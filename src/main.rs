@@ -13,13 +13,16 @@ use ratatui::{
 };
 use std::time::Duration;
 use ui::{App, View, InputMode};
+use ui::views::login::{render_login, LoginStep};
 
 fn main() -> Result<()> {
     let db = store::Database::new("tenex.db")?;
     let mut app = App::new(db);
     let mut terminal = ui::init_terminal()?;
+    let mut login_step = LoginStep::Nsec;
+    let mut pending_nsec: Option<String> = None;
 
-    let result = run_app(&mut terminal, &mut app);
+    let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec);
 
     ui::restore_terminal()?;
 
@@ -30,14 +33,19 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn run_app(terminal: &mut ui::Tui, app: &mut App) -> Result<()> {
+fn run_app(
+    terminal: &mut ui::Tui,
+    app: &mut App,
+    login_step: &mut LoginStep,
+    pending_nsec: &mut Option<String>,
+) -> Result<()> {
     while app.running {
-        terminal.draw(|f| render(f, app))?;
+        terminal.draw(|f| render(f, app, login_step))?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    handle_key(app, key.code);
+                    handle_key(app, key.code, login_step, pending_nsec);
                 }
             }
         }
@@ -45,7 +53,7 @@ fn run_app(terminal: &mut ui::Tui, app: &mut App) -> Result<()> {
     Ok(())
 }
 
-fn render(f: &mut Frame, app: &App) {
+fn render(f: &mut Frame, app: &App, login_step: &LoginStep) {
     let chunks = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(0),
@@ -66,26 +74,31 @@ fn render(f: &mut Frame, app: &App) {
     f.render_widget(header, chunks[0]);
 
     // Main content
-    let content = match app.view {
-        View::Login => "Enter your nsec to login:\n\nPress 'i' to start typing, Enter to submit",
-        _ => "Content area",
-    };
-    let main = Paragraph::new(content).block(Block::default().borders(Borders::NONE));
-    f.render_widget(main, chunks[1]);
+    match app.view {
+        View::Login => render_login(f, app, chunks[1], login_step),
+        _ => {
+            let main = Paragraph::new("Content area").block(Block::default());
+            f.render_widget(main, chunks[1]);
+        }
+    }
 
-    // Footer / input
-    let footer_text = if app.input_mode == InputMode::Editing {
-        format!("> {}", app.input)
-    } else {
-        "Press 'q' to quit, 'i' to edit".to_string()
+    // Footer
+    let footer_text = match app.input_mode {
+        InputMode::Editing => format!("> {}", "*".repeat(app.input.len())),
+        InputMode::Normal => "Press 'q' to quit".to_string(),
     };
     let footer = Paragraph::new(footer_text)
-        .style(Style::default().fg(Color::Yellow))
+        .style(Style::default().fg(Color::DarkGray))
         .block(Block::default().borders(Borders::TOP));
     f.render_widget(footer, chunks[2]);
 }
 
-fn handle_key(app: &mut App, key: KeyCode) {
+fn handle_key(
+    app: &mut App,
+    key: KeyCode,
+    login_step: &mut LoginStep,
+    pending_nsec: &mut Option<String>,
+) {
     match app.input_mode {
         InputMode::Normal => match key {
             KeyCode::Char('q') => app.quit(),
@@ -112,9 +125,7 @@ fn handle_key(app: &mut App, key: KeyCode) {
                     _ => {}
                 }
             }
-            KeyCode::Enter => {
-                // Select item based on view
-            }
+            KeyCode::Enter => {}
             KeyCode::Esc => {
                 match app.view {
                     View::Threads => app.view = View::Projects,
@@ -125,14 +136,47 @@ fn handle_key(app: &mut App, key: KeyCode) {
             _ => {}
         },
         InputMode::Editing => match key {
-            KeyCode::Esc => app.input_mode = InputMode::Normal,
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+                app.clear_input();
+            }
             KeyCode::Char(c) => app.enter_char(c),
             KeyCode::Backspace => app.delete_char(),
             KeyCode::Left => app.move_cursor_left(),
             KeyCode::Right => app.move_cursor_right(),
             KeyCode::Enter => {
-                let _input = app.submit_input();
+                let input = app.submit_input();
                 app.input_mode = InputMode::Normal;
+
+                if app.view == View::Login {
+                    match login_step {
+                        LoginStep::Nsec => {
+                            if input.starts_with("nsec") {
+                                *pending_nsec = Some(input);
+                                *login_step = LoginStep::Password;
+                            } else {
+                                app.set_status("Invalid nsec format");
+                            }
+                        }
+                        LoginStep::Password => {
+                            if let Some(ref nsec) = pending_nsec {
+                                let password = if input.is_empty() { None } else { Some(input.as_str()) };
+                                match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
+                                    Ok(keys) => {
+                                        app.keys = Some(keys);
+                                        app.view = View::Projects;
+                                        app.clear_status();
+                                    }
+                                    Err(e) => {
+                                        app.set_status(&format!("Login failed: {}", e));
+                                        *login_step = LoginStep::Nsec;
+                                    }
+                                }
+                            }
+                            *pending_nsec = None;
+                        }
+                    }
+                }
             }
             _ => {}
         },
