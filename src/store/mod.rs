@@ -1,5 +1,7 @@
 pub mod db;
 pub mod events;
+pub mod views;
 
 pub use db::Database;
-pub use events::{insert_events, get_events_by_kind, get_events_by_kind_and_pubkey};
+pub use events::{insert_events, get_events_by_kind, get_events_by_kind_and_pubkey, StoredEvent};
+pub use views::{get_projects, get_threads_for_project, get_messages_for_thread, get_profile_name};
