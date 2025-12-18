@@ -77,6 +77,7 @@ fn render(f: &mut Frame, app: &App, login_step: &LoginStep) {
     match app.view {
         View::Login => render_login(f, app, chunks[1], login_step),
         View::Projects => ui::views::render_projects(f, app, chunks[1]),
+        View::Threads => ui::views::render_threads(f, app, chunks[1]),
         _ => {
             let main = Paragraph::new("Content area").block(Block::default());
             f.render_widget(main, chunks[1]);
@@ -137,6 +138,15 @@ fn handle_key(
                         }
                         app.selected_thread_index = 0;
                         app.view = View::Threads;
+                    }
+                    View::Threads if !app.threads.is_empty() => {
+                        let thread = app.threads[app.selected_thread_index].clone();
+                        app.selected_thread = Some(thread.clone());
+                        // Load messages for this thread
+                        if let Ok(messages) = store::get_messages_for_thread(&app.db.connection(), &thread.id) {
+                            app.messages = messages;
+                        }
+                        app.view = View::Chat;
                     }
                     _ => {}
                 }
