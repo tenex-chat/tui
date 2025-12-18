@@ -12,17 +12,19 @@ use ratatui::{
     Frame,
 };
 use std::time::Duration;
+use tokio::runtime::Runtime;
 use ui::{App, View, InputMode};
 use ui::views::login::{render_login, LoginStep};
 
 fn main() -> Result<()> {
+    let rt = Runtime::new()?;
     let db = store::Database::new("tenex.db")?;
     let mut app = App::new(db);
     let mut terminal = ui::init_terminal()?;
     let mut login_step = LoginStep::Nsec;
     let mut pending_nsec: Option<String> = None;
 
-    let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec);
+    let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec, &rt);
 
     ui::restore_terminal()?;
 
@@ -38,6 +40,7 @@ fn run_app(
     app: &mut App,
     login_step: &mut LoginStep,
     pending_nsec: &mut Option<String>,
+    rt: &Runtime,
 ) -> Result<()> {
     while app.running {
         terminal.draw(|f| render(f, app, login_step))?;
@@ -45,7 +48,7 @@ fn run_app(
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    handle_key(app, key.code, login_step, pending_nsec);
+                    handle_key(app, key.code, login_step, pending_nsec, rt);
                 }
             }
         }
@@ -97,6 +100,7 @@ fn handle_key(
     key: KeyCode,
     login_step: &mut LoginStep,
     pending_nsec: &mut Option<String>,
+    rt: &Runtime,
 ) {
     match app.input_mode {
         InputMode::Normal => match key {
@@ -129,7 +133,19 @@ fn handle_key(
                     View::Projects if !app.projects.is_empty() => {
                         let project = app.projects[app.selected_project_index].clone();
                         app.selected_project = Some(project.clone());
-                        // Load threads for this project
+
+                        // Subscribe to project content (threads and messages)
+                        if let Some(ref client) = app.nostr_client {
+                            let project_a_tag = project.a_tag();
+                            let conn = app.db.connection();
+                            let client_clone = client.clone();
+
+                            rt.block_on(async move {
+                                let _ = nostr::subscribe_to_project_content(&client_clone, &project_a_tag, &conn).await;
+                            });
+                        }
+
+                        // Load threads for this project from db
                         if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
                             app.threads = threads;
                         }
@@ -185,13 +201,32 @@ fn handle_key(
                                 let password = if input.is_empty() { None } else { Some(input.as_str()) };
                                 match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
                                     Ok(keys) => {
-                                        app.keys = Some(keys);
-                                        // Load projects
-                                        if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                            app.projects = projects;
+                                        let user_pubkey = nostr::get_current_pubkey(&keys);
+
+                                        // Create Nostr client and subscribe to projects
+                                        let client_result = rt.block_on(async {
+                                            let client = nostr::NostrClient::new(keys.clone()).await?;
+                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
+                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                        });
+
+                                        match client_result {
+                                            Ok(client) => {
+                                                app.keys = Some(keys);
+                                                app.nostr_client = Some(client);
+
+                                                // Load projects from db
+                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                    app.projects = projects;
+                                                }
+                                                app.view = View::Projects;
+                                                app.clear_status();
+                                            }
+                                            Err(e) => {
+                                                app.set_status(&format!("Failed to connect: {}", e));
+                                                *login_step = LoginStep::Nsec;
+                                            }
                                         }
-                                        app.view = View::Projects;
-                                        app.clear_status();
                                     }
                                     Err(e) => {
                                         app.set_status(&format!("Login failed: {}", e));

@@ -10,6 +10,7 @@ const DEFAULT_RELAYS: &[&str] = &[
     "wss://relay.nostr.band",
 ];
 
+#[derive(Clone)]
 pub struct NostrClient {
     client: Arc<Mutex<Client>>,
     keys: Keys,
