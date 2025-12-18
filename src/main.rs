@@ -76,6 +76,7 @@ fn render(f: &mut Frame, app: &App, login_step: &LoginStep) {
     // Main content
     match app.view {
         View::Login => render_login(f, app, chunks[1], login_step),
+        View::Projects => ui::views::render_projects(f, app, chunks[1]),
         _ => {
             let main = Paragraph::new("Content area").block(Block::default());
             f.render_widget(main, chunks[1]);
@@ -125,7 +126,21 @@ fn handle_key(
                     _ => {}
                 }
             }
-            KeyCode::Enter => {}
+            KeyCode::Enter => {
+                match app.view {
+                    View::Projects if !app.projects.is_empty() => {
+                        let project = app.projects[app.selected_project_index].clone();
+                        app.selected_project = Some(project.clone());
+                        // Load threads for this project
+                        if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
+                            app.threads = threads;
+                        }
+                        app.selected_thread_index = 0;
+                        app.view = View::Threads;
+                    }
+                    _ => {}
+                }
+            }
             KeyCode::Esc => {
                 match app.view {
                     View::Threads => app.view = View::Projects,
@@ -164,6 +179,10 @@ fn handle_key(
                                 match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
                                     Ok(keys) => {
                                         app.keys = Some(keys);
+                                        // Load projects
+                                        if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                            app.projects = projects;
+                                        }
                                         app.view = View::Projects;
                                         app.clear_status();
                                     }
