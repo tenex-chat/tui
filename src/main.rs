@@ -78,10 +78,7 @@ fn render(f: &mut Frame, app: &App, login_step: &LoginStep) {
         View::Login => render_login(f, app, chunks[1], login_step),
         View::Projects => ui::views::render_projects(f, app, chunks[1]),
         View::Threads => ui::views::render_threads(f, app, chunks[1]),
-        _ => {
-            let main = Paragraph::new("Content area").block(Block::default());
-            f.render_widget(main, chunks[1]);
-        }
+        View::Chat => ui::views::render_chat(f, app, chunks[1]),
     }
 
     // Footer
