@@ -1,4 +1,5 @@
 mod models;
+mod nostr;
 mod store;
 
 fn main() {
