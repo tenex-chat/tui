@@ -1,9 +1,5 @@
-pub mod client;
 pub mod auth;
-pub mod subscriptions;
-pub mod publish;
+pub mod worker;
 
-pub use client::NostrClient;
 pub use auth::{get_current_pubkey, has_stored_credentials, load_stored_keys};
-pub use subscriptions::{subscribe_to_projects, subscribe_to_project_content, subscribe_to_profiles};
-pub use publish::{publish_message, publish_thread};
+pub use worker::{NostrWorker, NostrCommand, DataChange};

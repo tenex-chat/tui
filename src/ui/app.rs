@@ -1,8 +1,9 @@
 use crate::models::{Message, Project, Thread};
-use crate::nostr::NostrClient;
+use crate::nostr::{NostrCommand, DataChange};
 use crate::store::Database;
 use nostr_sdk::Keys;
 use std::sync::Arc;
+use std::sync::mpsc::{Sender, Receiver};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
@@ -26,7 +27,6 @@ pub struct App {
     pub cursor_position: usize,
 
     pub db: Arc<Database>,
-    pub nostr_client: Option<NostrClient>,
     pub keys: Option<Keys>,
 
     pub projects: Vec<Project>,
@@ -42,6 +42,9 @@ pub struct App {
     pub status_message: Option<String>,
 
     pub creating_thread: bool,
+
+    pub command_tx: Option<Sender<NostrCommand>>,
+    pub data_rx: Option<Receiver<DataChange>>,
 }
 
 impl App {
@@ -54,7 +57,6 @@ impl App {
             cursor_position: 0,
 
             db: Arc::new(db),
-            nostr_client: None,
             keys: None,
 
             projects: Vec::new(),
@@ -70,7 +72,40 @@ impl App {
             status_message: None,
 
             creating_thread: false,
+
+            command_tx: None,
+            data_rx: None,
         }
+    }
+
+    pub fn set_channels(&mut self, command_tx: Sender<NostrCommand>, data_rx: Receiver<DataChange>) {
+        self.command_tx = Some(command_tx);
+        self.data_rx = Some(data_rx);
+    }
+
+    pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
+        if let Some(ref data_rx) = self.data_rx {
+            while let Ok(change) = data_rx.try_recv() {
+                match change {
+                    DataChange::ProjectsUpdated => {
+                        self.projects = crate::store::get_projects(&self.db.connection())?;
+                    }
+                    DataChange::ThreadsUpdated(project_id) => {
+                        if self.selected_project.as_ref().map(|p| p.a_tag()) == Some(project_id) {
+                            self.threads = crate::store::get_threads_for_project(&self.db.connection(), &self.selected_project.as_ref().unwrap().a_tag())?;
+                        }
+                    }
+                    DataChange::MessagesUpdated(thread_id) => {
+                        if self.selected_thread.as_ref().map(|t| &t.id) == Some(&thread_id) {
+                            self.messages = crate::store::get_messages_for_thread(&self.db.connection(), &thread_id)?;
+                        }
+                    }
+                    DataChange::ProfilesUpdated => {
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn set_status(&mut self, msg: &str) {

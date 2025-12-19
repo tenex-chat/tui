@@ -44,6 +44,9 @@ impl Database {
             CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
             CREATE INDEX IF NOT EXISTS idx_events_pubkey ON events(pubkey);
             CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
+            CREATE INDEX IF NOT EXISTS idx_events_tags ON events(tags);
+            CREATE INDEX IF NOT EXISTS idx_events_kind_pubkey ON events(kind, pubkey);
+            CREATE INDEX IF NOT EXISTS idx_events_kind_created_at ON events(kind, created_at);
 
             CREATE TABLE IF NOT EXISTS credentials (
                 id INTEGER PRIMARY KEY CHECK (id = 1),

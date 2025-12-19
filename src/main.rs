@@ -12,80 +12,31 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use std::{collections::HashSet, sync::{Arc, Mutex}, time::Duration};
-use rusqlite::Connection;
-use tokio::runtime::Runtime;
+use std::time::Duration;
 use ui::{App, View, InputMode};
 use ui::views::login::{render_login, LoginStep};
-
-async fn sync_all_data(
-    client: &nostr::NostrClient,
-    user_pubkey: &str,
-    conn: &Arc<Mutex<Connection>>,
-) -> Result<()> {
-    // Fetch projects for user
-    nostr::subscribe_to_projects(client, user_pubkey, conn).await?;
-
-    // Load projects from db to get all project IDs
-    let projects = store::get_projects(conn)?;
-
-    // For each project, fetch threads and messages
-    for project in &projects {
-        let project_a_tag = project.a_tag();
-        nostr::subscribe_to_project_content(client, &project_a_tag, conn).await?;
-    }
-
-    // Collect all unique pubkeys from projects, threads, and messages
-    let mut pubkeys = HashSet::new();
-
-    // Pubkeys from projects
-    for project in &projects {
-        pubkeys.insert(project.pubkey.clone());
-        for participant in &project.participants {
-            pubkeys.insert(participant.clone());
-        }
-    }
-
-    // Pubkeys from threads
-    for project in &projects {
-        if let Ok(threads) = store::get_threads_for_project(conn, &project.a_tag()) {
-            for thread in &threads {
-                pubkeys.insert(thread.pubkey.clone());
-            }
-        }
-    }
-
-    // Pubkeys from messages
-    for project in &projects {
-        if let Ok(threads) = store::get_threads_for_project(conn, &project.a_tag()) {
-            for thread in &threads {
-                if let Ok(messages) = store::get_messages_for_thread(conn, &thread.id) {
-                    for message in &messages {
-                        pubkeys.insert(message.pubkey.clone());
-                    }
-                }
-            }
-        }
-    }
-
-    // Fetch all profiles once
-    if !pubkeys.is_empty() {
-        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
-        nostr::subscribe_to_profiles(client, &pubkeys_vec, conn).await?;
-    }
-
-    Ok(())
-}
+use nostr::{NostrWorker, NostrCommand, DataChange};
+use std::sync::mpsc;
 
 fn main() -> Result<()> {
     tracing_setup::init_tracing();
 
-    let rt = Runtime::new()?;
     let db = store::Database::new("tenex.db")?;
     let mut app = App::new(db);
     let mut terminal = ui::init_terminal()?;
 
-    // Check for stored credentials and set initial login step
+    let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
+    let (data_tx, data_rx) = mpsc::channel::<DataChange>();
+
+    app.set_channels(command_tx.clone(), data_rx);
+
+    let db_conn = app.db.connection();
+    let worker = NostrWorker::new(db_conn, data_tx, command_rx);
+
+    let worker_handle = std::thread::spawn(move || {
+        worker.run();
+    });
+
     let mut login_step = if nostr::has_stored_credentials(&app.db.connection()) {
         LoginStep::Unlock
     } else {
@@ -93,15 +44,10 @@ fn main() -> Result<()> {
     };
     let mut pending_nsec: Option<String> = None;
 
-    let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec, &rt);
+    let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec);
 
-    // Cleanup: disconnect from nostr
-    if let Some(ref client) = app.nostr_client {
-        let client = client.clone();
-        let _ = rt.block_on(async {
-            client.disconnect().await
-        });
-    }
+    command_tx.send(NostrCommand::Shutdown).ok();
+    worker_handle.join().ok();
 
     ui::restore_terminal()?;
 
@@ -117,15 +63,16 @@ fn run_app(
     app: &mut App,
     login_step: &mut LoginStep,
     pending_nsec: &mut Option<String>,
-    rt: &Runtime,
 ) -> Result<()> {
     while app.running {
+        app.check_for_data_updates()?;
+
         terminal.draw(|f| render(f, app, login_step))?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    handle_key(app, key.code, login_step, pending_nsec, rt);
+                    handle_key(app, key.code, login_step, pending_nsec);
                 }
             }
         }
@@ -177,55 +124,17 @@ fn handle_key(
     key: KeyCode,
     login_step: &mut LoginStep,
     pending_nsec: &mut Option<String>,
-    rt: &Runtime,
 ) {
     match app.input_mode {
         InputMode::Normal => match key {
             KeyCode::Char('q') => app.quit(),
             KeyCode::Char('i') => app.input_mode = InputMode::Editing,
             KeyCode::Char('r') => {
-                // Refresh data from Nostr
-                if let (Some(ref client), Some(ref keys)) = (&app.nostr_client, &app.keys) {
-                    let user_pubkey = nostr::get_current_pubkey(keys);
-                    let conn = app.db.connection();
-                    let client_clone = client.clone();
-
+                if let Some(ref command_tx) = app.command_tx {
+                    let tx = command_tx.clone();
                     app.set_status("Syncing...");
-
-                    let sync_result = rt.block_on(async {
-                        sync_all_data(&client_clone, &user_pubkey, &conn).await
-                    });
-
-                    match sync_result {
-                        Ok(_) => {
-                            // Reload current view data
-                            match app.view {
-                                View::Projects => {
-                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                        app.projects = projects;
-                                    }
-                                }
-                                View::Threads => {
-                                    if let Some(ref project) = app.selected_project {
-                                        if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
-                                            app.threads = threads;
-                                        }
-                                    }
-                                }
-                                View::Chat => {
-                                    if let Some(ref thread) = app.selected_thread {
-                                        if let Ok(messages) = store::get_messages_for_thread(&app.db.connection(), &thread.id) {
-                                            app.messages = messages;
-                                        }
-                                    }
-                                }
-                                _ => {}
-                            }
-                            app.set_status("Sync complete");
-                        }
-                        Err(e) => {
-                            app.set_status(&format!("Sync failed: {}", e));
-                        }
+                    if let Err(e) = tx.send(NostrCommand::Sync) {
+                        app.set_status(&format!("Sync request failed: {}", e));
                     }
                 }
             }
@@ -324,7 +233,6 @@ fn handle_key(
                                 }
                             }
                             LoginStep::Password => {
-                                // Try to use stored credentials if no pending nsec
                                 let keys_result = if pending_nsec.is_none() {
                                     nostr::load_stored_keys(&input, &app.db.connection())
                                 } else if let Some(ref nsec) = pending_nsec {
@@ -337,37 +245,22 @@ fn handle_key(
                                 match keys_result {
                                     Ok(keys) => {
                                         let user_pubkey = nostr::get_current_pubkey(&keys);
+                                        app.keys = Some(keys.clone());
 
-                                        // Create Nostr client
-                                        let client_result = rt.block_on(async {
-                                            nostr::NostrClient::new(keys.clone()).await
-                                        });
-
-                                        match client_result {
-                                            Ok(client) => {
-                                                app.keys = Some(keys);
-                                                app.nostr_client = Some(client.clone());
-
-                                                // Sync all data from Nostr
-                                                let conn = app.db.connection();
-                                                let sync_result = rt.block_on(async {
-                                                    sync_all_data(&client, &user_pubkey, &conn).await
-                                                });
-
-                                                if let Err(e) = sync_result {
-                                                    app.set_status(&format!("Sync failed: {}", e));
+                                        if let Some(ref command_tx) = app.command_tx {
+                                            if let Err(e) = command_tx.send(NostrCommand::Connect {
+                                                keys: keys.clone(),
+                                                user_pubkey: user_pubkey.clone()
+                                            }) {
+                                                app.set_status(&format!("Failed to connect: {}", e));
+                                                *login_step = LoginStep::Nsec;
+                                            } else {
+                                                if let Err(e) = command_tx.send(NostrCommand::Sync) {
+                                                    app.set_status(&format!("Failed to sync: {}", e));
                                                 } else {
-                                                    // Load projects from db
-                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                        app.projects = projects;
-                                                    }
                                                     app.view = View::Projects;
                                                     app.clear_status();
                                                 }
-                                            }
-                                            Err(e) => {
-                                                app.set_status(&format!("Failed to connect: {}", e));
-                                                *login_step = LoginStep::Nsec;
                                             }
                                         }
                                     }
@@ -379,43 +272,27 @@ fn handle_key(
                                 *pending_nsec = None;
                             }
                             LoginStep::Unlock => {
-                                // User is unlocking with stored credentials
                                 let keys_result = nostr::load_stored_keys(&input, &app.db.connection());
 
                                 match keys_result {
                                     Ok(keys) => {
                                         let user_pubkey = nostr::get_current_pubkey(&keys);
+                                        app.keys = Some(keys.clone());
 
-                                        // Create Nostr client
-                                        let client_result = rt.block_on(async {
-                                            nostr::NostrClient::new(keys.clone()).await
-                                        });
-
-                                        match client_result {
-                                            Ok(client) => {
-                                                app.keys = Some(keys);
-                                                app.nostr_client = Some(client.clone());
-
-                                                // Sync all data from Nostr
-                                                let conn = app.db.connection();
-                                                let sync_result = rt.block_on(async {
-                                                    sync_all_data(&client, &user_pubkey, &conn).await
-                                                });
-
-                                                if let Err(e) = sync_result {
-                                                    app.set_status(&format!("Sync failed: {}", e));
+                                        if let Some(ref command_tx) = app.command_tx {
+                                            if let Err(e) = command_tx.send(NostrCommand::Connect {
+                                                keys: keys.clone(),
+                                                user_pubkey: user_pubkey.clone()
+                                            }) {
+                                                app.set_status(&format!("Failed to connect: {}", e));
+                                                *login_step = LoginStep::Unlock;
+                                            } else {
+                                                if let Err(e) = command_tx.send(NostrCommand::Sync) {
+                                                    app.set_status(&format!("Failed to sync: {}", e));
                                                 } else {
-                                                    // Load projects from db
-                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                        app.projects = projects;
-                                                    }
                                                     app.view = View::Projects;
                                                     app.clear_status();
                                                 }
-                                            }
-                                            Err(e) => {
-                                                app.set_status(&format!("Failed to connect: {}", e));
-                                                *login_step = LoginStep::Unlock;
                                             }
                                         }
                                     }
@@ -428,20 +305,17 @@ fn handle_key(
                     }
                     View::Threads => {
                         if app.creating_thread && !input.is_empty() {
-                            if let (Some(ref client), Some(ref project)) = (&app.nostr_client, &app.selected_project) {
+                            if let (Some(ref command_tx), Some(ref project)) = (&app.command_tx, &app.selected_project) {
                                 let title = input.clone();
                                 let content = input.clone();
                                 let project_a_tag = project.a_tag();
-                                let conn = app.db.connection();
 
-                                rt.block_on(async {
-                                    if let Ok(_event_id) = nostr::publish_thread(client, &project_a_tag, &title, &content).await {
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                    }
-                                });
-
-                                if let Ok(threads) = store::get_threads_for_project(&conn, &project_a_tag) {
-                                    app.threads = threads;
+                                if let Err(e) = command_tx.send(NostrCommand::PublishThread {
+                                    project_a_tag,
+                                    title,
+                                    content,
+                                }) {
+                                    app.set_status(&format!("Failed to publish thread: {}", e));
                                 }
 
                                 app.creating_thread = false;
@@ -450,21 +324,15 @@ fn handle_key(
                     }
                     View::Chat => {
                         if !input.is_empty() {
-                            if let (Some(ref client), Some(ref thread)) = (&app.nostr_client, &app.selected_thread) {
+                            if let (Some(ref command_tx), Some(ref thread)) = (&app.command_tx, &app.selected_thread) {
                                 let thread_id = thread.id.clone();
                                 let content = input.clone();
-                                let conn = app.db.connection();
 
-                                rt.block_on(async {
-                                    if let Ok(_event_id) = nostr::publish_message(client, &thread_id, &content).await {
-                                        // Wait a moment for the event to propagate
-                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-                                    }
-                                });
-
-                                // Reload messages from database after publishing
-                                if let Ok(messages) = store::get_messages_for_thread(&conn, &thread_id) {
-                                    app.messages = messages;
+                                if let Err(e) = command_tx.send(NostrCommand::PublishMessage {
+                                    thread_id,
+                                    content,
+                                }) {
+                                    app.set_status(&format!("Failed to publish message: {}", e));
                                 }
                             }
                         }
