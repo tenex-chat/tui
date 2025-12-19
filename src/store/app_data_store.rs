@@ -1,5 +1,5 @@
 use crate::models::{Message, Project, ProjectStatus, Thread};
-use nostrdb::Ndb;
+use nostrdb::{Ndb, Note, Transaction};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -46,5 +46,135 @@ impl AppDataStore {
         if let Some(status) = crate::store::get_project_status(&self.ndb, a_tag) {
             self.project_statuses.insert(a_tag.to_string(), status);
         }
+    }
+
+    /// Handle a new event from SubscriptionStream - incrementally update data
+    pub fn handle_event(&mut self, kind: u32, note: &Note) {
+        match kind {
+            31933 => self.handle_project_event(note),
+            11 => self.handle_thread_event(note),
+            1111 => self.handle_message_event(note),
+            0 => self.handle_profile_event(note),
+            24010 => self.handle_status_event(note),
+            513 => self.handle_metadata_event(note),
+            _ => {}
+        }
+    }
+
+    fn handle_project_event(&mut self, _note: &Note) {
+        if let Ok(projects) = crate::store::get_projects(&self.ndb) {
+            self.projects = projects;
+        }
+    }
+
+    fn handle_status_event(&mut self, note: &Note) {
+        if let Some(status) = ProjectStatus::from_note(note) {
+            self.project_statuses.insert(status.project_coordinate.clone(), status);
+        }
+    }
+
+    fn handle_profile_event(&mut self, note: &Note) {
+        let pubkey = hex::encode(note.pubkey());
+        if let Some(name) = self.extract_profile_name(note) {
+            self.profiles.insert(pubkey, name);
+        }
+    }
+
+    fn handle_thread_event(&mut self, note: &Note) {
+        if let Some(a_tag) = Self::extract_project_a_tag(note) {
+            self.reload_threads_for_project(&a_tag);
+        }
+    }
+
+    fn handle_message_event(&mut self, note: &Note) {
+        if let Some(thread_id) = Self::extract_thread_id(note) {
+            self.reload_messages_for_thread(&thread_id);
+        }
+    }
+
+    fn handle_metadata_event(&mut self, note: &Note) {
+        if let Some(thread_id) = Self::extract_thread_id_from_metadata(note) {
+            let a_tag_to_reload = self.threads_by_project
+                .iter()
+                .find(|(_, threads)| threads.iter().any(|t| t.id == thread_id))
+                .map(|(a_tag, _)| a_tag.clone());
+
+            if let Some(a_tag) = a_tag_to_reload {
+                self.reload_threads_for_project(&a_tag);
+            }
+        }
+    }
+
+    pub fn reload_threads_for_project(&mut self, a_tag: &str) {
+        if let Ok(threads) = crate::store::get_threads_for_project(&self.ndb, a_tag) {
+            self.threads_by_project.insert(a_tag.to_string(), threads);
+        }
+    }
+
+    pub fn reload_messages_for_thread(&mut self, thread_id: &str) {
+        if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, thread_id) {
+            self.messages_by_thread.insert(thread_id.to_string(), messages);
+        }
+    }
+
+    fn extract_project_a_tag(note: &Note) -> Option<String> {
+        for tag in note.tags() {
+            if tag.count() >= 2 {
+                if let (Some("a"), Some(value)) = (tag.get(0).and_then(|s| s.str()), tag.get(1).and_then(|s| s.str())) {
+                    return Some(value.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_thread_id(note: &Note) -> Option<String> {
+        for tag in note.tags() {
+            if tag.count() >= 2 {
+                if let Some("E") = tag.get(0).and_then(|s| s.str()) {
+                    if let Some(elem) = tag.get(1) {
+                        if let Some(s) = elem.str() {
+                            return Some(s.to_string());
+                        } else if let Some(id) = elem.variant().id() {
+                            return Some(hex::encode(id));
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_thread_id_from_metadata(note: &Note) -> Option<String> {
+        for tag in note.tags() {
+            if tag.count() >= 2 {
+                if let (Some("e"), Some(value)) = (tag.get(0).and_then(|s| s.str()), tag.get(1).and_then(|s| s.str())) {
+                    return Some(value.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    fn extract_profile_name(&self, note: &Note) -> Option<String> {
+        let txn = Transaction::new(&self.ndb).ok()?;
+        let pubkey_bytes = note.pubkey();
+
+        if let Ok(profile) = self.ndb.get_profile_by_pubkey(&txn, pubkey_bytes) {
+            let record = profile.record();
+            if let Some(profile_data) = record.profile() {
+                if let Some(name) = profile_data.display_name() {
+                    if !name.is_empty() {
+                        return Some(name.to_string());
+                    }
+                }
+                if let Some(name) = profile_data.name() {
+                    if !name.is_empty() {
+                        return Some(name.to_string());
+                    }
+                }
+            }
+        }
+        None
     }
 }
