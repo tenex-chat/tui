@@ -223,18 +223,25 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     // Attachments line (if any)
     if has_attachments {
         let mut attachment_spans: Vec<Span> = vec![Span::styled("Attachments: ", Style::default().fg(Color::DarkGray))];
+        let img_count = app.chat_editor.image_attachments.len();
 
-        // Show image attachments
-        for img in &app.chat_editor.image_attachments {
+        // Show image attachments (focus index 0..img_count)
+        for (i, img) in app.chat_editor.image_attachments.iter().enumerate() {
+            let is_focused = app.chat_editor.focused_attachment == Some(i);
+            let style = if is_focused {
+                Style::default().fg(Color::Black).bg(Color::Magenta).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Magenta)
+            };
             attachment_spans.push(Span::styled(
                 format!("[Image #{}] ", img.id),
-                Style::default().fg(Color::Magenta),
+                style,
             ));
         }
 
-        // Show paste attachments
+        // Show paste attachments (focus index img_count..)
         for (i, attachment) in app.chat_editor.attachments.iter().enumerate() {
-            let is_focused = app.chat_editor.focused_attachment == Some(i);
+            let is_focused = app.chat_editor.focused_attachment == Some(img_count + i);
             let style = if is_focused {
                 Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
             } else {
@@ -246,8 +253,11 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
             ));
         }
 
-        if !app.chat_editor.attachments.is_empty() {
-            attachment_spans.push(Span::styled("(Tab to view/edit)", Style::default().fg(Color::DarkGray)));
+        // Show hint based on what's focused
+        if app.chat_editor.focused_attachment.is_some() {
+            attachment_spans.push(Span::styled("(Backspace to delete, ↓ to exit)", Style::default().fg(Color::DarkGray)));
+        } else {
+            attachment_spans.push(Span::styled("(↑ to select)", Style::default().fg(Color::DarkGray)));
         }
         let attachments_line = Line::from(attachment_spans);
         let attachments = Paragraph::new(attachments_line);

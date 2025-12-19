@@ -772,11 +772,35 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.view = View::Threads;
         }
         // Tab = cycle focus between input and attachments
-        KeyCode::Tab if !app.chat_editor.attachments.is_empty() => {
+        KeyCode::Tab if app.chat_editor.has_attachments() => {
             app.chat_editor.cycle_focus();
-            // If focused on an attachment, open the modal
-            if app.chat_editor.focused_attachment.is_some() {
+            // If focused on a paste attachment, open the modal (not for images)
+            if app.chat_editor.get_focused_attachment().is_some() {
                 app.open_attachment_modal();
+            }
+        }
+        // Up = focus attachments (when there are any)
+        KeyCode::Up if app.chat_editor.has_attachments() && app.chat_editor.focused_attachment.is_none() => {
+            app.chat_editor.focus_attachments();
+        }
+        // Down = unfocus attachments (return to input)
+        KeyCode::Down if app.chat_editor.focused_attachment.is_some() => {
+            app.chat_editor.unfocus_attachments();
+        }
+        // Left/Right = navigate between attachments when focused
+        KeyCode::Left if app.chat_editor.focused_attachment.is_some() => {
+            if let Some(idx) = app.chat_editor.focused_attachment {
+                if idx > 0 {
+                    app.chat_editor.focused_attachment = Some(idx - 1);
+                }
+            }
+        }
+        KeyCode::Right if app.chat_editor.focused_attachment.is_some() => {
+            if let Some(idx) = app.chat_editor.focused_attachment {
+                let total = app.chat_editor.total_attachments();
+                if idx + 1 < total {
+                    app.chat_editor.focused_attachment = Some(idx + 1);
+                }
             }
         }
         // @ = open agent selector

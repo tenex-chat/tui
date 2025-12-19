@@ -253,54 +253,114 @@ impl TextEditor {
         (row, col)
     }
 
+    /// Total number of attachments (images + pastes)
+    pub fn total_attachments(&self) -> usize {
+        self.image_attachments.len() + self.attachments.len()
+    }
+
+    /// Check if any attachments exist
+    pub fn has_attachments(&self) -> bool {
+        !self.image_attachments.is_empty() || !self.attachments.is_empty()
+    }
+
+    /// Focus the first attachment (called on Up arrow)
+    pub fn focus_attachments(&mut self) {
+        if self.has_attachments() {
+            self.focused_attachment = Some(0);
+        }
+    }
+
+    /// Unfocus attachments (return to text input)
+    pub fn unfocus_attachments(&mut self) {
+        self.focused_attachment = None;
+    }
+
     /// Cycle focus: main input -> attachments -> back to main input
+    /// Index spans: 0..image_attachments.len() for images, then paste attachments
     pub fn cycle_focus(&mut self) {
-        if self.attachments.is_empty() {
+        let total = self.total_attachments();
+        if total == 0 {
             return;
         }
 
         match self.focused_attachment {
             None => {
-                // Focus first attachment
                 self.focused_attachment = Some(0);
             }
             Some(idx) => {
-                if idx + 1 < self.attachments.len() {
+                if idx + 1 < total {
                     self.focused_attachment = Some(idx + 1);
                 } else {
-                    // Back to main input
                     self.focused_attachment = None;
                 }
             }
         }
     }
 
-    /// Get focused attachment for editing
-    pub fn get_focused_attachment(&self) -> Option<&PasteAttachment> {
+    /// Check if focused attachment is an image (vs paste)
+    #[allow(dead_code)]
+    pub fn is_focused_image(&self) -> bool {
         self.focused_attachment
-            .and_then(|idx| self.attachments.get(idx))
+            .map(|idx| idx < self.image_attachments.len())
+            .unwrap_or(false)
     }
 
-    /// Update focused attachment content
+    /// Get focused paste attachment for editing (only paste attachments are editable)
+    pub fn get_focused_attachment(&self) -> Option<&PasteAttachment> {
+        self.focused_attachment.and_then(|idx| {
+            let img_count = self.image_attachments.len();
+            if idx >= img_count {
+                self.attachments.get(idx - img_count)
+            } else {
+                None // Image attachment, not editable
+            }
+        })
+    }
+
+    /// Get focused image attachment
+    #[allow(dead_code)]
+    pub fn get_focused_image(&self) -> Option<&ImageAttachment> {
+        self.focused_attachment.and_then(|idx| {
+            if idx < self.image_attachments.len() {
+                self.image_attachments.get(idx)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Update focused attachment content (only for paste attachments)
     pub fn update_focused_attachment(&mut self, new_content: String) {
         if let Some(idx) = self.focused_attachment {
-            if let Some(attachment) = self.attachments.get_mut(idx) {
-                attachment.content = new_content;
+            let img_count = self.image_attachments.len();
+            if idx >= img_count {
+                if let Some(attachment) = self.attachments.get_mut(idx - img_count) {
+                    attachment.content = new_content;
+                }
             }
         }
     }
 
-    /// Delete focused attachment
+    /// Delete focused attachment (image or paste)
     pub fn delete_focused_attachment(&mut self) {
         if let Some(idx) = self.focused_attachment {
-            if idx < self.attachments.len() {
-                self.attachments.remove(idx);
-                // Adjust focus
-                if self.attachments.is_empty() {
-                    self.focused_attachment = None;
-                } else if idx >= self.attachments.len() {
-                    self.focused_attachment = Some(self.attachments.len() - 1);
+            let img_count = self.image_attachments.len();
+            if idx < img_count {
+                // Delete image attachment
+                self.image_attachments.remove(idx);
+            } else {
+                // Delete paste attachment
+                let paste_idx = idx - img_count;
+                if paste_idx < self.attachments.len() {
+                    self.attachments.remove(paste_idx);
                 }
+            }
+            // Adjust focus
+            let new_total = self.total_attachments();
+            if new_total == 0 {
+                self.focused_attachment = None;
+            } else if idx >= new_total {
+                self.focused_attachment = Some(new_total - 1);
             }
         }
     }
