@@ -12,10 +12,70 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
-use std::time::Duration;
+use std::{collections::HashSet, sync::{Arc, Mutex}, time::Duration};
+use rusqlite::Connection;
 use tokio::runtime::Runtime;
 use ui::{App, View, InputMode};
 use ui::views::login::{render_login, LoginStep};
+
+async fn sync_all_data(
+    client: &nostr::NostrClient,
+    user_pubkey: &str,
+    conn: &Arc<Mutex<Connection>>,
+) -> Result<()> {
+    // Fetch projects for user
+    nostr::subscribe_to_projects(client, user_pubkey, conn).await?;
+
+    // Load projects from db to get all project IDs
+    let projects = store::get_projects(conn)?;
+
+    // For each project, fetch threads and messages
+    for project in &projects {
+        let project_a_tag = project.a_tag();
+        nostr::subscribe_to_project_content(client, &project_a_tag, conn).await?;
+    }
+
+    // Collect all unique pubkeys from projects, threads, and messages
+    let mut pubkeys = HashSet::new();
+
+    // Pubkeys from projects
+    for project in &projects {
+        pubkeys.insert(project.pubkey.clone());
+        for participant in &project.participants {
+            pubkeys.insert(participant.clone());
+        }
+    }
+
+    // Pubkeys from threads
+    for project in &projects {
+        if let Ok(threads) = store::get_threads_for_project(conn, &project.a_tag()) {
+            for thread in &threads {
+                pubkeys.insert(thread.pubkey.clone());
+            }
+        }
+    }
+
+    // Pubkeys from messages
+    for project in &projects {
+        if let Ok(threads) = store::get_threads_for_project(conn, &project.a_tag()) {
+            for thread in &threads {
+                if let Ok(messages) = store::get_messages_for_thread(conn, &thread.id) {
+                    for message in &messages {
+                        pubkeys.insert(message.pubkey.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    // Fetch all profiles once
+    if !pubkeys.is_empty() {
+        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
+        nostr::subscribe_to_profiles(client, &pubkeys_vec, conn).await?;
+    }
+
+    Ok(())
+}
 
 fn main() -> Result<()> {
     tracing_setup::init_tracing();
@@ -123,6 +183,52 @@ fn handle_key(
         InputMode::Normal => match key {
             KeyCode::Char('q') => app.quit(),
             KeyCode::Char('i') => app.input_mode = InputMode::Editing,
+            KeyCode::Char('r') => {
+                // Refresh data from Nostr
+                if let (Some(ref client), Some(ref keys)) = (&app.nostr_client, &app.keys) {
+                    let user_pubkey = nostr::get_current_pubkey(keys);
+                    let conn = app.db.connection();
+                    let client_clone = client.clone();
+
+                    app.set_status("Syncing...");
+
+                    let sync_result = rt.block_on(async {
+                        sync_all_data(&client_clone, &user_pubkey, &conn).await
+                    });
+
+                    match sync_result {
+                        Ok(_) => {
+                            // Reload current view data
+                            match app.view {
+                                View::Projects => {
+                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                        app.projects = projects;
+                                    }
+                                }
+                                View::Threads => {
+                                    if let Some(ref project) = app.selected_project {
+                                        if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
+                                            app.threads = threads;
+                                        }
+                                    }
+                                }
+                                View::Chat => {
+                                    if let Some(ref thread) = app.selected_thread {
+                                        if let Ok(messages) = store::get_messages_for_thread(&app.db.connection(), &thread.id) {
+                                            app.messages = messages;
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                            app.set_status("Sync complete");
+                        }
+                        Err(e) => {
+                            app.set_status(&format!("Sync failed: {}", e));
+                        }
+                    }
+                }
+            }
             KeyCode::Up => {
                 match app.view {
                     View::Projects if app.selected_project_index > 0 => {
@@ -151,38 +257,9 @@ fn handle_key(
                         let project = app.projects[app.selected_project_index].clone();
                         app.selected_project = Some(project.clone());
 
-                        // Subscribe to project content (threads and messages)
-                        if let Some(ref client) = app.nostr_client {
-                            let project_a_tag = project.a_tag();
-                            let conn = app.db.connection();
-                            let client_clone = client.clone();
-
-                            rt.block_on(async move {
-                                let _ = nostr::subscribe_to_project_content(&client_clone, &project_a_tag, &conn).await;
-                            });
-                        }
-
                         // Load threads for this project from db
                         if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
-                            app.threads = threads.clone();
-
-                            // Collect unique pubkeys from threads and fetch profiles
-                            if let Some(ref client) = app.nostr_client {
-                                let mut pubkeys = std::collections::HashSet::new();
-                                for thread in &threads {
-                                    pubkeys.insert(thread.pubkey.clone());
-                                }
-
-                                if !pubkeys.is_empty() {
-                                    let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
-                                    let conn = app.db.connection();
-                                    let client_clone = client.clone();
-
-                                    rt.block_on(async move {
-                                        let _ = nostr::subscribe_to_profiles(&client_clone, &pubkeys_vec, &conn).await;
-                                    });
-                                }
-                            }
+                            app.threads = threads;
                         }
                         app.selected_thread_index = 0;
                         app.view = View::Threads;
@@ -190,27 +267,9 @@ fn handle_key(
                     View::Threads if !app.threads.is_empty() => {
                         let thread = app.threads[app.selected_thread_index].clone();
                         app.selected_thread = Some(thread.clone());
-                        // Load messages for this thread
+                        // Load messages for this thread from db
                         if let Ok(messages) = store::get_messages_for_thread(&app.db.connection(), &thread.id) {
-                            app.messages = messages.clone();
-
-                            // Collect unique pubkeys from messages and fetch profiles
-                            if let Some(ref client) = app.nostr_client {
-                                let mut pubkeys = std::collections::HashSet::new();
-                                for message in &messages {
-                                    pubkeys.insert(message.pubkey.clone());
-                                }
-
-                                if !pubkeys.is_empty() {
-                                    let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
-                                    let conn = app.db.connection();
-                                    let client_clone = client.clone();
-
-                                    rt.block_on(async move {
-                                        let _ = nostr::subscribe_to_profiles(&client_clone, &pubkeys_vec, &conn).await;
-                                    });
-                                }
-                            }
+                            app.messages = messages;
                         }
                         app.view = View::Chat;
                     }
@@ -279,11 +338,9 @@ fn handle_key(
                                     Ok(keys) => {
                                         let user_pubkey = nostr::get_current_pubkey(&keys);
 
-                                        // Create Nostr client and subscribe to projects
+                                        // Create Nostr client
                                         let client_result = rt.block_on(async {
-                                            let client = nostr::NostrClient::new(keys.clone()).await?;
-                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
-                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                            nostr::NostrClient::new(keys.clone()).await
                                         });
 
                                         match client_result {
@@ -291,30 +348,22 @@ fn handle_key(
                                                 app.keys = Some(keys);
                                                 app.nostr_client = Some(client.clone());
 
-                                                // Load projects from db
-                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                    app.projects = projects.clone();
+                                                // Sync all data from Nostr
+                                                let conn = app.db.connection();
+                                                let sync_result = rt.block_on(async {
+                                                    sync_all_data(&client, &user_pubkey, &conn).await
+                                                });
 
-                                                    // Collect unique pubkeys from projects
-                                                    let mut pubkeys = std::collections::HashSet::new();
-                                                    for project in &projects {
-                                                        pubkeys.insert(project.pubkey.clone());
-                                                        for participant in &project.participants {
-                                                            pubkeys.insert(participant.clone());
-                                                        }
+                                                if let Err(e) = sync_result {
+                                                    app.set_status(&format!("Sync failed: {}", e));
+                                                } else {
+                                                    // Load projects from db
+                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                        app.projects = projects;
                                                     }
-
-                                                    // Fetch profiles for all unique pubkeys
-                                                    if !pubkeys.is_empty() {
-                                                        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
-                                                        let conn = app.db.connection();
-                                                        rt.block_on(async move {
-                                                            let _ = nostr::subscribe_to_profiles(&client, &pubkeys_vec, &conn).await;
-                                                        });
-                                                    }
+                                                    app.view = View::Projects;
+                                                    app.clear_status();
                                                 }
-                                                app.view = View::Projects;
-                                                app.clear_status();
                                             }
                                             Err(e) => {
                                                 app.set_status(&format!("Failed to connect: {}", e));
@@ -337,11 +386,9 @@ fn handle_key(
                                     Ok(keys) => {
                                         let user_pubkey = nostr::get_current_pubkey(&keys);
 
-                                        // Create Nostr client and subscribe to projects
+                                        // Create Nostr client
                                         let client_result = rt.block_on(async {
-                                            let client = nostr::NostrClient::new(keys.clone()).await?;
-                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
-                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                            nostr::NostrClient::new(keys.clone()).await
                                         });
 
                                         match client_result {
@@ -349,30 +396,22 @@ fn handle_key(
                                                 app.keys = Some(keys);
                                                 app.nostr_client = Some(client.clone());
 
-                                                // Load projects from db
-                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                    app.projects = projects.clone();
+                                                // Sync all data from Nostr
+                                                let conn = app.db.connection();
+                                                let sync_result = rt.block_on(async {
+                                                    sync_all_data(&client, &user_pubkey, &conn).await
+                                                });
 
-                                                    // Collect unique pubkeys from projects
-                                                    let mut pubkeys = std::collections::HashSet::new();
-                                                    for project in &projects {
-                                                        pubkeys.insert(project.pubkey.clone());
-                                                        for participant in &project.participants {
-                                                            pubkeys.insert(participant.clone());
-                                                        }
+                                                if let Err(e) = sync_result {
+                                                    app.set_status(&format!("Sync failed: {}", e));
+                                                } else {
+                                                    // Load projects from db
+                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                        app.projects = projects;
                                                     }
-
-                                                    // Fetch profiles for all unique pubkeys
-                                                    if !pubkeys.is_empty() {
-                                                        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
-                                                        let conn = app.db.connection();
-                                                        rt.block_on(async move {
-                                                            let _ = nostr::subscribe_to_profiles(&client, &pubkeys_vec, &conn).await;
-                                                        });
-                                                    }
+                                                    app.view = View::Projects;
+                                                    app.clear_status();
                                                 }
-                                                app.view = View::Projects;
-                                                app.clear_status();
                                             }
                                             Err(e) => {
                                                 app.set_status(&format!("Failed to connect: {}", e));
