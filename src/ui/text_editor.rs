@@ -25,6 +25,13 @@ impl PasteAttachment {
     }
 }
 
+/// Represents an uploaded image attachment
+#[derive(Debug, Clone)]
+pub struct ImageAttachment {
+    pub id: usize,
+    pub url: String,
+}
+
 /// Text editor state for rich editing
 #[derive(Debug, Clone)]
 pub struct TextEditor {
@@ -34,8 +41,12 @@ pub struct TextEditor {
     pub cursor: usize,
     /// Attachments from large pastes
     pub attachments: Vec<PasteAttachment>,
-    /// Next attachment ID
+    /// Next paste attachment ID
     next_attachment_id: usize,
+    /// Image attachments (uploaded images)
+    pub image_attachments: Vec<ImageAttachment>,
+    /// Next image attachment ID
+    next_image_id: usize,
     /// Currently focused attachment index (None = main input focused)
     pub focused_attachment: Option<usize>,
 }
@@ -53,6 +64,8 @@ impl TextEditor {
             cursor: 0,
             attachments: Vec::new(),
             next_attachment_id: 1,
+            image_attachments: Vec::new(),
+            next_image_id: 1,
             focused_attachment: None,
         }
     }
@@ -212,7 +225,16 @@ impl TextEditor {
         self.text.clear();
         self.cursor = 0;
         self.attachments.clear();
+        self.image_attachments.clear();
         self.focused_attachment = None;
+    }
+
+    /// Add an image attachment and return its ID
+    pub fn add_image_attachment(&mut self, url: String) -> usize {
+        let id = self.next_image_id;
+        self.next_image_id += 1;
+        self.image_attachments.push(ImageAttachment { id, url });
+        id
     }
 
     /// Get the number of lines in the input
@@ -284,18 +306,24 @@ impl TextEditor {
     }
 
     /// Build the full message content including attachments
+    /// Replaces [Image #N] and [Paste #N] markers with actual content
     pub fn build_full_content(&self) -> String {
-        if self.attachments.is_empty() {
-            return self.text.clone();
+        let mut content = self.text.clone();
+
+        // Replace [Image #N] markers with actual URLs
+        for img in &self.image_attachments {
+            let marker = format!("[Image #{}]", img.id);
+            content = content.replace(&marker, &img.url);
         }
 
-        let mut content = self.text.clone();
+        // Append paste attachments at the end
         for attachment in &self.attachments {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
             }
             content.push_str(&attachment.content);
         }
+
         content
     }
 

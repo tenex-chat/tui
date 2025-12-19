@@ -57,8 +57,8 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     let input_lines = app.chat_editor.line_count().max(1);
     let input_height = (input_lines as u16 + 2).clamp(3, 10); // +2 for borders
 
-    // Check if we have attachments
-    let has_attachments = !app.chat_editor.attachments.is_empty();
+    // Check if we have attachments (paste or image)
+    let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
 
     // Build layout based on whether we have attachments
     let chunks = if has_attachments {
@@ -223,6 +223,16 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     // Attachments line (if any)
     if has_attachments {
         let mut attachment_spans: Vec<Span> = vec![Span::styled("Attachments: ", Style::default().fg(Color::DarkGray))];
+
+        // Show image attachments
+        for img in &app.chat_editor.image_attachments {
+            attachment_spans.push(Span::styled(
+                format!("[Image #{}] ", img.id),
+                Style::default().fg(Color::Magenta),
+            ));
+        }
+
+        // Show paste attachments
         for (i, attachment) in app.chat_editor.attachments.iter().enumerate() {
             let is_focused = app.chat_editor.focused_attachment == Some(i);
             let style = if is_focused {
@@ -235,7 +245,10 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
                 style,
             ));
         }
-        attachment_spans.push(Span::styled("(Tab to view/edit)", Style::default().fg(Color::DarkGray)));
+
+        if !app.chat_editor.attachments.is_empty() {
+            attachment_spans.push(Span::styled("(Tab to view/edit)", Style::default().fg(Color::DarkGray)));
+        }
         let attachments_line = Line::from(attachment_spans);
         let attachments = Paragraph::new(attachments_line);
         f.render_widget(attachments, chunks[2]);

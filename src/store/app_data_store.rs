@@ -87,8 +87,13 @@ impl AppDataStore {
     }
 
     fn handle_message_event(&mut self, note: &Note) {
+        let note_id = hex::encode(note.id());
+        tracing::info!("handle_message_event: processing message {}", note_id);
         if let Some(thread_id) = Self::extract_thread_id(note) {
+            tracing::info!("handle_message_event: found thread_id={}, reloading messages", thread_id);
             self.reload_messages_for_thread(&thread_id);
+        } else {
+            tracing::warn!("handle_message_event: could not extract thread_id from message {}", note_id);
         }
     }
 
@@ -112,16 +117,23 @@ impl AppDataStore {
     }
 
     pub fn reload_messages_for_thread(&mut self, thread_id: &str) {
+        tracing::info!("reload_messages_for_thread: loading messages for thread {}", thread_id);
         if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, thread_id) {
+            tracing::info!("reload_messages_for_thread: found {} messages for thread {}", messages.len(), thread_id);
             self.messages_by_thread.insert(thread_id.to_string(), messages);
+        } else {
+            tracing::warn!("reload_messages_for_thread: failed to load messages for thread {}", thread_id);
         }
     }
 
     fn extract_project_a_tag(note: &Note) -> Option<String> {
         for tag in note.tags() {
             if tag.count() >= 2 {
-                if let (Some("a"), Some(value)) = (tag.get(0).and_then(|s| s.str()), tag.get(1).and_then(|s| s.str())) {
-                    return Some(value.to_string());
+                let tag_name = tag.get(0).and_then(|t| t.variant().str());
+                if tag_name == Some("a") {
+                    if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                        return Some(value.to_string());
+                    }
                 }
             }
         }
@@ -131,13 +143,13 @@ impl AppDataStore {
     fn extract_thread_id(note: &Note) -> Option<String> {
         for tag in note.tags() {
             if tag.count() >= 2 {
-                if let Some("E") = tag.get(0).and_then(|s| s.str()) {
-                    if let Some(elem) = tag.get(1) {
-                        if let Some(s) = elem.str() {
-                            return Some(s.to_string());
-                        } else if let Some(id) = elem.variant().id() {
-                            return Some(hex::encode(id));
-                        }
+                let tag_name = tag.get(0).and_then(|t| t.variant().str());
+                if tag_name == Some("E") {
+                    // Try string first, then id bytes
+                    if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                        return Some(s.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        return Some(hex::encode(id_bytes));
                     }
                 }
             }
@@ -148,8 +160,11 @@ impl AppDataStore {
     fn extract_thread_id_from_metadata(note: &Note) -> Option<String> {
         for tag in note.tags() {
             if tag.count() >= 2 {
-                if let (Some("e"), Some(value)) = (tag.get(0).and_then(|s| s.str()), tag.get(1).and_then(|s| s.str())) {
-                    return Some(value.to_string());
+                let tag_name = tag.get(0).and_then(|t| t.variant().str());
+                if tag_name == Some("e") {
+                    if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                        return Some(value.to_string());
+                    }
                 }
             }
         }
@@ -201,9 +216,11 @@ impl AppDataStore {
     }
 
     pub fn get_messages(&self, thread_id: &str) -> &[Message] {
-        self.messages_by_thread.get(thread_id)
+        let messages = self.messages_by_thread.get(thread_id)
             .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            .unwrap_or(&[]);
+        tracing::debug!("get_messages: returning {} messages for thread {}", messages.len(), thread_id);
+        messages
     }
 
     pub fn get_profile_name(&self, pubkey: &str) -> String {

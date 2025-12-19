@@ -149,9 +149,17 @@ async fn run_app(
                                     // Paste into attachment modal
                                     app.attachment_modal_editor.handle_paste(&text);
                                 } else {
-                                    // Paste into chat editor
-                                    app.chat_editor.handle_paste(&text);
-                                    app.save_chat_draft();
+                                    // Check if pasted text is an image file path (drag & drop)
+                                    if let Some(keys) = app.keys.clone() {
+                                        if !handle_image_file_paste(app, &text, &keys).await {
+                                            // Not an image file - regular paste
+                                            app.chat_editor.handle_paste(&text);
+                                            app.save_chat_draft();
+                                        }
+                                    } else {
+                                        app.chat_editor.handle_paste(&text);
+                                        app.save_chat_draft();
+                                    }
                                 }
                             } else if app.input_mode == InputMode::Editing {
                                 // Simple paste for login/threads views
@@ -204,22 +212,21 @@ fn handle_ndb_notes(
                     if let Some(ref thread) = app.selected_thread {
                         for tag in note.tags() {
                             if tag.count() >= 2 {
-                                let is_e_tag = tag.get(0).and_then(|s| s.str()) == Some("E");
-                                if is_e_tag {
-                                    if let Some(tag_elem) = tag.get(1) {
-                                        let tag_value = if let Some(s) = tag_elem.str() {
-                                            s.to_string()
-                                        } else if let Some(id) = tag_elem.variant().id() {
-                                            hex::encode(id)
-                                        } else {
-                                            continue;
-                                        };
+                                let tag_name = tag.get(0).and_then(|t| t.variant().str());
+                                if tag_name == Some("E") {
+                                    // Try string first, then id bytes
+                                    let tag_value = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                                        s.to_string()
+                                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                                        hex::encode(id_bytes)
+                                    } else {
+                                        continue;
+                                    };
 
-                                        if tag_value == thread.id {
-                                            app.scroll_offset = usize::MAX;
-                                            app.streaming_accumulator.clear_message(&thread.id);
-                                            break;
-                                        }
+                                    if tag_value == thread.id {
+                                        app.scroll_offset = usize::MAX;
+                                        app.streaming_accumulator.clear_message(&thread.id);
+                                        break;
                                     }
                                 }
                             }
@@ -738,7 +745,8 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                     let project_a_tag = project.a_tag();
                     let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
                     let branch = app.selected_branch.clone();
-                    let reply_to = app.messages().last().map(|m| m.id.clone());
+                    // NIP-22: lowercase "e" tag references the FIRST (oldest) event in current view
+                    let reply_to = app.messages().first().map(|m| m.id.clone());
 
                     if let Err(e) = command_tx.send(NostrCommand::PublishMessage {
                         thread_id,
@@ -942,11 +950,12 @@ async fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys) {
         // Upload to Blossom
         match nostr::upload_image(&png_data, keys, "image/png").await {
             Ok(url) => {
-                // Insert URL into chat editor
-                for c in url.chars() {
+                // Add as image attachment and insert marker
+                let id = app.chat_editor.add_image_attachment(url);
+                let marker = format!("[Image #{}] ", id);
+                for c in marker.chars() {
                     app.chat_editor.insert_char(c);
                 }
-                app.chat_editor.insert_char(' ');
                 app.save_chat_draft();
                 app.clear_status();
             }
@@ -955,10 +964,116 @@ async fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys) {
             }
         }
     } else if let Ok(text) = clipboard.get_text() {
-        // Fall back to text paste
-        app.chat_editor.handle_paste(&text);
-        app.save_chat_draft();
+        // Check if clipboard text is a file path to an image
+        if !handle_image_file_paste(app, &text, keys).await {
+            // Fall back to regular text paste
+            app.chat_editor.handle_paste(&text);
+            app.save_chat_draft();
+        }
     }
+}
+
+/// Check if text is an image file path and upload it if so
+/// Returns true if it was an image file that was handled, false otherwise
+async fn handle_image_file_paste(app: &mut App, text: &str, keys: &nostr_sdk::Keys) -> bool {
+    let path = text.trim();
+
+    // Skip if empty or doesn't look like a file path
+    if path.is_empty() {
+        return false;
+    }
+
+    // Handle file:// URLs (common from some terminals/apps)
+    let path = if let Some(file_path) = path.strip_prefix("file://") {
+        urlencoded_decode(file_path)
+    } else {
+        // Handle backslash-escaped spaces (from terminal drag-and-drop)
+        path.replace("\\ ", " ")
+    };
+
+    // Check if it's a valid path to an image file
+    let path_obj = std::path::Path::new(&path);
+
+    // Must have an image extension
+    let extension = match path_obj.extension().and_then(|e| e.to_str()) {
+        Some(ext) => ext.to_lowercase(),
+        None => return false,
+    };
+
+    let mime_type = match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => return false,
+    };
+
+    // Check if file exists
+    if !path_obj.exists() {
+        return false;
+    }
+
+    // Read the file
+    app.set_status("Uploading image...");
+    let data = match std::fs::read(&path) {
+        Ok(data) => data,
+        Err(e) => {
+            app.set_status(&format!("Failed to read file: {}", e));
+            return true;
+        }
+    };
+
+    // Upload to Blossom
+    match nostr::upload_image(&data, keys, mime_type).await {
+        Ok(url) => {
+            // Add as image attachment and insert marker
+            let id = app.chat_editor.add_image_attachment(url);
+            let marker = format!("[Image #{}] ", id);
+            for c in marker.chars() {
+                app.chat_editor.insert_char(c);
+            }
+            app.save_chat_draft();
+            app.clear_status();
+        }
+        Err(e) => {
+            app.set_status(&format!("Upload failed: {}", e));
+        }
+    }
+
+    true
+}
+
+/// Simple URL decoding for file paths
+fn urlencoded_decode(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // Try to parse the next two characters as hex
+            let mut hex = String::with_capacity(2);
+            if let Some(&h1) = chars.peek() {
+                hex.push(h1);
+                chars.next();
+            }
+            if let Some(&h2) = chars.peek() {
+                hex.push(h2);
+                chars.next();
+            }
+            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                result.push(byte as char);
+            } else {
+                // Invalid escape, keep original
+                result.push('%');
+                result.push_str(&hex);
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 /// Convert arboard ImageData to PNG bytes
