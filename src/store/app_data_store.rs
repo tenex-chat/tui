@@ -177,4 +177,40 @@ impl AppDataStore {
         }
         None
     }
+
+    // Getters - return references for efficient access
+
+    pub fn get_projects(&self) -> &[Project] {
+        &self.projects
+    }
+
+    pub fn get_project_status(&self, a_tag: &str) -> Option<&ProjectStatus> {
+        self.project_statuses.get(a_tag)
+    }
+
+    pub fn is_project_online(&self, a_tag: &str) -> bool {
+        self.project_statuses.get(a_tag)
+            .map(|s| s.is_online())
+            .unwrap_or(false)
+    }
+
+    pub fn get_threads(&self, project_a_tag: &str) -> &[Thread] {
+        self.threads_by_project.get(project_a_tag)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn get_messages(&self, thread_id: &str) -> &[Message] {
+        self.messages_by_thread.get(thread_id)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+    }
+
+    pub fn get_profile_name(&self, pubkey: &str) -> String {
+        self.profiles.get(pubkey)
+            .cloned()
+            .unwrap_or_else(|| {
+                crate::store::get_profile_name(&self.ndb, pubkey)
+            })
+    }
 }
