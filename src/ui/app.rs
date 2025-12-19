@@ -40,6 +40,8 @@ pub struct App {
 
     pub scroll_offset: usize,
     pub status_message: Option<String>,
+
+    pub creating_thread: bool,
 }
 
 impl App {
@@ -66,6 +68,8 @@ impl App {
 
             scroll_offset: 0,
             status_message: None,
+
+            creating_thread: false,
         }
     }
 

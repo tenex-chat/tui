@@ -13,7 +13,6 @@ const DEFAULT_RELAYS: &[&str] = &[
 #[derive(Clone)]
 pub struct NostrClient {
     client: Arc<Mutex<Client>>,
-    keys: Keys,
 }
 
 impl NostrClient {
@@ -24,26 +23,14 @@ impl NostrClient {
             client.add_relay(*relay).await?;
         }
 
-        client.connect().await;
+        // Connect with timeout to prevent indefinite hang
+        tokio::time::timeout(Duration::from_secs(10), client.connect())
+            .await
+            .ok();
 
         Ok(Self {
             client: Arc::new(Mutex::new(client)),
-            keys,
         })
-    }
-
-    pub fn keys(&self) -> &Keys {
-        &self.keys
-    }
-
-    pub fn pubkey(&self) -> String {
-        self.keys.public_key().to_hex()
-    }
-
-    pub async fn subscribe(&self, filters: Vec<Filter>) -> Result<()> {
-        let client = self.client.lock().await;
-        client.subscribe(filters, None).await?;
-        Ok(())
     }
 
     pub async fn fetch_events(&self, filters: Vec<Filter>) -> Result<Vec<Event>> {

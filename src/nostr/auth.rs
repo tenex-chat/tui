@@ -60,24 +60,24 @@ fn get_stored_credentials(conn: &Arc<Mutex<Connection>>) -> Result<String> {
     Ok(result)
 }
 
-pub fn clear_credentials(conn: &Arc<Mutex<Connection>>) -> Result<()> {
-    let conn = conn.lock().unwrap();
-    conn.execute("DELETE FROM credentials WHERE id = 1", [])?;
-    Ok(())
-}
-
 pub fn get_current_pubkey(keys: &Keys) -> String {
     keys.public_key().to_hex()
-}
-
-pub fn is_logged_in(keys: Option<&Keys>) -> bool {
-    keys.is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::Database;
+
+    fn clear_credentials(conn: &Arc<Mutex<Connection>>) -> Result<()> {
+        let conn = conn.lock().unwrap();
+        conn.execute("DELETE FROM credentials WHERE id = 1", [])?;
+        Ok(())
+    }
+
+    fn is_logged_in(keys: Option<&Keys>) -> bool {
+        keys.is_some()
+    }
 
     #[test]
     fn test_login_and_store() {

@@ -17,6 +17,7 @@ impl Database {
         Ok(db)
     }
 
+    #[cfg(test)]
     pub fn in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory()?;
         let db = Self {

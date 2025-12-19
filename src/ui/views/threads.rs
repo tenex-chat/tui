@@ -1,7 +1,7 @@
 use crate::store::get_profile_name;
 use crate::ui::App;
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
@@ -9,12 +9,44 @@ use ratatui::{
 };
 
 pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
+    if app.creating_thread {
+        let chunks = Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+        if app.threads.is_empty() {
+            let empty = Paragraph::new("No threads found.")
+                .style(Style::default().fg(Color::DarkGray));
+            f.render_widget(empty, chunks[0]);
+        } else {
+            render_thread_list(f, app, chunks[0]);
+        }
+
+        let input_widget = Paragraph::new(app.input.as_str())
+            .style(Style::default().fg(Color::Yellow))
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title("Enter thread title (Enter to create, Esc to cancel)")
+                    .border_style(Style::default().fg(Color::Yellow)),
+            );
+        f.render_widget(input_widget, chunks[1]);
+        return;
+    }
+
     if app.threads.is_empty() {
         let empty = Paragraph::new("No threads found. Press 'n' to create a new thread.")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(empty, area);
         return;
     }
+
+    render_thread_list(f, app, area);
+}
+
+fn render_thread_list(f: &mut Frame, app: &App, area: Rect) {
 
     let items: Vec<ListItem> = app
         .threads

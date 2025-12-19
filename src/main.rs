@@ -24,13 +24,14 @@ fn main() -> Result<()> {
     let db = store::Database::new("tenex.db")?;
     let mut app = App::new(db);
     let mut terminal = ui::init_terminal()?;
-    let mut login_step = LoginStep::Nsec;
-    let mut pending_nsec: Option<String> = None;
 
-    // Check for stored credentials and auto-login
-    if nostr::has_stored_credentials(&app.db.connection()) {
-        app.set_status("Found stored credentials. Press 'i' and Enter with password (or just Enter if no password)");
-    }
+    // Check for stored credentials and set initial login step
+    let mut login_step = if nostr::has_stored_credentials(&app.db.connection()) {
+        LoginStep::Unlock
+    } else {
+        LoginStep::Nsec
+    };
+    let mut pending_nsec: Option<String> = None;
 
     let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec, &rt);
 
@@ -163,7 +164,25 @@ fn handle_key(
 
                         // Load threads for this project from db
                         if let Ok(threads) = store::get_threads_for_project(&app.db.connection(), &project.a_tag()) {
-                            app.threads = threads;
+                            app.threads = threads.clone();
+
+                            // Collect unique pubkeys from threads and fetch profiles
+                            if let Some(ref client) = app.nostr_client {
+                                let mut pubkeys = std::collections::HashSet::new();
+                                for thread in &threads {
+                                    pubkeys.insert(thread.pubkey.clone());
+                                }
+
+                                if !pubkeys.is_empty() {
+                                    let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
+                                    let conn = app.db.connection();
+                                    let client_clone = client.clone();
+
+                                    rt.block_on(async move {
+                                        let _ = nostr::subscribe_to_profiles(&client_clone, &pubkeys_vec, &conn).await;
+                                    });
+                                }
+                            }
                         }
                         app.selected_thread_index = 0;
                         app.view = View::Threads;
@@ -173,7 +192,25 @@ fn handle_key(
                         app.selected_thread = Some(thread.clone());
                         // Load messages for this thread
                         if let Ok(messages) = store::get_messages_for_thread(&app.db.connection(), &thread.id) {
-                            app.messages = messages;
+                            app.messages = messages.clone();
+
+                            // Collect unique pubkeys from messages and fetch profiles
+                            if let Some(ref client) = app.nostr_client {
+                                let mut pubkeys = std::collections::HashSet::new();
+                                for message in &messages {
+                                    pubkeys.insert(message.pubkey.clone());
+                                }
+
+                                if !pubkeys.is_empty() {
+                                    let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
+                                    let conn = app.db.connection();
+                                    let client_clone = client.clone();
+
+                                    rt.block_on(async move {
+                                        let _ = nostr::subscribe_to_profiles(&client_clone, &pubkeys_vec, &conn).await;
+                                    });
+                                }
+                            }
                         }
                         app.view = View::Chat;
                     }
@@ -187,12 +224,22 @@ fn handle_key(
                     _ => {}
                 }
             }
+            KeyCode::Char('n') => {
+                if app.view == View::Threads {
+                    app.creating_thread = true;
+                    app.input_mode = InputMode::Editing;
+                    app.clear_input();
+                }
+            }
             _ => {}
         },
         InputMode::Editing => match key {
             KeyCode::Esc => {
                 app.input_mode = InputMode::Normal;
                 app.clear_input();
+                if app.creating_thread {
+                    app.creating_thread = false;
+                }
             }
             KeyCode::Char(c) => app.enter_char(c),
             KeyCode::Backspace => app.delete_char(),
@@ -242,11 +289,29 @@ fn handle_key(
                                         match client_result {
                                             Ok(client) => {
                                                 app.keys = Some(keys);
-                                                app.nostr_client = Some(client);
+                                                app.nostr_client = Some(client.clone());
 
                                                 // Load projects from db
                                                 if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                    app.projects = projects;
+                                                    app.projects = projects.clone();
+
+                                                    // Collect unique pubkeys from projects
+                                                    let mut pubkeys = std::collections::HashSet::new();
+                                                    for project in &projects {
+                                                        pubkeys.insert(project.pubkey.clone());
+                                                        for participant in &project.participants {
+                                                            pubkeys.insert(participant.clone());
+                                                        }
+                                                    }
+
+                                                    // Fetch profiles for all unique pubkeys
+                                                    if !pubkeys.is_empty() {
+                                                        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
+                                                        let conn = app.db.connection();
+                                                        rt.block_on(async move {
+                                                            let _ = nostr::subscribe_to_profiles(&client, &pubkeys_vec, &conn).await;
+                                                        });
+                                                    }
                                                 }
                                                 app.view = View::Projects;
                                                 app.clear_status();
@@ -263,6 +328,84 @@ fn handle_key(
                                     }
                                 }
                                 *pending_nsec = None;
+                            }
+                            LoginStep::Unlock => {
+                                // User is unlocking with stored credentials
+                                let keys_result = nostr::load_stored_keys(&input, &app.db.connection());
+
+                                match keys_result {
+                                    Ok(keys) => {
+                                        let user_pubkey = nostr::get_current_pubkey(&keys);
+
+                                        // Create Nostr client and subscribe to projects
+                                        let client_result = rt.block_on(async {
+                                            let client = nostr::NostrClient::new(keys.clone()).await?;
+                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
+                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                        });
+
+                                        match client_result {
+                                            Ok(client) => {
+                                                app.keys = Some(keys);
+                                                app.nostr_client = Some(client.clone());
+
+                                                // Load projects from db
+                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                    app.projects = projects.clone();
+
+                                                    // Collect unique pubkeys from projects
+                                                    let mut pubkeys = std::collections::HashSet::new();
+                                                    for project in &projects {
+                                                        pubkeys.insert(project.pubkey.clone());
+                                                        for participant in &project.participants {
+                                                            pubkeys.insert(participant.clone());
+                                                        }
+                                                    }
+
+                                                    // Fetch profiles for all unique pubkeys
+                                                    if !pubkeys.is_empty() {
+                                                        let pubkeys_vec: Vec<String> = pubkeys.into_iter().collect();
+                                                        let conn = app.db.connection();
+                                                        rt.block_on(async move {
+                                                            let _ = nostr::subscribe_to_profiles(&client, &pubkeys_vec, &conn).await;
+                                                        });
+                                                    }
+                                                }
+                                                app.view = View::Projects;
+                                                app.clear_status();
+                                            }
+                                            Err(e) => {
+                                                app.set_status(&format!("Failed to connect: {}", e));
+                                                *login_step = LoginStep::Unlock;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        app.set_status(&format!("Unlock failed: {}. Press Esc to clear input and retry.", e));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    View::Threads => {
+                        if app.creating_thread && !input.is_empty() {
+                            if let (Some(ref client), Some(ref project)) = (&app.nostr_client, &app.selected_project) {
+                                let title = input.clone();
+                                let content = input.clone();
+                                let project_a_tag = project.a_tag();
+                                let conn = app.db.connection();
+
+                                rt.block_on(async {
+                                    if let Ok(_event_id) = nostr::publish_thread(client, &project_a_tag, &title, &content).await {
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                    }
+                                });
+
+                                if let Ok(threads) = store::get_threads_for_project(&conn, &project_a_tag) {
+                                    app.threads = threads;
+                                }
+
+                                app.creating_thread = false;
                             }
                         }
                     }

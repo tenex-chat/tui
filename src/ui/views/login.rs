@@ -10,6 +10,7 @@ use ratatui::{
 pub enum LoginStep {
     Nsec,
     Password,
+    Unlock,
 }
 
 pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep) {
@@ -24,6 +25,7 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
     let instructions = match login_step {
         LoginStep::Nsec => "Enter your nsec (private key) to login:",
         LoginStep::Password => "Enter a password to encrypt your key (optional, press Enter to skip):",
+        LoginStep::Unlock => "Welcome back! Enter your password to unlock:",
     };
     let instruction_widget = Paragraph::new(instructions)
         .style(Style::default().fg(Color::White))
@@ -41,6 +43,8 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
         // Mask the nsec
         "*".repeat(app.input.len())
     } else if *login_step == LoginStep::Password && !app.input.is_empty() {
+        "*".repeat(app.input.len())
+    } else if *login_step == LoginStep::Unlock && !app.input.is_empty() {
         "*".repeat(app.input.len())
     } else {
         app.input.clone()

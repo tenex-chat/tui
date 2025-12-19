@@ -4,10 +4,8 @@ use crate::store::events::StoredEvent;
 pub struct Project {
     pub id: String,
     pub name: String,
-    pub description: String,
     pub pubkey: String,
     pub participants: Vec<String>,
-    pub created_at: u64,
 }
 
 impl Project {
@@ -37,10 +35,8 @@ impl Project {
         Some(Project {
             id,
             name,
-            description: event.content.clone(),
             pubkey: event.pubkey.clone(),
             participants,
-            created_at: event.created_at,
         })
     }
 
@@ -80,10 +76,8 @@ mod tests {
         let project = Project {
             id: "proj1".to_string(),
             name: "Project 1".to_string(),
-            description: "".to_string(),
             pubkey: "a".repeat(64),
             participants: vec![],
-            created_at: 1000,
         };
 
         assert_eq!(project.a_tag(), format!("31933:{}:proj1", "a".repeat(64)));

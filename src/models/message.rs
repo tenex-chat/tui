@@ -2,11 +2,9 @@ use crate::store::events::StoredEvent;
 
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub id: String,
     pub content: String,
     pub pubkey: String,
     pub thread_id: String,
-    pub created_at: u64,
 }
 
 impl Message {
@@ -19,11 +17,9 @@ impl Message {
         let thread_id = e_tag.get(1)?.clone();
 
         Some(Message {
-            id: event.id.clone(),
             content: event.content.clone(),
             pubkey: event.pubkey.clone(),
             thread_id,
-            created_at: event.created_at,
         })
     }
 }

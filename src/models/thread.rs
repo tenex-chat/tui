@@ -4,10 +4,8 @@ use crate::store::events::StoredEvent;
 pub struct Thread {
     pub id: String,
     pub title: String,
-    pub content: String,
     pub pubkey: String,
     pub project_id: String,
-    pub created_at: u64,
 }
 
 impl Thread {
@@ -30,10 +28,8 @@ impl Thread {
         Some(Thread {
             id: event.id.clone(),
             title,
-            content: event.content.clone(),
             pubkey: event.pubkey.clone(),
             project_id,
-            created_at: event.created_at,
         })
     }
 }
