@@ -1,11 +1,17 @@
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_sdk::trace::TracerProvider as SdkTracerProvider;
-use opentelemetry_stdout::SpanExporter;
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::{runtime, trace::TracerProvider as SdkTracerProvider};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 
 pub fn init_tracing() {
+    let exporter = opentelemetry_otlp::SpanExporter::builder()
+        .with_tonic()
+        .with_endpoint("http://localhost:4317")
+        .build()
+        .expect("Failed to create OTLP exporter");
+
     let provider = SdkTracerProvider::builder()
-        .with_simple_exporter(SpanExporter::default())
+        .with_batch_exporter(exporter, runtime::Tokio)
         .build();
 
     let tracer = provider.tracer("tenex-tui");

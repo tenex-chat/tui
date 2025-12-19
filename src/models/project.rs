@@ -1,4 +1,4 @@
-use crate::store::events::StoredEvent;
+use nostrdb::Note;
 
 #[derive(Debug, Clone)]
 pub struct Project {
@@ -9,33 +9,41 @@ pub struct Project {
 }
 
 impl Project {
-    pub fn from_event(event: &StoredEvent) -> Option<Self> {
-        if event.kind != 31933 {
+    pub fn from_note(note: &Note) -> Option<Self> {
+        if note.kind() != 31933 {
             return None;
         }
 
-        let d_tag = event.tags.iter().find(|t| t.first().map(|s| s == "d").unwrap_or(false))?;
-        let id = d_tag.get(1)?.clone();
+        let pubkey = hex::encode(note.pubkey());
 
-        let name = event
-            .tags
-            .iter()
-            .find(|t| t.first().map(|s| s == "name").unwrap_or(false))
-            .and_then(|t| t.get(1))
-            .cloned()
-            .unwrap_or_else(|| id.clone());
+        let mut id: Option<String> = None;
+        let mut name: Option<String> = None;
+        let mut participants = Vec::new();
 
-        let participants: Vec<String> = event
-            .tags
-            .iter()
-            .filter(|t| t.first().map(|s| s == "p").unwrap_or(false))
-            .filter_map(|t| t.get(1).cloned())
-            .collect();
+        for tag in note.tags() {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+            match tag_name {
+                Some("d") => {
+                    id = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("name") => {
+                    name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("p") => {
+                    if let Some(p) = tag.get(1).and_then(|t| t.variant().str()) {
+                        participants.push(p.to_string());
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let id = id?;
 
         Some(Project {
-            id,
-            name,
-            pubkey: event.pubkey.clone(),
+            id: id.clone(),
+            name: name.unwrap_or_else(|| id.clone()),
+            pubkey,
             participants,
         })
     }
@@ -48,28 +56,6 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_project() {
-        let event = StoredEvent {
-            id: "a".repeat(64),
-            pubkey: "b".repeat(64),
-            kind: 31933,
-            created_at: 1000,
-            content: "Description".to_string(),
-            tags: vec![
-                vec!["d".to_string(), "my-project".to_string()],
-                vec!["name".to_string(), "My Project".to_string()],
-                vec!["p".to_string(), "c".repeat(64)],
-            ],
-            sig: "0".repeat(128),
-        };
-
-        let project = Project::from_event(&event).unwrap();
-        assert_eq!(project.id, "my-project");
-        assert_eq!(project.name, "My Project");
-        assert_eq!(project.participants.len(), 1);
-    }
 
     #[test]
     fn test_a_tag() {

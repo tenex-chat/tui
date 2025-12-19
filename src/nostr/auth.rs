@@ -68,6 +68,7 @@ pub fn get_current_pubkey(keys: &Keys) -> String {
 mod tests {
     use super::*;
     use crate::store::Database;
+    use tempfile::tempdir;
 
     fn clear_credentials(conn: &Arc<Mutex<Connection>>) -> Result<()> {
         let conn = conn.lock().unwrap();
@@ -81,8 +82,9 @@ mod tests {
 
     #[test]
     fn test_login_and_store() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.connection();
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let conn = db.credentials_conn();
 
         // Generate a test nsec
         let keys = Keys::generate();
@@ -99,8 +101,9 @@ mod tests {
 
     #[test]
     fn test_has_stored_credentials() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.connection();
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let conn = db.credentials_conn();
 
         assert!(!has_stored_credentials(&conn));
 
@@ -113,8 +116,9 @@ mod tests {
 
     #[test]
     fn test_clear_credentials() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.connection();
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let conn = db.credentials_conn();
 
         let keys = Keys::generate();
         let nsec = keys.secret_key().to_bech32().unwrap();

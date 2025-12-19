@@ -1,60 +1,47 @@
-use crate::store::events::StoredEvent;
+use nostrdb::Note;
 
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub id: String,
     pub title: String,
     pub pubkey: String,
-    pub project_id: String,
+    /// Most recent activity (thread creation or latest reply)
+    pub last_activity: u64,
 }
 
 impl Thread {
-    pub fn from_event(event: &StoredEvent) -> Option<Self> {
-        if event.kind != 11 {
+    pub fn from_note(note: &Note) -> Option<Self> {
+        if note.kind() != 11 {
             return None;
         }
 
-        let a_tag = event.tags.iter().find(|t| t.first().map(|s| s == "a").unwrap_or(false))?;
-        let project_id = a_tag.get(1)?.clone();
+        let id = hex::encode(note.id());
+        let pubkey = hex::encode(note.pubkey());
+        let created_at = note.created_at();
 
-        let title = event
-            .tags
-            .iter()
-            .find(|t| t.first().map(|s| s == "title").unwrap_or(false))
-            .and_then(|t| t.get(1))
-            .cloned()
-            .unwrap_or_else(|| "Untitled".to_string());
+        let mut title: Option<String> = None;
+
+        for tag in note.tags() {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+            match tag_name {
+                Some("a") => {
+                    // Validate project_id exists
+                    if tag.get(1).and_then(|t| t.variant().str()).is_none() {
+                        return None;
+                    }
+                }
+                Some("title") => {
+                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
 
         Some(Thread {
-            id: event.id.clone(),
-            title,
-            pubkey: event.pubkey.clone(),
-            project_id,
+            id,
+            title: title.unwrap_or_else(|| "Untitled".to_string()),
+            pubkey,
+            last_activity: created_at,
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_thread() {
-        let event = StoredEvent {
-            id: "a".repeat(64),
-            pubkey: "b".repeat(64),
-            kind: 11,
-            created_at: 1000,
-            content: "Thread content".to_string(),
-            tags: vec![
-                vec!["a".to_string(), "31933:pubkey:proj1".to_string()],
-                vec!["title".to_string(), "My Thread".to_string()],
-            ],
-            sig: "0".repeat(128),
-        };
-
-        let thread = Thread::from_event(&event).unwrap();
-        assert_eq!(thread.title, "My Thread");
-        assert_eq!(thread.project_id, "31933:pubkey:proj1");
     }
 }

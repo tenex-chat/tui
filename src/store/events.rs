@@ -1,179 +1,97 @@
 use anyhow::Result;
-use rusqlite::Connection;
-use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-use tracing::{info_span, instrument};
+use nostrdb::{IngestMetadata, Ndb};
+use nostr_sdk::prelude::*;
+use tracing::{debug, instrument};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredEvent {
-    pub id: String,
-    pub pubkey: String,
-    pub kind: u32,
-    pub created_at: u64,
-    pub content: String,
-    pub tags: Vec<Vec<String>>,
-    pub sig: String,
-}
-
-#[instrument(skip(conn, events), fields(event_count = events.len()))]
-pub fn insert_events(conn: &Arc<Mutex<Connection>>, events: &[StoredEvent]) -> Result<usize> {
-    let _span = info_span!("store.insert").entered();
-    let conn = conn.lock().unwrap();
-    let mut inserted = 0;
+/// Ingest events into nostrdb from nostr-sdk Events
+/// - relay_url: the source relay URL (None for locally created events)
+#[instrument(skip(ndb, events), fields(event_count = events.len()))]
+pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Result<usize> {
+    let mut ingested = 0;
 
     for event in events {
-        let tags_json = serde_json::to_string(&event.tags)?;
-        let result = conn.execute(
-            "INSERT OR IGNORE INTO events (id, pubkey, kind, created_at, content, tags, sig) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            (
-                &event.id,
-                &event.pubkey,
-                event.kind,
-                event.created_at as i64,
-                &event.content,
-                &tags_json,
-                &event.sig,
-            ),
-        );
-        if let Ok(n) = result {
-            inserted += n;
+        let json = event.as_json();
+        // nostrdb expects relay format: ["EVENT", "subid", {...}]
+        let relay_json = format!(r#"["EVENT","tenex",{}]"#, json);
+
+        let result = if let Some(url) = relay_url {
+            let meta = IngestMetadata::new().client(false).relay(url);
+            ndb.process_event_with(&relay_json, meta)
+        } else {
+            // For local/test events, use process_event which doesn't require relay metadata
+            ndb.process_event(&relay_json)
+        };
+
+        if let Err(e) = result {
+            debug!("Failed to ingest event {}: {}", event.id, e);
+        } else {
+            ingested += 1;
         }
     }
 
-    Ok(inserted)
+    Ok(ingested)
 }
 
-pub fn get_events_by_kind(conn: &Arc<Mutex<Connection>>, kind: u32) -> Result<Vec<StoredEvent>> {
-    let conn = conn.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT id, pubkey, kind, created_at, content, tags, sig FROM events WHERE kind = ?1 ORDER BY created_at DESC",
-    )?;
+/// Helper to wait for events to be processed by nostrdb (for tests)
+#[cfg(test)]
+pub fn wait_for_event_processing(ndb: &Ndb, filter: nostrdb::Filter, max_wait_ms: u64) -> bool {
+    use std::time::{Duration, Instant};
 
-    let events = stmt
-        .query_map([kind], |row| {
-            let tags_json: String = row.get(5)?;
-            let tags: Vec<Vec<String>> = serde_json::from_str(&tags_json).unwrap_or_default();
-            Ok(StoredEvent {
-                id: row.get(0)?,
-                pubkey: row.get(1)?,
-                kind: row.get(2)?,
-                created_at: row.get::<_, i64>(3)? as u64,
-                content: row.get(4)?,
-                tags,
-                sig: row.get(6)?,
-            })
-        })?
-        .filter_map(|e| e.ok())
-        .collect();
+    let start = Instant::now();
+    let timeout = Duration::from_millis(max_wait_ms);
 
-    Ok(events)
-}
+    loop {
+        if let Ok(txn) = nostrdb::Transaction::new(ndb) {
+            if let Ok(results) = ndb.query(&txn, &[filter.clone()], 1) {
+                if !results.is_empty() {
+                    return true;
+                }
+            }
+        }
 
-pub fn get_events_by_kind_and_pubkey(
-    conn: &Arc<Mutex<Connection>>,
-    kind: u32,
-    pubkey: &str,
-) -> Result<Vec<StoredEvent>> {
-    let conn = conn.lock().unwrap();
-    let mut stmt = conn.prepare(
-        "SELECT id, pubkey, kind, created_at, content, tags, sig FROM events WHERE kind = ?1 AND pubkey = ?2 ORDER BY created_at DESC",
-    )?;
+        if start.elapsed() >= timeout {
+            return false;
+        }
 
-    let events = stmt
-        .query_map([kind.to_string(), pubkey.to_string()], |row| {
-            let tags_json: String = row.get(5)?;
-            let tags: Vec<Vec<String>> = serde_json::from_str(&tags_json).unwrap_or_default();
-            Ok(StoredEvent {
-                id: row.get(0)?,
-                pubkey: row.get(1)?,
-                kind: row.get(2)?,
-                created_at: row.get::<_, i64>(3)? as u64,
-                content: row.get(4)?,
-                tags,
-                sig: row.get(6)?,
-            })
-        })?
-        .filter_map(|e| e.ok())
-        .collect();
-
-    Ok(events)
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::Database;
+    use tempfile::tempdir;
 
     #[test]
-    fn test_insert_and_query_events() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.connection();
+    fn test_ingest_events() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
 
-        let events = vec![
-            StoredEvent {
-                id: "a".repeat(64),
-                pubkey: "b".repeat(64),
-                kind: 31933,
-                created_at: 1000,
-                content: "Test project".to_string(),
-                tags: vec![vec!["d".to_string(), "proj1".to_string()]],
-                sig: "0".repeat(128),
-            },
-            StoredEvent {
-                id: "c".repeat(64),
-                pubkey: "d".repeat(64),
-                kind: 11,
-                created_at: 2000,
-                content: "Test thread".to_string(),
-                tags: vec![],
-                sig: "0".repeat(128),
-            },
-        ];
+        let keys = Keys::generate();
+        let event = EventBuilder::new(Kind::Custom(31933), "Test project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["proj1".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("name")),
+                vec!["Project 1".to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
 
-        let inserted = insert_events(&conn, &events).unwrap();
-        assert_eq!(inserted, 2);
+        let ingested = ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        assert_eq!(ingested, 1);
 
-        let projects = get_events_by_kind(&conn, 31933).unwrap();
-        assert_eq!(projects.len(), 1);
-        assert_eq!(projects[0].content, "Test project");
+        // Wait for async processing
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        let found = wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+        assert!(found, "Event was not processed within timeout");
 
-        let threads = get_events_by_kind(&conn, 11).unwrap();
-        assert_eq!(threads.len(), 1);
-    }
-
-    #[test]
-    fn test_query_by_pubkey() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.connection();
-
-        let pubkey1 = "a".repeat(64);
-        let pubkey2 = "b".repeat(64);
-
-        let events = vec![
-            StoredEvent {
-                id: "1".repeat(64),
-                pubkey: pubkey1.clone(),
-                kind: 31933,
-                created_at: 1000,
-                content: "Project 1".to_string(),
-                tags: vec![],
-                sig: "0".repeat(128),
-            },
-            StoredEvent {
-                id: "2".repeat(64),
-                pubkey: pubkey2.clone(),
-                kind: 31933,
-                created_at: 2000,
-                content: "Project 2".to_string(),
-                tags: vec![],
-                sig: "0".repeat(128),
-            },
-        ];
-
-        insert_events(&conn, &events).unwrap();
-
-        let result = get_events_by_kind_and_pubkey(&conn, 31933, &pubkey1).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].content, "Project 1");
+        // Query to verify
+        let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1);
     }
 }

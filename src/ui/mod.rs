@@ -1,5 +1,7 @@
 pub mod app;
+pub mod markdown;
 pub mod terminal;
+pub mod tool_calls;
 pub mod views;
 
 pub use app::{App, View, InputMode};

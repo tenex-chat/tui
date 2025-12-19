@@ -1,78 +1,68 @@
 use anyhow::Result;
+use nostrdb::Ndb;
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 pub struct Database {
-    conn: Arc<Mutex<Connection>>,
+    pub ndb: Arc<Ndb>,
+    creds_conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        let db = Self {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-        db.init_schema()?;
-        Ok(db)
+    /// Create a new Database with its own nostrdb instance
+    /// Used in tests
+    #[allow(dead_code)]
+    pub fn new<P: AsRef<Path>>(db_dir: P) -> Result<Self> {
+        let db_dir = db_dir.as_ref();
+        std::fs::create_dir_all(db_dir)?;
+
+        let config = nostrdb::Config::new();
+        let ndb = Ndb::new(db_dir.to_str().unwrap_or("tenex_data"), &config)?;
+
+        Self::with_ndb(Arc::new(ndb), db_dir)
     }
 
-    #[cfg(test)]
-    pub fn in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory()?;
-        let db = Self {
-            conn: Arc::new(Mutex::new(conn)),
-        };
-        db.init_schema()?;
-        Ok(db)
-    }
+    /// Create a Database with a shared nostrdb instance
+    pub fn with_ndb<P: AsRef<Path>>(ndb: Arc<Ndb>, db_dir: P) -> Result<Self> {
+        let db_dir = db_dir.as_ref();
+        std::fs::create_dir_all(db_dir)?;
 
-    fn init_schema(&self) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute_batch(
+        let creds_path = db_dir.join("credentials.db");
+        let creds_conn = Connection::open(&creds_path)?;
+        creds_conn.execute_batch(
             r#"
-            CREATE TABLE IF NOT EXISTS events (
-                id TEXT PRIMARY KEY,
-                pubkey TEXT NOT NULL,
-                kind INTEGER NOT NULL,
-                created_at INTEGER NOT NULL,
-                content TEXT NOT NULL,
-                tags TEXT NOT NULL,
-                sig TEXT NOT NULL
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_events_kind ON events(kind);
-            CREATE INDEX IF NOT EXISTS idx_events_pubkey ON events(pubkey);
-            CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
-            CREATE INDEX IF NOT EXISTS idx_events_tags ON events(tags);
-            CREATE INDEX IF NOT EXISTS idx_events_kind_pubkey ON events(kind, pubkey);
-            CREATE INDEX IF NOT EXISTS idx_events_kind_created_at ON events(kind, created_at);
-
             CREATE TABLE IF NOT EXISTS credentials (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 ncryptsec TEXT NOT NULL
             );
             "#,
         )?;
-        Ok(())
+
+        Ok(Self {
+            ndb,
+            creds_conn: Arc::new(Mutex::new(creds_conn)),
+        })
     }
 
-    pub fn connection(&self) -> Arc<Mutex<Connection>> {
-        self.conn.clone()
+    pub fn credentials_conn(&self) -> Arc<Mutex<Connection>> {
+        self.creds_conn.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_database_creation() {
-        let db = Database::in_memory().unwrap();
-        let conn = db.conn.lock().unwrap();
-        let count: i32 = conn
-            .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 0);
     }
 }

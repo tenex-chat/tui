@@ -1,47 +1,72 @@
-use crate::store::events::StoredEvent;
+use nostrdb::Note;
 
 #[derive(Debug, Clone)]
 pub struct Message {
+    pub id: String,
     pub content: String,
     pub pubkey: String,
     pub thread_id: String,
+    pub created_at: u64,
 }
 
 impl Message {
-    pub fn from_event(event: &StoredEvent) -> Option<Self> {
-        if event.kind != 1111 {
+    /// Create a Message from a kind:1111 reply note
+    /// Per NIP-22:
+    /// - Uppercase "E" tag = root reference (the thread/conversation, kind:11)
+    pub fn from_note(note: &Note) -> Option<Self> {
+        if note.kind() != 1111 {
             return None;
         }
 
-        let e_tag = event.tags.iter().find(|t| t.first().map(|s| s == "e").unwrap_or(false))?;
-        let thread_id = e_tag.get(1)?.clone();
+        let id = hex::encode(note.id());
+        let pubkey = hex::encode(note.pubkey());
+        let content = note.content().to_string();
+        let created_at = note.created_at();
+
+        let mut thread_id: Option<String> = None;
+
+        for tag in note.tags() {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+            match tag_name {
+                Some("E") => {
+                    if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                        thread_id = Some(s.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        thread_id = Some(hex::encode(id_bytes));
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        let thread_id = thread_id?;
 
         Some(Message {
-            content: event.content.clone(),
-            pubkey: event.pubkey.clone(),
+            id,
+            content,
+            pubkey,
             thread_id,
+            created_at,
         })
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+    /// Create a Message from a kind:11 thread root note (the thread itself is the first message)
+    pub fn from_thread_note(note: &Note) -> Option<Self> {
+        if note.kind() != 11 {
+            return None;
+        }
 
-    #[test]
-    fn test_parse_message() {
-        let event = StoredEvent {
-            id: "a".repeat(64),
-            pubkey: "b".repeat(64),
-            kind: 1111,
-            created_at: 1000,
-            content: "Hello world".to_string(),
-            tags: vec![vec!["e".to_string(), "c".repeat(64), "".to_string(), "root".to_string()]],
-            sig: "0".repeat(128),
-        };
+        let id = hex::encode(note.id());
+        let pubkey = hex::encode(note.pubkey());
+        let content = note.content().to_string();
+        let created_at = note.created_at();
 
-        let message = Message::from_event(&event).unwrap();
-        assert_eq!(message.content, "Hello world");
-        assert_eq!(message.thread_id, "c".repeat(64));
+        Some(Message {
+            id: id.clone(),
+            content,
+            pubkey,
+            thread_id: id,
+            created_at,
+        })
     }
 }
