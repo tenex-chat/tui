@@ -186,57 +186,81 @@ fn handle_key(
                 let input = app.submit_input();
                 app.input_mode = InputMode::Normal;
 
-                if app.view == View::Login {
-                    match login_step {
-                        LoginStep::Nsec => {
-                            if input.starts_with("nsec") {
-                                *pending_nsec = Some(input);
-                                *login_step = LoginStep::Password;
-                            } else {
-                                app.set_status("Invalid nsec format");
-                            }
-                        }
-                        LoginStep::Password => {
-                            if let Some(ref nsec) = pending_nsec {
-                                let password = if input.is_empty() { None } else { Some(input.as_str()) };
-                                match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
-                                    Ok(keys) => {
-                                        let user_pubkey = nostr::get_current_pubkey(&keys);
-
-                                        // Create Nostr client and subscribe to projects
-                                        let client_result = rt.block_on(async {
-                                            let client = nostr::NostrClient::new(keys.clone()).await?;
-                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
-                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
-                                        });
-
-                                        match client_result {
-                                            Ok(client) => {
-                                                app.keys = Some(keys);
-                                                app.nostr_client = Some(client);
-
-                                                // Load projects from db
-                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                    app.projects = projects;
-                                                }
-                                                app.view = View::Projects;
-                                                app.clear_status();
-                                            }
-                                            Err(e) => {
-                                                app.set_status(&format!("Failed to connect: {}", e));
-                                                *login_step = LoginStep::Nsec;
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        app.set_status(&format!("Login failed: {}", e));
-                                        *login_step = LoginStep::Nsec;
-                                    }
+                match app.view {
+                    View::Login => {
+                        match login_step {
+                            LoginStep::Nsec => {
+                                if input.starts_with("nsec") {
+                                    *pending_nsec = Some(input);
+                                    *login_step = LoginStep::Password;
+                                } else {
+                                    app.set_status("Invalid nsec format");
                                 }
                             }
-                            *pending_nsec = None;
+                            LoginStep::Password => {
+                                if let Some(ref nsec) = pending_nsec {
+                                    let password = if input.is_empty() { None } else { Some(input.as_str()) };
+                                    match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
+                                        Ok(keys) => {
+                                            let user_pubkey = nostr::get_current_pubkey(&keys);
+
+                                            // Create Nostr client and subscribe to projects
+                                            let client_result = rt.block_on(async {
+                                                let client = nostr::NostrClient::new(keys.clone()).await?;
+                                                nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
+                                                Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                            });
+
+                                            match client_result {
+                                                Ok(client) => {
+                                                    app.keys = Some(keys);
+                                                    app.nostr_client = Some(client);
+
+                                                    // Load projects from db
+                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                        app.projects = projects;
+                                                    }
+                                                    app.view = View::Projects;
+                                                    app.clear_status();
+                                                }
+                                                Err(e) => {
+                                                    app.set_status(&format!("Failed to connect: {}", e));
+                                                    *login_step = LoginStep::Nsec;
+                                                }
+                                            }
+                                        }
+                                        Err(e) => {
+                                            app.set_status(&format!("Login failed: {}", e));
+                                            *login_step = LoginStep::Nsec;
+                                        }
+                                    }
+                                }
+                                *pending_nsec = None;
+                            }
                         }
                     }
+                    View::Chat => {
+                        if !input.is_empty() {
+                            if let (Some(ref client), Some(ref thread)) = (&app.nostr_client, &app.selected_thread) {
+                                let thread_id = thread.id.clone();
+                                let content = input.clone();
+                                let conn = app.db.connection();
+
+                                rt.block_on(async {
+                                    if let Ok(_event_id) = nostr::publish_message(client, &thread_id, &content).await {
+                                        // Wait a moment for the event to propagate
+                                        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                                    }
+                                });
+
+                                // Reload messages from database after publishing
+                                if let Ok(messages) = store::get_messages_for_thread(&conn, &thread_id) {
+                                    app.messages = messages;
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
             _ => {}
