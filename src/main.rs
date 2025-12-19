@@ -515,13 +515,14 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
             KeyCode::Enter => match app.view {
                 View::Projects => {
                     if let Some((project, _is_online)) = ui::views::get_project_at_index(app, app.selected_project_index) {
-                        app.selected_project = Some(project.clone());
+                        let a_tag = project.a_tag();
+                        app.selected_project = Some(project);
 
                         // Load threads for this project into data store
-                        app.data_store.borrow_mut().reload_threads_for_project(&project.a_tag());
+                        app.data_store.borrow_mut().reload_threads_for_project(&a_tag);
 
                         // Auto-select PM agent and default branch from status
-                        if let Some(status) = app.data_store.borrow().get_project_status(&project.a_tag()) {
+                        if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
                             if app.selected_agent.is_none() {
                                 if let Some(pm) = status.pm_agent() {
                                     app.selected_agent = Some(pm.clone());

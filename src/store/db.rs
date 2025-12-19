@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 pub struct Database {
+    #[allow(dead_code)] // Used in tests
     pub ndb: Arc<Ndb>,
     creds_conn: Arc<Mutex<Connection>>,
 }

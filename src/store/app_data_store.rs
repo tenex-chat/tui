@@ -87,13 +87,8 @@ impl AppDataStore {
     }
 
     fn handle_message_event(&mut self, note: &Note) {
-        let note_id = hex::encode(note.id());
-        tracing::info!("handle_message_event: processing message {}", note_id);
         if let Some(thread_id) = Self::extract_thread_id(note) {
-            tracing::info!("handle_message_event: found thread_id={}, reloading messages", thread_id);
             self.reload_messages_for_thread(&thread_id);
-        } else {
-            tracing::warn!("handle_message_event: could not extract thread_id from message {}", note_id);
         }
     }
 
@@ -117,12 +112,8 @@ impl AppDataStore {
     }
 
     pub fn reload_messages_for_thread(&mut self, thread_id: &str) {
-        tracing::info!("reload_messages_for_thread: loading messages for thread {}", thread_id);
         if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, thread_id) {
-            tracing::info!("reload_messages_for_thread: found {} messages for thread {}", messages.len(), thread_id);
             self.messages_by_thread.insert(thread_id.to_string(), messages);
-        } else {
-            tracing::warn!("reload_messages_for_thread: failed to load messages for thread {}", thread_id);
         }
     }
 
@@ -216,11 +207,9 @@ impl AppDataStore {
     }
 
     pub fn get_messages(&self, thread_id: &str) -> &[Message] {
-        let messages = self.messages_by_thread.get(thread_id)
+        self.messages_by_thread.get(thread_id)
             .map(|v| v.as_slice())
-            .unwrap_or(&[]);
-        tracing::debug!("get_messages: returning {} messages for thread {}", messages.len(), thread_id);
-        messages
+            .unwrap_or(&[])
     }
 
     pub fn get_profile_name(&self, pubkey: &str) -> String {
