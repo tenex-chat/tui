@@ -1,5 +1,7 @@
 use crate::models::{Message, Project, Thread};
-use crate::store::events::{get_events_by_kind, get_events_by_kind_and_pubkey, StoredEvent};
+use crate::store::events::{get_events_by_kind, get_events_by_kind_and_pubkey};
+#[cfg(test)]
+use crate::store::events::StoredEvent;
 use anyhow::Result;
 use rusqlite::Connection;
 use std::sync::{Arc, Mutex};

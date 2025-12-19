@@ -4,6 +4,6 @@ pub mod subscriptions;
 pub mod publish;
 
 pub use client::NostrClient;
-pub use auth::{login_with_nsec, get_current_pubkey, is_logged_in};
-pub use subscriptions::{subscribe_to_projects, subscribe_to_project_content, subscribe_to_profiles};
-pub use publish::{publish_message, publish_thread};
+pub use auth::{get_current_pubkey, has_stored_credentials, load_stored_keys};
+pub use subscriptions::{subscribe_to_projects, subscribe_to_project_content};
+pub use publish::publish_message;

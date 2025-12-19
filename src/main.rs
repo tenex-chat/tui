@@ -27,7 +27,20 @@ fn main() -> Result<()> {
     let mut login_step = LoginStep::Nsec;
     let mut pending_nsec: Option<String> = None;
 
+    // Check for stored credentials and auto-login
+    if nostr::has_stored_credentials(&app.db.connection()) {
+        app.set_status("Found stored credentials. Press 'i' and Enter with password (or just Enter if no password)");
+    }
+
     let result = run_app(&mut terminal, &mut app, &mut login_step, &mut pending_nsec, &rt);
+
+    // Cleanup: disconnect from nostr
+    if let Some(ref client) = app.nostr_client {
+        let client = client.clone();
+        let _ = rt.block_on(async {
+            client.disconnect().await
+        });
+    }
 
     ui::restore_terminal()?;
 
@@ -193,7 +206,11 @@ fn handle_key(
                     View::Login => {
                         match login_step {
                             LoginStep::Nsec => {
-                                if input.starts_with("nsec") {
+                                // Check if user wants to use stored credentials
+                                if input.is_empty() && nostr::has_stored_credentials(&app.db.connection()) {
+                                    *pending_nsec = None;
+                                    *login_step = LoginStep::Password;
+                                } else if input.starts_with("nsec") {
                                     *pending_nsec = Some(input);
                                     *login_step = LoginStep::Password;
                                 } else {
@@ -201,41 +218,48 @@ fn handle_key(
                                 }
                             }
                             LoginStep::Password => {
-                                if let Some(ref nsec) = pending_nsec {
+                                // Try to use stored credentials if no pending nsec
+                                let keys_result = if pending_nsec.is_none() {
+                                    nostr::load_stored_keys(&input, &app.db.connection())
+                                } else if let Some(ref nsec) = pending_nsec {
                                     let password = if input.is_empty() { None } else { Some(input.as_str()) };
-                                    match nostr::auth::login_with_nsec(nsec, password, &app.db.connection()) {
-                                        Ok(keys) => {
-                                            let user_pubkey = nostr::get_current_pubkey(&keys);
+                                    nostr::auth::login_with_nsec(nsec, password, &app.db.connection())
+                                } else {
+                                    Err(anyhow::anyhow!("No credentials provided"))
+                                };
 
-                                            // Create Nostr client and subscribe to projects
-                                            let client_result = rt.block_on(async {
-                                                let client = nostr::NostrClient::new(keys.clone()).await?;
-                                                nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
-                                                Ok::<nostr::NostrClient, anyhow::Error>(client)
-                                            });
+                                match keys_result {
+                                    Ok(keys) => {
+                                        let user_pubkey = nostr::get_current_pubkey(&keys);
 
-                                            match client_result {
-                                                Ok(client) => {
-                                                    app.keys = Some(keys);
-                                                    app.nostr_client = Some(client);
+                                        // Create Nostr client and subscribe to projects
+                                        let client_result = rt.block_on(async {
+                                            let client = nostr::NostrClient::new(keys.clone()).await?;
+                                            nostr::subscribe_to_projects(&client, &user_pubkey, &app.db.connection()).await?;
+                                            Ok::<nostr::NostrClient, anyhow::Error>(client)
+                                        });
 
-                                                    // Load projects from db
-                                                    if let Ok(projects) = store::get_projects(&app.db.connection()) {
-                                                        app.projects = projects;
-                                                    }
-                                                    app.view = View::Projects;
-                                                    app.clear_status();
+                                        match client_result {
+                                            Ok(client) => {
+                                                app.keys = Some(keys);
+                                                app.nostr_client = Some(client);
+
+                                                // Load projects from db
+                                                if let Ok(projects) = store::get_projects(&app.db.connection()) {
+                                                    app.projects = projects;
                                                 }
-                                                Err(e) => {
-                                                    app.set_status(&format!("Failed to connect: {}", e));
-                                                    *login_step = LoginStep::Nsec;
-                                                }
+                                                app.view = View::Projects;
+                                                app.clear_status();
+                                            }
+                                            Err(e) => {
+                                                app.set_status(&format!("Failed to connect: {}", e));
+                                                *login_step = LoginStep::Nsec;
                                             }
                                         }
-                                        Err(e) => {
-                                            app.set_status(&format!("Login failed: {}", e));
-                                            *login_step = LoginStep::Nsec;
-                                        }
+                                    }
+                                    Err(e) => {
+                                        app.set_status(&format!("Login failed: {}", e));
+                                        *login_step = LoginStep::Nsec;
                                     }
                                 }
                                 *pending_nsec = None;

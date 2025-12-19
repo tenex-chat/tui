@@ -1,4 +1,3 @@
-use crate::models::Project;
 use crate::store::get_profile_name;
 use crate::ui::App;
 use ratatui::{
