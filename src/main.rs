@@ -1,6 +1,7 @@
 mod models;
 mod nostr;
 mod store;
+mod tracing_setup;
 mod ui;
 
 use anyhow::Result;
@@ -17,6 +18,8 @@ use ui::{App, View, InputMode};
 use ui::views::login::{render_login, LoginStep};
 
 fn main() -> Result<()> {
+    tracing_setup::init_tracing();
+
     let rt = Runtime::new()?;
     let db = store::Database::new("tenex.db")?;
     let mut app = App::new(db);

@@ -2,6 +2,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
+use tracing::{info_span, instrument};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredEvent {
@@ -14,7 +15,9 @@ pub struct StoredEvent {
     pub sig: String,
 }
 
+#[instrument(skip(conn, events), fields(event_count = events.len()))]
 pub fn insert_events(conn: &Arc<Mutex<Connection>>, events: &[StoredEvent]) -> Result<usize> {
+    let _span = info_span!("store.insert").entered();
     let conn = conn.lock().unwrap();
     let mut inserted = 0;
 
