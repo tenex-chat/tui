@@ -6,7 +6,10 @@ edition = "2021"
 [dependencies]
 # TUI
 ratatui = "0.29"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
+
+# Async streams
+futures = "0.3"
 
 # Nostr
 nostr-sdk = { version = "0.38", features = ["nip49"] }
@@ -24,7 +27,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-opentelemetry = "0.28"
 opentelemetry = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
-opentelemetry-otlp = { version = "0.27", features = ["tonic"] }
+opentelemetry-otlp = { version = "0.27", features = ["http-proto", "reqwest-client"] }
 
 # Error handling
 anyhow = "1"
@@ -37,6 +40,18 @@ hex = "0.4"
 
 # Markdown
 pulldown-cmark = "0.12"
+
+# Clipboard (for image paste)
+arboard = "3"
+
+# HTTP client (for Blossom upload)
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Hashing (for Blossom)
+sha2 = "0.10"
+
+# PNG encoding (for image paste)
+png = "0.17"
 
 [dev-dependencies]
 tempfile = "3"

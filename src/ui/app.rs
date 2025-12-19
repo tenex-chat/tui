@@ -134,11 +134,6 @@ impl App {
         self.selected_project.as_ref().and_then(|p| self.get_project_status(p))
     }
 
-    /// Check if a project is online (has recent 24010 status)
-    pub fn is_project_online(&self, project: &Project) -> bool {
-        self.data_store.borrow().is_project_online(&project.a_tag())
-    }
-
     /// Get threads for the currently selected project
     pub fn threads(&self) -> Vec<Thread> {
         self.selected_project.as_ref()

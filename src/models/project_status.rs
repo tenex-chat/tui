@@ -1,4 +1,5 @@
 use nostrdb::Note;
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Staleness threshold in seconds - status older than this is considered offline
@@ -25,51 +26,66 @@ pub struct ProjectStatus {
 }
 
 impl ProjectStatus {
-    /// Create a ProjectStatus from a kind:24010 note
+    /// Create from nostrdb::Note
     pub fn from_note(note: &Note) -> Option<Self> {
         if note.kind() != 24010 {
             return None;
         }
 
-        let created_at = note.created_at();
-
-        let mut project_coordinate: Option<String> = None;
-        let mut agents: Vec<ProjectAgent> = Vec::new();
-        let mut branches: Vec<String> = Vec::new();
-
-        // First pass: collect agent tags
-        let mut agent_map: std::collections::HashMap<String, ProjectAgent> =
-            std::collections::HashMap::new();
-        let mut is_first_agent = true;
-
+        // Extract tags, handling the id variant for agent pubkeys
+        let mut tags: Vec<Vec<String>> = Vec::new();
         for tag in note.tags() {
-            let tag_name = tag.get(0).and_then(|t| t.variant().str());
-
-            match tag_name {
-                Some("a") => {
-                    if project_coordinate.is_none() {
-                        project_coordinate = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+            let mut parts: Vec<String> = Vec::new();
+            for i in 0..tag.count() {
+                if let Some(t) = tag.get(i) {
+                    if let Some(s) = t.variant().str() {
+                        parts.push(s.to_string());
+                    } else if let Some(id) = t.variant().id() {
+                        parts.push(hex::encode(id));
                     }
                 }
-                Some("agent") => {
-                    let agent_pubkey = tag.get(1).and_then(|t| t.variant().str());
-                    let agent_name = tag.get(2).and_then(|t| t.variant().str());
+            }
+            tags.push(parts);
+        }
 
-                    if let (Some(pk), Some(name)) = (agent_pubkey, agent_name) {
+        Self::from_tags(note.created_at(), tags)
+    }
+
+    /// Common parsing logic for tags
+    fn from_tags(created_at: u64, tags: Vec<Vec<String>>) -> Option<Self> {
+        let mut project_coordinate: Option<String> = None;
+        let mut agent_map: HashMap<String, ProjectAgent> = HashMap::new();
+        let mut branches: Vec<String> = Vec::new();
+        let mut is_first_agent = true;
+
+        // First pass: collect project coordinate, agents, and branches
+        for tag in &tags {
+            if tag.is_empty() {
+                continue;
+            }
+
+            match tag[0].as_str() {
+                "a" => {
+                    if project_coordinate.is_none() && tag.len() > 1 {
+                        project_coordinate = Some(tag[1].clone());
+                    }
+                }
+                "agent" => {
+                    if tag.len() >= 3 {
                         let agent = ProjectAgent {
-                            pubkey: pk.to_string(),
-                            name: name.to_string(),
+                            pubkey: tag[1].clone(),
+                            name: tag[2].clone(),
                             is_pm: is_first_agent,
                             model: None,
                             tools: Vec::new(),
                         };
-                        agent_map.insert(name.to_string(), agent);
+                        agent_map.insert(tag[2].clone(), agent);
                         is_first_agent = false;
                     }
                 }
-                Some("branch") => {
-                    if let Some(branch) = tag.get(1).and_then(|t| t.variant().str()) {
-                        branches.push(branch.to_string());
+                "branch" => {
+                    if tag.len() > 1 {
+                        branches.push(tag[1].clone());
                     }
                 }
                 _ => {}
@@ -77,33 +93,28 @@ impl ProjectStatus {
         }
 
         // Second pass: apply model and tool tags
-        for tag in note.tags() {
-            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+        for tag in &tags {
+            if tag.is_empty() {
+                continue;
+            }
 
-            match tag_name {
-                Some("model") => {
-                    // ["model", <model-slug>, <agent-name>, ...]
-                    let model_slug = tag.get(1).and_then(|t| t.variant().str());
-                    if let Some(model) = model_slug {
-                        // Apply to all agents named in positions 2+
-                        for i in 2..tag.count() {
-                            if let Some(agent_name) = tag.get(i).and_then(|t| t.variant().str()) {
-                                if let Some(agent) = agent_map.get_mut(agent_name) {
-                                    agent.model = Some(model.to_string());
-                                }
+            match tag[0].as_str() {
+                "model" => {
+                    if tag.len() >= 3 {
+                        let model = &tag[1];
+                        for agent_name in &tag[2..] {
+                            if let Some(agent) = agent_map.get_mut(agent_name) {
+                                agent.model = Some(model.clone());
                             }
                         }
                     }
                 }
-                Some("tool") => {
-                    // ["tool", <tool-name>, <agent-name>, ...]
-                    let tool_name = tag.get(1).and_then(|t| t.variant().str());
-                    if let Some(tool) = tool_name {
-                        for i in 2..tag.count() {
-                            if let Some(agent_name) = tag.get(i).and_then(|t| t.variant().str()) {
-                                if let Some(agent) = agent_map.get_mut(agent_name) {
-                                    agent.tools.push(tool.to_string());
-                                }
+                "tool" => {
+                    if tag.len() >= 3 {
+                        let tool = &tag[1];
+                        for agent_name in &tag[2..] {
+                            if let Some(agent) = agent_map.get_mut(agent_name) {
+                                agent.tools.push(tool.clone());
                             }
                         }
                     }
@@ -112,9 +123,8 @@ impl ProjectStatus {
             }
         }
 
-        agents = agent_map.into_values().collect();
-
         let project_coordinate = project_coordinate?;
+        let agents = agent_map.into_values().collect();
 
         Some(ProjectStatus {
             project_coordinate,

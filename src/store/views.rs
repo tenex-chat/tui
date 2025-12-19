@@ -1,4 +1,4 @@
-use crate::models::{Agent, ConversationMetadata, Message, Project, ProjectStatus, Thread};
+use crate::models::{ConversationMetadata, Message, Project, ProjectStatus, Thread};
 use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
 use std::collections::HashMap;
@@ -27,16 +27,6 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
 /// Get threads for a project - fast version that skips expensive message activity calculation
 #[instrument(skip(ndb), fields(project = %project_a_tag))]
 pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thread>> {
-    get_threads_for_project_impl(ndb, project_a_tag, false)
-}
-
-/// Get threads with full last_activity calculation (expensive - queries all messages)
-#[instrument(skip(ndb), fields(project = %project_a_tag))]
-pub fn get_threads_for_project_with_activity(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thread>> {
-    get_threads_for_project_impl(ndb, project_a_tag, true)
-}
-
-fn get_threads_for_project_impl(ndb: &Ndb, project_a_tag: &str, include_activity: bool) -> Result<Vec<Thread>> {
     let txn = Transaction::new(ndb)?;
 
     // Get threads
@@ -80,38 +70,11 @@ fn get_threads_for_project_impl(ndb: &Ndb, project_a_tag: &str, include_activity
         map
     };
 
-    // Only calculate last_activity if requested (expensive operation)
-    let last_activity_map: HashMap<String, u64> = if include_activity {
-        let _span = info_span!("query_messages_for_activity").entered();
-        let message_filter = Filter::new().kinds([1111]).build();
-        let message_results = ndb.query(&txn, &[message_filter], 10000)?;
-
-        let mut map: HashMap<String, u64> = HashMap::new();
-        for r in message_results.iter() {
-            if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
-                if let Some(msg) = Message::from_note(&note) {
-                    let entry = map.entry(msg.thread_id.clone()).or_insert(0);
-                    if msg.created_at > *entry {
-                        *entry = msg.created_at;
-                    }
-                }
-            }
-        }
-        map
-    } else {
-        HashMap::new()
-    };
-
-    // Enrich threads with metadata and last_activity
+    // Enrich threads with metadata
     for thread in &mut threads {
         if let Some(metadata) = metadata_map.get(&thread.id) {
             if let Some(title) = &metadata.title {
                 thread.title = title.clone();
-            }
-        }
-        if let Some(&msg_timestamp) = last_activity_map.get(&thread.id) {
-            if msg_timestamp > thread.last_activity {
-                thread.last_activity = msg_timestamp;
             }
         }
     }
@@ -221,43 +184,6 @@ pub fn get_profile_name(ndb: &Ndb, pubkey: &str) -> String {
     }
 
     format!("{}...", &pubkey[..8.min(pubkey.len())])
-}
-
-/// Get all agent definitions
-pub fn get_agents(ndb: &Ndb) -> Result<Vec<Agent>> {
-    let txn = Transaction::new(ndb)?;
-    let filter = Filter::new().kinds([4199]).build();
-    let results = ndb.query(&txn, &[filter], 1000)?;
-
-    let mut agents: Vec<Agent> = results
-        .iter()
-        .filter_map(|r| {
-            let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
-            Agent::from_note(&note)
-        })
-        .collect();
-
-    // Sort by name
-    agents.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-    Ok(agents)
-}
-
-/// Get agent by pubkey
-pub fn get_agent_by_pubkey(ndb: &Ndb, pubkey: &str) -> Option<Agent> {
-    let txn = Transaction::new(ndb).ok()?;
-    let filter = Filter::new().kinds([4199]).build();
-    let results = ndb.query(&txn, &[filter], 1000).ok()?;
-
-    results.iter().find_map(|r| {
-        let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
-        let agent = Agent::from_note(&note)?;
-        if agent.pubkey == pubkey {
-            Some(agent)
-        } else {
-            None
-        }
-    })
 }
 
 /// Get project status for a project

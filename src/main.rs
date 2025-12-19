@@ -508,7 +508,6 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
             KeyCode::Enter => match app.view {
                 View::Projects => {
                     if let Some((project, _is_online)) = ui::views::get_project_at_index(app, app.selected_project_index) {
-                        let project = project.clone();
                         app.selected_project = Some(project.clone());
 
                         // Load threads for this project into data store

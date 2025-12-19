@@ -1,0 +1,382 @@
+/// Rich text editor with multiline support and paste attachment handling
+///
+/// Features:
+/// - Multiline input with dynamic height
+/// - Ctrl+A: Move to beginning of line
+/// - Ctrl+E: Move to end of line
+/// - Ctrl+K: Kill from cursor to end of line
+/// - Alt+Left/Right: Word jumping
+/// - Large pastes become attachments
+
+/// Represents a pasted attachment (large text that was pasted)
+#[derive(Debug, Clone)]
+pub struct PasteAttachment {
+    pub id: usize,
+    pub content: String,
+}
+
+impl PasteAttachment {
+    pub fn line_count(&self) -> usize {
+        self.content.lines().count().max(1)
+    }
+
+    pub fn char_count(&self) -> usize {
+        self.content.len()
+    }
+}
+
+/// Text editor state for rich editing
+#[derive(Debug, Clone)]
+pub struct TextEditor {
+    /// The actual text content (can be multiline)
+    pub text: String,
+    /// Cursor position as byte offset
+    pub cursor: usize,
+    /// Attachments from large pastes
+    pub attachments: Vec<PasteAttachment>,
+    /// Next attachment ID
+    next_attachment_id: usize,
+    /// Currently focused attachment index (None = main input focused)
+    pub focused_attachment: Option<usize>,
+}
+
+impl Default for TextEditor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TextEditor {
+    pub fn new() -> Self {
+        Self {
+            text: String::new(),
+            cursor: 0,
+            attachments: Vec::new(),
+            next_attachment_id: 1,
+            focused_attachment: None,
+        }
+    }
+
+    /// Check if text should become an attachment (>5 lines or >500 chars)
+    fn should_be_attachment(text: &str) -> bool {
+        let line_count = text.lines().count();
+        let char_count = text.len();
+        line_count > 5 || char_count > 500
+    }
+
+    /// Handle pasted text - may become attachment if large
+    pub fn handle_paste(&mut self, text: &str) {
+        if Self::should_be_attachment(text) {
+            let attachment = PasteAttachment {
+                id: self.next_attachment_id,
+                content: text.to_string(),
+            };
+            self.next_attachment_id += 1;
+            self.attachments.push(attachment);
+        } else {
+            // Insert at cursor position
+            self.text.insert_str(self.cursor, text);
+            self.cursor += text.len();
+        }
+    }
+
+    /// Insert a single character at cursor
+    pub fn insert_char(&mut self, c: char) {
+        self.text.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
+    }
+
+    /// Insert a newline at cursor
+    pub fn insert_newline(&mut self) {
+        self.insert_char('\n');
+    }
+
+    /// Delete character before cursor (backspace)
+    pub fn delete_char_before(&mut self) {
+        if self.cursor > 0 {
+            // Find the previous character boundary
+            let prev_boundary = self.text[..self.cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.text.remove(prev_boundary);
+            self.cursor = prev_boundary;
+        }
+    }
+
+    /// Delete character at cursor (delete key)
+    pub fn delete_char_at(&mut self) {
+        if self.cursor < self.text.len() {
+            self.text.remove(self.cursor);
+        }
+    }
+
+    /// Move cursor left by one character
+    pub fn move_left(&mut self) {
+        if self.cursor > 0 {
+            self.cursor = self.text[..self.cursor]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+        }
+    }
+
+    /// Move cursor right by one character
+    pub fn move_right(&mut self) {
+        if self.cursor < self.text.len() {
+            self.cursor = self.text[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
+                .unwrap_or(self.text.len());
+        }
+    }
+
+    /// Move cursor to beginning of current line (Ctrl+A)
+    pub fn move_to_line_start(&mut self) {
+        // Find the previous newline or start of string
+        self.cursor = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+    }
+
+    /// Move cursor to end of current line (Ctrl+E)
+    pub fn move_to_line_end(&mut self) {
+        // Find the next newline or end of string
+        self.cursor = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+    }
+
+    /// Kill from cursor to end of line (Ctrl+K)
+    pub fn kill_to_line_end(&mut self) {
+        let end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        self.text.drain(self.cursor..end);
+    }
+
+    /// Move cursor to previous word boundary (Alt+Left)
+    pub fn move_word_left(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        // Skip any whitespace before cursor
+        let before = &self.text[..self.cursor];
+        let trimmed_end = before.trim_end();
+        if trimmed_end.is_empty() {
+            self.cursor = 0;
+            return;
+        }
+
+        // Find the start of the word
+        let word_end = trimmed_end.len();
+        let word_start = trimmed_end
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        self.cursor = word_start.min(word_end);
+    }
+
+    /// Move cursor to next word boundary (Alt+Right)
+    pub fn move_word_right(&mut self) {
+        if self.cursor >= self.text.len() {
+            return;
+        }
+
+        let after = &self.text[self.cursor..];
+
+        // Skip current word (non-whitespace)
+        let word_end = after
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(after.len());
+
+        // Skip whitespace after word
+        let next_word = after[word_end..]
+            .find(|c: char| !c.is_whitespace())
+            .map(|i| word_end + i)
+            .unwrap_or(after.len());
+
+        self.cursor += next_word;
+    }
+
+    /// Clear all content
+    pub fn clear(&mut self) {
+        self.text.clear();
+        self.cursor = 0;
+        self.attachments.clear();
+        self.focused_attachment = None;
+    }
+
+    /// Get the number of lines in the input
+    pub fn line_count(&self) -> usize {
+        self.text.lines().count().max(1)
+    }
+
+    /// Get cursor position as (row, col) for rendering
+    pub fn cursor_position(&self) -> (usize, usize) {
+        let before_cursor = &self.text[..self.cursor];
+        let row = before_cursor.matches('\n').count();
+        let col = before_cursor
+            .rfind('\n')
+            .map(|i| self.cursor - i - 1)
+            .unwrap_or(self.cursor);
+        (row, col)
+    }
+
+    /// Cycle focus: main input -> attachments -> back to main input
+    pub fn cycle_focus(&mut self) {
+        if self.attachments.is_empty() {
+            return;
+        }
+
+        match self.focused_attachment {
+            None => {
+                // Focus first attachment
+                self.focused_attachment = Some(0);
+            }
+            Some(idx) => {
+                if idx + 1 < self.attachments.len() {
+                    self.focused_attachment = Some(idx + 1);
+                } else {
+                    // Back to main input
+                    self.focused_attachment = None;
+                }
+            }
+        }
+    }
+
+    /// Get focused attachment for editing
+    pub fn get_focused_attachment(&self) -> Option<&PasteAttachment> {
+        self.focused_attachment
+            .and_then(|idx| self.attachments.get(idx))
+    }
+
+    /// Update focused attachment content
+    pub fn update_focused_attachment(&mut self, new_content: String) {
+        if let Some(idx) = self.focused_attachment {
+            if let Some(attachment) = self.attachments.get_mut(idx) {
+                attachment.content = new_content;
+            }
+        }
+    }
+
+    /// Delete focused attachment
+    pub fn delete_focused_attachment(&mut self) {
+        if let Some(idx) = self.focused_attachment {
+            if idx < self.attachments.len() {
+                self.attachments.remove(idx);
+                // Adjust focus
+                if self.attachments.is_empty() {
+                    self.focused_attachment = None;
+                } else if idx >= self.attachments.len() {
+                    self.focused_attachment = Some(self.attachments.len() - 1);
+                }
+            }
+        }
+    }
+
+    /// Build the full message content including attachments
+    pub fn build_full_content(&self) -> String {
+        if self.attachments.is_empty() {
+            return self.text.clone();
+        }
+
+        let mut content = self.text.clone();
+        for attachment in &self.attachments {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(&attachment.content);
+        }
+        content
+    }
+
+    /// Submit and clear the editor, returning the full content
+    pub fn submit(&mut self) -> String {
+        let content = self.build_full_content();
+        self.clear();
+        content
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_editing() {
+        let mut editor = TextEditor::new();
+        editor.insert_char('h');
+        editor.insert_char('e');
+        editor.insert_char('l');
+        editor.insert_char('l');
+        editor.insert_char('o');
+        assert_eq!(editor.text, "hello");
+        assert_eq!(editor.cursor, 5);
+    }
+
+    #[test]
+    fn test_multiline() {
+        let mut editor = TextEditor::new();
+        editor.insert_char('a');
+        editor.insert_newline();
+        editor.insert_char('b');
+        assert_eq!(editor.text, "a\nb");
+        assert_eq!(editor.line_count(), 2);
+    }
+
+    #[test]
+    fn test_paste_becomes_attachment() {
+        let mut editor = TextEditor::new();
+        let long_text = "line1\nline2\nline3\nline4\nline5\nline6\n";
+        editor.handle_paste(long_text);
+        assert!(editor.text.is_empty());
+        assert_eq!(editor.attachments.len(), 1);
+        assert_eq!(editor.attachments[0].content, long_text);
+    }
+
+    #[test]
+    fn test_small_paste_inline() {
+        let mut editor = TextEditor::new();
+        editor.handle_paste("hello");
+        assert_eq!(editor.text, "hello");
+        assert!(editor.attachments.is_empty());
+    }
+
+    #[test]
+    fn test_word_navigation() {
+        let mut editor = TextEditor::new();
+        editor.text = "hello world test".to_string();
+        editor.cursor = 0;
+
+        editor.move_word_right();
+        assert_eq!(editor.cursor, 6); // After "hello "
+
+        editor.move_word_right();
+        assert_eq!(editor.cursor, 12); // After "world "
+
+        editor.move_word_left();
+        assert_eq!(editor.cursor, 6);
+    }
+
+    #[test]
+    fn test_line_navigation() {
+        let mut editor = TextEditor::new();
+        editor.text = "first line\nsecond line".to_string();
+        editor.cursor = 15; // Middle of "second"
+
+        editor.move_to_line_start();
+        assert_eq!(editor.cursor, 11);
+
+        editor.move_to_line_end();
+        assert_eq!(editor.cursor, 22);
+    }
+}

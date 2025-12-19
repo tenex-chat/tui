@@ -1,6 +1,7 @@
 pub mod app;
 pub mod markdown;
 pub mod terminal;
+pub mod text_editor;
 pub mod tool_calls;
 pub mod views;
 

@@ -12,6 +12,12 @@ use crate::store::ingest_events;
 
 const RELAY_URL: &str = "wss://tenex.chat";
 
+fn debug_log(msg: &str) {
+    if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
+        eprintln!("[WORKER] {}", msg);
+    }
+}
+
 pub enum NostrCommand {
     Connect { keys: Keys, user_pubkey: String },
     Sync,
@@ -33,16 +39,13 @@ pub enum NostrCommand {
     Shutdown,
 }
 
+/// Data changes that require the worker channel (not handled by SubscriptionStream).
+/// Only streaming deltas need ordered channel processing.
 #[derive(Debug, Clone)]
 pub enum DataChange {
-    ProjectsUpdated,
-    ThreadsUpdated(String),
-    MessagesUpdated(String),
-    ProfilesUpdated,
-    AgentsUpdated,
-    ProjectStatusUpdated(String),
+    /// Streaming delta (kind 21111) - for real-time typing updates
+    /// These need ordered processing via channel, not SubscriptionStream
     StreamingDelta { message_id: String, delta: String },
-    ConversationMetadataUpdated,
 }
 
 pub struct NostrWorker {
@@ -75,7 +78,6 @@ impl NostrWorker {
     pub fn run(mut self) {
         let rt = Runtime::new().expect("Failed to create runtime");
         self.rt_handle = Some(rt.handle().clone());
-
         info!("Nostr worker thread started");
 
         loop {
@@ -149,10 +151,15 @@ impl NostrWorker {
         // Agent definitions (kind 4199)
         let agent_filter = Filter::new().kind(Kind::Custom(4199));
 
-        // Project status (kind 24010) - p-tagged to user
+        // Project status (kind 24010) - subscribe to both p-tagged events AND all 24010 events
+        // We filter client-side by project coordinate since 24010 events may not have p-tags
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
             .pubkey(pubkey);
+
+        // Also subscribe to ALL 24010 events (we'll filter by project coord client-side)
+        let all_status_filter = Filter::new()
+            .kind(Kind::Custom(24010));
 
         // Streaming deltas (kind 21111) - p-tagged to user
         let streaming_filter = Filter::new()
@@ -171,6 +178,7 @@ impl NostrWorker {
                     mention_filter,
                     agent_filter,
                     status_filter,
+                    all_status_filter,
                     streaming_filter,
                     metadata_filter,
                 ],
@@ -217,75 +225,19 @@ impl NostrWorker {
         relay_url: &str,
     ) -> Result<()> {
         // Ingest the event into nostrdb with relay metadata
+        // UI gets notified via nostrdb SubscriptionStream when events are ready
         ingest_events(ndb, &[event.clone()], Some(relay_url))?;
 
-        // Notify UI about the change
-        match event.kind.as_u16() {
-            31933 => {
-                info!("Project event received, notifying UI");
-                data_tx.send(DataChange::ProjectsUpdated)?;
+        // Only streaming deltas need channel processing (ordered delivery)
+        // All other events are handled via SubscriptionStream
+        if event.kind.as_u16() == 21111 {
+            if let Some(message_id) = Self::get_e_tag(&event) {
+                let delta = event.content.to_string();
+                data_tx.send(DataChange::StreamingDelta { message_id, delta })?;
             }
-            11 => {
-                if let Some(a_tag) = Self::get_a_tag(&event) {
-                    info!("Thread event received for project {}", &a_tag[..20.min(a_tag.len())]);
-                    data_tx.send(DataChange::ThreadsUpdated(a_tag))?;
-                }
-            }
-            1111 => {
-                if let Some(thread_id) = Self::get_thread_id(&event) {
-                    info!("Message event received for thread {}", &thread_id[..8.min(thread_id.len())]);
-                    data_tx.send(DataChange::MessagesUpdated(thread_id))?;
-                }
-            }
-            0 => {
-                info!("Profile event received");
-                data_tx.send(DataChange::ProfilesUpdated)?;
-            }
-            4199 => {
-                info!("Agent definition event received");
-                data_tx.send(DataChange::AgentsUpdated)?;
-            }
-            24010 => {
-                if let Some(a_tag) = Self::get_a_tag(&event) {
-                    info!("Project status event received for {}", &a_tag[..20.min(a_tag.len())]);
-                    data_tx.send(DataChange::ProjectStatusUpdated(a_tag))?;
-                }
-            }
-            21111 => {
-                // Streaming delta - extract message_id from e tag
-                if let Some(message_id) = Self::get_e_tag(&event) {
-                    let delta = event.content.to_string();
-                    info!("Streaming delta received for message {}", &message_id[..8.min(message_id.len())]);
-                    data_tx.send(DataChange::StreamingDelta { message_id, delta })?;
-                }
-            }
-            513 => {
-                info!("Conversation metadata event received");
-                data_tx.send(DataChange::ConversationMetadataUpdated)?;
-            }
-            _ => {}
         }
 
         Ok(())
-    }
-
-    fn get_a_tag(event: &Event) -> Option<String> {
-        event
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s == "a").unwrap_or(false))
-            .and_then(|t| t.as_slice().get(1))
-            .map(|s| s.to_string())
-    }
-
-    /// Get thread_id from uppercase "E" tag (NIP-22 root reference)
-    fn get_thread_id(event: &Event) -> Option<String> {
-        event
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s == "E").unwrap_or(false))
-            .and_then(|t| t.as_slice().get(1))
-            .map(|s| s.to_string())
     }
 
     /// Get message_id from lowercase "e" tag (for streaming deltas)
@@ -303,19 +255,75 @@ impl NostrWorker {
         let user_pubkey = self.user_pubkey.as_ref().ok_or_else(|| anyhow::anyhow!("No user pubkey"))?;
 
         info!("Starting sync for user {}", &user_pubkey[..8]);
+        debug_log(&format!("Starting sync for user {}", user_pubkey));
 
         let pubkey = PublicKey::parse(user_pubkey)?;
 
         // Fetch projects
         let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
+        debug_log(&format!("Fetching projects (kind 31933) for author {}", user_pubkey));
 
         let events = client
             .fetch_events(vec![project_filter], std::time::Duration::from_secs(10))
             .await?;
 
         let events_vec: Vec<Event> = events.into_iter().collect();
+        debug_log(&format!("Fetched {} project events", events_vec.len()));
+        for event in &events_vec {
+            debug_log(&format!("  Project event: id={}, created_at={}", &event.id.to_hex()[..16], event.created_at.as_u64()));
+        }
         ingest_events(&self.ndb, &events_vec, Some(RELAY_URL))?;
-        self.data_tx.send(DataChange::ProjectsUpdated)?;
+        debug_log("Ingested project events into nostrdb");
+        // UI gets notified via nostrdb SubscriptionStream when data is ready
+
+        // Fetch project status events (kind 24010) for user's projects
+        // First try with p-tag filter, then also fetch by project coordinates
+        let status_filter = Filter::new()
+            .kind(Kind::Custom(24010))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), [user_pubkey]);
+
+        info!("Fetching 24010 events with p-tag filter for user {}", &user_pubkey[..16]);
+        let status_events = client
+            .fetch_events(vec![status_filter], std::time::Duration::from_secs(10))
+            .await?;
+
+        let mut status_events_vec: Vec<Event> = status_events.into_iter().collect();
+        info!("Fetched {} 24010 events with p-tag filter", status_events_vec.len());
+
+        // Also fetch 24010 events by project a-tags (in case they don't have p-tags)
+        let projects = crate::store::get_projects(&self.ndb)?;
+        if !projects.is_empty() {
+            let project_coords: Vec<String> = projects.iter().map(|p| p.a_tag()).collect();
+            info!("Also fetching 24010 events for {} project coordinates", project_coords.len());
+
+            let coord_filter = Filter::new()
+                .kind(Kind::Custom(24010))
+                .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_coords);
+
+            let coord_events = client
+                .fetch_events(vec![coord_filter], std::time::Duration::from_secs(10))
+                .await?;
+
+            let coord_events_vec: Vec<Event> = coord_events.into_iter().collect();
+            info!("Fetched {} 24010 events by a-tag filter", coord_events_vec.len());
+
+            // Deduplicate by event ID
+            let existing_ids: std::collections::HashSet<_> = status_events_vec.iter().map(|e| e.id).collect();
+            for event in coord_events_vec {
+                if !existing_ids.contains(&event.id) {
+                    status_events_vec.push(event);
+                }
+            }
+        }
+
+        if !status_events_vec.is_empty() {
+            info!("Processing {} total 24010 events", status_events_vec.len());
+            ingest_events(&self.ndb, &status_events_vec, Some(RELAY_URL))?;
+
+            // UI gets notified via SubscriptionStream when events are ready
+        } else {
+            info!("No 24010 events found during sync");
+        }
 
         // Get projects from nostrdb to subscribe to their content
         let projects = crate::store::get_projects(&self.ndb)?;
@@ -354,8 +362,7 @@ impl NostrWorker {
 
         let thread_events_vec: Vec<Event> = thread_events.iter().cloned().collect();
         ingest_events(&self.ndb, &thread_events_vec, Some(RELAY_URL))?;
-
-        self.data_tx.send(DataChange::ThreadsUpdated(project_a_tag.to_string()))?;
+        // UI gets notified via nostrdb SubscriptionStream when data is ready
 
         // Fetch messages for each thread
         let thread_ids: Vec<EventId> = thread_events.iter().map(|e| e.id).collect();
@@ -376,10 +383,7 @@ impl NostrWorker {
 
             let metadata_events_vec: Vec<Event> = metadata_events.into_iter().collect();
             ingest_events(&self.ndb, &metadata_events_vec, Some(RELAY_URL))?;
-
-            if !metadata_events_vec.is_empty() {
-                self.data_tx.send(DataChange::ConversationMetadataUpdated)?;
-            }
+            // UI gets notified via nostrdb SubscriptionStream when data is ready
 
             // Fetch messages (kind 1111)
             // Kind 1111 uses uppercase "E" tag (NIP-22 root reference) to reference threads
@@ -393,10 +397,7 @@ impl NostrWorker {
 
             let message_events_vec: Vec<Event> = message_events.into_iter().collect();
             ingest_events(&self.ndb, &message_events_vec, Some(RELAY_URL))?;
-
-            for thread_id in thread_ids {
-                self.data_tx.send(DataChange::MessagesUpdated(thread_id.to_hex()))?;
-            }
+            // UI gets notified via nostrdb SubscriptionStream when data is ready
         }
 
         // Subscribe for real-time updates
@@ -421,7 +422,7 @@ impl NostrWorker {
 
         let events_vec: Vec<Event> = events.into_iter().collect();
         ingest_events(&self.ndb, &events_vec, Some(RELAY_URL))?;
-        self.data_tx.send(DataChange::ProfilesUpdated)?;
+        // UI gets notified via SubscriptionStream when events are ready
 
         Ok(())
     }
@@ -436,12 +437,13 @@ impl NostrWorker {
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
+        // Parse project coordinate for proper a-tag
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
+
         let mut event = EventBuilder::new(Kind::Custom(11), &content)
             // Project reference (a tag) - required
-            .tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
-                vec![project_a_tag.clone()],
-            ))
+            .tag(Tag::coordinate(coordinate))
             // Title tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("title")),
@@ -463,7 +465,16 @@ impl NostrWorker {
             ));
         }
 
-        let event_id = client.send_event_builder(event).await?;
+        // Build and sign the event
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb so it appears immediately
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        // UI gets notified via nostrdb SubscriptionStream when data is ready
+
+        // Send to relay
+        let event_id = client.send_event(signed_event).await?;
         info!("Published thread: {}", event_id.id());
 
         Ok(())
@@ -480,6 +491,10 @@ impl NostrWorker {
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
+        // Parse project coordinate for proper a-tag
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
+
         let mut event = EventBuilder::new(Kind::Custom(1111), &content)
             // NIP-22: Uppercase "E" tag = root thread reference (required)
             .tag(Tag::custom(
@@ -492,10 +507,7 @@ impl NostrWorker {
                 vec!["11".to_string()],
             ))
             // Project reference (a tag)
-            .tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
-                vec![project_a_tag],
-            ));
+            .tag(Tag::coordinate(coordinate));
 
         // NIP-22: Lowercase "e" tag = reply-to reference (optional, for threaded replies)
         if let Some(reply_id) = reply_to {
@@ -520,7 +532,15 @@ impl NostrWorker {
             ));
         }
 
-        let event_id = client.send_event_builder(event).await?;
+        // Build and sign the event
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay
+        let event_id = client.send_event(signed_event).await?;
         info!("Published message: {}", event_id.id());
 
         Ok(())
@@ -535,5 +555,18 @@ impl NostrWorker {
         self.user_pubkey = None;
         self.subscribed_projects.clear();
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_coordinate_parse() {
+        let a_tag = "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:DDD-83ayt6";
+        let result = Coordinate::parse(a_tag);
+        println!("Parse result: {:?}", result);
+        assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     }
 }

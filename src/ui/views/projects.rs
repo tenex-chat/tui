@@ -83,8 +83,8 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = list_index - 1 == app.selected_project_index;
             let prefix = if is_selected { "  ▶ " } else { "    " };
 
-            let owner_name = app.data_store.borrow().get_profile_name(&project.pubkey);
-            let agent_count = app.data_store.borrow()
+            let owner_name = data_store.get_profile_name(&project.pubkey);
+            let agent_count = data_store
                 .get_project_status(&project.a_tag())
                 .map(|s| s.agents.len())
                 .unwrap_or(0);
@@ -157,8 +157,8 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
                 };
                 let prefix = if is_selected { "  ▶ " } else { "    " };
 
-                let owner_name = app.data_store.borrow().get_profile_name(&project.pubkey);
-                let agent_count = app.data_store.borrow()
+                let owner_name = data_store.get_profile_name(&project.pubkey);
+                let agent_count = data_store
                     .get_project_status(&project.a_tag())
                     .map(|s| s.agents.len())
                     .unwrap_or(0);
