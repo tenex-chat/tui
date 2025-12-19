@@ -139,6 +139,20 @@ impl App {
         self.data_store.borrow().is_project_online(&project.a_tag())
     }
 
+    /// Get threads for the currently selected project
+    pub fn threads(&self) -> Vec<Thread> {
+        self.selected_project.as_ref()
+            .map(|p| self.data_store.borrow().get_threads(&p.a_tag()).to_vec())
+            .unwrap_or_default()
+    }
+
+    /// Get messages for the currently selected thread
+    pub fn messages(&self) -> Vec<crate::models::Message> {
+        self.selected_thread.as_ref()
+            .map(|t| self.data_store.borrow().get_messages(&t.id).to_vec())
+            .unwrap_or_default()
+    }
+
     /// Save current chat editor content as draft for the selected thread
     pub fn save_chat_draft(&self) {
         if let Some(ref thread) = self.selected_thread {
