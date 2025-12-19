@@ -125,10 +125,12 @@ fn render(f: &mut Frame, app: &App, login_step: &LoginStep) {
         View::Chat => ui::views::render_chat(f, app, chunks[1]),
     }
 
-    // Footer
-    let footer_text = match app.input_mode {
-        InputMode::Editing => format!("> {}", "*".repeat(app.input.len())),
-        InputMode::Normal => "Press 'q' to quit".to_string(),
+    // Footer - only show masked input for Login view (password), otherwise show hints
+    let footer_text = match (&app.view, &app.input_mode) {
+        (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
+        (View::Projects, _) => "Type to filter · Tab expand offline · Enter select · q quit".to_string(),
+        (_, InputMode::Normal) => "Press 'q' to quit".to_string(),
+        _ => String::new(), // Chat/Threads editing has its own input box
     };
     let footer = Paragraph::new(footer_text)
         .style(Style::default().fg(Color::DarkGray))
@@ -338,10 +340,28 @@ fn handle_key(app: &mut App, key: KeyCode, login_step: &mut LoginStep, pending_n
                     app.creating_thread = false;
                 }
             }
+            KeyCode::Char('@') if app.view == View::Chat && !app.available_agents().is_empty() => {
+                // Open agent selector from chat input
+                app.showing_agent_selector = true;
+                app.agent_selector_index = 0;
+            }
             KeyCode::Char(c) => app.enter_char(c),
             KeyCode::Backspace => app.delete_char(),
             KeyCode::Left => app.move_cursor_left(),
             KeyCode::Right => app.move_cursor_right(),
+            // Allow scrolling while typing in Chat view
+            KeyCode::Up if app.view == View::Chat => {
+                app.scroll_offset = app.scroll_offset.saturating_sub(3);
+            }
+            KeyCode::Down if app.view == View::Chat => {
+                app.scroll_offset = app.scroll_offset.saturating_add(3);
+            }
+            KeyCode::PageUp if app.view == View::Chat => {
+                app.scroll_offset = app.scroll_offset.saturating_sub(20);
+            }
+            KeyCode::PageDown if app.view == View::Chat => {
+                app.scroll_offset = app.scroll_offset.saturating_add(20);
+            }
             KeyCode::Enter => {
                 let input = app.submit_input();
                 app.input_mode = InputMode::Normal;
@@ -465,12 +485,15 @@ fn handle_key(app: &mut App, key: KeyCode, login_step: &mut LoginStep, pending_n
                                 let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
                                 let branch = app.project_status.as_ref().and_then(|s| s.default_branch().map(|b| b.to_string()));
 
+                                // Reply to the most recent message in the thread
+                                let reply_to = app.messages.last().map(|m| m.id.clone());
+
                                 if let Err(e) = command_tx.send(NostrCommand::PublishMessage {
                                     thread_id,
                                     project_a_tag,
                                     content,
                                     agent_pubkey,
-                                    reply_to: None, // Could be set if replying to specific message
+                                    reply_to,
                                     branch,
                                 }) {
                                     app.set_status(&format!("Failed to publish message: {}", e));

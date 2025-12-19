@@ -149,9 +149,22 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
             .block(Block::default().borders(Borders::ALL).title(title.clone()));
         f.render_widget(empty, chunks[0]);
     } else {
-        // Calculate total lines and auto-scroll to bottom if at end
-        let total_lines = messages_text.len();
         let visible_height = chunks[0].height.saturating_sub(2) as usize; // -2 for borders
+        let content_width = chunks[0].width.saturating_sub(2) as usize; // -2 for borders
+
+        // Calculate actual line count after wrapping
+        let total_lines: usize = messages_text
+            .iter()
+            .map(|line| {
+                let line_len: usize = line.spans.iter().map(|s| s.content.len()).sum();
+                if line_len == 0 {
+                    1 // Empty lines still take one row
+                } else {
+                    (line_len + content_width - 1) / content_width.max(1) // Ceiling division
+                }
+            })
+            .sum();
+
         let max_scroll = total_lines.saturating_sub(visible_height);
 
         // Use scroll_offset, clamped to max
