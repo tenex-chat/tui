@@ -4,11 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-const DEFAULT_RELAYS: &[&str] = &[
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.nostr.band",
-];
+const DEFAULT_RELAYS: &[&str] = &["wss://tenex.chat"];
 
 #[derive(Clone)]
 pub struct NostrClient {
