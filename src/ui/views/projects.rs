@@ -46,7 +46,8 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    if app.projects.is_empty() {
+    let data_store = app.data_store.borrow();
+    if data_store.get_projects().is_empty() {
         let empty = Paragraph::new("No projects found. Create a project to get started.")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(empty, chunks[1]);
@@ -82,12 +83,12 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
             let is_selected = list_index - 1 == app.selected_project_index;
             let prefix = if is_selected { "  ▶ " } else { "    " };
 
-            let owner_name = app.get_profile_name(&project.pubkey);
-            let info = format!(
-                "{} participant(s) · Owner: {}",
-                project.participants.len(),
-                owner_name
-            );
+            let owner_name = app.data_store.borrow().get_profile_name(&project.pubkey);
+            let agent_count = app.data_store.borrow()
+                .get_project_status(&project.a_tag())
+                .map(|s| s.agents.len())
+                .unwrap_or(0);
+            let info = format!("{} agent(s) · Owner: {}", agent_count, owner_name);
 
             let style = if is_selected {
                 Style::default()
@@ -146,21 +147,22 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
         ))));
 
         if app.offline_projects_expanded {
-            for project in &offline_projects {
+            for (offline_idx, project) in offline_projects.iter().enumerate() {
                 let is_selected = if online_projects.is_empty() {
-                    // When no online projects, selection starts from first offline project
-                    items.len() - 2 == app.selected_project_index // -2 to account for header
+                    // When no online projects, selection is directly the offline index
+                    offline_idx == app.selected_project_index
                 } else {
-                    list_index - 1 == app.selected_project_index
+                    // When there are online projects, offset by their count
+                    online_projects.len() + offline_idx == app.selected_project_index
                 };
                 let prefix = if is_selected { "  ▶ " } else { "    " };
 
-                let owner_name = app.get_profile_name(&project.pubkey);
-                let info = format!(
-                    "{} participant(s) · Owner: {}",
-                    project.participants.len(),
-                    owner_name
-                );
+                let owner_name = app.data_store.borrow().get_profile_name(&project.pubkey);
+                let agent_count = app.data_store.borrow()
+                    .get_project_status(&project.a_tag())
+                    .map(|s| s.agents.len())
+                    .unwrap_or(0);
+                let info = format!("{} agent(s) · Owner: {}", agent_count, owner_name);
 
                 let style = if is_selected {
                     Style::default()
@@ -179,7 +181,6 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
                 ];
 
                 items.push(ListItem::new(content));
-                list_index += 1;
             }
         }
     }
@@ -197,14 +198,14 @@ pub fn render_projects(f: &mut Frame, app: &App, area: Rect) {
 
 /// Get the actual project at the given selection index
 /// Returns (project, is_online)
-pub fn get_project_at_index(app: &App, index: usize) -> Option<(&crate::models::Project, bool)> {
+pub fn get_project_at_index(app: &App, index: usize) -> Option<(crate::models::Project, bool)> {
     let (online_projects, offline_projects) = app.filtered_projects();
 
     if index < online_projects.len() {
-        Some((online_projects[index], true))
+        online_projects.get(index).map(|p| (p.clone(), true))
     } else if app.offline_projects_expanded {
         let offline_index = index - online_projects.len();
-        offline_projects.get(offline_index).map(|p| (*p, false))
+        offline_projects.get(offline_index).map(|p| (p.clone(), false))
     } else {
         None
     }

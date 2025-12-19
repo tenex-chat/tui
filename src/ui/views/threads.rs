@@ -28,7 +28,8 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
         ])
         .split(content_area);
 
-        if app.threads.is_empty() {
+        let threads = app.threads();
+        if threads.is_empty() {
             let empty = Paragraph::new("No threads found.")
                 .style(Style::default().fg(Color::DarkGray));
             f.render_widget(empty, chunks[0]);
@@ -48,7 +49,8 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    if app.threads.is_empty() {
+    let threads = app.threads();
+    if threads.is_empty() {
         let empty = Paragraph::new("No threads found. Press 'n' to create a new thread.")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(empty, content_area);
@@ -64,16 +66,15 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_thread_list(f: &mut Frame, app: &App, area: Rect) {
-
-    let items: Vec<ListItem> = app
-        .threads
+    let threads = app.threads();
+    let items: Vec<ListItem> = threads
         .iter()
         .enumerate()
         .map(|(i, thread)| {
             let is_selected = i == app.selected_thread_index;
             let prefix = if is_selected { "▶ " } else { "  " };
 
-            let author_name = app.get_profile_name(&thread.pubkey);
+            let author_name = app.data_store.borrow().get_profile_name(&thread.pubkey);
 
             let style = if is_selected {
                 Style::default()
@@ -118,7 +119,7 @@ fn render_thread_list(f: &mut Frame, app: &App, area: Rect) {
 fn render_status_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let mut lines: Vec<Line> = Vec::new();
 
-    if let Some(ref status) = app.project_status {
+    if let Some(status) = app.get_selected_project_status() {
         // Online indicator
         let online_style = if status.is_online() {
             Style::default().fg(Color::Green)

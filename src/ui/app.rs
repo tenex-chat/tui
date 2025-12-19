@@ -315,8 +315,11 @@ impl App {
     /// Get available agents from project status (from data store)
     pub fn available_agents(&self) -> Vec<crate::models::ProjectAgent> {
         self.selected_project.as_ref()
-            .and_then(|p| self.data_store.borrow().get_project_status(&p.a_tag()))
-            .map(|s| s.agents.clone())
+            .and_then(|p| {
+                self.data_store.borrow()
+                    .get_project_status(&p.a_tag())
+                    .map(|s| s.agents.clone())
+            })
             .unwrap_or_default()
     }
 
@@ -332,8 +335,11 @@ impl App {
     /// Get available branches from project status (from data store)
     pub fn available_branches(&self) -> Vec<String> {
         self.selected_project.as_ref()
-            .and_then(|p| self.data_store.borrow().get_project_status(&p.a_tag()))
-            .map(|s| s.branches.clone())
+            .and_then(|p| {
+                self.data_store.borrow()
+                    .get_project_status(&p.a_tag())
+                    .map(|s| s.branches.clone())
+            })
             .unwrap_or_default()
     }
 
