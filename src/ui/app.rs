@@ -1,12 +1,12 @@
-use crate::models::{Agent, Message, Project, ProjectStatus, StreamingAccumulator, Thread};
+use crate::models::{ChatDraft, DraftStorage, Project, ProjectAgent, ProjectStatus, StreamingAccumulator, Thread};
 use crate::nostr::{DataChange, NostrCommand};
-use crate::store::Database;
+use crate::store::{AppDataStore, Database};
+use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use tracing::{debug, info_span};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
@@ -32,17 +32,11 @@ pub struct App {
     pub db: Arc<Database>,
     pub keys: Option<Keys>,
 
-    pub projects: Vec<Project>,
-    pub threads: Vec<Thread>,
-    pub messages: Vec<Message>,
-    pub agents: Vec<Agent>,
-
     pub selected_project_index: usize,
     pub selected_thread_index: usize,
     pub selected_project: Option<Project>,
     pub selected_thread: Option<Thread>,
-    pub selected_agent: Option<Agent>,
-    pub project_status: Option<ProjectStatus>,
+    pub selected_agent: Option<ProjectAgent>,
 
     pub scroll_offset: usize,
     pub status_message: Option<String>,
@@ -50,27 +44,43 @@ pub struct App {
     pub creating_thread: bool,
     pub showing_agent_selector: bool,
     pub agent_selector_index: usize,
+    pub showing_branch_selector: bool,
+    pub branch_selector_index: usize,
+    pub selected_branch: Option<String>,
+    pub selector_filter: String,
 
     pub streaming_accumulator: StreamingAccumulator,
 
     pub command_tx: Option<Sender<NostrCommand>>,
     pub data_rx: Option<Receiver<DataChange>>,
 
-    /// Cached profile names to avoid repeated DB lookups during render
-    profile_name_cache: RefCell<HashMap<String, String>>,
-
     /// Filter text for projects view (type to filter)
     pub project_filter: String,
 
-    /// Cached project status for each project (keyed by a_tag)
-    project_status_cache: RefCell<HashMap<String, Option<ProjectStatus>>>,
-
     /// Whether offline projects section is expanded
     pub offline_projects_expanded: bool,
+
+    /// Whether user pressed Ctrl+C once (pending quit confirmation)
+    pub pending_quit: bool,
+
+    /// Draft storage for persisting message drafts
+    draft_storage: RefCell<DraftStorage>,
+
+    /// Rich text editor for chat input (multiline, attachments)
+    pub chat_editor: TextEditor,
+
+    /// Whether attachment modal is open
+    pub showing_attachment_modal: bool,
+
+    /// Editor for the attachment modal content
+    pub attachment_modal_editor: TextEditor,
+
+    /// Single source of truth for app data
+    pub data_store: Rc<RefCell<AppDataStore>>,
 }
 
 impl App {
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Database, data_store: Rc<RefCell<AppDataStore>>) -> Self {
         Self {
             running: true,
             view: View::Login,
@@ -81,17 +91,11 @@ impl App {
             db: Arc::new(db),
             keys: None,
 
-            projects: Vec::new(),
-            threads: Vec::new(),
-            messages: Vec::new(),
-            agents: Vec::new(),
-
             selected_project_index: 0,
             selected_thread_index: 0,
             selected_project: None,
             selected_thread: None,
             selected_agent: None,
-            project_status: None,
 
             scroll_offset: 0,
             status_message: None,
@@ -99,71 +103,125 @@ impl App {
             creating_thread: false,
             showing_agent_selector: false,
             agent_selector_index: 0,
+            showing_branch_selector: false,
+            branch_selector_index: 0,
+            selected_branch: None,
+            selector_filter: String::new(),
 
             streaming_accumulator: StreamingAccumulator::new(),
 
             command_tx: None,
             data_rx: None,
 
-            profile_name_cache: RefCell::new(HashMap::new()),
             project_filter: String::new(),
-            project_status_cache: RefCell::new(HashMap::new()),
             offline_projects_expanded: false,
+            pending_quit: false,
+            draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
+            chat_editor: TextEditor::new(),
+            showing_attachment_modal: false,
+            attachment_modal_editor: TextEditor::new(),
+            data_store,
         }
     }
 
-    /// Get a profile name, using cache to avoid repeated DB lookups
-    pub fn get_profile_name(&self, pubkey: &str) -> String {
-        // Check cache first
-        if let Some(name) = self.profile_name_cache.borrow().get(pubkey) {
-            return name.clone();
-        }
-
-        // Lookup and cache
-        let name = crate::store::get_profile_name(&self.db.ndb, pubkey);
-        self.profile_name_cache.borrow_mut().insert(pubkey.to_string(), name.clone());
-        name
+    /// Get project status for a project - delegates to data store
+    pub fn get_project_status(&self, project: &Project) -> Option<ProjectStatus> {
+        self.data_store.borrow().get_project_status(&project.a_tag()).cloned()
     }
 
-    /// Clear the profile cache (call when profiles are updated)
-    pub fn clear_profile_cache(&self) {
-        self.profile_name_cache.borrow_mut().clear();
-    }
-
-    /// Get project status for a project, using cache
-    pub fn get_project_status_cached(&self, project: &Project) -> Option<ProjectStatus> {
-        let a_tag = project.a_tag();
-
-        // Check cache first
-        if let Some(status) = self.project_status_cache.borrow().get(&a_tag) {
-            return status.clone();
-        }
-
-        // Lookup and cache
-        let status = crate::store::get_project_status(&self.db.ndb, &a_tag);
-        self.project_status_cache
-            .borrow_mut()
-            .insert(a_tag, status.clone());
-        status
-    }
-
-    /// Clear the project status cache (call when project status updates)
-    pub fn clear_project_status_cache(&self) {
-        self.project_status_cache.borrow_mut().clear();
+    /// Get project status for selected project
+    pub fn get_selected_project_status(&self) -> Option<ProjectStatus> {
+        self.selected_project.as_ref().and_then(|p| self.get_project_status(p))
     }
 
     /// Check if a project is online (has recent 24010 status)
     pub fn is_project_online(&self, project: &Project) -> bool {
-        self.get_project_status_cached(project)
-            .map(|s| s.is_online())
-            .unwrap_or(false)
+        self.data_store.borrow().is_project_online(&project.a_tag())
+    }
+
+    /// Save current chat editor content as draft for the selected thread
+    pub fn save_chat_draft(&self) {
+        if let Some(ref thread) = self.selected_thread {
+            let draft = ChatDraft {
+                conversation_id: thread.id.clone(),
+                text: self.chat_editor.build_full_content(),
+                selected_agent_pubkey: self.selected_agent.as_ref().map(|a| a.pubkey.clone()),
+                selected_branch: self.selected_branch.clone(),
+                last_modified: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            };
+            self.draft_storage.borrow_mut().save(draft);
+        }
+    }
+
+    /// Restore draft for the selected thread into chat_editor
+    pub fn restore_chat_draft(&mut self) {
+        if let Some(ref thread) = self.selected_thread {
+            if let Some(draft) = self.draft_storage.borrow().load(&thread.id) {
+                // For now, put all content in the text field
+                // (attachments will be re-created on paste if needed)
+                self.chat_editor.text = draft.text;
+                self.chat_editor.cursor = self.chat_editor.text.len();
+                self.selected_branch = draft.selected_branch;
+                if let Some(agent_pubkey) = draft.selected_agent_pubkey {
+                    if let Some(status) = self.get_selected_project_status() {
+                        self.selected_agent = status
+                            .agents
+                            .iter()
+                            .find(|a| a.pubkey == agent_pubkey)
+                            .cloned();
+                    }
+                }
+            }
+        }
+    }
+
+    /// Delete draft for the selected thread (call after sending message)
+    pub fn delete_chat_draft(&self) {
+        if let Some(ref thread) = self.selected_thread {
+            self.draft_storage.borrow_mut().delete(&thread.id);
+        }
+    }
+
+    /// Open attachment modal with focused attachment's content
+    pub fn open_attachment_modal(&mut self) {
+        if let Some(attachment) = self.chat_editor.get_focused_attachment() {
+            self.attachment_modal_editor.text = attachment.content.clone();
+            self.attachment_modal_editor.cursor = 0;
+            self.showing_attachment_modal = true;
+        }
+    }
+
+    /// Save attachment modal changes and close
+    pub fn save_and_close_attachment_modal(&mut self) {
+        let new_content = self.attachment_modal_editor.text.clone();
+        self.chat_editor.update_focused_attachment(new_content);
+        self.attachment_modal_editor.clear();
+        self.showing_attachment_modal = false;
+    }
+
+    /// Close attachment modal without saving
+    pub fn cancel_attachment_modal(&mut self) {
+        self.attachment_modal_editor.clear();
+        self.showing_attachment_modal = false;
+    }
+
+    /// Delete focused attachment and close modal
+    pub fn delete_attachment_and_close_modal(&mut self) {
+        self.chat_editor.delete_focused_attachment();
+        self.attachment_modal_editor.clear();
+        self.showing_attachment_modal = false;
     }
 
     /// Get filtered projects based on current filter
-    pub fn filtered_projects(&self) -> (Vec<&Project>, Vec<&Project>) {
+    pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.project_filter.to_lowercase();
-        let matching: Vec<&Project> = self
-            .projects
+        let store = self.data_store.borrow();
+        let projects = store.get_projects();
+
+        let matching: Vec<&Project> = projects
             .iter()
             .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
             .collect();
@@ -171,9 +229,9 @@ impl App {
         // Separate into online and offline
         let (online, offline): (Vec<_>, Vec<_>) = matching
             .into_iter()
-            .partition(|p| self.is_project_online(p));
+            .partition(|p| store.is_project_online(&p.a_tag()));
 
-        (online, offline)
+        (online.into_iter().cloned().collect(), offline.into_iter().cloned().collect())
     }
 
     pub fn set_channels(&mut self, command_tx: Sender<NostrCommand>, data_rx: Receiver<DataChange>) {
@@ -181,116 +239,19 @@ impl App {
         self.data_rx = Some(data_rx);
     }
 
+    /// Process streaming deltas from the worker channel.
+    /// All other updates are handled via nostrdb SubscriptionStream in main.rs.
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
         if let Some(ref data_rx) = self.data_rx {
-            // Limit events processed per frame to prevent UI blocking
-            let mut events_processed = 0;
-            const MAX_EVENTS_PER_FRAME: usize = 10;
-
-            // Track what needs refreshing to avoid duplicate queries
-            let mut needs_projects_refresh = false;
-            let mut needs_threads_refresh = false;
-            let mut needs_messages_refresh = false;
-            let mut needs_agents_refresh = false;
-
-            while events_processed < MAX_EVENTS_PER_FRAME {
-                let change = match data_rx.try_recv() {
-                    Ok(c) => c,
-                    Err(_) => break,
+            // Process streaming deltas (need ordered delivery)
+            while let Ok(DataChange::StreamingDelta { message_id, delta }) = data_rx.try_recv() {
+                let streaming_delta = crate::models::StreamingDelta {
+                    message_id,
+                    delta,
+                    sequence: None,
+                    created_at: 0,
                 };
-                events_processed += 1;
-
-                debug!("Processing data change: {:?}", change);
-
-                match change {
-                    DataChange::ProjectsUpdated => {
-                        needs_projects_refresh = true;
-                    }
-                    DataChange::ThreadsUpdated(project_id) => {
-                        if self.selected_project.as_ref().map(|p| p.a_tag()) == Some(project_id) {
-                            needs_threads_refresh = true;
-                        }
-                    }
-                    DataChange::MessagesUpdated(thread_id) => {
-                        if self.selected_thread.as_ref().map(|t| &t.id) == Some(&thread_id) {
-                            needs_messages_refresh = true;
-                            // Clear streaming content for this thread since we have the final message
-                            self.streaming_accumulator.clear_message(&thread_id);
-                        }
-                    }
-                    DataChange::ProfilesUpdated => {
-                        self.clear_profile_cache();
-                    }
-                    DataChange::AgentsUpdated => {
-                        needs_agents_refresh = true;
-                    }
-                    DataChange::ProjectStatusUpdated(project_coord) => {
-                        // Clear cache so online/offline status updates
-                        self.clear_project_status_cache();
-
-                        if self.selected_project.as_ref().map(|p| p.a_tag()) == Some(project_coord.clone()) {
-                            let _span = info_span!("get_project_status").entered();
-                            self.project_status = crate::store::get_project_status(&self.db.ndb, &project_coord);
-                            // Auto-select PM agent when status arrives
-                            if self.selected_agent.is_none() {
-                                if let Some(ref status) = self.project_status {
-                                    if let Some(pm) = status.pm_agent() {
-                                        self.selected_agent = crate::store::get_agent_by_pubkey(&self.db.ndb, &pm.pubkey);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    DataChange::StreamingDelta { message_id, delta } => {
-                        let streaming_delta = crate::models::StreamingDelta {
-                            message_id: message_id.clone(),
-                            delta,
-                            sequence: None,
-                            created_at: 0,
-                        };
-                        self.streaming_accumulator.add_delta(streaming_delta);
-                    }
-                    DataChange::ConversationMetadataUpdated => {
-                        // Mark threads for refresh (titles may have changed)
-                        if self.selected_project.is_some() {
-                            needs_threads_refresh = true;
-                        }
-                    }
-                }
-            }
-
-            // Now do the actual refreshes (deduplicated)
-            if needs_projects_refresh {
-                let _span = info_span!("refresh_projects").entered();
-                self.projects = crate::store::get_projects(&self.db.ndb)?;
-            }
-            if needs_threads_refresh {
-                if let Some(ref project) = self.selected_project {
-                    let _span = info_span!("refresh_threads").entered();
-                    self.threads = crate::store::get_threads_for_project(&self.db.ndb, &project.a_tag())?;
-                }
-            }
-            if needs_messages_refresh {
-                if let Some(ref thread) = self.selected_thread {
-                    let _span = info_span!("refresh_messages").entered();
-                    self.messages = crate::store::get_messages_for_thread(&self.db.ndb, &thread.id)?;
-                    self.scroll_offset = usize::MAX;
-                }
-            }
-            if needs_agents_refresh {
-                let _span = info_span!("refresh_agents").entered();
-                self.agents = crate::store::get_agents(&self.db.ndb)?;
-                if self.selected_agent.is_none() {
-                    if let Some(ref status) = self.project_status {
-                        if let Some(pm) = status.pm_agent() {
-                            self.selected_agent = crate::store::get_agent_by_pubkey(&self.db.ndb, &pm.pubkey);
-                        }
-                    }
-                }
-            }
-
-            if events_processed > 0 {
-                debug!("Processed {} data events this frame", events_processed);
+                self.streaming_accumulator.add_delta(streaming_delta);
             }
         }
         Ok(())
@@ -337,20 +298,62 @@ impl App {
         self.cursor_position = 0;
     }
 
-    /// Get available agents from project status
-    pub fn available_agents(&self) -> Vec<&crate::models::ProjectAgent> {
-        self.project_status
-            .as_ref()
-            .map(|s| s.agents.iter().collect())
+    /// Get available agents from project status (from data store)
+    pub fn available_agents(&self) -> Vec<crate::models::ProjectAgent> {
+        self.selected_project.as_ref()
+            .and_then(|p| self.data_store.borrow().get_project_status(&p.a_tag()))
+            .map(|s| s.agents.clone())
             .unwrap_or_default()
     }
 
     /// Select agent by index from available agents
     pub fn select_agent_by_index(&mut self, index: usize) {
-        if let Some(ref status) = self.project_status {
+        if let Some(status) = self.get_selected_project_status() {
             if let Some(agent) = status.agents.get(index) {
-                self.selected_agent = crate::store::get_agent_by_pubkey(&self.db.ndb, &agent.pubkey);
+                self.selected_agent = Some(agent.clone());
             }
+        }
+    }
+
+    /// Get available branches from project status (from data store)
+    pub fn available_branches(&self) -> Vec<String> {
+        self.selected_project.as_ref()
+            .and_then(|p| self.data_store.borrow().get_project_status(&p.a_tag()))
+            .map(|s| s.branches.clone())
+            .unwrap_or_default()
+    }
+
+    /// Get agents filtered by selector_filter
+    pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
+        let filter = self.selector_filter.to_lowercase();
+        self.available_agents()
+            .into_iter()
+            .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
+            .collect()
+    }
+
+    /// Get branches filtered by selector_filter
+    pub fn filtered_branches(&self) -> Vec<String> {
+        let filter = self.selector_filter.to_lowercase();
+        self.available_branches()
+            .into_iter()
+            .filter(|b| filter.is_empty() || b.to_lowercase().contains(&filter))
+            .collect()
+    }
+
+    /// Select branch by index from filtered branches
+    pub fn select_branch_by_index(&mut self, index: usize) {
+        let filtered = self.filtered_branches();
+        if let Some(branch) = filtered.get(index) {
+            self.selected_branch = Some(branch.clone());
+        }
+    }
+
+    /// Select agent by index from filtered agents
+    pub fn select_filtered_agent_by_index(&mut self, index: usize) {
+        let filtered = self.filtered_agents();
+        if let Some(project_agent) = filtered.get(index) {
+            self.selected_agent = Some(project_agent.clone());
         }
     }
 
