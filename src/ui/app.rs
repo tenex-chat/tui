@@ -1,4 +1,4 @@
-use crate::models::{ChatDraft, DraftStorage, Project, ProjectAgent, ProjectStatus, StreamingAccumulator, Thread};
+use crate::models::{ChatDraft, DraftStorage, Message, Project, ProjectAgent, ProjectStatus, StreamingAccumulator, Thread};
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{AppDataStore, Database};
 use crate::ui::text_editor::TextEditor;
@@ -77,6 +77,13 @@ pub struct App {
 
     /// Single source of truth for app data
     pub data_store: Rc<RefCell<AppDataStore>>,
+
+    /// When viewing a subthread, this is the root message ID
+    pub subthread_root: Option<String>,
+    /// The root message when viewing a subthread (for display and reply tagging)
+    pub subthread_root_message: Option<Message>,
+    /// Index of selected message in chat view (for navigation)
+    pub selected_message_index: usize,
 }
 
 impl App {
@@ -121,6 +128,9 @@ impl App {
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
             data_store,
+            subthread_root: None,
+            subthread_root_message: None,
+            selected_message_index: 0,
         }
     }
 
@@ -142,10 +152,30 @@ impl App {
     }
 
     /// Get messages for the currently selected thread
-    pub fn messages(&self) -> Vec<crate::models::Message> {
+    pub fn messages(&self) -> Vec<Message> {
         self.selected_thread.as_ref()
             .map(|t| self.data_store.borrow().get_messages(&t.id).to_vec())
             .unwrap_or_default()
+    }
+
+    /// Enter a subthread view rooted at the given message
+    pub fn enter_subthread(&mut self, message: Message) {
+        self.subthread_root = Some(message.id.clone());
+        self.subthread_root_message = Some(message);
+        self.selected_message_index = 0;
+        self.scroll_offset = 0;
+    }
+
+    /// Exit the current subthread view and return to parent
+    pub fn exit_subthread(&mut self) {
+        self.subthread_root = None;
+        self.subthread_root_message = None;
+        self.selected_message_index = 0;
+    }
+
+    /// Check if we're currently viewing a subthread
+    pub fn in_subthread(&self) -> bool {
+        self.subthread_root.is_some()
     }
 
     /// Save current chat editor content as draft for the selected thread

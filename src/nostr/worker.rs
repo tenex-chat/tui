@@ -473,9 +473,15 @@ impl NostrWorker {
         ingest_events(&self.ndb, &[signed_event.clone()], None)?;
         // UI gets notified via nostrdb SubscriptionStream when data is ready
 
-        // Send to relay
-        let event_id = client.send_event(signed_event).await?;
-        info!("Published thread: {}", event_id.id());
+        // Send to relay with timeout (don't block forever on degraded connections)
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Published thread: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send thread to relay: {}", e),
+            Err(_) => error!("Timeout sending thread to relay (event was saved locally)"),
+        }
 
         Ok(())
     }
@@ -539,9 +545,15 @@ impl NostrWorker {
         // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
         ingest_events(&self.ndb, &[signed_event.clone()], None)?;
 
-        // Send to relay
-        let event_id = client.send_event(signed_event).await?;
-        info!("Published message: {}", event_id.id());
+        // Send to relay with timeout (don't block forever on degraded connections)
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Published message: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send message to relay: {}", e),
+            Err(_) => error!("Timeout sending message to relay (event was saved locally)"),
+        }
 
         Ok(())
     }

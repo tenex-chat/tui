@@ -1,3 +1,4 @@
+use crate::models::Message;
 use crate::ui::markdown::render_markdown;
 use crate::ui::tool_calls::{parse_message_content, render_tool_calls_group, MessageContent};
 use crate::ui::{App, InputMode};
@@ -8,6 +9,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
     Frame,
 };
+use std::collections::HashMap;
 use tracing::info_span;
 
 /// Get any streaming content for the current thread
@@ -50,8 +52,8 @@ fn get_streaming_content(app: &App) -> Option<(String, String)> {
 }
 
 pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
-    let messages = app.messages();
-    let _render_span = info_span!("render_chat", message_count = messages.len()).entered();
+    let all_messages = app.messages();
+    let _render_span = info_span!("render_chat", message_count = all_messages.len()).entered();
 
     // Calculate dynamic input height based on line count (min 3, max 10)
     let input_lines = app.chat_editor.line_count().max(1);
@@ -59,23 +61,62 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
 
     // Check if we have attachments (paste or image)
     let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
+    let has_status = app.status_message.is_some();
 
-    // Build layout based on whether we have attachments
-    let chunks = if has_attachments {
-        Layout::vertical([
+    // Build layout based on whether we have attachments and/or status
+    let chunks = match (has_attachments, has_status) {
+        (true, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Status line
+            Constraint::Length(1),     // Context line
+            Constraint::Length(1),     // Attachments line
+            Constraint::Length(input_height), // Input
+        ]).split(area),
+        (true, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
             Constraint::Length(input_height), // Input
-        ])
-        .split(area)
-    } else {
-        Layout::vertical([
+        ]).split(area),
+        (false, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Status line
+            Constraint::Length(1),     // Context line
+            Constraint::Length(input_height), // Input
+        ]).split(area),
+        (false, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Context line
             Constraint::Length(input_height), // Input
-        ])
-        .split(area)
+        ]).split(area),
+    };
+
+    // Get thread_id first - needed for reply index filtering
+    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+
+    // Build reply index: parent_id -> Vec<&Message>
+    // Skip messages that e-tag the thread root - those are siblings, not nested replies
+    let mut replies_by_parent: HashMap<&str, Vec<&Message>> = HashMap::new();
+    for msg in &all_messages {
+        if let Some(ref parent_id) = msg.reply_to {
+            // Only count as a reply if parent is NOT the thread root
+            if Some(parent_id.as_str()) != thread_id {
+                replies_by_parent.entry(parent_id.as_str()).or_default().push(msg);
+            }
+        }
+    }
+    let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
+        // Subthread view: show messages that reply directly to the root
+        all_messages.iter()
+            .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+            .collect()
+    } else {
+        // Main view: show messages with no parent or parent = thread root
+        all_messages.iter()
+            .filter(|m| {
+                m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
+            })
+            .collect()
     };
 
     // Build title with thread name and selected agent
@@ -91,53 +132,142 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         .map(|a| a.name.clone())
         .unwrap_or_else(|| "No agent".to_string());
 
-    let title = format!("{} | @{} (@ to change, Esc to go back)", thread_title, agent_name);
+    let title = if app.in_subthread() {
+        format!("{} (subthread) | @{} (Esc to go back)", thread_title, agent_name)
+    } else {
+        format!("{} | @{} (@ to change, Esc to go back)", thread_title, agent_name)
+    };
 
     // Messages area
     let mut messages_text: Vec<Line> = Vec::new();
 
-    // Render regular messages
+    // If in subthread, render the root message first as a header
+    if let Some(ref root_msg) = app.subthread_root_message {
+        let author = app.data_store.borrow().get_profile_name(&root_msg.pubkey);
+        messages_text.push(Line::from(Span::styled(
+            format!("{} :", author),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )));
+
+        // Render root message content (truncated)
+        let content_preview: String = root_msg.content.chars().take(200).collect();
+        let markdown_lines = render_markdown(&content_preview);
+        messages_text.extend(markdown_lines);
+        if root_msg.content.len() > 200 {
+            messages_text.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+        }
+
+        // Separator
+        messages_text.push(Line::from(Span::styled(
+            "────────────────────────────────────────",
+            Style::default().fg(Color::DarkGray),
+        )));
+        messages_text.push(Line::from(""));
+    }
+
+    // Render display messages
     {
         let _span = info_span!("render_messages").entered();
-        for (i, msg) in messages.iter().enumerate() {
+        for (i, msg) in display_messages.iter().enumerate() {
             let _msg_span = info_span!("render_message", index = i).entered();
+
+            // Check if this message is selected (for navigation)
+            let is_selected = i == app.selected_message_index && app.input_mode == InputMode::Normal;
 
             let author = {
                 let _span = info_span!("get_profile_name").entered();
                 app.data_store.borrow().get_profile_name(&msg.pubkey)
             };
 
-            messages_text.push(Line::from(Span::styled(
-                format!("{} :", author),
-                Style::default().fg(Color::Cyan),
-            )));
+            // Reasoning messages get muted italic style
+            if msg.is_reasoning {
+                let prefix = if is_selected { "> " } else { "" };
+                let header_style = if is_selected {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC)
+                } else {
+                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
+                };
+                messages_text.push(Line::from(Span::styled(
+                    format!("{}{} (thinking):", prefix, author),
+                    header_style,
+                )));
 
-            let parsed = {
-                let _span = info_span!("parse_message_content").entered();
-                parse_message_content(&msg.content)
-            };
-
-            match parsed {
-                MessageContent::PlainText(text) => {
-                    let _span = info_span!("render_markdown").entered();
-                    let markdown_lines = render_markdown(&text);
-                    messages_text.extend(markdown_lines);
+                // Render reasoning content in muted italic style
+                let muted_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+                for line in msg.content.lines() {
+                    messages_text.push(Line::from(Span::styled(line.to_string(), muted_style)));
                 }
-                MessageContent::Mixed {
-                    text_parts,
-                    tool_calls,
-                } => {
-                    for text_part in text_parts {
-                        if !text_part.trim().is_empty() {
-                            let markdown_lines = render_markdown(&text_part);
-                            messages_text.extend(markdown_lines);
+            } else {
+                // Normal message rendering
+                let author_style = if is_selected {
+                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(Color::Cyan)
+                };
+                let prefix = if is_selected { "> " } else { "" };
+                messages_text.push(Line::from(Span::styled(
+                    format!("{}{} :", prefix, author),
+                    author_style,
+                )));
+
+                let parsed = {
+                    let _span = info_span!("parse_message_content").entered();
+                    parse_message_content(&msg.content)
+                };
+
+                match parsed {
+                    MessageContent::PlainText(text) => {
+                        let _span = info_span!("render_markdown").entered();
+                        let markdown_lines = render_markdown(&text);
+                        messages_text.extend(markdown_lines);
+                    }
+                    MessageContent::Mixed {
+                        text_parts,
+                        tool_calls,
+                    } => {
+                        for text_part in text_parts {
+                            if !text_part.trim().is_empty() {
+                                let markdown_lines = render_markdown(&text_part);
+                                messages_text.extend(markdown_lines);
+                            }
+                        }
+
+                        if !tool_calls.is_empty() {
+                            messages_text.push(Line::from(""));
+                            let tool_call_lines = render_tool_calls_group(&tool_calls);
+                            messages_text.extend(tool_call_lines);
                         }
                     }
+                }
+            }
 
-                    if !tool_calls.is_empty() {
-                        messages_text.push(Line::from(""));
-                        let tool_call_lines = render_tool_calls_group(&tool_calls);
-                        messages_text.extend(tool_call_lines);
+            // Check if this message has replies and show preview
+            if let Some(replies) = replies_by_parent.get(msg.id.as_str()) {
+                if !replies.is_empty() {
+                    // Find most recent reply
+                    let most_recent = replies.iter().max_by_key(|r| r.created_at);
+                    if let Some(recent) = most_recent {
+                        let reply_author = app.data_store.borrow().get_profile_name(&recent.pubkey);
+                        let preview: String = recent.content.chars().take(60).collect();
+                        let preview = preview.replace('\n', " ");
+                        let suffix = if recent.content.len() > 60 { "..." } else { "" };
+
+                        messages_text.push(Line::from(vec![
+                            Span::styled("  └→ ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format!("{}", replies.len()),
+                                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                            Span::styled(
+                                format!("{}: ", reply_author),
+                                Style::default().fg(Color::Blue),
+                            ),
+                            Span::styled(
+                                format!("{}{}", preview, suffix),
+                                Style::default().fg(Color::DarkGray),
+                            ),
+                        ]));
                     }
                 }
             }
@@ -199,6 +329,23 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         f.render_widget(messages, chunks[0]);
     }
 
+    // Calculate chunk indices based on layout
+    // Layout: [messages, (status?), context, (attachments?), input]
+    let mut idx = 1; // Start after messages
+
+    // Status line (if any)
+    if has_status {
+        if let Some(ref msg) = app.status_message {
+            let status_line = Line::from(vec![
+                Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
+                Span::styled(msg.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            ]);
+            let status = Paragraph::new(status_line);
+            f.render_widget(status, chunks[idx]);
+        }
+        idx += 1;
+    }
+
     // Context line showing selected agent and branch
     let agent_display = app
         .selected_agent
@@ -218,7 +365,8 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(branch_display, Style::default().fg(Color::Green)),
     ]);
     let context = Paragraph::new(context_line);
-    f.render_widget(context, chunks[1]);
+    f.render_widget(context, chunks[idx]);
+    idx += 1;
 
     // Attachments line (if any)
     if has_attachments {
@@ -261,7 +409,8 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         }
         let attachments_line = Line::from(attachment_spans);
         let attachments = Paragraph::new(attachments_line);
-        f.render_widget(attachments, chunks[2]);
+        f.render_widget(attachments, chunks[idx]);
+        idx += 1;
     }
 
     // Input area - use chat_editor instead of app.input
@@ -271,8 +420,7 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::DarkGray)
     };
 
-    // Input is the last chunk (index depends on whether we have attachments)
-    let input_area = if has_attachments { chunks[3] } else { chunks[2] };
+    let input_area = chunks[idx];
 
     let input = Paragraph::new(app.chat_editor.text.as_str())
         .style(input_style)

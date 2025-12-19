@@ -1,4 +1,4 @@
-use crate::models::{Message, Project, ProjectStatus, Thread};
+use crate::models::{ConversationMetadata, Message, Project, ProjectStatus, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,10 +35,22 @@ impl AppDataStore {
         if let Ok(projects) = crate::store::get_projects(&self.ndb) {
             self.projects = projects;
         }
-        // Reload statuses for all projects
+        // Load statuses and threads for all projects
         let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
         for a_tag in a_tags {
             self.reload_project_status(&a_tag);
+            // Pre-load threads for each project
+            if let Ok(threads) = crate::store::get_threads_for_project(&self.ndb, &a_tag) {
+                self.threads_by_project.insert(a_tag.clone(), threads);
+            }
+        }
+        // Pre-load messages for all threads
+        for threads in self.threads_by_project.values() {
+            for thread in threads {
+                if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, &thread.id) {
+                    self.messages_by_thread.insert(thread.id.clone(), messages);
+                }
+            }
         }
     }
 
@@ -61,9 +73,18 @@ impl AppDataStore {
         }
     }
 
-    fn handle_project_event(&mut self, _note: &Note) {
-        if let Ok(projects) = crate::store::get_projects(&self.ndb) {
-            self.projects = projects;
+    fn handle_project_event(&mut self, note: &Note) {
+        // Parse project directly from the note we already have
+        // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
+        if let Some(project) = Project::from_note(note) {
+            let a_tag = project.a_tag();
+
+            // Check if project already exists and update it, or add new one
+            if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
+                *existing = project;
+            } else {
+                self.projects.push(project);
+            }
         }
     }
 
@@ -81,39 +102,57 @@ impl AppDataStore {
     }
 
     fn handle_thread_event(&mut self, note: &Note) {
-        if let Some(a_tag) = Self::extract_project_a_tag(note) {
-            self.reload_threads_for_project(&a_tag);
-        }
-    }
+        // Parse thread directly from the note we already have
+        // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
+        if let Some(thread) = Thread::from_note(note) {
+            if let Some(a_tag) = Self::extract_project_a_tag(note) {
+                // Add to existing threads list, maintaining sort order by last_activity
+                let threads = self.threads_by_project.entry(a_tag).or_default();
 
-    fn handle_message_event(&mut self, note: &Note) {
-        if let Some(thread_id) = Self::extract_thread_id(note) {
-            self.reload_messages_for_thread(&thread_id);
-        }
-    }
-
-    fn handle_metadata_event(&mut self, note: &Note) {
-        if let Some(thread_id) = Self::extract_thread_id_from_metadata(note) {
-            let a_tag_to_reload = self.threads_by_project
-                .iter()
-                .find(|(_, threads)| threads.iter().any(|t| t.id == thread_id))
-                .map(|(a_tag, _)| a_tag.clone());
-
-            if let Some(a_tag) = a_tag_to_reload {
-                self.reload_threads_for_project(&a_tag);
+                // Check if thread already exists (avoid duplicates)
+                if !threads.iter().any(|t| t.id == thread.id) {
+                    // Insert in sorted position (most recent first)
+                    let insert_pos = threads.partition_point(|t| t.last_activity > thread.last_activity);
+                    threads.insert(insert_pos, thread);
+                }
             }
         }
     }
 
-    pub fn reload_threads_for_project(&mut self, a_tag: &str) {
-        if let Ok(threads) = crate::store::get_threads_for_project(&self.ndb, a_tag) {
-            self.threads_by_project.insert(a_tag.to_string(), threads);
+    fn handle_message_event(&mut self, note: &Note) {
+        // Parse message directly from the note we already have
+        // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
+        if let Some(message) = Message::from_note(note) {
+            let thread_id = message.thread_id.clone();
+
+            // Add to existing messages list, maintaining sort order by created_at
+            let messages = self.messages_by_thread.entry(thread_id).or_default();
+
+            // Check if message already exists (avoid duplicates)
+            if !messages.iter().any(|m| m.id == message.id) {
+                // Insert in sorted position (oldest first)
+                let insert_pos = messages.partition_point(|m| m.created_at < message.created_at);
+                messages.insert(insert_pos, message);
+            }
         }
     }
 
-    pub fn reload_messages_for_thread(&mut self, thread_id: &str) {
-        if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, thread_id) {
-            self.messages_by_thread.insert(thread_id.to_string(), messages);
+    fn handle_metadata_event(&mut self, note: &Note) {
+        // Parse metadata directly from the note to update thread title
+        if let Some(metadata) = ConversationMetadata::from_note(note) {
+            // Find the thread across all projects and update its title
+            for threads in self.threads_by_project.values_mut() {
+                if let Some(thread) = threads.iter_mut().find(|t| t.id == metadata.thread_id) {
+                    if let Some(title) = metadata.title {
+                        thread.title = title;
+                    }
+                    // Update last_activity and maintain sort order
+                    thread.last_activity = metadata.created_at;
+                    // Re-sort to maintain order by last_activity (most recent first)
+                    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                    break;
+                }
+            }
         }
     }
 
@@ -122,37 +161,6 @@ impl AppDataStore {
             if tag.count() >= 2 {
                 let tag_name = tag.get(0).and_then(|t| t.variant().str());
                 if tag_name == Some("a") {
-                    if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
-                        return Some(value.to_string());
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn extract_thread_id(note: &Note) -> Option<String> {
-        for tag in note.tags() {
-            if tag.count() >= 2 {
-                let tag_name = tag.get(0).and_then(|t| t.variant().str());
-                if tag_name == Some("E") {
-                    // Try string first, then id bytes
-                    if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
-                        return Some(s.to_string());
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        return Some(hex::encode(id_bytes));
-                    }
-                }
-            }
-        }
-        None
-    }
-
-    fn extract_thread_id_from_metadata(note: &Note) -> Option<String> {
-        for tag in note.tags() {
-            if tag.count() >= 2 {
-                let tag_name = tag.get(0).and_then(|t| t.variant().str());
-                if tag_name == Some("e") {
                     if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
                         return Some(value.to_string());
                     }

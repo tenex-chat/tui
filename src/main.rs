@@ -74,6 +74,12 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+/// Result of a background image upload
+enum UploadResult {
+    Success(String), // URL
+    Error(String),   // Error message
+}
+
 async fn run_app(
     terminal: &mut ui::Tui,
     app: &mut App,
@@ -87,6 +93,9 @@ async fn run_app(
 
     // Create a tick interval for regular updates (data channel polling, etc.)
     let mut tick_interval = tokio::time::interval(Duration::from_millis(50));
+
+    // Channel for receiving upload results from background tasks
+    let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(10);
 
     // Create nostrdb subscription for all event kinds we care about:
     // - 31933: Projects
@@ -132,7 +141,7 @@ async fn run_app(
                                 app.pending_quit = false;
                                 if app.view == View::Chat && app.input_mode == InputMode::Editing {
                                     if let Some(keys) = app.keys.clone() {
-                                        handle_clipboard_paste(app, &keys).await;
+                                        handle_clipboard_paste(app, &keys, upload_tx.clone());
                                     }
                                 }
                             } else {
@@ -151,7 +160,7 @@ async fn run_app(
                                 } else {
                                     // Check if pasted text is an image file path (drag & drop)
                                     if let Some(keys) = app.keys.clone() {
-                                        if !handle_image_file_paste(app, &text, &keys).await {
+                                        if !handle_image_file_paste(app, &text, &keys, upload_tx.clone()) {
                                             // Not an image file - regular paste
                                             app.chat_editor.handle_paste(&text);
                                             app.save_chat_draft();
@@ -183,6 +192,24 @@ async fn run_app(
             _ = tick_interval.tick() => {
                 let _span = info_span!("check_data_updates").entered();
                 app.check_for_data_updates()?;
+            }
+
+            // Handle upload results from background tasks
+            Some(result) = upload_rx.recv() => {
+                match result {
+                    UploadResult::Success(url) => {
+                        let id = app.chat_editor.add_image_attachment(url);
+                        let marker = format!("[Image #{}] ", id);
+                        for c in marker.chars() {
+                            app.chat_editor.insert_char(c);
+                        }
+                        app.save_chat_draft();
+                        app.clear_status();
+                    }
+                    UploadResult::Error(msg) => {
+                        app.set_status(&msg);
+                    }
+                }
             }
         }
     }
@@ -472,8 +499,10 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                 View::Threads if app.selected_thread_index > 0 => {
                     app.selected_thread_index -= 1;
                 }
-                View::Chat if app.scroll_offset > 0 => {
-                    app.scroll_offset = app.scroll_offset.saturating_sub(3);
+                View::Chat => {
+                    if app.selected_message_index > 0 {
+                        app.selected_message_index -= 1;
+                    }
                 }
                 _ => {}
             },
@@ -488,7 +517,22 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                     app.selected_thread_index += 1;
                 }
                 View::Chat => {
-                    app.scroll_offset = app.scroll_offset.saturating_add(3);
+                    // Get display message count for bounds checking
+                    let messages = app.messages();
+                    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+                    let display_count = if let Some(ref root_id) = app.subthread_root {
+                        messages.iter()
+                            .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                            .count()
+                    } else {
+                        messages.iter()
+                            .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == thread_id)
+                            .count()
+                    };
+
+                    if app.selected_message_index < display_count.saturating_sub(1) {
+                        app.selected_message_index += 1;
+                    }
                 }
                 _ => {}
             },
@@ -518,9 +562,6 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                         let a_tag = project.a_tag();
                         app.selected_project = Some(project);
 
-                        // Load threads for this project into data store
-                        app.data_store.borrow_mut().reload_threads_for_project(&a_tag);
-
                         // Auto-select PM agent and default branch from status
                         if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
                             if app.selected_agent.is_none() {
@@ -547,9 +588,6 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                         let thread = threads[app.selected_thread_index].clone();
                         app.selected_thread = Some(thread.clone());
 
-                        // Load messages for this thread into data store
-                        app.data_store.borrow_mut().reload_messages_for_thread(&thread.id);
-
                         // Auto-select first available agent if none selected
                         {
                             let _span = info_span!("select_agent").entered();
@@ -569,6 +607,30 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                         tracing::info!("Chat view ready");
                     }
                 }
+                View::Chat => {
+                    // Navigate into subthread if selected message has replies
+                    let messages = app.messages();
+                    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+
+                    // Get display messages based on current view
+                    let display_messages: Vec<&crate::models::Message> = if let Some(ref root_id) = app.subthread_root {
+                        messages.iter()
+                            .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                            .collect()
+                    } else {
+                        messages.iter()
+                            .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == thread_id)
+                            .collect()
+                    };
+
+                    if let Some(msg) = display_messages.get(app.selected_message_index) {
+                        // Check if this message has replies
+                        let has_replies = messages.iter().any(|m| m.reply_to.as_deref() == Some(msg.id.as_str()));
+                        if has_replies {
+                            app.enter_subthread((*msg).clone());
+                        }
+                    }
+                }
                 _ => {}
             },
             KeyCode::Esc => match app.view {
@@ -581,9 +643,15 @@ fn handle_key(app: &mut App, key: KeyEvent, login_step: &mut LoginStep, pending_
                 }
                 View::Threads => app.view = View::Projects,
                 View::Chat => {
-                    app.save_chat_draft();
-                    app.chat_editor.clear();
-                    app.view = View::Threads;
+                    if app.in_subthread() {
+                        // Exit subthread view and return to main thread view
+                        app.exit_subthread();
+                    } else {
+                        // Exit chat and go back to threads
+                        app.save_chat_draft();
+                        app.chat_editor.clear();
+                        app.view = View::Threads;
+                    }
                 }
                 _ => {}
             },
@@ -746,8 +814,14 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                     let project_a_tag = project.a_tag();
                     let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
                     let branch = app.selected_branch.clone();
-                    // NIP-22: lowercase "e" tag references the FIRST (oldest) event in current view
-                    let reply_to = app.messages().first().map(|m| m.id.clone());
+                    // NIP-22: lowercase "e" tag references the parent message
+                    // When in subthread, reply to the subthread root
+                    // When in main view, reply to the thread root (or first message)
+                    let reply_to = if let Some(ref root_id) = app.subthread_root {
+                        Some(root_id.clone())
+                    } else {
+                        Some(thread_id.clone())
+                    };
 
                     if let Err(e) = command_tx.send(NostrCommand::PublishMessage {
                         thread_id,
@@ -764,12 +838,10 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Esc = go back to threads
+        // Esc = exit input mode (then navigate back via normal mode Esc)
         KeyCode::Esc => {
             app.save_chat_draft();
             app.input_mode = InputMode::Normal;
-            app.chat_editor.clear();
-            app.view = View::Threads;
         }
         // Tab = cycle focus between input and attachments
         KeyCode::Tab if app.chat_editor.has_attachments() => {
@@ -949,7 +1021,7 @@ fn handle_attachment_modal_key(app: &mut App, key: KeyEvent) {
 }
 
 /// Handle clipboard paste - checks for images and uploads to Blossom
-async fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys) {
+fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys, upload_tx: tokio::sync::mpsc::Sender<UploadResult>) {
     use arboard::Clipboard;
 
     let mut clipboard = match Clipboard::new() {
@@ -972,25 +1044,18 @@ async fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys) {
             }
         };
 
-        // Upload to Blossom
-        match nostr::upload_image(&png_data, keys, "image/png").await {
-            Ok(url) => {
-                // Add as image attachment and insert marker
-                let id = app.chat_editor.add_image_attachment(url);
-                let marker = format!("[Image #{}] ", id);
-                for c in marker.chars() {
-                    app.chat_editor.insert_char(c);
-                }
-                app.save_chat_draft();
-                app.clear_status();
-            }
-            Err(e) => {
-                app.set_status(&format!("Upload failed: {}", e));
-            }
-        }
+        // Spawn background upload task
+        let keys = keys.clone();
+        tokio::spawn(async move {
+            let result = match nostr::upload_image(&png_data, &keys, "image/png").await {
+                Ok(url) => UploadResult::Success(url),
+                Err(e) => UploadResult::Error(format!("Upload failed: {}", e)),
+            };
+            let _ = upload_tx.send(result).await;
+        });
     } else if let Ok(text) = clipboard.get_text() {
         // Check if clipboard text is a file path to an image
-        if !handle_image_file_paste(app, &text, keys).await {
+        if !handle_image_file_paste(app, &text, keys, upload_tx) {
             // Fall back to regular text paste
             app.chat_editor.handle_paste(&text);
             app.save_chat_draft();
@@ -1000,7 +1065,7 @@ async fn handle_clipboard_paste(app: &mut App, keys: &nostr_sdk::Keys) {
 
 /// Check if text is an image file path and upload it if so
 /// Returns true if it was an image file that was handled, false otherwise
-async fn handle_image_file_paste(app: &mut App, text: &str, keys: &nostr_sdk::Keys) -> bool {
+fn handle_image_file_paste(app: &mut App, text: &str, keys: &nostr_sdk::Keys, upload_tx: tokio::sync::mpsc::Sender<UploadResult>) -> bool {
     let path = text.trim();
 
     // Skip if empty or doesn't look like a file path
@@ -1049,22 +1114,16 @@ async fn handle_image_file_paste(app: &mut App, text: &str, keys: &nostr_sdk::Ke
         }
     };
 
-    // Upload to Blossom
-    match nostr::upload_image(&data, keys, mime_type).await {
-        Ok(url) => {
-            // Add as image attachment and insert marker
-            let id = app.chat_editor.add_image_attachment(url);
-            let marker = format!("[Image #{}] ", id);
-            for c in marker.chars() {
-                app.chat_editor.insert_char(c);
-            }
-            app.save_chat_draft();
-            app.clear_status();
-        }
-        Err(e) => {
-            app.set_status(&format!("Upload failed: {}", e));
-        }
-    }
+    // Spawn background upload task
+    let keys = keys.clone();
+    let mime_type = mime_type.to_string();
+    tokio::spawn(async move {
+        let result = match nostr::upload_image(&data, &keys, &mime_type).await {
+            Ok(url) => UploadResult::Success(url),
+            Err(e) => UploadResult::Error(format!("Upload failed: {}", e)),
+        };
+        let _ = upload_tx.send(result).await;
+    });
 
     true
 }
