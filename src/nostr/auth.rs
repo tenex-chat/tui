@@ -41,6 +41,24 @@ pub fn has_stored_credentials(conn: &Arc<Mutex<Connection>>) -> bool {
     get_stored_credentials(conn).is_ok()
 }
 
+/// Check if stored credentials are encrypted (require a password to unlock)
+pub fn credentials_need_password(conn: &Arc<Mutex<Connection>>) -> bool {
+    match get_stored_credentials(conn) {
+        Ok(cred) => cred.starts_with("ncryptsec"),
+        Err(_) => false,
+    }
+}
+
+/// Load stored keys that don't require a password (unencrypted nsec)
+pub fn load_unencrypted_keys(conn: &Arc<Mutex<Connection>>) -> Result<Keys> {
+    let nsec = get_stored_credentials(conn)?;
+    if nsec.starts_with("ncryptsec") {
+        anyhow::bail!("Credentials are encrypted, password required");
+    }
+    let secret_key = SecretKey::parse(&nsec)?;
+    Ok(Keys::new(secret_key))
+}
+
 fn store_credentials(conn: &Arc<Mutex<Connection>>, ncryptsec: &str) -> Result<()> {
     let conn = conn.lock().unwrap();
     conn.execute(

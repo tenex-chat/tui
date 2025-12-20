@@ -36,6 +36,9 @@ pub enum NostrCommand {
         reply_to: Option<String>,
         branch: Option<String>,
     },
+    BootProject {
+        project_a_tag: String,
+    },
     Shutdown,
 }
 
@@ -45,7 +48,14 @@ pub enum NostrCommand {
 pub enum DataChange {
     /// Streaming delta (kind 21111) - for real-time typing updates
     /// These need ordered processing via channel, not SubscriptionStream
-    StreamingDelta { message_id: String, delta: String },
+    StreamingDelta {
+        pubkey: String,
+        message_id: String,   // from 'e' tag - message being replied to
+        thread_id: String,    // from 'E' tag - thread root
+        sequence: Option<u32>,
+        created_at: u64,
+        delta: String,
+    },
 }
 
 pub struct NostrWorker {
@@ -105,6 +115,12 @@ impl NostrWorker {
                         info!("Worker: Publishing message");
                         if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch)) {
                             error!("Failed to publish message: {}", e);
+                        }
+                    }
+                    NostrCommand::BootProject { project_a_tag } => {
+                        info!("Worker: Booting project {}", project_a_tag);
+                        if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag)) {
+                            error!("Failed to boot project: {}", e);
                         }
                     }
                     NostrCommand::Shutdown => {
@@ -231,9 +247,33 @@ impl NostrWorker {
         // Only streaming deltas need channel processing (ordered delivery)
         // All other events are handled via SubscriptionStream
         if event.kind.as_u16() == 21111 {
-            if let Some(message_id) = Self::get_e_tag(&event) {
+            eprintln!("[STREAM] Received 21111 event: id={}", &event.id.to_hex()[..16]);
+
+            let e_tag = Self::get_e_tag(&event);
+            let upper_e_tag = Self::get_uppercase_e_tag(&event);
+
+            eprintln!("[STREAM]   e tag (message_id): {:?}", e_tag.as_ref().map(|s| &s[..16.min(s.len())]));
+            eprintln!("[STREAM]   E tag (thread_id): {:?}", upper_e_tag.as_ref().map(|s| &s[..16.min(s.len())]));
+
+            // Extract required tags - both 'e' (message being replied to) and 'E' (thread root) are required
+            if let (Some(message_id), Some(thread_id)) = (e_tag, upper_e_tag) {
+                let pubkey = event.pubkey.to_hex();
+                let sequence = Self::get_sequence_tag(&event);
+                let created_at = event.created_at.as_u64();
                 let delta = event.content.to_string();
-                data_tx.send(DataChange::StreamingDelta { message_id, delta })?;
+
+                eprintln!("[STREAM]   Sending StreamingDelta: seq={:?}, delta_len={}", sequence, delta.len());
+
+                data_tx.send(DataChange::StreamingDelta {
+                    pubkey,
+                    message_id,
+                    thread_id,
+                    sequence,
+                    created_at,
+                    delta,
+                })?;
+            } else {
+                eprintln!("[STREAM]   Skipping 21111 - missing required tags");
             }
         }
 
@@ -248,6 +288,26 @@ impl NostrWorker {
             .find(|t| t.as_slice().first().map(|s| s == "e").unwrap_or(false))
             .and_then(|t| t.as_slice().get(1))
             .map(|s| s.to_string())
+    }
+
+    /// Get thread_id from uppercase "E" tag (NIP-22 root reference)
+    fn get_uppercase_e_tag(event: &Event) -> Option<String> {
+        event
+            .tags
+            .iter()
+            .find(|t| t.as_slice().first().map(|s| s == "E").unwrap_or(false))
+            .and_then(|t| t.as_slice().get(1))
+            .map(|s| s.to_string())
+    }
+
+    /// Get sequence number from "sequence" tag
+    fn get_sequence_tag(event: &Event) -> Option<u32> {
+        event
+            .tags
+            .iter()
+            .find(|t| t.as_slice().first().map(|s| s == "sequence").unwrap_or(false))
+            .and_then(|t| t.as_slice().get(1))
+            .and_then(|s| s.parse().ok())
     }
 
     async fn handle_sync(&mut self) -> Result<()> {
@@ -553,6 +613,33 @@ impl NostrWorker {
             Ok(Ok(output)) => info!("Published message: {}", output.id()),
             Ok(Err(e)) => error!("Failed to send message to relay: {}", e),
             Err(_) => error!("Timeout sending message to relay (event was saved locally)"),
+        }
+
+        Ok(())
+    }
+
+    async fn handle_boot_project(&self, project_a_tag: String) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Parse project coordinate for proper a-tag
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
+
+        // Kind 24000 boot request with a-tag pointing to project
+        let event = EventBuilder::new(Kind::Custom(24000), "")
+            .tag(Tag::coordinate(coordinate));
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Sent boot request: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send boot request to relay: {}", e),
+            Err(_) => error!("Timeout sending boot request to relay"),
         }
 
         Ok(())

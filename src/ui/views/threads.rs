@@ -1,3 +1,4 @@
+use crate::ui::views::chat::render_tab_bar;
 use crate::ui::App;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -8,12 +9,27 @@ use ratatui::{
 };
 
 pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
+    let has_tabs = !app.open_tabs.is_empty();
+
+    // Main vertical layout: content + optional tab bar
+    let vertical_chunks = if has_tabs {
+        Layout::vertical([
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
+        .split(area)
+    } else {
+        Layout::vertical([Constraint::Min(0)]).split(area)
+    };
+
+    let main_area = vertical_chunks[0];
+
     // Split into main content and status sidebar
     let main_chunks = Layout::horizontal([
         Constraint::Min(40),
         Constraint::Length(30),
     ])
-    .split(area);
+    .split(main_area);
 
     let content_area = main_chunks[0];
     let status_area = main_chunks[1];
@@ -46,6 +62,11 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
                     .border_style(Style::default().fg(Color::Yellow)),
             );
         f.render_widget(input_widget, chunks[1]);
+
+        // Tab bar (if tabs exist)
+        if has_tabs {
+            render_tab_bar(f, app, vertical_chunks[1]);
+        }
         return;
     }
 
@@ -54,6 +75,11 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
         let empty = Paragraph::new("No threads found. Press 'n' to create a new thread.")
             .style(Style::default().fg(Color::DarkGray));
         f.render_widget(empty, content_area);
+
+        // Tab bar (if tabs exist)
+        if has_tabs {
+            render_tab_bar(f, app, vertical_chunks[1]);
+        }
         return;
     }
 
@@ -62,6 +88,11 @@ pub fn render_threads(f: &mut Frame, app: &App, area: Rect) {
     // Render agent selector overlay if showing
     if app.showing_agent_selector {
         render_agent_selector(f, app, area);
+    }
+
+    // Tab bar (if tabs exist)
+    if has_tabs {
+        render_tab_bar(f, app, vertical_chunks[1]);
     }
 }
 

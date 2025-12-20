@@ -4,6 +4,7 @@ use nostrdb::Note;
 pub struct Thread {
     pub id: String,
     pub title: String,
+    pub content: String,
     pub pubkey: String,
     /// Most recent activity (thread creation or latest reply)
     pub last_activity: u64,
@@ -37,9 +38,12 @@ impl Thread {
             }
         }
 
+        let content = note.content().to_string();
+
         Some(Thread {
             id,
             title: title.unwrap_or_else(|| "Untitled".to_string()),
+            content,
             pubkey,
             last_activity: created_at,
         })

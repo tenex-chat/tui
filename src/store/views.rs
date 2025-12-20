@@ -112,34 +112,42 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
         }
     }
 
-    // Then get all replies (kind:1111) for this thread
-    // nostrdb stores e-tags as id variant (bytes), not hex strings,
-    // so we filter at app level instead of using .tags() filter
+    // Get all replies (kind:1111) for this thread using uppercase 'E' tag (NIP-22 root reference)
+    // nostrdb stores 'E' tag values as 32-byte IDs, not hex strings, so we must query with bytes
     let results = {
         let _span = info_span!("query_messages").entered();
-        let filter = Filter::new().kinds([1111]).build();
+
+        // Convert hex thread_id to bytes for the query
+        let thread_id_bytes: [u8; 32] = match hex::decode(thread_id) {
+            Ok(bytes) if bytes.len() == 32 => {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                arr
+            }
+            _ => return Ok(messages), // Invalid thread_id, return just the root message
+        };
+
+        let mut filter = Filter::new();
+        filter.start_tag_field('E').unwrap();
+        filter.add_id_element(&thread_id_bytes).unwrap();
+        filter.end_field();
+        let filter = filter.kinds([1111]).build();
+
         ndb.query(&txn, &[filter], 1000)?
     };
 
-    tracing::info!("query returned {} messages", results.len());
+    tracing::info!("query returned {} messages for thread", results.len());
 
     let replies: Vec<Message> = {
-        let _span = info_span!("filter_messages", total = results.len()).entered();
+        let _span = info_span!("parse_messages", total = results.len()).entered();
         results
             .iter()
             .filter_map(|r| {
                 let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
-                let msg = Message::from_note(&note)?;
-                if msg.thread_id == thread_id {
-                    Some(msg)
-                } else {
-                    None
-                }
+                Message::from_note(&note)
             })
             .collect()
     };
-
-    tracing::info!("filtered to {} messages for this thread", replies.len());
 
     messages.extend(replies);
 

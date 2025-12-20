@@ -1,4 +1,4 @@
-use crate::models::{ChatDraft, DraftStorage, Message, Project, ProjectAgent, ProjectStatus, StreamingAccumulator, Thread};
+use crate::models::{ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread};
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{AppDataStore, Database};
 use crate::ui::text_editor::TextEditor;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
-    Projects,
+    Home,
     Threads,
     Chat,
 }
@@ -21,6 +21,38 @@ pub enum InputMode {
     Normal,
     Editing,
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum HomeTab {
+    Recent,
+    Inbox,
+    Projects,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RecentPanelFocus {
+    Conversations,
+    Feed,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum NewThreadField {
+    Content,
+    Project,
+    Agent,
+}
+
+/// An open tab representing a thread
+#[derive(Debug, Clone)]
+pub struct OpenTab {
+    pub thread_id: String,
+    pub thread_title: String,
+    pub project_a_tag: String,
+    pub has_unread: bool,
+}
+
+/// Maximum number of open tabs (matches 1-9 shortcuts)
+pub const MAX_TABS: usize = 9;
 
 pub struct App {
     pub running: bool,
@@ -39,6 +71,8 @@ pub struct App {
     pub selected_agent: Option<ProjectAgent>,
 
     pub scroll_offset: usize,
+    /// Maximum scroll offset (set after rendering to enable proper scroll clamping)
+    pub max_scroll_offset: usize,
     pub status_message: Option<String>,
 
     pub creating_thread: bool,
@@ -49,16 +83,11 @@ pub struct App {
     pub selected_branch: Option<String>,
     pub selector_filter: String,
 
-    pub streaming_accumulator: StreamingAccumulator,
-
     pub command_tx: Option<Sender<NostrCommand>>,
     pub data_rx: Option<Receiver<DataChange>>,
 
     /// Filter text for projects view (type to filter)
     pub project_filter: String,
-
-    /// Whether offline projects section is expanded
-    pub offline_projects_expanded: bool,
 
     /// Whether user pressed Ctrl+C once (pending quit confirmation)
     pub pending_quit: bool,
@@ -84,6 +113,32 @@ pub struct App {
     pub subthread_root_message: Option<Message>,
     /// Index of selected message in chat view (for navigation)
     pub selected_message_index: usize,
+
+    /// Open tabs (max 9, LRU eviction)
+    pub open_tabs: Vec<OpenTab>,
+    /// Index of the active tab
+    pub active_tab_index: usize,
+
+    // Home view state
+    pub home_panel_focus: HomeTab,
+    pub recent_panel_focus: RecentPanelFocus,
+    pub selected_inbox_index: usize,
+    pub selected_recent_index: usize,
+    pub selected_feed_index: usize,
+    pub showing_projects_modal: bool,
+
+    // New thread modal state
+    pub showing_new_thread_modal: bool,
+    pub new_thread_modal_focus: NewThreadField,
+    pub new_thread_project_filter: String,
+    pub new_thread_agent_filter: String,
+    pub new_thread_selected_project: Option<Project>,
+    pub new_thread_selected_agent: Option<ProjectAgent>,
+    pub new_thread_editor: TextEditor,
+    pub new_thread_project_index: usize,
+    pub new_thread_agent_index: usize,
+    project_draft_storage: RefCell<ProjectDraftStorage>,
+    preferences: RefCell<PreferencesStorage>,
 }
 
 impl App {
@@ -105,6 +160,7 @@ impl App {
             selected_agent: None,
 
             scroll_offset: 0,
+            max_scroll_offset: 0,
             status_message: None,
 
             creating_thread: false,
@@ -115,13 +171,10 @@ impl App {
             selected_branch: None,
             selector_filter: String::new(),
 
-            streaming_accumulator: StreamingAccumulator::new(),
-
             command_tx: None,
             data_rx: None,
 
             project_filter: String::new(),
-            offline_projects_expanded: false,
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
             chat_editor: TextEditor::new(),
@@ -131,6 +184,25 @@ impl App {
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,
+            open_tabs: Vec::new(),
+            active_tab_index: 0,
+            home_panel_focus: HomeTab::Recent,
+            recent_panel_focus: RecentPanelFocus::Conversations,
+            selected_inbox_index: 0,
+            selected_recent_index: 0,
+            selected_feed_index: 0,
+            showing_projects_modal: false,
+            showing_new_thread_modal: false,
+            new_thread_modal_focus: NewThreadField::Content,
+            new_thread_project_filter: String::new(),
+            new_thread_agent_filter: String::new(),
+            new_thread_selected_project: None,
+            new_thread_selected_agent: None,
+            new_thread_editor: TextEditor::new(),
+            new_thread_project_index: 0,
+            new_thread_agent_index: 0,
+            project_draft_storage: RefCell::new(ProjectDraftStorage::new("tenex_data")),
+            preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
         }
     }
 
@@ -283,14 +355,22 @@ impl App {
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
         if let Some(ref data_rx) = self.data_rx {
             // Process streaming deltas (need ordered delivery)
-            while let Ok(DataChange::StreamingDelta { message_id, delta }) = data_rx.try_recv() {
-                let streaming_delta = crate::models::StreamingDelta {
+            while let Ok(DataChange::StreamingDelta {
+                pubkey,
+                message_id,
+                thread_id,
+                sequence,
+                created_at,
+                delta,
+            }) = data_rx.try_recv() {
+                self.data_store.borrow_mut().handle_streaming_delta(
+                    pubkey,
                     message_id,
+                    thread_id,
+                    sequence,
+                    created_at,
                     delta,
-                    sequence: None,
-                    created_at: 0,
-                };
-                self.streaming_accumulator.add_delta(streaming_delta);
+                );
             }
         }
         Ok(())
@@ -302,6 +382,29 @@ impl App {
 
     pub fn clear_status(&mut self) {
         self.status_message = None;
+    }
+
+    /// Scroll up by the given amount, clamping to valid range
+    pub fn scroll_up(&mut self, amount: usize) {
+        // First clamp scroll_offset to max if it's above (handles usize::MAX sentinel)
+        if self.scroll_offset > self.max_scroll_offset {
+            self.scroll_offset = self.max_scroll_offset;
+        }
+        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
+    }
+
+    /// Scroll down by the given amount, clamping to valid range
+    pub fn scroll_down(&mut self, amount: usize) {
+        // First clamp scroll_offset to max if it's above (handles usize::MAX sentinel)
+        if self.scroll_offset > self.max_scroll_offset {
+            self.scroll_offset = self.max_scroll_offset;
+        }
+        self.scroll_offset = self.scroll_offset.saturating_add(amount).min(self.max_scroll_offset);
+    }
+
+    /// Scroll to bottom
+    pub fn scroll_to_bottom(&mut self) {
+        self.scroll_offset = self.max_scroll_offset;
     }
 
     pub fn quit(&mut self) {
@@ -406,5 +509,359 @@ impl App {
         let input = self.input.clone();
         self.clear_input();
         input
+    }
+
+    /// Open a thread in a tab (or switch to it if already open)
+    /// Returns the tab index
+    pub fn open_tab(&mut self, thread: &Thread, project_a_tag: &str) -> usize {
+        // Check if already open
+        if let Some(idx) = self.open_tabs.iter().position(|t| t.thread_id == thread.id) {
+            // Clear unread since we're switching to it
+            self.open_tabs[idx].has_unread = false;
+            self.active_tab_index = idx;
+            return idx;
+        }
+
+        // Create new tab
+        let tab = OpenTab {
+            thread_id: thread.id.clone(),
+            thread_title: thread.title.clone(),
+            project_a_tag: project_a_tag.to_string(),
+            has_unread: false,
+        };
+
+        // If at max capacity, remove the oldest (leftmost) tab
+        if self.open_tabs.len() >= MAX_TABS {
+            self.open_tabs.remove(0);
+            // Adjust active index if needed
+            if self.active_tab_index > 0 {
+                self.active_tab_index -= 1;
+            }
+        }
+
+        self.open_tabs.push(tab);
+        self.active_tab_index = self.open_tabs.len() - 1;
+        self.active_tab_index
+    }
+
+    /// Close the current tab
+    pub fn close_current_tab(&mut self) {
+        if self.open_tabs.is_empty() {
+            return;
+        }
+
+        self.open_tabs.remove(self.active_tab_index);
+
+        if self.open_tabs.is_empty() {
+            // No more tabs - go back to threads view
+            self.save_chat_draft();
+            self.chat_editor.clear();
+            self.selected_thread = None;
+            self.view = View::Threads;
+            self.active_tab_index = 0;
+        } else {
+            // Move to next tab (or previous if we were at the end)
+            if self.active_tab_index >= self.open_tabs.len() {
+                self.active_tab_index = self.open_tabs.len() - 1;
+            }
+            // Switch to the new active tab
+            self.switch_to_tab(self.active_tab_index);
+        }
+    }
+
+    /// Switch to a specific tab by index
+    pub fn switch_to_tab(&mut self, index: usize) {
+        if index >= self.open_tabs.len() {
+            return;
+        }
+
+        // Save current draft before switching
+        self.save_chat_draft();
+
+        self.active_tab_index = index;
+
+        // Extract data we need before mutating
+        let thread_id = self.open_tabs[index].thread_id.clone();
+        let project_a_tag = self.open_tabs[index].project_a_tag.clone();
+
+        // Clear unread for this tab
+        self.open_tabs[index].has_unread = false;
+
+        // Find the thread in data store
+        let thread = self.data_store.borrow().get_threads(&project_a_tag)
+            .iter()
+            .find(|t| t.id == thread_id)
+            .cloned();
+
+        if let Some(thread) = thread {
+            self.selected_thread = Some(thread);
+            self.restore_chat_draft();
+            self.scroll_offset = usize::MAX; // Scroll to bottom
+            self.selected_message_index = 0;
+            self.subthread_root = None;
+            self.subthread_root_message = None;
+        }
+    }
+
+    /// Switch to next tab (Ctrl+Tab)
+    pub fn next_tab(&mut self) {
+        if self.open_tabs.len() <= 1 {
+            return;
+        }
+        let next = (self.active_tab_index + 1) % self.open_tabs.len();
+        self.switch_to_tab(next);
+    }
+
+    /// Switch to previous tab (Ctrl+Shift+Tab)
+    pub fn prev_tab(&mut self) {
+        if self.open_tabs.len() <= 1 {
+            return;
+        }
+        let prev = if self.active_tab_index == 0 {
+            self.open_tabs.len() - 1
+        } else {
+            self.active_tab_index - 1
+        };
+        self.switch_to_tab(prev);
+    }
+
+    /// Mark a thread as having unread messages (if it's open in a tab but not active)
+    pub fn mark_tab_unread(&mut self, thread_id: &str) {
+        for (idx, tab) in self.open_tabs.iter_mut().enumerate() {
+            if tab.thread_id == thread_id && idx != self.active_tab_index {
+                tab.has_unread = true;
+            }
+        }
+    }
+
+    /// Count unread tabs
+    pub fn unread_tab_count(&self) -> usize {
+        self.open_tabs.iter().filter(|t| t.has_unread).count()
+    }
+
+    // ===== Home View Methods =====
+
+    /// Get recent threads across all projects for Home view
+    pub fn recent_threads(&self) -> Vec<(Thread, String)> {
+        self.data_store.borrow().get_all_recent_threads(50)
+    }
+
+    /// Get inbox items for Home view
+    pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
+        self.data_store.borrow().get_inbox_items().to_vec()
+    }
+
+    /// Get agent chatter feed for Home view
+    pub fn agent_chatter(&self) -> Vec<crate::models::AgentChatter> {
+        self.data_store.borrow().get_agent_chatter().to_vec()
+    }
+
+    /// Open thread from Home view (recent conversations or inbox)
+    pub fn open_thread_from_home(&mut self, thread: &Thread, project_a_tag: &str) {
+        // Find and set selected project
+        let project = self.data_store.borrow().get_projects()
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .cloned();
+
+        if let Some(project) = project {
+            self.selected_project = Some(project);
+
+            // Open tab and switch to chat
+            self.open_tab(thread, project_a_tag);
+            self.selected_thread = Some(thread.clone());
+            self.restore_chat_draft();
+            self.view = View::Chat;
+            self.input_mode = InputMode::Editing;
+            self.scroll_offset = usize::MAX;
+        }
+    }
+
+    // ===== New Thread Modal Methods =====
+
+    /// Open the new thread modal
+    pub fn open_new_thread_modal(&mut self) {
+        self.showing_new_thread_modal = true;
+        self.new_thread_modal_focus = NewThreadField::Content;
+        self.new_thread_project_filter.clear();
+        self.new_thread_agent_filter.clear();
+        self.new_thread_project_index = 0;
+        self.new_thread_agent_index = 0;
+
+        // Try to load last used project
+        let last_project_a_tag = self.preferences.borrow().last_project().map(|s| s.to_string());
+
+        if let Some(ref a_tag) = last_project_a_tag {
+            let project = self.data_store.borrow().get_projects()
+                .iter()
+                .find(|p| p.a_tag() == *a_tag)
+                .cloned();
+
+            if let Some(project) = project {
+                self.new_thread_selected_project = Some(project.clone());
+                // Auto-select first agent if available
+                if let Some(status) = self.data_store.borrow().get_project_status(&project.a_tag()) {
+                    self.new_thread_selected_agent = status.agents.first().cloned();
+                }
+                // Load project draft
+                self.restore_project_draft(&project.a_tag());
+            }
+        }
+
+        // If no last project, try to select first online project
+        if self.new_thread_selected_project.is_none() {
+            let (online, _) = self.filtered_projects();
+            if let Some(project) = online.first() {
+                self.new_thread_selected_project = Some(project.clone());
+                if let Some(status) = self.data_store.borrow().get_project_status(&project.a_tag()) {
+                    self.new_thread_selected_agent = status.agents.first().cloned();
+                }
+            }
+        }
+
+        self.input_mode = InputMode::Editing;
+    }
+
+    /// Close the new thread modal, saving draft
+    pub fn close_new_thread_modal(&mut self) {
+        self.save_project_draft();
+        self.showing_new_thread_modal = false;
+        self.new_thread_editor.clear();
+        self.new_thread_selected_project = None;
+        self.new_thread_selected_agent = None;
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// Save project draft for the current modal state
+    fn save_project_draft(&self) {
+        if let Some(ref project) = self.new_thread_selected_project {
+            let draft = ProjectDraft {
+                project_a_tag: project.a_tag(),
+                text: self.new_thread_editor.build_full_content(),
+                selected_agent_pubkey: self.new_thread_selected_agent.as_ref().map(|a| a.pubkey.clone()),
+                last_modified: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            };
+            self.project_draft_storage.borrow_mut().save(draft);
+        }
+    }
+
+    /// Restore project draft into the modal editor
+    fn restore_project_draft(&mut self, project_a_tag: &str) {
+        if let Some(draft) = self.project_draft_storage.borrow().load(project_a_tag) {
+            self.new_thread_editor.text = draft.text;
+            self.new_thread_editor.cursor = self.new_thread_editor.text.len();
+            if let Some(agent_pubkey) = draft.selected_agent_pubkey {
+                if let Some(status) = self.data_store.borrow().get_project_status(project_a_tag) {
+                    self.new_thread_selected_agent = status
+                        .agents
+                        .iter()
+                        .find(|a| a.pubkey == agent_pubkey)
+                        .cloned();
+                }
+            }
+        }
+    }
+
+    /// Delete project draft (after sending)
+    pub fn delete_project_draft(&self, project_a_tag: &str) {
+        self.project_draft_storage.borrow_mut().delete(project_a_tag);
+    }
+
+    /// Set last used project preference
+    pub fn set_last_project(&self, project_a_tag: &str) {
+        self.preferences.borrow_mut().set_last_project(project_a_tag);
+    }
+
+    /// Cycle to next field in new thread modal
+    pub fn new_thread_modal_next_field(&mut self) {
+        // Save draft when switching away from project
+        if self.new_thread_modal_focus == NewThreadField::Project {
+            self.save_project_draft();
+        }
+
+        self.new_thread_modal_focus = match self.new_thread_modal_focus {
+            NewThreadField::Content => NewThreadField::Project,
+            NewThreadField::Project => NewThreadField::Agent,
+            NewThreadField::Agent => NewThreadField::Content,
+        };
+
+        // Clear filter when entering a selector
+        match self.new_thread_modal_focus {
+            NewThreadField::Project => self.new_thread_project_filter.clear(),
+            NewThreadField::Agent => self.new_thread_agent_filter.clear(),
+            NewThreadField::Content => {}
+        }
+    }
+
+    /// Get filtered projects for the new thread modal
+    pub fn new_thread_filtered_projects(&self) -> Vec<Project> {
+        let filter = self.new_thread_project_filter.to_lowercase();
+        let store = self.data_store.borrow();
+        let projects = store.get_projects();
+
+        projects
+            .iter()
+            .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
+            .filter(|p| store.is_project_online(&p.a_tag()))
+            .cloned()
+            .collect()
+    }
+
+    /// Get filtered agents for the new thread modal
+    pub fn new_thread_filtered_agents(&self) -> Vec<ProjectAgent> {
+        let filter = self.new_thread_agent_filter.to_lowercase();
+        self.new_thread_selected_project
+            .as_ref()
+            .and_then(|p| {
+                self.data_store
+                    .borrow()
+                    .get_project_status(&p.a_tag())
+                    .map(|s| {
+                        s.agents
+                            .iter()
+                            .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
+                            .cloned()
+                            .collect()
+                    })
+            })
+            .unwrap_or_default()
+    }
+
+    /// Select a project in the new thread modal
+    pub fn new_thread_select_project(&mut self, project: Project) {
+        // Save draft for old project
+        self.save_project_draft();
+
+        let a_tag = project.a_tag();
+        self.new_thread_selected_project = Some(project);
+        self.new_thread_selected_agent = None;
+
+        // Auto-select first agent
+        if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+            self.new_thread_selected_agent = status.agents.first().cloned();
+        }
+
+        // Load draft for new project
+        self.restore_project_draft(&a_tag);
+
+        // Move to next field
+        self.new_thread_modal_focus = NewThreadField::Agent;
+        self.new_thread_agent_filter.clear();
+    }
+
+    /// Select an agent in the new thread modal
+    pub fn new_thread_select_agent(&mut self, agent: ProjectAgent) {
+        self.new_thread_selected_agent = Some(agent);
+        self.new_thread_modal_focus = NewThreadField::Content;
+    }
+
+    /// Check if the new thread modal can submit
+    pub fn can_submit_new_thread(&self) -> bool {
+        self.new_thread_selected_project.is_some()
+            && self.new_thread_selected_agent.is_some()
+            && !self.new_thread_editor.text.trim().is_empty()
     }
 }

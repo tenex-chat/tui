@@ -1,6 +1,6 @@
 use crate::models::Message;
 use crate::ui::markdown::render_markdown;
-use crate::ui::tool_calls::{parse_message_content, render_tool_calls_group, MessageContent};
+use crate::ui::tool_calls::{parse_message_content, MessageContent, tool_icon, extract_target};
 use crate::ui::{App, InputMode};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -12,46 +12,169 @@ use ratatui::{
 use std::collections::HashMap;
 use tracing::info_span;
 
-/// Get any streaming content for the current thread
-fn get_streaming_content(app: &App) -> Option<(String, String)> {
-    let thread = app.selected_thread.as_ref()?;
+/// Streaming content for display
+struct StreamingContent {
+    agent_name: String,
+    content: String,
+}
 
-    // Check if there's streaming content for this thread
-    // Streaming deltas reference the message they're responding to,
-    // which could be the thread root or any message in the thread
-    for msg_id in app.streaming_accumulator.pending_messages() {
-        // Check if this message_id is the thread root
-        if msg_id == thread.id {
-            if let Some(content) = app.streaming_accumulator.get_content(msg_id) {
-                let agent_name = app
-                    .selected_agent
-                    .as_ref()
-                    .map(|a| a.name.clone())
-                    .unwrap_or_else(|| "Agent".to_string());
-                return Some((agent_name, content));
-            }
+/// Check if a message looks like a short action/status message
+fn is_action_message(content: &str) -> bool {
+    let trimmed = content.trim();
+
+    // Must be short (under 100 chars) and single line
+    if trimmed.len() > 100 || trimmed.contains('\n') {
+        return false;
+    }
+
+    // Common action patterns
+    let action_patterns = [
+        "Sending", "Executing", "Delegating", "Running", "Calling",
+        "Reading", "Writing", "Editing", "Creating", "Deleting",
+        "Searching", "Finding", "Checking", "Validating", "Processing",
+        "Fetching", "Loading", "Saving", "Updating", "Installing",
+        "Building", "Compiling", "Testing", "Deploying",
+        "There is an existing", "Already", "Successfully", "Failed to",
+        "Starting", "Finishing", "Completed", "Done",
+    ];
+
+    for pattern in action_patterns {
+        if trimmed.starts_with(pattern) {
+            return true;
         }
+    }
 
-        // Check if this message_id is any message in the current thread
-        let messages = app.messages();
-        for msg in &messages {
-            if msg.id == msg_id {
-                if let Some(content) = app.streaming_accumulator.get_content(msg_id) {
-                    let agent_name = app
-                        .selected_agent
-                        .as_ref()
-                        .map(|a| a.name.clone())
-                        .unwrap_or_else(|| "Agent".to_string());
-                    return Some((agent_name, content));
-                }
+    // Also detect messages that look like tool operations (short with specific verbs)
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    if words.len() <= 6 {
+        if let Some(first) = words.first() {
+            // Check for -ing verbs
+            if first.ends_with("ing") && first.len() > 4 {
+                return true;
             }
         }
     }
 
-    None
+    false
 }
 
-pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
+/// Grouped display item - either a single message or a collapsed group
+enum DisplayItem<'a> {
+    SingleMessage(&'a Message),
+    ActionGroup {
+        messages: Vec<&'a Message>,
+        pubkey: String,
+    },
+}
+
+/// Group consecutive action messages from the same author
+fn group_messages<'a>(messages: &[&'a Message], user_pubkey: Option<&str>) -> Vec<DisplayItem<'a>> {
+    let mut result = Vec::new();
+    let mut current_group: Vec<&'a Message> = Vec::new();
+    let mut group_pubkey: Option<String> = None;
+
+    for msg in messages {
+        let is_user = user_pubkey.map(|pk| pk == msg.pubkey.as_str()).unwrap_or(false);
+        let is_action = !is_user && is_action_message(&msg.content);
+
+        if is_action {
+            // Check if we can add to current group
+            if let Some(ref pk) = group_pubkey {
+                if pk == &msg.pubkey {
+                    current_group.push(msg);
+                    continue;
+                }
+            }
+
+            // Flush existing group if any
+            if !current_group.is_empty() {
+                if current_group.len() == 1 {
+                    result.push(DisplayItem::SingleMessage(current_group[0]));
+                } else {
+                    result.push(DisplayItem::ActionGroup {
+                        messages: current_group.clone(),
+                        pubkey: group_pubkey.clone().unwrap(),
+                    });
+                }
+                current_group.clear();
+            }
+
+            // Start new group
+            group_pubkey = Some(msg.pubkey.clone());
+            current_group.push(msg);
+        } else {
+            // Flush any existing group
+            if !current_group.is_empty() {
+                if current_group.len() == 1 {
+                    result.push(DisplayItem::SingleMessage(current_group[0]));
+                } else {
+                    result.push(DisplayItem::ActionGroup {
+                        messages: current_group.clone(),
+                        pubkey: group_pubkey.clone().unwrap(),
+                    });
+                }
+                current_group.clear();
+                group_pubkey = None;
+            }
+
+            result.push(DisplayItem::SingleMessage(msg));
+        }
+    }
+
+    // Flush final group
+    if !current_group.is_empty() {
+        if current_group.len() == 1 {
+            result.push(DisplayItem::SingleMessage(current_group[0]));
+        } else {
+            result.push(DisplayItem::ActionGroup {
+                messages: current_group,
+                pubkey: group_pubkey.unwrap(),
+            });
+        }
+    }
+
+    result
+}
+
+/// Get streaming sessions with content for the current thread
+fn get_streaming_content(app: &App) -> Vec<StreamingContent> {
+    let thread = match app.selected_thread.as_ref() {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let data_store = app.data_store.borrow();
+    let sessions = data_store.streaming_with_content_for_thread(&thread.id);
+
+    sessions
+        .into_iter()
+        .map(|session| {
+            let agent_name = data_store.get_profile_name(&session.pubkey);
+            StreamingContent {
+                agent_name,
+                content: session.content().to_string(),
+            }
+        })
+        .collect()
+}
+
+/// Get typing indicators (agents streaming but no content yet)
+fn get_typing_indicators(app: &App) -> Vec<String> {
+    let thread = match app.selected_thread.as_ref() {
+        Some(t) => t,
+        None => return Vec::new(),
+    };
+
+    let data_store = app.data_store.borrow();
+    let pubkeys = data_store.typing_indicators_for_thread(&thread.id);
+
+    pubkeys
+        .into_iter()
+        .map(|pubkey| data_store.get_profile_name(pubkey))
+        .collect()
+}
+
+pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let all_messages = app.messages();
     let _render_span = info_span!("render_chat", message_count = all_messages.len()).entered();
 
@@ -63,28 +186,59 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
     let has_status = app.status_message.is_some();
 
-    // Build layout based on whether we have attachments and/or status
-    let chunks = match (has_attachments, has_status) {
-        (true, true) => Layout::vertical([
+    // Check if we have tabs to show
+    let has_tabs = !app.open_tabs.is_empty();
+
+    // Build layout based on whether we have attachments, status, and tabs
+    let chunks = match (has_attachments, has_status, has_tabs) {
+        (true, true, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Status line
+            Constraint::Length(1),     // Context line
+            Constraint::Length(1),     // Attachments line
+            Constraint::Length(input_height), // Input
+            Constraint::Length(1),     // Tab bar
+        ]).split(area),
+        (true, true, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
             Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
             Constraint::Length(input_height), // Input
         ]).split(area),
-        (true, false) => Layout::vertical([
+        (true, false, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Context line
+            Constraint::Length(1),     // Attachments line
+            Constraint::Length(input_height), // Input
+            Constraint::Length(1),     // Tab bar
+        ]).split(area),
+        (true, false, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
             Constraint::Length(input_height), // Input
         ]).split(area),
-        (false, true) => Layout::vertical([
+        (false, true, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Status line
+            Constraint::Length(1),     // Context line
+            Constraint::Length(input_height), // Input
+            Constraint::Length(1),     // Tab bar
+        ]).split(area),
+        (false, true, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
             Constraint::Length(1),     // Context line
             Constraint::Length(input_height), // Input
         ]).split(area),
-        (false, false) => Layout::vertical([
+        (false, false, true) => Layout::vertical([
+            Constraint::Min(0),        // Messages
+            Constraint::Length(1),     // Context line
+            Constraint::Length(input_height), // Input
+            Constraint::Length(1),     // Tab bar
+        ]).split(area),
+        (false, false, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Context line
             Constraint::Length(input_height), // Input
@@ -141,156 +295,418 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
     // Messages area
     let mut messages_text: Vec<Line> = Vec::new();
 
+    // Left padding for message content
+    let padding = "   ";
+    let content_width = area.width.saturating_sub(4) as usize;
+
+    // Render the thread itself (kind:11) as the first message
+    // This is NOT in subthread mode - the thread content IS the first message
+    if !app.in_subthread() {
+        if let Some(ref thread) = app.selected_thread {
+            if !thread.content.trim().is_empty() {
+                let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+                let is_user_thread = user_pubkey.as_ref().map(|pk| pk == &thread.pubkey).unwrap_or(false);
+                let author = app.data_store.borrow().get_profile_name(&thread.pubkey);
+
+                if is_user_thread {
+                    // User's thread - render as card
+                    let card_border = Color::Rgb(48, 54, 61);
+                    let label_color = Color::Green;
+
+                    let top_border = "─".repeat(content_width.saturating_sub(2));
+                    messages_text.push(Line::from(Span::styled(
+                        format!("╭{}╮", top_border),
+                        Style::default().fg(card_border),
+                    )));
+
+                    messages_text.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(card_border)),
+                        Span::styled(author, Style::default().fg(label_color).add_modifier(Modifier::BOLD)),
+                    ]));
+
+                    let markdown_lines = render_markdown(&thread.content);
+                    for line in markdown_lines {
+                        let mut line_spans = vec![
+                            Span::styled("│ ", Style::default().fg(card_border)),
+                        ];
+                        line_spans.extend(line.spans);
+                        messages_text.push(Line::from(line_spans));
+                    }
+
+                    let bottom_border = "─".repeat(content_width.saturating_sub(2));
+                    messages_text.push(Line::from(Span::styled(
+                        format!("╰{}╯", bottom_border),
+                        Style::default().fg(card_border),
+                    )));
+                } else {
+                    // Someone else's thread - render with left border
+                    let border_color = Color::Cyan;
+
+                    messages_text.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(border_color)),
+                        Span::styled(author, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                    ]));
+
+                    let markdown_lines = render_markdown(&thread.content);
+                    for line in markdown_lines {
+                        let mut line_spans = vec![
+                            Span::styled("│ ", Style::default().fg(border_color)),
+                        ];
+                        line_spans.extend(line.spans);
+                        messages_text.push(Line::from(line_spans));
+                    }
+                }
+
+                messages_text.push(Line::from(""));
+            }
+        }
+    }
+
     // If in subthread, render the root message first as a header
     if let Some(ref root_msg) = app.subthread_root_message {
         let author = app.data_store.borrow().get_profile_name(&root_msg.pubkey);
         messages_text.push(Line::from(Span::styled(
-            format!("{} :", author),
+            format!("{}{} :", padding, author),
             Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
         )));
 
         // Render root message content (truncated)
         let content_preview: String = root_msg.content.chars().take(200).collect();
         let markdown_lines = render_markdown(&content_preview);
-        messages_text.extend(markdown_lines);
+        for line in markdown_lines {
+            let mut padded_spans = vec![Span::raw(padding)];
+            padded_spans.extend(line.spans);
+            messages_text.push(Line::from(padded_spans));
+        }
         if root_msg.content.len() > 200 {
-            messages_text.push(Line::from(Span::styled("...", Style::default().fg(Color::DarkGray))));
+            messages_text.push(Line::from(Span::styled(format!("{}...", padding), Style::default().fg(Color::DarkGray))));
         }
 
         // Separator
         messages_text.push(Line::from(Span::styled(
-            "────────────────────────────────────────",
+            format!("{}────────────────────────────────────────", padding),
             Style::default().fg(Color::DarkGray),
         )));
         messages_text.push(Line::from(""));
     }
 
-    // Render display messages
+    // Render display messages with card-style layout and action grouping
     {
         let _span = info_span!("render_messages").entered();
-        for (i, msg) in display_messages.iter().enumerate() {
-            let _msg_span = info_span!("render_message", index = i).entered();
 
-            // Check if this message is selected (for navigation)
-            let is_selected = i == app.selected_message_index && app.input_mode == InputMode::Normal;
+        // Get user's pubkey for distinguishing user vs assistant messages
+        let user_pubkey = app.data_store.borrow().user_pubkey.clone();
 
-            let author = {
-                let _span = info_span!("get_profile_name").entered();
-                app.data_store.borrow().get_profile_name(&msg.pubkey)
-            };
+        // Group consecutive action messages
+        let grouped = group_messages(&display_messages, user_pubkey.as_deref());
 
-            // Reasoning messages get muted italic style
-            if msg.is_reasoning {
-                let prefix = if is_selected { "> " } else { "" };
-                let header_style = if is_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::ITALIC)
-                } else {
-                    Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC)
-                };
-                messages_text.push(Line::from(Span::styled(
-                    format!("{}{} (thinking):", prefix, author),
-                    header_style,
-                )));
+        let mut prev_pubkey: Option<&str> = None;
 
-                // Render reasoning content in muted italic style
-                let muted_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
-                for line in msg.content.lines() {
-                    messages_text.push(Line::from(Span::styled(line.to_string(), muted_style)));
-                }
-            } else {
-                // Normal message rendering
-                let author_style = if is_selected {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Cyan)
-                };
-                let prefix = if is_selected { "> " } else { "" };
-                messages_text.push(Line::from(Span::styled(
-                    format!("{}{} :", prefix, author),
-                    author_style,
-                )));
+        for (group_idx, item) in grouped.iter().enumerate() {
+            match item {
+                DisplayItem::ActionGroup { messages: action_msgs, pubkey } => {
+                    // Render collapsed action group
+                    let border_color = Color::Cyan;
+                    let author = app.data_store.borrow().get_profile_name(pubkey);
 
-                let parsed = {
-                    let _span = info_span!("parse_message_content").entered();
-                    parse_message_content(&msg.content)
-                };
+                    // Show header if author changed
+                    let show_header = prev_pubkey != Some(pubkey.as_str());
+                    prev_pubkey = Some(pubkey.as_str());
 
-                match parsed {
-                    MessageContent::PlainText(text) => {
-                        let _span = info_span!("render_markdown").entered();
-                        let markdown_lines = render_markdown(&text);
-                        messages_text.extend(markdown_lines);
-                    }
-                    MessageContent::Mixed {
-                        text_parts,
-                        tool_calls,
-                    } => {
-                        for text_part in text_parts {
-                            if !text_part.trim().is_empty() {
-                                let markdown_lines = render_markdown(&text_part);
-                                messages_text.extend(markdown_lines);
-                            }
-                        }
-
-                        if !tool_calls.is_empty() {
-                            messages_text.push(Line::from(""));
-                            let tool_call_lines = render_tool_calls_group(&tool_calls);
-                            messages_text.extend(tool_call_lines);
-                        }
-                    }
-                }
-            }
-
-            // Check if this message has replies and show preview
-            if let Some(replies) = replies_by_parent.get(msg.id.as_str()) {
-                if !replies.is_empty() {
-                    // Find most recent reply
-                    let most_recent = replies.iter().max_by_key(|r| r.created_at);
-                    if let Some(recent) = most_recent {
-                        let reply_author = app.data_store.borrow().get_profile_name(&recent.pubkey);
-                        let preview: String = recent.content.chars().take(60).collect();
-                        let preview = preview.replace('\n', " ");
-                        let suffix = if recent.content.len() > 60 { "..." } else { "" };
-
+                    if show_header {
                         messages_text.push(Line::from(vec![
-                            Span::styled("  └→ ", Style::default().fg(Color::DarkGray)),
+                            Span::styled("│ ", Style::default().fg(border_color)),
                             Span::styled(
-                                format!("{}", replies.len()),
-                                Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(" · ", Style::default().fg(Color::DarkGray)),
-                            Span::styled(
-                                format!("{}: ", reply_author),
-                                Style::default().fg(Color::Blue),
-                            ),
-                            Span::styled(
-                                format!("{}{}", preview, suffix),
-                                Style::default().fg(Color::DarkGray),
+                                author,
+                                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                             ),
                         ]));
                     }
+
+                    // Collapsed summary line
+                    let count = action_msgs.len();
+                    let first_action: String = action_msgs.first()
+                        .map(|m| m.content.trim().chars().take(30).collect())
+                        .unwrap_or_default();
+                    let last_action: String = action_msgs.last()
+                        .map(|m| m.content.trim().chars().take(30).collect())
+                        .unwrap_or_default();
+
+                    messages_text.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(border_color)),
+                        Span::styled("▸ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            format!("{} actions", count),
+                            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            first_action,
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                        Span::styled(" → ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(
+                            last_action,
+                            Style::default().fg(Color::DarkGray),
+                        ),
+                    ]));
+
+                    messages_text.push(Line::from(""));
+                }
+
+                DisplayItem::SingleMessage(msg) => {
+                    let _msg_span = info_span!("render_message", index = group_idx).entered();
+
+                    // Check if this message is selected (for navigation)
+                    let is_selected = group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
+
+                    // Determine if this is from the user or an assistant
+                    let is_user_message = user_pubkey.as_ref().map(|pk| pk == &msg.pubkey).unwrap_or(false);
+
+                    // Check if we should show header (first message or different author)
+                    let show_header = prev_pubkey != Some(msg.pubkey.as_str());
+                    prev_pubkey = Some(msg.pubkey.as_str());
+
+                    let author = {
+                        let _span = info_span!("get_profile_name").entered();
+                        app.data_store.borrow().get_profile_name(&msg.pubkey)
+                    };
+
+                    if is_user_message {
+                        // USER MESSAGE: Card style with box borders
+                        let card_border = if is_selected { Color::Yellow } else { Color::Rgb(48, 54, 61) };
+                        let label_color = Color::Green;
+
+                        // Top border of card
+                        let top_border = "─".repeat(content_width.saturating_sub(2));
+                        messages_text.push(Line::from(Span::styled(
+                            format!("╭{}╮", top_border),
+                            Style::default().fg(card_border),
+                        )));
+
+                        // Label line
+                        messages_text.push(Line::from(vec![
+                            Span::styled("│ ", Style::default().fg(card_border)),
+                            Span::styled(author.clone(), Style::default().fg(label_color).add_modifier(Modifier::BOLD)),
+                        ]));
+
+                        // Content
+                        let parsed = parse_message_content(&msg.content);
+                        match parsed {
+                            MessageContent::PlainText(text) => {
+                                let markdown_lines = render_markdown(&text);
+                                for line in markdown_lines {
+                                    let mut line_spans = vec![
+                                        Span::styled("│ ", Style::default().fg(card_border)),
+                                    ];
+                                    line_spans.extend(line.spans);
+                                    messages_text.push(Line::from(line_spans));
+                                }
+                            }
+                            MessageContent::Mixed { text_parts, tool_calls: _ } => {
+                                for text_part in text_parts {
+                                    if !text_part.trim().is_empty() {
+                                        let markdown_lines = render_markdown(&text_part);
+                                        for line in markdown_lines {
+                                            let mut line_spans = vec![
+                                                Span::styled("│ ", Style::default().fg(card_border)),
+                                            ];
+                                            line_spans.extend(line.spans);
+                                            messages_text.push(Line::from(line_spans));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Bottom border of card
+                        let bottom_border = "─".repeat(content_width.saturating_sub(2));
+                        messages_text.push(Line::from(Span::styled(
+                            format!("╰{}╯", bottom_border),
+                            Style::default().fg(card_border),
+                        )));
+
+                    } else {
+                        // ASSISTANT MESSAGE: Left border style
+                        let border_color = if is_selected { Color::Yellow } else { Color::Cyan };
+
+                        // Reasoning messages get muted italic style
+                        if msg.is_reasoning {
+                            if show_header {
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│ ", Style::default().fg(border_color)),
+                                    Span::styled(
+                                        format!("{} (thinking)", author),
+                                        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                                    ),
+                                ]));
+                            }
+
+                            let muted_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+                            for line in msg.content.lines() {
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│ ", Style::default().fg(border_color)),
+                                    Span::styled(line.to_string(), muted_style),
+                                ]));
+                            }
+                        } else {
+                            // Normal assistant message
+                            if show_header {
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│ ", Style::default().fg(border_color)),
+                                    Span::styled(
+                                        author.clone(),
+                                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
+                            }
+
+                            let parsed = {
+                                let _span = info_span!("parse_message_content").entered();
+                                parse_message_content(&msg.content)
+                            };
+
+                            match parsed {
+                                MessageContent::PlainText(text) => {
+                                    let markdown_lines = render_markdown(&text);
+                                    for line in markdown_lines {
+                                        let mut line_spans = vec![
+                                            Span::styled("│ ", Style::default().fg(border_color)),
+                                        ];
+                                        line_spans.extend(line.spans);
+                                        messages_text.push(Line::from(line_spans));
+                                    }
+                                }
+                                MessageContent::Mixed { text_parts, tool_calls } => {
+                                    // Render tool calls as compact blocks
+                                    for tool_call in &tool_calls {
+                                        let icon = tool_icon(&tool_call.name);
+                                        let target = extract_target(tool_call).unwrap_or_default();
+
+                                        messages_text.push(Line::from(vec![
+                                            Span::styled("│ ", Style::default().fg(border_color)),
+                                            Span::styled("┌─ ", Style::default().fg(Color::DarkGray)),
+                                            Span::styled(icon, Style::default()),
+                                            Span::styled(" ", Style::default()),
+                                            Span::styled(
+                                                tool_call.name.to_uppercase(),
+                                                Style::default().fg(Color::DarkGray),
+                                            ),
+                                            Span::styled(" ", Style::default()),
+                                            Span::styled(
+                                                target,
+                                                Style::default().fg(Color::Cyan),
+                                            ),
+                                        ]));
+
+                                        if let Some(ref result) = tool_call.result {
+                                            let (result_icon, result_color) = if result.contains("error") || result.contains("Error") || result.contains("failed") {
+                                                ("✗", Color::Red)
+                                            } else {
+                                                ("✓", Color::Green)
+                                            };
+
+                                            let result_preview: String = result.lines().next().unwrap_or("").chars().take(60).collect();
+                                            let suffix = if result.len() > 60 { "..." } else { "" };
+
+                                            messages_text.push(Line::from(vec![
+                                                Span::styled("│ ", Style::default().fg(border_color)),
+                                                Span::styled("└─ ", Style::default().fg(Color::DarkGray)),
+                                                Span::styled(result_icon, Style::default().fg(result_color)),
+                                                Span::styled(" ", Style::default()),
+                                                Span::styled(
+                                                    format!("{}{}", result_preview, suffix),
+                                                    Style::default().fg(Color::DarkGray),
+                                                ),
+                                            ]));
+                                        }
+                                    }
+
+                                    for text_part in text_parts {
+                                        if !text_part.trim().is_empty() {
+                                            let markdown_lines = render_markdown(&text_part);
+                                            for line in markdown_lines {
+                                                let mut line_spans = vec![
+                                                    Span::styled("│ ", Style::default().fg(border_color)),
+                                                ];
+                                                line_spans.extend(line.spans);
+                                                messages_text.push(Line::from(line_spans));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check if this message has replies and show preview
+                    if let Some(replies) = replies_by_parent.get(msg.id.as_str()) {
+                        if !replies.is_empty() {
+                            let most_recent = replies.iter().max_by_key(|r| r.created_at);
+                            if let Some(recent) = most_recent {
+                                let reply_author = app.data_store.borrow().get_profile_name(&recent.pubkey);
+                                let preview: String = recent.content.chars().take(60).collect();
+                                let preview = preview.replace('\n', " ");
+                                let suffix = if recent.content.len() > 60 { "..." } else { "" };
+
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("  └→ ", Style::default().fg(Color::DarkGray)),
+                                    Span::styled(
+                                        format!("{}", replies.len()),
+                                        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                                    ),
+                                    Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                                    Span::styled(
+                                        format!("{}: ", reply_author),
+                                        Style::default().fg(Color::Blue),
+                                    ),
+                                    Span::styled(
+                                        format!("{}{}", preview, suffix),
+                                        Style::default().fg(Color::DarkGray),
+                                    ),
+                                ]));
+                            }
+                        }
+                    }
+
+                    // Blank line between messages
+                    messages_text.push(Line::from(""));
                 }
             }
-
-            messages_text.push(Line::from(""));
-            messages_text.push(Line::from(""));
         }
     }
 
-    // Check for streaming content (agent typing)
-    let streaming_content = {
+    // Check for streaming content (agents actively streaming with content)
+    let streaming_sessions = {
         let _span = info_span!("get_streaming_content").entered();
         get_streaming_content(app)
     };
-    if let Some((agent_name, content)) = streaming_content {
+    for streaming in &streaming_sessions {
         messages_text.push(Line::from(Span::styled(
-            format!("{} (typing...):", agent_name),
+            format!("{}{} (streaming...):", padding, streaming.agent_name),
             Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
         )));
 
-        let markdown_lines = render_markdown(&content);
-        messages_text.extend(markdown_lines);
+        let markdown_lines = render_markdown(&streaming.content);
+        for line in markdown_lines {
+            let mut padded_spans = vec![Span::raw(padding)];
+            padded_spans.extend(line.spans);
+            messages_text.push(Line::from(padded_spans));
+        }
 
+        messages_text.push(Line::from(""));
+    }
+
+    // Check for typing indicators (agents streaming but no content yet)
+    let typing_agents = {
+        let _span = info_span!("get_typing_indicators").entered();
+        get_typing_indicators(app)
+    };
+    for agent_name in &typing_agents {
+        messages_text.push(Line::from(Span::styled(
+            format!("{}{} is typing...", padding, agent_name),
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        )));
         messages_text.push(Line::from(""));
     }
 
@@ -317,6 +733,9 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
             .sum();
 
         let max_scroll = total_lines.saturating_sub(visible_height);
+
+        // Update max_scroll_offset so scroll methods work correctly
+        app.max_scroll_offset = max_scroll;
 
         // Use scroll_offset, clamped to max
         let scroll = app.scroll_offset.min(max_scroll);
@@ -360,6 +779,7 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         .unwrap_or_default();
 
     let context_line = Line::from(vec![
+        Span::raw(padding),
         Span::styled("→ @", Style::default().fg(Color::DarkGray)),
         Span::styled(agent_display, Style::default().fg(Color::Cyan)),
         Span::styled(branch_display, Style::default().fg(Color::Green)),
@@ -427,12 +847,7 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(input_style)
-                .title(if app.input_mode == InputMode::Editing {
-                    "Enter to send, Ctrl+Enter for newline"
-                } else {
-                    "Press 'i' to compose"
-                }),
+                .border_style(input_style),
         )
         .wrap(Wrap { trim: false });
     f.render_widget(input, input_area);
@@ -444,6 +859,12 @@ pub fn render_chat(f: &mut Frame, app: &App, area: Rect) {
             input_area.x + cursor_col as u16 + 1,
             input_area.y + cursor_row as u16 + 1,
         ));
+    }
+    idx += 1;
+
+    // Tab bar (if tabs are open)
+    if has_tabs {
+        render_tab_bar(f, app, chunks[idx]);
     }
 
     // Render agent selector popup if showing
@@ -629,4 +1050,56 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     );
 
     f.render_widget(list, popup_area);
+}
+
+pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
+    let mut spans: Vec<Span> = Vec::new();
+
+    for (i, tab) in app.open_tabs.iter().enumerate() {
+        let is_active = i == app.active_tab_index;
+
+        // Tab number
+        let num_style = if is_active {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(format!("{}", i + 1), num_style));
+        spans.push(Span::raw(":"));
+
+        // Tab title (truncate if needed)
+        let max_title_len = 12;
+        let title: String = if tab.thread_title.len() > max_title_len {
+            format!("{}...", &tab.thread_title[..max_title_len - 3])
+        } else {
+            tab.thread_title.clone()
+        };
+
+        let title_style = if is_active {
+            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        } else if tab.has_unread {
+            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(title, title_style));
+
+        // Unread indicator
+        if tab.has_unread && !is_active {
+            spans.push(Span::styled("●", Style::default().fg(Color::Red)));
+        }
+
+        // Separator between tabs
+        if i < app.open_tabs.len() - 1 {
+            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+        }
+    }
+
+    // Add hint at the end
+    spans.push(Span::styled("  ", Style::default()));
+    spans.push(Span::styled("Tab:cycle x:close", Style::default().fg(Color::DarkGray)));
+
+    let tab_line = Line::from(spans);
+    let tab_bar = Paragraph::new(tab_line);
+    f.render_widget(tab_bar, area);
 }

@@ -12,6 +12,8 @@ pub struct ToolCall {
     pub name: String,
     #[serde(default)]
     pub parameters: serde_json::Value,
+    #[serde(default)]
+    pub result: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,52 +107,98 @@ pub fn parse_message_content(content: &str) -> MessageContent {
     }
 }
 
-pub fn render_tool_call(tool_call: &ToolCall) -> Vec<Line<'static>> {
+/// Get icon for a tool call based on its name
+pub fn tool_icon(name: &str) -> &'static str {
+    match name.to_lowercase().as_str() {
+        "edit" | "str_replace_editor" => "✏️",
+        "write" | "file_write" => "📝",
+        "read" | "file_read" => "📖",
+        "bash" | "execute_bash" | "shell" => "⚡",
+        "glob" | "find" => "🔍",
+        "grep" | "search" => "🔎",
+        "task" | "agent" => "🤖",
+        "web_search" | "websearch" => "🌐",
+        "todowrite" | "todo" => "📋",
+        _ => "⚙️",
+    }
+}
+
+/// Extract a meaningful target/file from tool parameters
+pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
+    let params = &tool_call.parameters;
+
+    // Try common parameter names for file paths
+    for key in ["file_path", "path", "filePath", "file", "target"] {
+        if let Some(val) = params.get(key).and_then(|v| v.as_str()) {
+            // Shorten long paths - show last 2 components
+            let parts: Vec<&str> = val.split('/').collect();
+            if parts.len() > 2 {
+                return Some(format!(".../{}", parts[parts.len()-2..].join("/")));
+            }
+            return Some(val.to_string());
+        }
+    }
+
+    // For bash commands, show the command
+    if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+        let truncated: String = cmd.chars().take(40).collect();
+        if cmd.len() > 40 {
+            return Some(format!("{}...", truncated));
+        }
+        return Some(truncated);
+    }
+
+    // For search/grep, show the pattern
+    if let Some(pattern) = params.get("pattern").and_then(|v| v.as_str()) {
+        let truncated: String = pattern.chars().take(30).collect();
+        if pattern.len() > 30 {
+            return Some(format!("\"{}...\"", truncated));
+        }
+        return Some(format!("\"{}\"", truncated));
+    }
+
+    None
+}
+
+/// Render a single tool call as a compact single line
+#[allow(dead_code)]
+pub fn render_tool_call_compact(tool_call: &ToolCall) -> Line<'static> {
+    let icon = tool_icon(&tool_call.name);
+    let target = extract_target(tool_call);
+
+    let mut spans = vec![
+        Span::styled("  ", Style::default()), // indent
+        Span::styled(format!("{} ", icon), Style::default()),
+        Span::styled(
+            tool_call.name.clone(),
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        ),
+    ];
+
+    if let Some(t) = target {
+        spans.push(Span::styled(" ", Style::default()));
+        spans.push(Span::styled(t, Style::default().fg(Color::Magenta)));
+    }
+
+    Line::from(spans)
+}
+
+/// Render a single tool call - returns multiple lines for detailed view
+#[allow(dead_code)]
+fn render_tool_call_detailed(tool_call: &ToolCall) -> Vec<Line<'static>> {
+    // Detailed rendering with box drawing (unused for now, keeping for future)
     let mut lines = Vec::new();
 
     lines.push(Line::from(Span::styled(
-        "┌─ Tool Call ─────────────────────────────────────",
+        format!("┌─ {} ─────────────────────────────────────", tool_call.name),
         Style::default().fg(Color::Cyan),
     )));
 
-    lines.push(Line::from(vec![
-        Span::styled("│ ", Style::default().fg(Color::Cyan)),
-        Span::styled("Name: ", Style::default().fg(Color::Yellow)),
-        Span::styled(
-            tool_call.name.clone(),
-            Style::default()
-                .fg(Color::Green)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]));
-
-    if !tool_call.id.is_empty() {
+    if let Some(target) = extract_target(tool_call) {
         lines.push(Line::from(vec![
             Span::styled("│ ", Style::default().fg(Color::Cyan)),
-            Span::styled("ID: ", Style::default().fg(Color::Yellow)),
-            Span::styled(
-                tool_call.id.clone(),
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(target, Style::default().fg(Color::Magenta)),
         ]));
-    }
-
-    if !tool_call.parameters.is_null() && tool_call.parameters != serde_json::json!({}) {
-        lines.push(Line::from(vec![
-            Span::styled("│ ", Style::default().fg(Color::Cyan)),
-            Span::styled("Parameters:", Style::default().fg(Color::Yellow)),
-        ]));
-
-        let params_str = serde_json::to_string_pretty(&tool_call.parameters).unwrap_or_default();
-        for param_line in params_str.lines() {
-            lines.push(Line::from(vec![
-                Span::styled("│   ", Style::default().fg(Color::Cyan)),
-                Span::styled(
-                    param_line.to_string(),
-                    Style::default().fg(Color::White),
-                ),
-            ]));
-        }
     }
 
     lines.push(Line::from(Span::styled(
@@ -161,50 +209,10 @@ pub fn render_tool_call(tool_call: &ToolCall) -> Vec<Line<'static>> {
     lines
 }
 
+#[allow(dead_code)]
 pub fn render_tool_calls_group(tool_calls: &[ToolCall]) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-
-    if tool_calls.len() > 1 {
-        lines.push(Line::from(Span::styled(
-            format!("┌─ Tool Calls ({}) ─────────────────────────────────", tool_calls.len()),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-    }
-
-    for (i, tool_call) in tool_calls.iter().enumerate() {
-        if tool_calls.len() > 1 {
-            lines.push(Line::from(Span::styled(
-                format!("│ [{}/{}]", i + 1, tool_calls.len()),
-                Style::default().fg(Color::Magenta),
-            )));
-        }
-
-        let mut tool_lines = render_tool_call(tool_call);
-        if tool_calls.len() > 1 {
-            for line in &mut tool_lines {
-                let spans = line.spans.clone();
-                line.spans.clear();
-                line.spans.push(Span::styled("│ ", Style::default().fg(Color::Magenta)));
-                line.spans.extend(spans);
-            }
-        }
-        lines.extend(tool_lines);
-
-        if i < tool_calls.len() - 1 {
-            lines.push(Line::from(""));
-        }
-    }
-
-    if tool_calls.len() > 1 {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            "└─────────────────────────────────────────────────",
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
-        )));
-    }
-
-    lines
+    // Render each tool call as a compact line
+    tool_calls.iter().map(render_tool_call_compact).collect()
 }
 
 #[cfg(test)]
