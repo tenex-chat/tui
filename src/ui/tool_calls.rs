@@ -246,8 +246,9 @@ mod tests {
             id: "123".to_string(),
             name: "test_tool".to_string(),
             parameters: serde_json::json!({"key": "value"}),
+            result: None,
         };
-        let lines = render_tool_call(&tool_call);
-        assert!(!lines.is_empty());
+        let line = render_tool_call_compact(&tool_call);
+        assert!(!line.spans.is_empty());
     }
 }

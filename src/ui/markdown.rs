@@ -133,7 +133,10 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             },
             Event::Text(text) => {
                 if in_code_block {
-                    code_block_lines.push(text.to_string());
+                    // Split by newlines - pulldown_cmark sends entire code block as one text event
+                    for line in text.lines() {
+                        code_block_lines.push(line.to_string());
+                    }
                 } else {
                     current_line.push(Span::styled(text.to_string(), style_stack.current()));
                 }

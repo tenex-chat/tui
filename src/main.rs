@@ -98,6 +98,9 @@ async fn main() -> Result<()> {
 
     ui::restore_terminal()?;
 
+    // Flush pending traces before exit
+    tracing_setup::shutdown_tracing();
+
     if let Err(err) = result {
         eprintln!("Error: {err}");
     }
