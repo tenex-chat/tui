@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX Home - Compact List</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #1a1b26;
+            color: #a9b1d6;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .container {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 16px;
+            background: #16161e;
+            border-bottom: 1px solid #292e42;
+        }
+        .header-title {
+            color: #7aa2f7;
+            font-weight: 600;
+        }
+
+        /* Main layout - full width when inbox empty */
+        .main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        /* Inbox collapsed state */
+        .inbox-collapsed {
+            width: 40px;
+            border-right: 1px solid #292e42;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding-top: 12px;
+        }
+        .inbox-collapsed .icon {
+            color: #565f89;
+            font-size: 16px;
+        }
+        .inbox-collapsed .count {
+            color: #565f89;
+            font-size: 10px;
+            margin-top: 4px;
+        }
+
+        /* Recent panel - takes most space */
+        .recent {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .recent-header {
+            padding: 10px 16px;
+            border-bottom: 1px solid #292e42;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #565f89;
+        }
+        .recent-list {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Conversation row */
+        .conv-row {
+            display: grid;
+            grid-template-columns: 120px 1fr auto;
+            gap: 16px;
+            padding: 8px 16px;
+            border-bottom: 1px solid #1f2335;
+            cursor: pointer;
+            align-items: center;
+        }
+        .conv-row:hover {
+            background: #1f2335;
+        }
+        .conv-row.selected {
+            background: #3d59a1;
+            color: #c0caf5;
+        }
+        .conv-row.selected .conv-project {
+            color: #9ece6a;
+        }
+        .conv-row.selected .conv-time {
+            color: #7aa2f7;
+        }
+
+        /* Project column */
+        .conv-project {
+            color: #9ece6a;
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Title column */
+        .conv-content {
+            min-width: 0;
+        }
+        .conv-title {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #c0caf5;
+        }
+
+        /* Time column */
+        .conv-time {
+            color: #565f89;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        /* Unread indicator */
+        .conv-row.unread .conv-title {
+            font-weight: 600;
+        }
+        .conv-row.unread::before {
+            content: '●';
+            color: #7aa2f7;
+            font-size: 8px;
+            margin-right: 8px;
+        }
+
+        /* Help bar */
+        .help-bar {
+            padding: 8px 16px;
+            border-top: 1px solid #292e42;
+            background: #16161e;
+            display: flex;
+            gap: 20px;
+            font-size: 11px;
+            color: #565f89;
+        }
+        .help-bar kbd {
+            background: #292e42;
+            padding: 2px 5px;
+            border-radius: 3px;
+            margin-right: 4px;
+            color: #7aa2f7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <span class="header-title">TENEX</span>
+            <span>⧉</span>
+        </div>
+
+        <div class="main">
+            <div class="inbox-collapsed">
+                <span class="icon">📥</span>
+                <span class="count">0</span>
+            </div>
+
+            <div class="recent">
+                <div class="recent-header">Recent Conversations</div>
+                <div class="recent-list">
+                    <div class="conv-row selected unread">
+                        <span class="conv-project">TENEX-iOS</span>
+                        <div class="conv-content">
+                            <div class="conv-title">When I click on a suggestion from an ask event not</div>
+                        </div>
+                        <span class="conv-time">2m ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">TENEX-Web</span>
+                        <div class="conv-content">
+                            <div class="conv-title">When we press on an ask suggestion, the kind 1111</div>
+                        </div>
+                        <span class="conv-time">15m ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">@transparent I want to delegate in pair mode to ag</div>
+                        </div>
+                        <span class="conv-time">1h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">hey</div>
+                        </div>
+                        <span class="conv-time">2h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">@ABrouter ask your agents their name and then tell</div>
+                        </div>
+                        <span class="conv-time">3h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">@transparent delegate to agent1 asking it its name</div>
+                        </div>
+                        <span class="conv-time">4h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">ask agent1 its name</div>
+                        </div>
+                        <span class="conv-time">5h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">hey, what's your name, what teammates do you have?</div>
+                        </div>
+                        <span class="conv-time">6h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">without using any tools, tell me your name and the</div>
+                        </div>
+                        <span class="conv-time">7h ago</span>
+                    </div>
+                    <div class="conv-row">
+                        <span class="conv-project">DDD</span>
+                        <div class="conv-content">
+                            <div class="conv-title">hello</div>
+                        </div>
+                        <span class="conv-time">8h ago</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="help-bar">
+            <span><kbd>↑↓</kbd> navigate</span>
+            <span><kbd>Enter</kbd> open</span>
+            <span><kbd>Tab</kbd> inbox</span>
+            <span><kbd>p</kbd> projects</span>
+            <span><kbd>q</kbd> quit</span>
+        </div>
+    </div>
+</body>
+</html>

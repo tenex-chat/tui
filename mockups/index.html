@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX UI Mockups</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            margin: 0;
+            padding: 40px;
+        }
+        h1 {
+            margin-bottom: 8px;
+        }
+        h2 {
+            margin-top: 48px;
+            margin-bottom: 8px;
+            color: #7ee787;
+        }
+        .subtitle {
+            color: #888;
+            margin-bottom: 24px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 24px;
+        }
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid #333;
+        }
+        .card-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #333;
+        }
+        .card-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .card-desc {
+            font-size: 14px;
+            color: #888;
+        }
+        .card-preview {
+            height: 300px;
+            overflow: hidden;
+        }
+        .card-preview iframe {
+            width: 200%;
+            height: 200%;
+            border: none;
+            transform: scale(0.5);
+            transform-origin: top left;
+        }
+        .card-actions {
+            padding: 12px 20px;
+            border-top: 1px solid #333;
+            display: flex;
+            gap: 12px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .btn-primary {
+            background: #0ea5e9;
+            color: #000;
+        }
+        .btn-secondary {
+            background: #333;
+            color: #fff;
+        }
+        .summary {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 24px;
+            margin-top: 40px;
+            border: 1px solid #333;
+        }
+        .summary h2, .summary h3 {
+            margin-top: 0;
+            margin-bottom: 16px;
+        }
+        .summary ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #ccc;
+            line-height: 1.8;
+        }
+        .summary li {
+            margin-bottom: 8px;
+        }
+        .summary code {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 3px;
+            color: #f472b6;
+        }
+    </style>
+</head>
+<body>
+    <h1>TENEX UI Mockups</h1>
+
+    <h2>Home Screen</h2>
+    <p class="subtitle">Three approaches to improve the home/recent conversations view</p>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V1: Grouped by Project</div>
+                <div class="card-desc">Sidebar inbox, conversations grouped under project headers</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="home-v1-grouped.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="home-v1-grouped.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V2: Compact Table</div>
+                <div class="card-desc">Collapsed inbox, table layout with project column</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="home-v2-compact.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="home-v2-compact.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V3: Card Layout</div>
+                <div class="card-desc">Tabbed header, card-based conversations with activity</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="home-v3-cards.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="home-v3-cards.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+    </div>
+
+    <h2>Chat Screen</h2>
+    <p class="subtitle">Four different approaches to improve the chat interface</p>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V1: Compact</div>
+                <div class="card-desc">GitHub-inspired dark theme with card-based actions</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="chat-v1-compact.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="chat-v1-compact.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V2: Bubble</div>
+                <div class="card-desc">Chat bubble style with inline action badges</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="chat-v2-bubble.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="chat-v2-bubble.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V3: Minimal Terminal</div>
+                <div class="card-desc">Clean terminal aesthetic, prompt-driven flow</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="chat-v3-minimal.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="chat-v3-minimal.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">V4: Stream</div>
+                <div class="card-desc">Modern streaming UI with tabbed navigation</div>
+            </div>
+            <div class="card-preview">
+                <iframe src="chat-v4-stream.html"></iframe>
+            </div>
+            <div class="card-actions">
+                <a href="chat-v4-stream.html" class="btn btn-primary">Open Full</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="summary">
+        <h3>Home Screen Improvements</h3>
+        <ul>
+            <li><strong>No duplicate project names:</strong> Group conversations by project or show project once per row</li>
+            <li><strong>Timestamps:</strong> Show relative time (2m ago, 1h ago) for each conversation</li>
+            <li><strong>Collapsed empty inbox:</strong> Don't waste space when inbox has no notifications</li>
+            <li><strong>Single help bar:</strong> Consolidated keyboard shortcuts instead of two rows</li>
+            <li><strong>Unread indicators:</strong> Blue dots or bold text for unread conversations</li>
+            <li><strong>Activity badges:</strong> Show streaming status, reply counts for active threads</li>
+        </ul>
+
+        <h3>Chat Screen Improvements</h3>
+        <ul>
+            <li><strong>Grouped responses:</strong> Actions belonging to one response are visually connected instead of appearing as separate "Claude Code :" blocks</li>
+            <li><strong>Reduced repetition:</strong> Single assistant header instead of repeating "Claude Code :" for every line</li>
+            <li><strong>Visual hierarchy:</strong> Clear distinction between user messages and assistant responses using color, backgrounds, or indentation</li>
+            <li><strong>Compact actions:</strong> Tool executions shown as compact badges/lines rather than full blocks with excessive whitespace</li>
+            <li><strong>Status indicators:</strong> Success/failure states shown with color coding and icons</li>
+            <li><strong>Better input area:</strong> Cleaner layout with context (branch, user) and keyboard hints organized</li>
+        </ul>
+    </div>
+</body>
+</html>

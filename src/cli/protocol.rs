@@ -65,6 +65,8 @@ pub enum CliCommand {
     CreateThread { project_id: String, title: String },
     /// Trigger relay sync
     Sync,
+    /// Boot/start a project
+    BootProject { project_id: String },
     /// Get daemon status
     Status,
     /// Shutdown the daemon
@@ -93,6 +95,9 @@ impl CliCommand {
                 serde_json::json!({ "project_id": project_id, "title": title }),
             ),
             CliCommand::Sync => ("sync", serde_json::json!({})),
+            CliCommand::BootProject { project_id } => {
+                ("boot_project", serde_json::json!({ "project_id": project_id }))
+            }
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
         };

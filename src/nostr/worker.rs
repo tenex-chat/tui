@@ -38,6 +38,7 @@ pub enum NostrCommand {
     },
     BootProject {
         project_a_tag: String,
+        project_pubkey: Option<String>,
     },
     Shutdown,
 }
@@ -117,9 +118,9 @@ impl NostrWorker {
                             error!("Failed to publish message: {}", e);
                         }
                     }
-                    NostrCommand::BootProject { project_a_tag } => {
+                    NostrCommand::BootProject { project_a_tag, project_pubkey } => {
                         info!("Worker: Booting project {}", project_a_tag);
-                        if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag)) {
+                        if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag, project_pubkey)) {
                             error!("Failed to boot project: {}", e);
                         }
                     }
@@ -618,7 +619,7 @@ impl NostrWorker {
         Ok(())
     }
 
-    async fn handle_boot_project(&self, project_a_tag: String) -> Result<()> {
+    async fn handle_boot_project(&self, project_a_tag: String, project_pubkey: Option<String>) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
@@ -627,8 +628,15 @@ impl NostrWorker {
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
         // Kind 24000 boot request with a-tag pointing to project
-        let event = EventBuilder::new(Kind::Custom(24000), "")
+        let mut event = EventBuilder::new(Kind::Custom(24000), "")
             .tag(Tag::coordinate(coordinate));
+
+        // Add p-tag for project owner (required by backend)
+        if let Some(pubkey) = project_pubkey {
+            if let Ok(pk) = PublicKey::parse(&pubkey) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
 
         let signed_event = event.sign_with_keys(keys)?;
 

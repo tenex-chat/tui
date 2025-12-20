@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tenex TUI - Tabs (Interactive Demo)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a1a;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.4;
+      padding: 20px;
+    }
+    .instructions {
+      max-width: 900px;
+      margin: 0 auto 20px;
+      padding: 16px;
+      background: #2a2a2a;
+      border-radius: 8px;
+      border-left: 3px solid #7aa2f7;
+    }
+    .instructions h2 {
+      color: #7aa2f7;
+      margin-bottom: 8px;
+      font-size: 16px;
+    }
+    .instructions p {
+      color: #888;
+      font-size: 13px;
+    }
+    .instructions code {
+      background: #1a1a1a;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #9ece6a;
+    }
+    .terminal {
+      background: #0d0d0d;
+      border: 1px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .titlebar {
+      background: #2a2a2a;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .titlebar-btn {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .btn-close { background: #ff5f56; }
+    .btn-min { background: #ffbd2e; }
+    .btn-max { background: #27ca40; }
+    .titlebar-text {
+      color: #888;
+      margin-left: 20px;
+    }
+    .content {
+      height: 450px;
+      display: flex;
+      flex-direction: column;
+    }
+    .messages {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 16px;
+      animation: fadeIn 0.2s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .message-header {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .message-author {
+      color: #7aa2f7;
+      font-weight: bold;
+    }
+    .message-time {
+      color: #555;
+      margin-left: 8px;
+    }
+    .message-content {
+      color: #e0e0e0;
+    }
+    .message.assistant .message-author {
+      color: #9ece6a;
+    }
+
+    .bottom-bar {
+      border-top: 1px solid #333;
+      background: #1a1a1a;
+    }
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      height: 26px;
+      border-bottom: 1px solid #333;
+      gap: 2px;
+    }
+    .tab {
+      padding: 3px 10px;
+      color: #666;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 13px;
+      transition: all 0.15s ease;
+      border-bottom: 2px solid transparent;
+    }
+    .tab:hover {
+      background: #252525;
+      color: #999;
+    }
+    .tab.active {
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border-bottom: 2px solid #7aa2f7;
+    }
+    .tab-number {
+      color: #555;
+      font-size: 11px;
+    }
+    .tab.active .tab-number {
+      color: #7aa2f7;
+    }
+    .tab.unread {
+      color: #bb9af7;
+    }
+    .tab.unread .tab-name {
+      font-weight: bold;
+    }
+    .unread-dot {
+      width: 6px;
+      height: 6px;
+      background: #f7768e;
+      border-radius: 50%;
+    }
+    .tab-separator {
+      width: 1px;
+      height: 14px;
+      background: #333;
+      margin: 0 8px;
+    }
+    .context-info {
+      margin-left: auto;
+      color: #555;
+      font-size: 12px;
+    }
+
+    .context-line {
+      display: flex;
+      align-items: center;
+      padding: 4px 12px;
+      height: 22px;
+      color: #555;
+      font-size: 12px;
+    }
+
+    .input-area {
+      padding: 8px 12px;
+      border-top: 1px solid #333;
+    }
+    .input-box {
+      background: #252525;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      color: #e0e0e0;
+      min-height: 36px;
+    }
+    .input-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #7aa2f7;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    .keyboard-hint {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #2d2d2d;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #888;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .keyboard-hint.show {
+      opacity: 1;
+    }
+    .keyboard-hint code {
+      background: #1a1a1a;
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: #9ece6a;
+      margin: 0 2px;
+    }
+
+    .tab.closing {
+      animation: slideOut 0.2s ease-out forwards;
+    }
+    @keyframes slideOut {
+      to {
+        opacity: 0;
+        transform: translateY(-10px);
+        width: 0;
+        padding: 0;
+        margin: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="instructions">
+    <h2>Interactive Demo</h2>
+    <p>Press <code>1</code> <code>2</code> <code>3</code> <code>4</code> to switch tabs · <code>Tab</code> for next · <code>Shift+Tab</code> for prev · <code>x</code> to close current tab</p>
+  </div>
+
+  <div class="terminal">
+    <div class="titlebar">
+      <div class="titlebar-btn btn-close"></div>
+      <div class="titlebar-btn btn-min"></div>
+      <div class="titlebar-btn btn-max"></div>
+      <span class="titlebar-text">tenex — 80×24</span>
+    </div>
+    <div class="content">
+      <div class="messages" id="messages">
+        <!-- Messages will be injected by JS -->
+      </div>
+
+      <div class="bottom-bar">
+        <div class="tab-bar" id="tab-bar">
+          <!-- Tabs will be injected by JS -->
+        </div>
+        <div class="context-line" id="context-line">
+          <!-- Context will be injected by JS -->
+        </div>
+        <div class="input-area">
+          <div class="input-box">
+            <span class="input-cursor"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="keyboard-hint" id="keyboard-hint"></div>
+
+  <script>
+    const tabs = [
+      {
+        id: 1,
+        name: "Auth bug",
+        unread: false,
+        messages: [
+          { author: "You", time: "10:32 AM", content: "Can you help me fix the authentication bug?" },
+          { author: "Claude", time: "10:32 AM", content: "I'll look into the authentication flow. The issue seems to be in the token refresh logic." },
+          { author: "You", time: "10:35 AM", content: "The token validation fails on refresh" },
+        ]
+      },
+      {
+        id: 2,
+        name: "Feature X",
+        unread: true,
+        messages: [
+          { author: "You", time: "11:00 AM", content: "Let's implement the new dashboard" },
+          { author: "Claude", time: "11:01 AM", content: "I'll create a component structure for the dashboard. What metrics should we display?" },
+        ]
+      },
+      {
+        id: 3,
+        name: "Deploy",
+        unread: true,
+        messages: [
+          { author: "Claude", time: "9:15 AM", content: "The deployment pipeline is ready. CI passed on all checks." },
+          { author: "You", time: "9:20 AM", content: "Great, let's review the staging environment" },
+        ]
+      },
+      {
+        id: 4,
+        name: "Tests",
+        unread: false,
+        messages: [
+          { author: "You", time: "2:00 PM", content: "Need to add integration tests for the API" },
+          { author: "Claude", time: "2:01 PM", content: "I'll set up the test framework. Should we use mocks for external services?" },
+          { author: "You", time: "2:05 PM", content: "Yes, mock the payment gateway" },
+        ]
+      }
+    ];
+
+    let currentTabIndex = 0;
+
+    function renderTabs() {
+      const tabBar = document.getElementById('tab-bar');
+      tabBar.innerHTML = tabs.map((tab, i) => `
+        <div class="tab ${i === currentTabIndex ? 'active' : ''} ${tab.unread && i !== currentTabIndex ? 'unread' : ''}"
+             onclick="switchTab(${i})" data-index="${i}">
+          <span class="tab-number">${i + 1}</span>
+          <span class="tab-name">${tab.name}</span>
+          ${tab.unread && i !== currentTabIndex ? '<span class="unread-dot"></span>' : ''}
+        </div>
+      `).join('') + `
+        <div class="tab-separator"></div>
+        <div class="context-info">
+          <span>Project: tenex</span>
+        </div>
+      `;
+    }
+
+    function renderMessages() {
+      const messagesEl = document.getElementById('messages');
+      const tab = tabs[currentTabIndex];
+      messagesEl.innerHTML = tab.messages.map(msg => `
+        <div class="message ${msg.author === 'Claude' ? 'assistant' : ''}">
+          <div class="message-header">
+            <span class="message-author">${msg.author}</span>
+            <span class="message-time">${msg.time}</span>
+          </div>
+          <div class="message-content">${msg.content}</div>
+        </div>
+      `).join('');
+
+      // Scroll to bottom
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function renderContextLine() {
+      const contextEl = document.getElementById('context-line');
+      const tab = tabs[currentTabIndex];
+      const unreadCount = tabs.filter((t, i) => t.unread && i !== currentTabIndex).length;
+      const unreadText = unreadCount > 0 ? ` · ${unreadCount} unread` : '';
+      contextEl.textContent = `${tab.name} · ${tab.messages.length} messages${unreadText} · Tab: switch · x: close`;
+    }
+
+    function switchTab(index) {
+      if (index >= 0 && index < tabs.length) {
+        // Mark current tab as read when switching away
+        tabs[currentTabIndex].unread = false;
+        // Mark new tab as read
+        tabs[index].unread = false;
+        currentTabIndex = index;
+        renderTabs();
+        renderMessages();
+        renderContextLine();
+        showHint(`Switched to tab ${index + 1}: ${tabs[index].name}`);
+      }
+    }
+
+    function closeCurrentTab() {
+      if (tabs.length <= 1) {
+        showHint("Can't close the last tab");
+        return;
+      }
+
+      const tabEl = document.querySelector(`.tab[data-index="${currentTabIndex}"]`);
+      tabEl.classList.add('closing');
+
+      setTimeout(() => {
+        const closedName = tabs[currentTabIndex].name;
+        tabs.splice(currentTabIndex, 1);
+        if (currentTabIndex >= tabs.length) {
+          currentTabIndex = tabs.length - 1;
+        }
+        renderTabs();
+        renderMessages();
+        renderContextLine();
+        showHint(`Closed "${closedName}"`);
+      }, 200);
+    }
+
+    function showHint(text) {
+      const hint = document.getElementById('keyboard-hint');
+      hint.innerHTML = text;
+      hint.classList.add('show');
+      setTimeout(() => hint.classList.remove('show'), 1500);
+    }
+
+    document.addEventListener('keydown', (e) => {
+      // Number keys 1-9
+      if (e.key >= '1' && e.key <= '9') {
+        const index = parseInt(e.key) - 1;
+        if (index < tabs.length) {
+          switchTab(index);
+        }
+        e.preventDefault();
+      }
+
+      // Tab key (next)
+      if (e.key === 'Tab' && !e.shiftKey) {
+        const nextIndex = (currentTabIndex + 1) % tabs.length;
+        switchTab(nextIndex);
+        e.preventDefault();
+      }
+
+      // Shift+Tab (previous)
+      if (e.key === 'Tab' && e.shiftKey) {
+        const prevIndex = (currentTabIndex - 1 + tabs.length) % tabs.length;
+        switchTab(prevIndex);
+        e.preventDefault();
+      }
+
+      // x to close
+      if (e.key === 'x' || e.key === 'X') {
+        closeCurrentTab();
+        e.preventDefault();
+      }
+    });
+
+    // Initial render
+    renderTabs();
+    renderMessages();
+    renderContextLine();
+  </script>
+</body>
+</html>

@@ -1,18 +1,22 @@
 use std::cell::RefCell;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Instant;
 
+use tokio::net::UnixListener;
+
 use anyhow::Result;
 use nostrdb::Ndb;
+use tracing::{info, instrument};
 
 use crate::nostr::{self, DataChange, NostrCommand, NostrWorker};
 use crate::store::{AppDataStore, Database};
+use crate::tracing_setup::init_tracing_with_service;
 
 use super::protocol::{Request, Response};
 
@@ -38,7 +42,12 @@ fn get_data_dir() -> PathBuf {
 }
 
 /// Run the daemon server
-pub fn run_daemon() -> Result<()> {
+#[tokio::main]
+pub async fn run_daemon() -> Result<()> {
+    // Initialize tracing for CLI daemon
+    init_tracing_with_service("tenex-cli");
+
+    info!("Starting tenex-cli daemon");
     eprintln!("Starting tenex-cli daemon...");
 
     // Ensure base directory exists
@@ -95,12 +104,15 @@ pub fn run_daemon() -> Result<()> {
     // Track state
     let start_time = Instant::now();
 
-    // Handle connections
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
+    // Handle connections - use async accept to allow batch exporter to run
+    loop {
+        match listener.accept().await {
+            Ok((stream, _)) => {
+                // Convert tokio UnixStream to std UnixStream for blocking I/O
+                let std_stream = stream.into_std()?;
+                std_stream.set_nonblocking(false)?;
                 let should_shutdown = handle_connection(
-                    stream,
+                    std_stream,
                     &data_store,
                     &command_tx,
                     &data_rx,
@@ -125,6 +137,9 @@ pub fn run_daemon() -> Result<()> {
     worker_handle.join().ok();
     fs::remove_file(&socket_path).ok();
     fs::remove_file(&pid_path).ok();
+
+    // Flush any pending traces
+    crate::tracing_setup::shutdown_tracing();
 
     eprintln!("Daemon stopped");
     Ok(())
@@ -244,6 +259,7 @@ fn handle_connection(
     Ok(false)
 }
 
+#[instrument(name = "cli_request", skip_all, fields(method = %request.method))]
 fn handle_request(
     request: &Request,
     data_store: &Rc<RefCell<AppDataStore>>,
@@ -252,6 +268,8 @@ fn handle_request(
     start_time: Instant,
     logged_in: bool,
 ) -> (Response, bool) {
+    info!("Handling request");
+
     let id = request.id;
 
     match request.method.as_str() {
@@ -437,6 +455,44 @@ fn handle_request(
                 )
             } else {
                 (Response::error(id, "SYNC_FAILED", "Failed to sync"), false)
+            }
+        }
+
+        "boot_project" => {
+            let project_id = request.params["project_id"].as_str().unwrap_or("");
+
+            if project_id.is_empty() {
+                return (
+                    Response::error(id, "INVALID_PARAMS", "project_id is required"),
+                    false,
+                );
+            }
+
+            // Find the project to get its pubkey
+            let store = data_store.borrow();
+            let project_pubkey = store
+                .get_projects()
+                .iter()
+                .find(|p| p.a_tag() == project_id)
+                .map(|p| p.pubkey.clone());
+            drop(store);
+
+            if command_tx
+                .send(NostrCommand::BootProject {
+                    project_a_tag: project_id.to_string(),
+                    project_pubkey,
+                })
+                .is_ok()
+            {
+                (
+                    Response::success(id, serde_json::json!({"status": "boot_sent"})),
+                    false,
+                )
+            } else {
+                (
+                    Response::error(id, "BOOT_FAILED", "Failed to send boot request"),
+                    false,
+                )
             }
         }
 

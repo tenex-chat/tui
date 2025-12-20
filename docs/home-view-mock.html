@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tenex Home View Mock</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: #1a1a1a;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
+      font-size: 14px;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Left: Inbox (40%) */
+    .inbox {
+      width: 40%;
+      border-right: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Right side (60%) */
+    .right-panel {
+      width: 60%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Recent Conversations (full height now) */
+    .conversations {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Projects Modal */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.hidden {
+      display: none;
+    }
+
+    .projects-modal {
+      background: #1a1a1a;
+      border: 1px solid #444;
+      border-radius: 8px;
+      width: 500px;
+      max-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid #333;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h2 {
+      font-size: 14px;
+      font-weight: bold;
+      color: #e0e0e0;
+    }
+
+    .modal-header .close-hint {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .modal-filter {
+      padding: 8px 16px;
+      border-bottom: 1px solid #333;
+    }
+
+    .modal-filter input {
+      width: 100%;
+      background: #252525;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 8px 12px;
+      color: #e0e0e0;
+      font-family: inherit;
+      font-size: 13px;
+    }
+
+    .modal-filter input::placeholder {
+      color: #555;
+    }
+
+    .modal-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    .projects {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Common panel styles */
+    .panel-header {
+      padding: 8px 12px;
+      border-bottom: 1px solid #333;
+      font-weight: bold;
+      color: #888;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .panel-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px 0;
+    }
+
+    /* Inbox items */
+    .inbox-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid #2a2a2a;
+      cursor: pointer;
+    }
+
+    .inbox-item:hover {
+      background: #252525;
+    }
+
+    .inbox-item.unread {
+      border-left: 3px solid #4a9eff;
+    }
+
+    .inbox-item .type {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 4px;
+    }
+
+    .inbox-item .title {
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .inbox-item .preview {
+      color: #888;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .inbox-item .meta {
+      font-size: 11px;
+      color: #555;
+      margin-top: 4px;
+    }
+
+    .inbox-item .project-tag {
+      color: #7c3aed;
+      font-size: 11px;
+    }
+
+    /* Conversation items */
+    .conversation-item {
+      padding: 10px 12px;
+      border-bottom: 1px solid #2a2a2a;
+      cursor: pointer;
+    }
+
+    .conversation-item:hover {
+      background: #252525;
+    }
+
+    .conversation-item.selected {
+      background: #1e3a2f;
+      border-left: 3px solid #22c55e;
+    }
+
+    .conversation-item .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .conversation-item .title {
+      color: #fff;
+      font-weight: 500;
+    }
+
+    .conversation-item .time {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .conversation-item .project {
+      font-size: 12px;
+      color: #7c3aed;
+      margin-bottom: 4px;
+    }
+
+    .conversation-item .preview {
+      color: #888;
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .conversation-item .author {
+      color: #22c55e;
+    }
+
+    /* Project items */
+    .project-section {
+      padding: 6px 12px;
+    }
+
+    .project-section-header {
+      font-size: 12px;
+      font-weight: bold;
+      margin-bottom: 4px;
+    }
+
+    .project-section-header.online {
+      color: #22c55e;
+    }
+
+    .project-section-header.offline {
+      color: #666;
+    }
+
+    .project-item {
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+
+    .project-item:hover {
+      background: #252525;
+    }
+
+    .project-item .name {
+      color: #e0e0e0;
+    }
+
+    .project-item .info {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .project-item.offline .name {
+      color: #666;
+    }
+
+    .project-item.selected {
+      background: #1e3a2f;
+    }
+
+    .project-item.selected .name {
+      color: #22c55e;
+      font-weight: 500;
+    }
+
+    /* Status indicator */
+    .status-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+
+    .status-dot.online {
+      background: #22c55e;
+    }
+
+    .status-dot.offline {
+      background: #555;
+    }
+
+    /* Keyboard hint */
+    .keyboard-hint {
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #555;
+      border-top: 1px solid #333;
+    }
+
+    kbd {
+      background: #333;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      margin: 0 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- INBOX (40% left) -->
+    <div class="inbox">
+      <div class="panel-header">Inbox</div>
+      <div class="panel-content">
+        <div class="inbox-item unread">
+          <div class="type">Mention in thread</div>
+          <div class="title">@you can you review the auth changes?</div>
+          <div class="preview">I've updated the JWT validation logic and would like your feedback on...</div>
+          <div class="meta">
+            <span class="project-tag">tenex-api</span> · 5 min ago · from agent-claude
+          </div>
+        </div>
+
+        <div class="inbox-item unread">
+          <div class="type">Reply to your message</div>
+          <div class="title">Done! The tests are passing now</div>
+          <div class="preview">Fixed the failing integration tests by mocking the external API...</div>
+          <div class="meta">
+            <span class="project-tag">frontend-app</span> · 12 min ago · from agent-gpt4
+          </div>
+        </div>
+
+        <div class="inbox-item">
+          <div class="type">Mention in thread</div>
+          <div class="title">@you thoughts on this architecture?</div>
+          <div class="preview">I'm proposing we use event sourcing for the order management...</div>
+          <div class="meta">
+            <span class="project-tag">ecommerce</span> · 1 hour ago · from pablo
+          </div>
+        </div>
+
+        <div class="inbox-item">
+          <div class="type">Task completed</div>
+          <div class="title">Deployed v2.3.1 to staging</div>
+          <div class="preview">Successfully deployed the latest changes. All health checks passing...</div>
+          <div class="meta">
+            <span class="project-tag">tenex-api</span> · 2 hours ago · from agent-claude
+          </div>
+        </div>
+
+        <div class="inbox-item">
+          <div class="type">Error notification</div>
+          <div class="title">Build failed on main branch</div>
+          <div class="preview">TypeScript compilation error in src/components/UserProfile.tsx...</div>
+          <div class="meta">
+            <span class="project-tag">frontend-app</span> · 3 hours ago · from CI
+          </div>
+        </div>
+
+        <div class="inbox-item">
+          <div class="type">Mention in thread</div>
+          <div class="title">@you can you check the database migration?</div>
+          <div class="preview">The migration script is ready but I want to double-check the rollback...</div>
+          <div class="meta">
+            <span class="project-tag">ecommerce</span> · 5 hours ago · from agent-gpt4
+          </div>
+        </div>
+      </div>
+      <div class="keyboard-hint">
+        <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open · <kbd>r</kbd> mark read
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL (60%) -->
+    <div class="right-panel">
+      <!-- RECENT CONVERSATIONS (70% of right) -->
+      <div class="conversations">
+        <div class="panel-header">Recent Conversations</div>
+        <div class="panel-content">
+          <div class="conversation-item selected">
+            <div class="header">
+              <span class="title">Implement user authentication</span>
+              <span class="time">5 min ago</span>
+            </div>
+            <div class="project">tenex-api</div>
+            <div class="preview"><span class="author">agent-claude:</span> I've completed the JWT refresh token implementation...</div>
+          </div>
+
+          <div class="conversation-item">
+            <div class="header">
+              <span class="title">Fix responsive layout issues</span>
+              <span class="time">15 min ago</span>
+            </div>
+            <div class="project">frontend-app</div>
+            <div class="preview"><span class="author">agent-gpt4:</span> The mobile breakpoints have been updated. Testing on...</div>
+          </div>
+
+          <div class="conversation-item">
+            <div class="header">
+              <span class="title">Database optimization</span>
+              <span class="time">1 hour ago</span>
+            </div>
+            <div class="project">ecommerce</div>
+            <div class="preview"><span class="author">you:</span> Let's add an index on the orders table for...</div>
+          </div>
+
+          <div class="conversation-item">
+            <div class="header">
+              <span class="title">API rate limiting</span>
+              <span class="time">2 hours ago</span>
+            </div>
+            <div class="project">tenex-api</div>
+            <div class="preview"><span class="author">agent-claude:</span> Implemented sliding window rate limiting with Redis...</div>
+          </div>
+
+          <div class="conversation-item">
+            <div class="header">
+              <span class="title">Dark mode support</span>
+              <span class="time">3 hours ago</span>
+            </div>
+            <div class="project">frontend-app</div>
+            <div class="preview"><span class="author">agent-gpt4:</span> Added CSS variables for theming. The toggle component...</div>
+          </div>
+        </div>
+        <div class="keyboard-hint">
+          <kbd>Tab</kbd> switch panel · <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> open · <kbd>p</kbd> projects
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROJECTS MODAL (on-demand, press 'p' to toggle) -->
+  <div class="modal-overlay" id="projectsModal">
+    <div class="projects-modal">
+      <div class="modal-header">
+        <h2>Switch Project</h2>
+        <span class="close-hint"><kbd>Esc</kbd> to close</span>
+      </div>
+      <div class="modal-filter">
+        <input type="text" placeholder="Type to filter projects..." autofocus>
+      </div>
+      <div class="modal-content">
+        <div class="projects">
+          <div class="project-section">
+            <div class="project-section-header online">
+              <span class="status-dot online"></span>ONLINE (3)
+            </div>
+            <div class="project-item selected">
+              <div class="name">▶ tenex-api</div>
+              <div class="info">2 agents · Owner: pablo</div>
+            </div>
+            <div class="project-item">
+              <div class="name">  frontend-app</div>
+              <div class="info">1 agent · Owner: pablo</div>
+            </div>
+            <div class="project-item">
+              <div class="name">  ecommerce</div>
+              <div class="info">3 agents · Owner: team</div>
+            </div>
+          </div>
+
+          <div class="project-section">
+            <div class="project-section-header offline">
+              <span class="status-dot offline"></span>OFFLINE (2) ▶
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="keyboard-hint">
+        <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> select · <kbd>Tab</kbd> expand offline
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Toggle modal with 'p' key
+    document.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('projectsModal');
+      if (e.key === 'p' && !e.target.matches('input')) {
+        modal.classList.toggle('hidden');
+        if (!modal.classList.contains('hidden')) {
+          modal.querySelector('input').focus();
+        }
+      }
+      if (e.key === 'Escape') {
+        modal.classList.add('hidden');
+      }
+    });
+  </script>
+</body>
+</html>

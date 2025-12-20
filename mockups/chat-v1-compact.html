@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX Chat - Compact Design</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            background: #0d1117;
+            color: #c9d1d9;
+            font-family: 'JetBrains Mono', 'Fira Code', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            border-bottom: 1px solid #21262d;
+        }
+        .header-title {
+            color: #58a6ff;
+            font-weight: 600;
+        }
+        .header-icon {
+            color: #484f58;
+        }
+
+        /* Chat area */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        /* User message */
+        .user-message {
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+        .user-message .label {
+            color: #7ee787;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+        .user-message .content {
+            color: #e6edf3;
+        }
+        .user-message .meta {
+            color: #484f58;
+            font-size: 11px;
+            margin-top: 8px;
+        }
+
+        /* Assistant response */
+        .assistant-response {
+            margin-bottom: 16px;
+            padding-left: 12px;
+            border-left: 2px solid #58a6ff;
+        }
+        .assistant-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .assistant-header .name {
+            color: #58a6ff;
+            font-weight: 500;
+        }
+        .assistant-header .timestamp {
+            color: #484f58;
+            font-size: 11px;
+        }
+
+        /* Action blocks */
+        .action-block {
+            background: #161b22;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .action-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #21262d;
+            font-size: 12px;
+        }
+        .action-header .icon {
+            width: 16px;
+            text-align: center;
+        }
+        .action-header .type {
+            color: #8b949e;
+            text-transform: uppercase;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+        .action-header .file {
+            color: #58a6ff;
+        }
+        .action-content {
+            padding: 10px 12px;
+            font-size: 13px;
+        }
+        .action-content.success {
+            color: #7ee787;
+        }
+        .action-content.error {
+            color: #f97583;
+        }
+        .action-content.warning {
+            color: #d29922;
+        }
+
+        /* Text response */
+        .text-response {
+            padding: 8px 0;
+            color: #c9d1d9;
+        }
+
+        /* Input area */
+        .input-area {
+            border-top: 1px solid #21262d;
+            padding: 12px 16px;
+        }
+        .input-context {
+            color: #484f58;
+            font-size: 11px;
+            margin-bottom: 8px;
+        }
+        .input-context span {
+            color: #7ee787;
+        }
+        .input-box {
+            background: #0d1117;
+            border: 1px solid #f0c14b;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #e6edf3;
+        }
+        .input-hint {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 11px;
+            color: #484f58;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-title">TENEX - Chat</div>
+            <div class="header-icon">⧉</div>
+        </div>
+
+        <div class="chat-area">
+            <div class="user-message">
+                <div class="label">You</div>
+                <div class="content">When I click on a suggestion from an ask event not</div>
+                <div class="meta">@pm · @ to change, Esc to go back</div>
+            </div>
+
+            <div class="assistant-response">
+                <div class="assistant-header">
+                    <span class="name">Claude Code</span>
+                    <span class="timestamp">just now</span>
+                </div>
+
+                <div class="action-block">
+                    <div class="action-header">
+                        <span class="icon">✏️</span>
+                        <span class="type">Edit</span>
+                        <span class="file">src/views/suggestions.rs</span>
+                    </div>
+                </div>
+
+                <div class="text-response">
+                    Ah! There's a SwiftLint error - I used <code style="color: #f97583;">print</code> instead of Logger. Let me fix that:
+                </div>
+
+                <div class="action-block">
+                    <div class="action-header">
+                        <span class="icon">🔨</span>
+                        <span class="type">Build</span>
+                    </div>
+                    <div class="action-content success">
+                        ✓ Build succeeded
+                    </div>
+                </div>
+
+                <div class="text-response">
+                    Now let me also check the ThreadFocusView to make sure it also gets the suggestion handler.
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <div class="input-context">→ <span>@pm</span> on <span>%master</span></div>
+            <div class="input-box">│</div>
+            <div class="input-hint">
+                <span>1: When I cl...</span>
+                <span>Tab:cycle x:close</span>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

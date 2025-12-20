@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tenex TUI - Tabs (Many + Unread)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a1a;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.4;
+      padding: 20px;
+    }
+    .terminal {
+      background: #0d0d0d;
+      border: 1px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      max-width: 1000px;
+      margin: 0 auto;
+    }
+    .titlebar {
+      background: #2a2a2a;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .titlebar-btn {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .btn-close { background: #ff5f56; }
+    .btn-min { background: #ffbd2e; }
+    .btn-max { background: #27ca40; }
+    .titlebar-text {
+      color: #888;
+      margin-left: 20px;
+    }
+    .content {
+      height: 500px;
+      display: flex;
+      flex-direction: column;
+    }
+    .messages {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 16px;
+    }
+    .message-header {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .message-author {
+      color: #7aa2f7;
+      font-weight: bold;
+    }
+    .message-time {
+      color: #555;
+      margin-left: 8px;
+    }
+    .message-content {
+      color: #e0e0e0;
+    }
+    .message.assistant .message-author {
+      color: #9ece6a;
+    }
+
+    /* Tab bar styling */
+    .bottom-bar {
+      border-top: 1px solid #333;
+      background: #1a1a1a;
+    }
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      height: 24px;
+      border-bottom: 1px solid #333;
+      gap: 2px;
+      overflow-x: auto;
+    }
+    .tab {
+      padding: 2px 8px;
+      color: #666;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .tab:hover {
+      background: #252525;
+      color: #999;
+    }
+    .tab.active {
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border-bottom: 2px solid #7aa2f7;
+    }
+    .tab-number {
+      color: #555;
+      font-size: 10px;
+    }
+    .tab.active .tab-number {
+      color: #7aa2f7;
+    }
+    /* Unread indicator */
+    .tab.unread {
+      color: #bb9af7;
+    }
+    .tab.unread .tab-name {
+      font-weight: bold;
+    }
+    .unread-dot {
+      width: 6px;
+      height: 6px;
+      background: #f7768e;
+      border-radius: 50%;
+      margin-left: 2px;
+    }
+    .tab-separator {
+      width: 1px;
+      height: 14px;
+      background: #333;
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+    .context-info {
+      margin-left: auto;
+      color: #555;
+      font-size: 11px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .context-info span {
+      margin-left: 8px;
+    }
+    .context-label {
+      color: #666;
+    }
+    .context-value {
+      color: #888;
+    }
+
+    .context-line {
+      display: flex;
+      align-items: center;
+      padding: 4px 12px;
+      height: 22px;
+      color: #555;
+      font-size: 12px;
+    }
+
+    .input-area {
+      padding: 8px 12px;
+      border-top: 1px solid #333;
+    }
+    .input-box {
+      background: #252525;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      color: #e0e0e0;
+      min-height: 40px;
+    }
+    .input-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #7aa2f7;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    .notes {
+      margin-top: 20px;
+      padding: 16px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      max-width: 1000px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .notes h3 {
+      color: #7aa2f7;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .notes ul {
+      list-style: none;
+      font-size: 13px;
+    }
+    .notes li {
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .notes li::before {
+      content: "→";
+      color: #9ece6a;
+    }
+    .indicator-example {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #2d2d2d;
+      padding: 2px 8px;
+      border-radius: 3px;
+      color: #bb9af7;
+      font-weight: bold;
+    }
+    .indicator-example .unread-dot {
+      width: 6px;
+      height: 6px;
+      background: #f7768e;
+      border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal">
+    <div class="titlebar">
+      <div class="titlebar-btn btn-close"></div>
+      <div class="titlebar-btn btn-min"></div>
+      <div class="titlebar-btn btn-max"></div>
+      <span class="titlebar-text">tenex — 100×24</span>
+    </div>
+    <div class="content">
+      <div class="messages">
+        <div class="message">
+          <div class="message-header">
+            <span class="message-author">You</span>
+            <span class="message-time">2:15 PM</span>
+          </div>
+          <div class="message-content">Let's work on the API refactor</div>
+        </div>
+        <div class="message assistant">
+          <div class="message-header">
+            <span class="message-author">Claude</span>
+            <span class="message-time">2:15 PM</span>
+          </div>
+          <div class="message-content">I'll help refactor the API. Looking at the current structure...</div>
+        </div>
+      </div>
+
+      <div class="bottom-bar">
+        <div class="tab-bar">
+          <div class="tab">
+            <span class="tab-number">1</span>
+            <span class="tab-name">Auth</span>
+          </div>
+          <div class="tab unread">
+            <span class="tab-number">2</span>
+            <span class="tab-name">Deploy</span>
+            <span class="unread-dot"></span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">3</span>
+            <span class="tab-name">Tests</span>
+          </div>
+          <div class="tab active">
+            <span class="tab-number">4</span>
+            <span class="tab-name">API refactor</span>
+          </div>
+          <div class="tab unread">
+            <span class="tab-number">5</span>
+            <span class="tab-name">DB schema</span>
+            <span class="unread-dot"></span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">6</span>
+            <span class="tab-name">Docs</span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">7</span>
+            <span class="tab-name">CI/CD</span>
+          </div>
+          <div class="tab unread">
+            <span class="tab-number">8</span>
+            <span class="tab-name">Perf</span>
+            <span class="unread-dot"></span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">9</span>
+            <span class="tab-name">Logging</span>
+          </div>
+          <div class="tab-separator"></div>
+          <div class="context-info">
+            <span><span class="context-label">tenex</span></span>
+          </div>
+        </div>
+        <div class="context-line">
+          API refactor · 2 msgs · 3 unread in other tabs
+        </div>
+        <div class="input-area">
+          <div class="input-box">
+            <span class="input-cursor"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="notes">
+    <h3>Design Notes</h3>
+    <ul>
+      <li>9 tabs maximum - matches 1-9 keyboard shortcuts</li>
+      <li>When opening a 10th thread, the oldest (leftmost) tab closes automatically</li>
+      <li>Unread indicator: <span class="indicator-example">Deploy <span class="unread-dot"></span></span> - purple text + red dot</li>
+      <li>Tab names truncate to fit (e.g., "API refactor" becomes "API ref..." if needed)</li>
+      <li>Context line shows aggregate unread count across all tabs</li>
+      <li>Project name moves to compact display when tabs are crowded</li>
+    </ul>
+  </div>
+</body>
+</html>

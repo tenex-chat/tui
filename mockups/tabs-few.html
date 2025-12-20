@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Tenex TUI - Tabs (Few)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #1a1a1a;
+      color: #e0e0e0;
+      font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+      font-size: 14px;
+      line-height: 1.4;
+      padding: 20px;
+    }
+    .terminal {
+      background: #0d0d0d;
+      border: 1px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .titlebar {
+      background: #2a2a2a;
+      padding: 8px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .titlebar-btn {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+    .btn-close { background: #ff5f56; }
+    .btn-min { background: #ffbd2e; }
+    .btn-max { background: #27ca40; }
+    .titlebar-text {
+      color: #888;
+      margin-left: 20px;
+    }
+    .content {
+      height: 500px;
+      display: flex;
+      flex-direction: column;
+    }
+    .messages {
+      flex: 1;
+      padding: 12px;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 16px;
+    }
+    .message-header {
+      color: #888;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .message-author {
+      color: #7aa2f7;
+      font-weight: bold;
+    }
+    .message-time {
+      color: #555;
+      margin-left: 8px;
+    }
+    .message-content {
+      color: #e0e0e0;
+      padding-left: 0;
+    }
+    .message.assistant .message-author {
+      color: #9ece6a;
+    }
+
+    /* Tab bar styling */
+    .bottom-bar {
+      border-top: 1px solid #333;
+      background: #1a1a1a;
+    }
+    .tab-bar {
+      display: flex;
+      align-items: center;
+      padding: 0 8px;
+      height: 24px;
+      border-top: 1px solid #333;
+      gap: 2px;
+    }
+    .tab {
+      padding: 2px 10px;
+      color: #666;
+      border-radius: 3px 3px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+    }
+    .tab:hover {
+      background: #252525;
+      color: #999;
+    }
+    .tab.active {
+      background: #2d2d2d;
+      color: #e0e0e0;
+      border-top: 2px solid #7aa2f7;
+    }
+    .tab-number {
+      color: #555;
+      font-size: 11px;
+    }
+    .tab.active .tab-number {
+      color: #7aa2f7;
+    }
+    .tab-separator {
+      width: 1px;
+      height: 14px;
+      background: #333;
+      margin: 0 8px;
+    }
+    .context-info {
+      margin-left: auto;
+      color: #555;
+      font-size: 12px;
+    }
+    .context-info span {
+      margin-left: 12px;
+    }
+    .context-label {
+      color: #666;
+    }
+    .context-value {
+      color: #888;
+    }
+
+    /* Status/context line */
+    .context-line {
+      display: flex;
+      align-items: center;
+      padding: 4px 12px;
+      height: 22px;
+      color: #555;
+      font-size: 12px;
+    }
+
+    /* Input area */
+    .input-area {
+      padding: 8px 12px;
+      border-top: 1px solid #333;
+    }
+    .input-box {
+      background: #252525;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 8px;
+      color: #e0e0e0;
+      min-height: 40px;
+    }
+    .input-cursor {
+      display: inline-block;
+      width: 8px;
+      height: 16px;
+      background: #7aa2f7;
+      animation: blink 1s infinite;
+    }
+    @keyframes blink {
+      0%, 50% { opacity: 1; }
+      51%, 100% { opacity: 0; }
+    }
+
+    /* Legend */
+    .legend {
+      margin-top: 20px;
+      padding: 16px;
+      background: #1a1a1a;
+      border-radius: 8px;
+      max-width: 900px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .legend h3 {
+      color: #7aa2f7;
+      margin-bottom: 12px;
+      font-size: 14px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .legend-key {
+      background: #2d2d2d;
+      padding: 2px 8px;
+      border-radius: 3px;
+      color: #9ece6a;
+      min-width: 80px;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal">
+    <div class="titlebar">
+      <div class="titlebar-btn btn-close"></div>
+      <div class="titlebar-btn btn-min"></div>
+      <div class="titlebar-btn btn-max"></div>
+      <span class="titlebar-text">tenex — 80×24</span>
+    </div>
+    <div class="content">
+      <div class="messages">
+        <div class="message">
+          <div class="message-header">
+            <span class="message-author">You</span>
+            <span class="message-time">10:32 AM</span>
+          </div>
+          <div class="message-content">Can you help me fix the authentication bug?</div>
+        </div>
+        <div class="message assistant">
+          <div class="message-header">
+            <span class="message-author">Claude</span>
+            <span class="message-time">10:32 AM</span>
+          </div>
+          <div class="message-content">I'll look into the authentication flow. Let me check the auth middleware first...</div>
+        </div>
+        <div class="message">
+          <div class="message-header">
+            <span class="message-author">You</span>
+            <span class="message-time">10:35 AM</span>
+          </div>
+          <div class="message-content">The token validation seems to be failing on refresh</div>
+        </div>
+      </div>
+
+      <div class="bottom-bar">
+        <div class="context-line">
+          Thread: Auth bug fix · 3 messages · Ctrl+Tab: switch · x: close · Esc: threads
+        </div>
+        <div class="input-area">
+          <div class="input-box">
+            <span class="input-cursor"></span>
+          </div>
+        </div>
+        <div class="tab-bar">
+          <div class="tab active">
+            <span class="tab-number">1</span>
+            <span>Auth bug</span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">2</span>
+            <span>Feature X</span>
+          </div>
+          <div class="tab">
+            <span class="tab-number">3</span>
+            <span>Deploy q...</span>
+          </div>
+          <div class="tab-separator"></div>
+          <div class="context-info">
+            <span><span class="context-label">Project:</span> <span class="context-value">tenex</span></span>
+            <span><span class="context-label">Agent:</span> <span class="context-value">Claude</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="legend">
+    <h3>Keyboard Shortcuts</h3>
+    <div class="legend-item">
+      <span class="legend-key">1-9</span>
+      <span>Jump to tab by number</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">Ctrl+Tab</span>
+      <span>Next tab</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">Ctrl+Shift+Tab</span>
+      <span>Previous tab</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-key">x</span>
+      <span>Close current tab</span>
+    </div>
+  </div>
+</body>
+</html>
