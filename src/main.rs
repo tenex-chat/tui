@@ -454,6 +454,31 @@ fn handle_key(
         return Ok(());
     }
 
+    // Handle Ctrl+R to open ask modal (works in any mode when in Chat view)
+    if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) && app.view == View::Chat {
+        let messages = app.messages();
+        let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| {
+                    m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
+                })
+                .collect()
+        };
+
+        if let Some(msg) = display_messages.get(app.selected_message_index) {
+            if let Some(ref ask_event) = msg.ask_event {
+                app.open_ask_modal(msg.id.clone(), ask_event.clone());
+                return Ok(());
+            }
+        }
+    }
+
     // Handle agent selector when open
     if app.showing_agent_selector {
         match code {

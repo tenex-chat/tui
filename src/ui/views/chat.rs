@@ -582,9 +582,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                                 if let Some(ref ask) = msg.ask_event {
                                     let question_count = ask.questions.len();
                                     let indicator_text = if question_count == 1 {
-                                        " [❓ Question - Press 'a' to answer] ".to_string()
+                                        " [❓ Question - Press Ctrl+R to answer] ".to_string()
                                     } else {
-                                        format!(" [❓ {} Questions - Press 'a' to answer] ", question_count)
+                                        format!(" [❓ {} Questions - Press Ctrl+R to answer] ", question_count)
                                     };
 
                                     messages_text.push(Line::from(vec![
