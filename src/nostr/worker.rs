@@ -187,6 +187,9 @@ impl NostrWorker {
         // Conversation metadata (kind 513) - provides titles and summaries for threads
         let metadata_filter = Filter::new().kind(Kind::Custom(513));
 
+        // Agent lessons (kind 4129) - learning insights from agents
+        let lesson_filter = Filter::new().kind(Kind::Custom(4129));
+
         info!("Starting persistent subscriptions");
 
         let subscription_id = client
@@ -199,6 +202,7 @@ impl NostrWorker {
                     all_status_filter,
                     streaming_filter,
                     metadata_filter,
+                    lesson_filter,
                 ],
                 None,
             )

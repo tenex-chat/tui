@@ -394,6 +394,7 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         View::Home => "TENEX - Home", // Won't reach here
         View::Threads => "TENEX - Threads",
         View::Chat => "TENEX - Chat",
+        View::LessonViewer => "TENEX - Lesson",
     };
     let header = Paragraph::new(title)
         .style(Style::default().fg(chrome_color))
@@ -406,6 +407,13 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         View::Home => {} // Won't reach here
         View::Threads => ui::views::render_threads(f, app, chunks[1]),
         View::Chat => ui::views::render_chat(f, app, chunks[1]),
+        View::LessonViewer => {
+            if let Some(ref lesson_id) = app.viewing_lesson_id.clone() {
+                if let Some(lesson) = app.data_store.borrow().get_lesson(lesson_id) {
+                    ui::views::render_lesson_viewer(f, app, chunks[1], lesson);
+                }
+            }
+        }
     }
 
     // Footer - show quit warning if pending, otherwise normal hints
@@ -592,6 +600,21 @@ fn handle_key(
                     app.agent_selector_index = 0;
                 } else if c == 'o' && app.view == View::Chat {
                     app.open_first_image();
+                } else if c == 'j' && app.view == View::LessonViewer {
+                    app.scroll_down(3);
+                } else if c == 'k' && app.view == View::LessonViewer {
+                    app.scroll_up(3);
+                } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
+                    // Navigate to section 1-5
+                    let section_index = (c as usize) - ('1' as usize);
+                    if let Some(ref lesson_id) = app.viewing_lesson_id {
+                        if let Some(lesson) = app.data_store.borrow().get_lesson(lesson_id) {
+                            if section_index < lesson.sections().len() {
+                                app.lesson_viewer_section = section_index;
+                                app.scroll_offset = 0; // Reset scroll when changing sections
+                            }
+                        }
+                    }
                 }
             }
             KeyCode::Up => match app.view {
@@ -603,11 +626,17 @@ fn handle_key(
                         app.selected_message_index -= 1;
                     }
                 }
+                View::LessonViewer => {
+                    app.scroll_up(3);
+                }
                 _ => {}
             },
             KeyCode::Down => match app.view {
                 View::Threads if app.selected_thread_index < app.threads().len().saturating_sub(1) => {
                     app.selected_thread_index += 1;
+                }
+                View::LessonViewer => {
+                    app.scroll_down(3);
                 }
                 View::Chat => {
                     // Get display message count for bounds checking
@@ -712,6 +741,13 @@ fn handle_key(
                         app.chat_editor.clear();
                         app.view = View::Threads;
                     }
+                }
+                View::LessonViewer => {
+                    // Return to home view
+                    app.view = View::Home;
+                    app.viewing_lesson_id = None;
+                    app.lesson_viewer_section = 0;
+                    app.scroll_offset = 0;
                 }
                 _ => {}
             },
@@ -1165,17 +1201,26 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         RecentPanelFocus::Feed => {
                             let chatter = app.agent_chatter();
                             if let Some(item) = chatter.get(app.selected_feed_index).cloned() {
-                                let thread_id = item.thread_id.clone();
-                                let project_a_tag = item.project_a_tag.clone();
+                                use crate::models::AgentChatter;
+                                match item {
+                                    AgentChatter::Message { thread_id, project_a_tag, .. } => {
+                                        // Find the thread
+                                        let thread = app.data_store.borrow().get_threads(&project_a_tag)
+                                            .iter()
+                                            .find(|t| t.id == thread_id)
+                                            .cloned();
 
-                                // Find the thread
-                                let thread = app.data_store.borrow().get_threads(&project_a_tag)
-                                    .iter()
-                                    .find(|t| t.id == thread_id)
-                                    .cloned();
-
-                                if let Some(thread) = thread {
-                                    app.open_thread_from_home(&thread, &project_a_tag);
+                                        if let Some(thread) = thread {
+                                            app.open_thread_from_home(&thread, &project_a_tag);
+                                        }
+                                    }
+                                    AgentChatter::Lesson { id, .. } => {
+                                        // Open lesson viewer
+                                        app.viewing_lesson_id = Some(id);
+                                        app.lesson_viewer_section = 0;
+                                        app.scroll_offset = 0;
+                                        app.view = View::LessonViewer;
+                                    }
                                 }
                             }
                         }

@@ -1,6 +1,7 @@
 pub mod conversation_metadata;
 pub mod draft;
 pub mod inbox;
+pub mod lesson;
 pub mod message;
 pub mod project;
 pub mod project_draft;
@@ -11,7 +12,8 @@ pub mod thread;
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{ChatDraft, DraftStorage};
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
-pub use message::Message;
+pub use lesson::Lesson;
+pub use message::{AskEvent, AskQuestion, Message};
 pub use project::Project;
 pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage};
 pub use project_status::{ProjectAgent, ProjectStatus};

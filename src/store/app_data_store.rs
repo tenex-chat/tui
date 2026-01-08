@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, ConversationMetadata, InboxEventType, InboxItem, Message, Project, ProjectStatus, StreamingSession, Thread};
+use crate::models::{AgentChatter, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, StreamingSession, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -28,6 +28,9 @@ pub struct AppDataStore {
 
     // Agent chatter feed - kind:1111 events a-tagging our projects
     pub agent_chatter: Vec<AgentChatter>,
+
+    // Agent lessons - kind:4129 events
+    pub lessons: HashMap<String, Lesson>,  // keyed by lesson id
 }
 
 impl AppDataStore {
@@ -45,6 +48,7 @@ impl AppDataStore {
             inbox_read_ids: HashSet::new(),
             user_pubkey: None,
             agent_chatter: Vec::new(),
+            lessons: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -160,6 +164,7 @@ impl AppDataStore {
             0 => self.handle_profile_event(note),
             24010 => self.handle_status_event(note),
             513 => self.handle_metadata_event(note),
+            4129 => self.handle_lesson_event(note),
             _ => {}
         }
     }
@@ -252,7 +257,7 @@ impl AppDataStore {
             // Check if message a-tags one of our projects for agent chatter feed
             if let Some(a_tag) = Self::extract_project_a_tag(note) {
                 if self.projects.iter().any(|p| p.a_tag() == a_tag) {
-                    let chatter = AgentChatter {
+                    let chatter = AgentChatter::Message {
                         id: message_id.clone(),
                         content: message.content.clone(),
                         project_a_tag: a_tag,
@@ -509,18 +514,51 @@ impl AppDataStore {
     /// Add an agent chatter item, maintaining sort order and limiting to 100 items
     pub fn add_agent_chatter(&mut self, item: AgentChatter) {
         // Deduplicate by id
-        if self.agent_chatter.iter().any(|i| i.id == item.id) {
+        if self.agent_chatter.iter().any(|i| i.id() == item.id()) {
             return;
         }
 
         // Insert sorted by created_at (most recent first)
-        let pos = self.agent_chatter.partition_point(|i| i.created_at > item.created_at);
+        let pos = self.agent_chatter.partition_point(|i| i.created_at() > item.created_at());
         self.agent_chatter.insert(pos, item);
 
         // Limit to 100 items
         if self.agent_chatter.len() > 100 {
             self.agent_chatter.truncate(100);
         }
+    }
+
+    // ===== Lesson Methods =====
+
+    fn handle_lesson_event(&mut self, note: &Note) {
+        if let Some(lesson) = Lesson::from_note(note) {
+            let lesson_id = lesson.id.clone();
+
+            // Add to agent chatter feed
+            let chatter = AgentChatter::Lesson {
+                id: lesson.id.clone(),
+                title: lesson.title.clone(),
+                content: lesson.content.clone(),
+                author_pubkey: lesson.pubkey.clone(),
+                created_at: lesson.created_at,
+                category: lesson.category.clone(),
+            };
+            self.add_agent_chatter(chatter);
+
+            // Store lesson
+            self.lessons.insert(lesson_id, lesson);
+        }
+    }
+
+    pub fn get_lesson(&self, lesson_id: &str) -> Option<&Lesson> {
+        self.lessons.get(lesson_id)
+    }
+
+    /// Get all lessons sorted by created_at (most recent first)
+    pub fn get_all_lessons(&self) -> Vec<&Lesson> {
+        let mut lessons: Vec<&Lesson> = self.lessons.values().collect();
+        lessons.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        lessons
     }
 
     // ===== Streaming Methods =====

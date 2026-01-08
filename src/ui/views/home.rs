@@ -374,21 +374,7 @@ fn render_feed_sidebar(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 }
 
 fn render_feed_card(app: &App, item: &AgentChatter, is_selected: bool) -> ListItem<'static> {
-    // Single borrow to extract all needed data
-    let (project_name, author_name) = {
-        let store = app.data_store.borrow();
-        (store.get_project_name(&item.project_a_tag), store.get_profile_name(&item.author_pubkey))
-    };
-    let time_str = format_relative_time(item.created_at);
-
-    // Get first line of content as preview
-    let preview: String = item.content
-        .lines()
-        .next()
-        .unwrap_or("")
-        .chars()
-        .take(70)
-        .collect();
+    use crate::models::AgentChatter;
 
     // Card styling
     let border_char = if is_selected { "│ " } else { "  " };
@@ -404,39 +390,118 @@ fn render_feed_card(app: &App, item: &AgentChatter, is_selected: bool) -> ListIt
         Style::default().fg(Color::Magenta)
     };
 
-    // Line 1: Author + time
-    let line1_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(format!("@{}", author_name), author_style),
-        Span::styled("  ", Style::default()),
-        Span::styled(time_str, Style::default().fg(Color::DarkGray)),
-    ];
+    match item {
+        AgentChatter::Message { id: _, content, project_a_tag, author_pubkey, created_at, thread_id: _ } => {
+            // Single borrow to extract all needed data
+            let (project_name, author_name) = {
+                let store = app.data_store.borrow();
+                (store.get_project_name(project_a_tag), store.get_profile_name(author_pubkey))
+            };
+            let time_str = format_relative_time(*created_at);
 
-    // Line 2: Project
-    let line2_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled("● ", Style::default().fg(Color::Green)),
-        Span::styled(project_name, Style::default().fg(Color::Green)),
-    ];
+            // Get first line of content as preview
+            let preview: String = content
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(70)
+                .collect();
 
-    // Line 3: Preview
-    let line3_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(
-            truncate_string(&preview, 70),
-            Style::default().fg(Color::DarkGray),
-        ),
-    ];
+            // Line 1: Author + time
+            let line1_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled(format!("@{}", author_name), author_style),
+                Span::styled("  ", Style::default()),
+                Span::styled(time_str, Style::default().fg(Color::DarkGray)),
+            ];
 
-    // Line 4: Empty for spacing
-    let line4_spans = vec![Span::raw("")];
+            // Line 2: Project
+            let line2_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled("● ", Style::default().fg(Color::Green)),
+                Span::styled(project_name, Style::default().fg(Color::Green)),
+            ];
 
-    ListItem::new(vec![
-        Line::from(line1_spans),
-        Line::from(line2_spans),
-        Line::from(line3_spans),
-        Line::from(line4_spans),
-    ])
+            // Line 3: Preview
+            let line3_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled(
+                    truncate_string(&preview, 70),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+
+            // Line 4: Empty for spacing
+            let line4_spans = vec![Span::raw("")];
+
+            ListItem::new(vec![
+                Line::from(line1_spans),
+                Line::from(line2_spans),
+                Line::from(line3_spans),
+                Line::from(line4_spans),
+            ])
+        }
+        AgentChatter::Lesson { id: _, title, content, author_pubkey, created_at, category } => {
+            // Single borrow to extract all needed data
+            let author_name = app.data_store.borrow().get_profile_name(author_pubkey);
+            let time_str = format_relative_time(*created_at);
+
+            // Get first line of content as preview
+            let preview: String = content
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(60)
+                .collect();
+
+            // Line 1: 📚 icon + title
+            let line1_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled("📚 ", Style::default().fg(Color::Yellow)),
+                Span::styled(
+                    truncate_string(title, 60),
+                    if is_selected {
+                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    }
+                ),
+            ];
+
+            // Line 2: Author + time + category
+            let mut line2_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled(format!("by @{}", author_name), author_style),
+                Span::styled(" • ", Style::default().fg(Color::DarkGray)),
+                Span::styled(time_str, Style::default().fg(Color::DarkGray)),
+            ];
+            if let Some(cat) = category {
+                line2_spans.push(Span::styled(" • ", Style::default().fg(Color::DarkGray)));
+                line2_spans.push(Span::styled(cat.to_string(), Style::default().fg(Color::Magenta)));
+            }
+
+            // Line 3: Preview
+            let line3_spans = vec![
+                Span::styled(border_char, border_style),
+                Span::styled(
+                    truncate_string(&preview, 70),
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ];
+
+            // Line 4: Empty for spacing
+            let line4_spans = vec![Span::raw("")];
+
+            ListItem::new(vec![
+                Line::from(line1_spans),
+                Line::from(line2_spans),
+                Line::from(line3_spans),
+                Line::from(line4_spans),
+            ])
+        }
+    }
 }
 
 fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {

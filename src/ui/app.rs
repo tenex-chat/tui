@@ -1,6 +1,7 @@
-use crate::models::{ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread};
+use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread};
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{AppDataStore, Database};
+use crate::ui::ask_input::AskInputState;
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -14,6 +15,7 @@ pub enum View {
     Home,
     Threads,
     Chat,
+    LessonViewer,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,6 +55,14 @@ pub struct OpenTab {
 
 /// Maximum number of open tabs (matches 1-9 shortcuts)
 pub const MAX_TABS: usize = 9;
+
+/// State for the ask modal (answering multi-question ask events)
+#[derive(Debug, Clone)]
+pub struct AskModalState {
+    pub message_id: String,
+    pub ask_event: AskEvent,
+    pub input_state: AskInputState,
+}
 
 pub struct App {
     pub running: bool,
@@ -139,6 +149,13 @@ pub struct App {
     pub new_thread_agent_index: usize,
     project_draft_storage: RefCell<ProjectDraftStorage>,
     preferences: RefCell<PreferencesStorage>,
+
+    // Ask modal state
+    pub ask_modal_state: Option<AskModalState>,
+
+    // Lesson viewer state
+    pub viewing_lesson_id: Option<String>,
+    pub lesson_viewer_section: usize,
 }
 
 impl App {
@@ -203,6 +220,9 @@ impl App {
             new_thread_agent_index: 0,
             project_draft_storage: RefCell::new(ProjectDraftStorage::new("tenex_data")),
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
+            ask_modal_state: None,
+            viewing_lesson_id: None,
+            lesson_viewer_section: 0,
         }
     }
 
@@ -915,5 +935,27 @@ impl App {
                 self.set_status(&e);
             }
         }
+    }
+
+    /// Open ask modal for a message
+    pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent) {
+        let input_state = AskInputState::new(ask_event.questions.clone());
+        self.ask_modal_state = Some(AskModalState {
+            message_id,
+            ask_event,
+            input_state,
+        });
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// Close ask modal
+    pub fn close_ask_modal(&mut self) {
+        self.ask_modal_state = None;
+        self.input_mode = InputMode::Editing;
+    }
+
+    /// Check if ask modal is open
+    pub fn is_ask_modal_open(&self) -> bool {
+        self.ask_modal_state.is_some()
     }
 }
