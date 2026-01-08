@@ -10,6 +10,23 @@ use ratatui::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Map status label to Unicode symbol
+fn status_label_to_symbol(label: &str) -> &'static str {
+    match label.to_lowercase().as_str() {
+        "in progress" | "in-progress" | "working" | "active" => "🔧",
+        "blocked" | "waiting" | "paused" => "🚧",
+        "done" | "complete" | "completed" | "finished" => "✅",
+        "reviewing" | "review" | "in review" => "👀",
+        "testing" | "in testing" => "🧪",
+        "planning" | "draft" | "design" => "📝",
+        "urgent" | "critical" | "high priority" => "🔥",
+        "bug" | "issue" | "error" => "🐛",
+        "enhancement" | "feature" | "new" => "✨",
+        "question" | "help needed" => "❓",
+        _ => "📌",
+    }
+}
+
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
 fn format_relative_time(timestamp: u64) -> String {
     let now = SystemTime::now()
@@ -196,30 +213,28 @@ fn render_conversation_card(
     a_tag: &str,
     is_selected: bool,
 ) -> ListItem<'static> {
-    let project_name = app.data_store.borrow().get_project_name(a_tag);
+    // Single borrow to extract all needed data
+    let (project_name, author_name, preview, timestamp, is_streaming) = {
+        let store = app.data_store.borrow();
+        let project_name = store.get_project_name(a_tag);
 
-    // Get last message info
-    let messages = app.data_store.borrow().get_messages(&thread.id).to_vec();
-    let last_message = messages.last();
+        // Get last message info without cloning the entire vector
+        let messages = store.get_messages(&thread.id);
+        let (author_name, preview, timestamp) = if let Some(msg) = messages.last() {
+            let name = store.get_profile_name(&msg.pubkey);
+            let preview: String = msg.content.chars().take(80).collect();
+            let preview = preview.replace('\n', " ");
+            (name, preview, msg.created_at)
+        } else {
+            ("".to_string(), "No messages yet".to_string(), thread.last_activity)
+        };
 
-    let (author_name, preview, timestamp) = if let Some(msg) = last_message {
-        let name = app.data_store.borrow().get_profile_name(&msg.pubkey);
-        let preview: String = msg.content.chars().take(80).collect();
-        let preview = preview.replace('\n', " ");
-        (name, preview, msg.created_at)
-    } else {
-        ("".to_string(), "No messages yet".to_string(), thread.last_activity)
+        let is_streaming = !store.streaming_with_content_for_thread(&thread.id).is_empty();
+
+        (project_name, author_name, preview, timestamp, is_streaming)
     };
 
     let time_str = format_relative_time(timestamp);
-
-    // Check for streaming activity
-    let is_streaming = app
-        .data_store
-        .borrow()
-        .streaming_with_content_for_thread(&thread.id)
-        .len()
-        > 0;
 
     // Card styling
     let border_char = if is_selected { "│ " } else { "  " };
@@ -235,14 +250,22 @@ fn render_conversation_card(
         Style::default().fg(Color::White)
     };
 
-    // Line 1: Title + time
-    let mut line1_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(
-            truncate_string(&thread.title, 60),
-            title_style,
-        ),
-    ];
+    // Line 1: Status label (if present) + Title + time
+    let mut line1_spans = vec![Span::styled(border_char, border_style)];
+
+    // Add status label with symbol if present
+    if let Some(ref status_label) = thread.status_label {
+        let symbol = status_label_to_symbol(status_label);
+        line1_spans.push(Span::styled(
+            format!("[{} {}] ", symbol, status_label),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    line1_spans.push(Span::styled(
+        truncate_string(&thread.title, 60),
+        title_style,
+    ));
 
     // Add time on the right (we'll pad later in rendering)
     let time_padding = "  ";
@@ -276,15 +299,30 @@ fn render_conversation_card(
         ));
     }
 
-    // Line 4: Empty line for spacing
-    let line4_spans = vec![Span::raw("")];
-
-    ListItem::new(vec![
+    // Build lines list
+    let mut lines = vec![
         Line::from(line1_spans),
         Line::from(line2_spans),
         Line::from(line3_spans),
-        Line::from(line4_spans),
-    ])
+    ];
+
+    // Line 4: Current activity (if present)
+    if let Some(ref activity) = thread.status_current_activity {
+        let activity_spans = vec![
+            Span::styled(border_char, border_style),
+            Span::styled("⟳ ", Style::default().fg(Color::Cyan)),
+            Span::styled(
+                truncate_string(activity, 70),
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+            ),
+        ];
+        lines.push(Line::from(activity_spans));
+    }
+
+    // Final line: Empty line for spacing
+    lines.push(Line::from(vec![Span::raw("")]));
+
+    ListItem::new(lines)
 }
 
 fn render_feed_sidebar(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
@@ -336,8 +374,11 @@ fn render_feed_sidebar(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 }
 
 fn render_feed_card(app: &App, item: &AgentChatter, is_selected: bool) -> ListItem<'static> {
-    let project_name = app.data_store.borrow().get_project_name(&item.project_a_tag);
-    let author_name = app.data_store.borrow().get_profile_name(&item.author_pubkey);
+    // Single borrow to extract all needed data
+    let (project_name, author_name) = {
+        let store = app.data_store.borrow();
+        (store.get_project_name(&item.project_a_tag), store.get_profile_name(&item.author_pubkey))
+    };
     let time_str = format_relative_time(item.created_at);
 
     // Get first line of content as preview
@@ -442,8 +483,11 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem<'static> {
-    let project_name = app.data_store.borrow().get_project_name(&item.project_a_tag);
-    let author_name = app.data_store.borrow().get_profile_name(&item.author_pubkey);
+    // Single borrow to extract all needed data
+    let (project_name, author_name) = {
+        let store = app.data_store.borrow();
+        (store.get_project_name(&item.project_a_tag), store.get_profile_name(&item.author_pubkey))
+    };
     let time_str = format_relative_time(item.created_at);
 
     let type_str = match item.event_type {

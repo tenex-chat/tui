@@ -333,14 +333,17 @@ impl AppDataStore {
     }
 
     fn handle_metadata_event(&mut self, note: &Note) {
-        // Parse metadata directly from the note to update thread title
+        // Parse metadata directly from the note to update thread title and status
         if let Some(metadata) = ConversationMetadata::from_note(note) {
-            // Find the thread across all projects and update its title
+            // Find the thread across all projects and update its fields
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == metadata.thread_id) {
                     if let Some(title) = metadata.title {
                         thread.title = title;
                     }
+                    // Update status fields
+                    thread.status_label = metadata.status_label;
+                    thread.status_current_activity = metadata.status_current_activity;
                     // Update last_activity and maintain sort order
                     thread.last_activity = metadata.created_at;
                     // Re-sort to maintain order by last_activity (most recent first)

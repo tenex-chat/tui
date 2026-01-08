@@ -8,6 +8,10 @@ pub struct Thread {
     pub pubkey: String,
     /// Most recent activity (thread creation or latest reply)
     pub last_activity: u64,
+    /// Status label from kind:513 metadata (e.g., "In Progress", "Blocked", "Done")
+    pub status_label: Option<String>,
+    /// Current activity from kind:513 metadata (e.g., "Writing tests...")
+    pub status_current_activity: Option<String>,
 }
 
 impl Thread {
@@ -59,6 +63,8 @@ impl Thread {
             content,
             pubkey,
             last_activity: created_at,
+            status_label: None,
+            status_current_activity: None,
         })
     }
 }
