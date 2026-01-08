@@ -5,6 +5,7 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -62,6 +63,15 @@ pub struct AskModalState {
     pub message_id: String,
     pub ask_event: AskEvent,
     pub input_state: AskInputState,
+}
+
+/// Buffer for local streaming content (per conversation)
+#[derive(Default, Clone)]
+pub struct LocalStreamBuffer {
+    pub agent_pubkey: String,
+    pub text_content: String,
+    pub reasoning_content: String,
+    pub is_complete: bool,
 }
 
 pub struct App {
@@ -156,6 +166,9 @@ pub struct App {
     // Lesson viewer state
     pub viewing_lesson_id: Option<String>,
     pub lesson_viewer_section: usize,
+
+    /// Local streaming buffers by conversation_id
+    pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
 }
 
 impl App {
@@ -223,6 +236,7 @@ impl App {
             ask_modal_state: None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
+            local_stream_buffers: HashMap::new(),
         }
     }
 
@@ -994,5 +1008,50 @@ impl App {
         }
 
         None
+    }
+
+    // ===== Local Streaming Methods =====
+
+    /// Get streaming content for current conversation
+    pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
+        let conv_id = self.current_conversation_id()?;
+        self.local_stream_buffers.get(&conv_id)
+    }
+
+    /// Update streaming buffer from local chunk
+    pub fn handle_local_stream_chunk(
+        &mut self,
+        agent_pubkey: String,
+        conversation_id: String,
+        text_delta: Option<String>,
+        reasoning_delta: Option<String>,
+        is_finish: bool,
+    ) {
+        let buffer = self.local_stream_buffers
+            .entry(conversation_id)
+            .or_insert_with(|| LocalStreamBuffer {
+                agent_pubkey: agent_pubkey.clone(),
+                ..Default::default()
+            });
+
+        if let Some(delta) = text_delta {
+            buffer.text_content.push_str(&delta);
+        }
+        if let Some(delta) = reasoning_delta {
+            buffer.reasoning_content.push_str(&delta);
+        }
+        if is_finish {
+            buffer.is_complete = true;
+        }
+    }
+
+    /// Clear streaming buffer when Nostr event arrives
+    pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
+        self.local_stream_buffers.remove(conversation_id);
+    }
+
+    /// Get current conversation ID (thread ID)
+    fn current_conversation_id(&self) -> Option<String> {
+        self.selected_thread.as_ref().map(|t| t.id.clone())
     }
 }
