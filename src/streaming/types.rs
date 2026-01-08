@@ -41,3 +41,62 @@ impl LocalStreamChunk {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_text_delta_extraction() {
+        let chunk = LocalStreamChunk {
+            agent_pubkey: "abc".to_string(),
+            conversation_id: "def".to_string(),
+            data: json!({
+                "type": "text-delta",
+                "textDelta": "Hello"
+            }),
+        };
+        assert_eq!(chunk.text_delta(), Some("Hello"));
+    }
+
+    #[test]
+    fn test_finish_detection() {
+        let chunk = LocalStreamChunk {
+            agent_pubkey: "abc".to_string(),
+            conversation_id: "def".to_string(),
+            data: json!({
+                "type": "finish",
+                "finishReason": "stop"
+            }),
+        };
+        assert!(chunk.is_finish());
+    }
+
+    #[test]
+    fn test_reasoning_delta_extraction() {
+        let chunk = LocalStreamChunk {
+            agent_pubkey: "abc".to_string(),
+            conversation_id: "def".to_string(),
+            data: json!({
+                "type": "reasoning",
+                "textDelta": "Let me think..."
+            }),
+        };
+        assert_eq!(chunk.reasoning_delta(), Some("Let me think..."));
+    }
+
+    #[test]
+    fn test_non_text_returns_none() {
+        let chunk = LocalStreamChunk {
+            agent_pubkey: "abc".to_string(),
+            conversation_id: "def".to_string(),
+            data: json!({
+                "type": "tool-call",
+                "toolName": "search"
+            }),
+        };
+        assert_eq!(chunk.text_delta(), None);
+        assert!(!chunk.is_finish());
+    }
+}
