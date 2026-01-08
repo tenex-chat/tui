@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info_span, warn};
 
-use models::Message;
 use nostr::{DataChange, NostrCommand, NostrWorker};
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
 use std::sync::mpsc;
@@ -454,30 +453,8 @@ fn handle_key(
         return Ok(());
     }
 
-    // Handle Ctrl+R to open ask modal (works in any mode when in Chat view)
-    if key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::CONTROL) && app.view == View::Chat {
-        let messages = app.messages();
-        let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-
-        let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
-            messages.iter()
-                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                .collect()
-        } else {
-            messages.iter()
-                .filter(|m| {
-                    m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
-                })
-                .collect()
-        };
-
-        if let Some(msg) = display_messages.get(app.selected_message_index) {
-            if let Some(ref ask_event) = msg.ask_event {
-                app.open_ask_modal(msg.id.clone(), ask_event.clone());
-                return Ok(());
-            }
-        }
-    }
+    // Ctrl+R is no longer needed - ask UI auto-shows when there's an unanswered ask event
+    // Users just press 'i' to enter editing mode and the ask UI will appear automatically
 
     // Handle agent selector when open
     if app.showing_agent_selector {
@@ -627,37 +604,10 @@ fn handle_key(
                     app.creating_thread = true;
                     app.input_mode = InputMode::Editing;
                     app.clear_input();
-                } else if c == 'a' && app.view == View::Chat {
-                    // Check if selected message is an ask event
-                    let messages = app.messages();
-                    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-
-                    let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
-                        messages.iter()
-                            .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                            .collect()
-                    } else {
-                        messages.iter()
-                            .filter(|m| {
-                                m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
-                            })
-                            .collect()
-                    };
-
-                    if let Some(msg) = display_messages.get(app.selected_message_index) {
-                        if let Some(ref ask_event) = msg.ask_event {
-                            // Open ask modal
-                            app.open_ask_modal(msg.id.clone(), ask_event.clone());
-                        } else if !app.available_agents().is_empty() {
-                            // No ask event, open agent selector
-                            app.showing_agent_selector = true;
-                            app.agent_selector_index = 0;
-                        }
-                    } else if !app.available_agents().is_empty() {
-                        // No message selected, open agent selector
-                        app.showing_agent_selector = true;
-                        app.agent_selector_index = 0;
-                    }
+                } else if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
+                    // 'a' opens agent selector
+                    app.showing_agent_selector = true;
+                    app.agent_selector_index = 0;
                 } else if c == '@' && (app.view == View::Threads || app.view == View::Chat) && !app.available_agents().is_empty() {
                     app.showing_agent_selector = true;
                     app.agent_selector_index = 0;

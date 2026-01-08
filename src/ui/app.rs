@@ -937,7 +937,7 @@ impl App {
         }
     }
 
-    /// Open ask modal for a message
+    /// Open ask UI inline (replacing input box)
     pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent) {
         let input_state = AskInputState::new(ask_event.questions.clone());
         self.ask_modal_state = Some(AskModalState {
@@ -948,14 +948,51 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
-    /// Close ask modal
+    /// Close ask UI and return to normal input
     pub fn close_ask_modal(&mut self) {
         self.ask_modal_state = None;
         self.input_mode = InputMode::Editing;
     }
 
-    /// Check if ask modal is open
+    /// Check if ask UI is active
     pub fn is_ask_modal_open(&self) -> bool {
         self.ask_modal_state.is_some()
+    }
+
+    /// Check for unanswered ask events in current thread
+    /// Returns the first unanswered ask event found
+    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str())?;
+
+        // Get all message IDs that have replies
+        let mut replied_to: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for msg in &messages {
+            if let Some(ref reply_to) = msg.reply_to {
+                replied_to.insert(reply_to.as_str());
+            }
+        }
+
+        // Find first ask event that hasn't been replied to
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == Some(thread_id))
+                .collect()
+        };
+
+        for msg in display_messages {
+            if let Some(ref ask_event) = msg.ask_event {
+                // Check if this message has been replied to
+                if !replied_to.contains(msg.id.as_str()) {
+                    return Some((msg.id.clone(), ask_event.clone()));
+                }
+            }
+        }
+
+        None
     }
 }

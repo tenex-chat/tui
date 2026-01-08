@@ -178,12 +178,35 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let all_messages = app.messages();
     let _render_span = info_span!("render_chat", message_count = all_messages.len()).entered();
 
-    // Calculate dynamic input height based on line count (min 3, max 10)
-    let input_lines = app.chat_editor.line_count().max(1);
-    let input_height = (input_lines as u16 + 2).clamp(3, 10); // +2 for borders
+    // Check if we should show inline ask UI instead of normal input
+    let should_show_ask_ui = if app.input_mode == InputMode::Editing {
+        // Only auto-activate ask UI if in editing mode AND there's an unanswered ask
+        if let Some((message_id, ask_event)) = app.has_unanswered_ask_event() {
+            // Auto-activate ask UI if not already active
+            if app.ask_modal_state.is_none() {
+                app.open_ask_modal(message_id, ask_event);
+            }
+            true
+        } else {
+            false
+        }
+    } else {
+        // Ask modal is already active (user manually opened it)
+        app.ask_modal_state.is_some()
+    };
 
-    // Check if we have attachments (paste or image)
-    let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
+    // Calculate dynamic input height based on what we're showing
+    let input_height = if should_show_ask_ui {
+        // Ask UI needs fixed height: tab bar (1) + question content (min 5) + help (3) = 9
+        9
+    } else {
+        // Normal input: dynamic based on line count (min 3, max 10)
+        let input_lines = app.chat_editor.line_count().max(1);
+        (input_lines as u16 + 2).clamp(3, 10) // +2 for borders
+    };
+
+    // Check if we have attachments (paste or image) - only relevant for normal input
+    let has_attachments = !should_show_ask_ui && (!app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty());
     let has_status = app.status_message.is_some();
 
     // Check if we have tabs to show
@@ -582,9 +605,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                                 if let Some(ref ask) = msg.ask_event {
                                     let question_count = ask.questions.len();
                                     let indicator_text = if question_count == 1 {
-                                        " [❓ Question - Press Ctrl+R to answer] ".to_string()
+                                        " [❓ Question - Press 'i' to answer] ".to_string()
                                     } else {
-                                        format!(" [❓ {} Questions - Press Ctrl+R to answer] ", question_count)
+                                        format!(" [❓ {} Questions - Press 'i' to answer] ", question_count)
                                     };
 
                                     messages_text.push(Line::from(vec![
@@ -870,32 +893,41 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         idx += 1;
     }
 
-    // Input area - use chat_editor instead of app.input
-    let input_style = if app.input_mode == InputMode::Editing {
-        Style::default().fg(Color::Yellow)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
+    // Input area - show either ask UI or normal chat input
     let input_area = chunks[idx];
 
-    let input = Paragraph::new(app.chat_editor.text.as_str())
-        .style(input_style)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(input_style),
-        )
-        .wrap(Wrap { trim: false });
-    f.render_widget(input, input_area);
+    if should_show_ask_ui {
+        // Render inline ask UI (replacing input box)
+        if let Some(ref modal_state) = app.ask_modal_state {
+            use crate::ui::views::render_inline_ask_ui;
+            render_inline_ask_ui(f, modal_state, input_area);
+        }
+    } else {
+        // Normal chat input
+        let input_style = if app.input_mode == InputMode::Editing {
+            Style::default().fg(Color::Yellow)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
 
-    // Show cursor in input mode
-    if app.input_mode == InputMode::Editing && !app.showing_attachment_modal {
-        let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
-        f.set_cursor_position((
-            input_area.x + cursor_col as u16 + 1,
-            input_area.y + cursor_row as u16 + 1,
-        ));
+        let input = Paragraph::new(app.chat_editor.text.as_str())
+            .style(input_style)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(input_style),
+            )
+            .wrap(Wrap { trim: false });
+        f.render_widget(input, input_area);
+
+        // Show cursor in input mode
+        if app.input_mode == InputMode::Editing && !app.showing_attachment_modal {
+            let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
+            f.set_cursor_position((
+                input_area.x + cursor_col as u16 + 1,
+                input_area.y + cursor_row as u16 + 1,
+            ));
+        }
     }
     idx += 1;
 
