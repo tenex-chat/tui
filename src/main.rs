@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info_span, warn};
 
+use models::Message;
 use nostr::{DataChange, NostrCommand, NostrWorker};
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
 use std::sync::mpsc;
@@ -447,6 +448,12 @@ fn handle_key(
         return Ok(());
     }
 
+    // Handle ask modal when open
+    if app.ask_modal_state.is_some() {
+        handle_ask_modal_key(app, key);
+        return Ok(());
+    }
+
     // Handle agent selector when open
     if app.showing_agent_selector {
         match code {
@@ -595,7 +602,38 @@ fn handle_key(
                     app.creating_thread = true;
                     app.input_mode = InputMode::Editing;
                     app.clear_input();
-                } else if (c == 'a' || c == '@') && (app.view == View::Threads || app.view == View::Chat) && !app.available_agents().is_empty() {
+                } else if c == 'a' && app.view == View::Chat {
+                    // Check if selected message is an ask event
+                    let messages = app.messages();
+                    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+
+                    let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
+                        messages.iter()
+                            .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                            .collect()
+                    } else {
+                        messages.iter()
+                            .filter(|m| {
+                                m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
+                            })
+                            .collect()
+                    };
+
+                    if let Some(msg) = display_messages.get(app.selected_message_index) {
+                        if let Some(ref ask_event) = msg.ask_event {
+                            // Open ask modal
+                            app.open_ask_modal(msg.id.clone(), ask_event.clone());
+                        } else if !app.available_agents().is_empty() {
+                            // No ask event, open agent selector
+                            app.showing_agent_selector = true;
+                            app.agent_selector_index = 0;
+                        }
+                    } else if !app.available_agents().is_empty() {
+                        // No message selected, open agent selector
+                        app.showing_agent_selector = true;
+                        app.agent_selector_index = 0;
+                    }
+                } else if c == '@' && (app.view == View::Threads || app.view == View::Chat) && !app.available_agents().is_empty() {
                     app.showing_agent_selector = true;
                     app.agent_selector_index = 0;
                 } else if c == 'o' && app.view == View::Chat {
@@ -1426,6 +1464,108 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
 }
 
 /// Handle key events for the attachment modal
+fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
+    use crate::ui::ask_input::InputMode as AskInputMode;
+
+    let code = key.code;
+    let modifiers = key.modifiers;
+    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+    // Extract modal_state to avoid borrow issues
+    let modal_state = match &mut app.ask_modal_state {
+        Some(state) => state,
+        None => return,
+    };
+
+    let input_state = &mut modal_state.input_state;
+
+    match input_state.mode {
+        AskInputMode::Selection => {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    input_state.prev_option();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    input_state.next_option();
+                }
+                KeyCode::Char(' ') if input_state.is_multi_select() => {
+                    input_state.toggle_multi_select();
+                }
+                KeyCode::Enter => {
+                    input_state.select_current_option();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                }
+                KeyCode::Char('c') => {
+                    input_state.enter_custom_mode();
+                }
+                KeyCode::Esc => {
+                    app.close_ask_modal();
+                }
+                _ => {}
+            }
+        }
+        AskInputMode::CustomInput => {
+            match code {
+                KeyCode::Enter if has_ctrl => {
+                    // Ctrl+Enter submits custom input
+                    input_state.submit_custom_answer();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                }
+                KeyCode::Esc => {
+                    input_state.cancel_custom_mode();
+                }
+                KeyCode::Enter => {
+                    // Regular newline in custom input
+                    input_state.insert_char('\n');
+                }
+                KeyCode::Left => {
+                    input_state.move_cursor_left();
+                }
+                KeyCode::Right => {
+                    input_state.move_cursor_right();
+                }
+                KeyCode::Backspace => {
+                    input_state.delete_char();
+                }
+                KeyCode::Char(c) => {
+                    input_state.insert_char(c);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn submit_ask_response(app: &mut App) {
+    let modal_state = match app.ask_modal_state.take() {
+        Some(state) => state,
+        None => return,
+    };
+
+    let response_text = modal_state.input_state.format_response();
+    let message_id = modal_state.message_id;
+
+    // Send reply to the ask event
+    if let (Some(ref command_tx), Some(ref thread), Some(ref project)) =
+        (&app.command_tx, &app.selected_thread, &app.selected_project)
+    {
+        let _ = command_tx.send(NostrCommand::PublishMessage {
+            thread_id: thread.id.clone(),
+            project_a_tag: project.a_tag(),
+            content: response_text,
+            agent_pubkey: None,
+            reply_to: Some(message_id),
+            branch: None,
+        });
+    }
+
+    app.input_mode = InputMode::Editing;
+}
+
 fn handle_attachment_modal_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
     let modifiers = key.modifiers;

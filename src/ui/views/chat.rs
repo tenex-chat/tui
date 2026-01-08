@@ -577,6 +577,24 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                                         Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
                                     ),
                                 ]));
+
+                                // Show ask indicator if this is an ask event
+                                if let Some(ref ask) = msg.ask_event {
+                                    let question_count = ask.questions.len();
+                                    let indicator_text = if question_count == 1 {
+                                        " [❓ Question - Press 'a' to answer] ".to_string()
+                                    } else {
+                                        format!(" [❓ {} Questions - Press 'a' to answer] ", question_count)
+                                    };
+
+                                    messages_text.push(Line::from(vec![
+                                        Span::styled("│ ", Style::default().fg(border_color)),
+                                        Span::styled(
+                                            indicator_text,
+                                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                                        ),
+                                    ]));
+                                }
                             }
 
                             let parsed = {
@@ -1069,6 +1087,20 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     );
 
     f.render_widget(list, popup_area);
+
+    // Render ask modal overlay if open
+    if let Some(ref modal_state) = app.ask_modal_state {
+        use crate::ui::views::render_ask_modal;
+
+        // Create centered modal area (90% width, 85% height)
+        let modal_width = (area.width * 90) / 100;
+        let modal_height = (area.height * 85) / 100;
+        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
+        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
+        let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
+
+        render_ask_modal(f, modal_state, modal_area);
+    }
 }
 
 pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {

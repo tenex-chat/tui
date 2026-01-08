@@ -1,5 +1,26 @@
 use nostrdb::Note;
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AskQuestion {
+    SingleSelect {
+        title: String,
+        question: String,
+        suggestions: Vec<String>,
+    },
+    MultiSelect {
+        title: String,
+        question: String,
+        options: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct AskEvent {
+    pub title: Option<String>,
+    pub context: String,
+    pub questions: Vec<AskQuestion>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
     pub id: String,
@@ -12,6 +33,8 @@ pub struct Message {
     pub reply_to: Option<String>,
     /// Whether this is a reasoning/thinking message (has "reasoning" tag)
     pub is_reasoning: bool,
+    /// Ask event data if this message contains an ask
+    pub ask_event: Option<AskEvent>,
 }
 
 impl Message {
@@ -83,6 +106,9 @@ impl Message {
         // Must have at least one e-tag (for thread_id)
         let thread_id = thread_id?;
 
+        // Parse ask event data if present
+        let ask_event = Self::parse_ask_event(note);
+
         Some(Message {
             id,
             content,
@@ -91,6 +117,7 @@ impl Message {
             created_at,
             reply_to,
             is_reasoning,
+            ask_event,
         })
     }
 
@@ -123,6 +150,9 @@ impl Message {
             return None;
         }
 
+        // Parse ask event data if present
+        let ask_event = Self::parse_ask_event(note);
+
         Some(Message {
             id: id.clone(),
             content,
@@ -131,6 +161,7 @@ impl Message {
             created_at,
             reply_to: None,
             is_reasoning: false,
+            ask_event,
         })
     }
 
@@ -187,6 +218,71 @@ impl Message {
 
         urls
     }
+
+    /// Parse ask event from a note
+    /// Returns Some(AskEvent) if this message contains ask tags
+    pub fn parse_ask_event(note: &Note) -> Option<AskEvent> {
+        let mut title: Option<String> = None;
+        let mut questions: Vec<AskQuestion> = Vec::new();
+
+        for tag in note.tags() {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+
+            match tag_name {
+                Some("title") => {
+                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("question") => {
+                    // ["question", title, question, ...suggestions]
+                    let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+                    let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+
+                    let mut suggestions = Vec::new();
+                    let mut idx = 3;
+                    while let Some(suggestion) = tag.get(idx).and_then(|t| t.variant().str()) {
+                        suggestions.push(suggestion.to_string());
+                        idx += 1;
+                    }
+
+                    questions.push(AskQuestion::SingleSelect {
+                        title: q_title,
+                        question: q_text,
+                        suggestions,
+                    });
+                }
+                Some("multiselect") => {
+                    // ["multiselect", title, question, ...options]
+                    let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+                    let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+
+                    let mut options = Vec::new();
+                    let mut idx = 3;
+                    while let Some(option) = tag.get(idx).and_then(|t| t.variant().str()) {
+                        options.push(option.to_string());
+                        idx += 1;
+                    }
+
+                    questions.push(AskQuestion::MultiSelect {
+                        title: q_title,
+                        question: q_text,
+                        options,
+                    });
+                }
+                _ => {}
+            }
+        }
+
+        if questions.is_empty() {
+            None
+        } else {
+            Some(AskEvent {
+                title,
+                context: note.content().to_string(),
+                questions,
+            })
+        }
+    }
+
 }
 
 #[cfg(test)]
@@ -409,6 +505,7 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         assert!(msg.has_images());
 
@@ -420,6 +517,7 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         assert!(!no_images.has_images());
     }
@@ -434,6 +532,7 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
@@ -449,6 +548,7 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
@@ -464,6 +564,7 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         let urls = msg.extract_image_urls();
         assert!(urls.is_empty());
@@ -479,8 +580,181 @@ mod tests {
             created_at: 0,
             reply_to: None,
             is_reasoning: false,
+            ask_event: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
+    }
+
+    #[test]
+    fn test_parse_ask_event_single_select() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Context for the question")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["What is the answer?"],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("question")),
+                vec!["Q1", "Which option do you prefer?", "Option A", "Option B", "Option C"],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(results.len() > 0);
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+
+        let ask_event = Message::parse_ask_event(&note);
+        assert!(ask_event.is_some());
+
+        let ask = ask_event.unwrap();
+        assert_eq!(ask.title, Some("What is the answer?".to_string()));
+        assert_eq!(ask.context, "Context for the question");
+        assert_eq!(ask.questions.len(), 1);
+
+        match &ask.questions[0] {
+            AskQuestion::SingleSelect { title, question, suggestions } => {
+                assert_eq!(title, "Q1");
+                assert_eq!(question, "Which option do you prefer?");
+                assert_eq!(suggestions, &vec!["Option A", "Option B", "Option C"]);
+            }
+            _ => panic!("Expected SingleSelect question"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ask_event_multiselect() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Pick your favorites")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Choose features"],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("multiselect")),
+                vec!["Features", "Select all that apply", "Dark mode", "Notifications", "Analytics"],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(results.len() > 0);
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+
+        let ask_event = Message::parse_ask_event(&note);
+        assert!(ask_event.is_some());
+
+        let ask = ask_event.unwrap();
+        assert_eq!(ask.title, Some("Choose features".to_string()));
+        assert_eq!(ask.questions.len(), 1);
+
+        match &ask.questions[0] {
+            AskQuestion::MultiSelect { title, question, options } => {
+                assert_eq!(title, "Features");
+                assert_eq!(question, "Select all that apply");
+                assert_eq!(options, &vec!["Dark mode", "Notifications", "Analytics"]);
+            }
+            _ => panic!("Expected MultiSelect question"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ask_event_multiple_questions() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Please answer these questions")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Survey"],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("question")),
+                vec!["Q1", "What is your name?"],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("multiselect")),
+                vec!["Q2", "Select your interests", "Music", "Sports", "Art"],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(results.len() > 0);
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+
+        let ask_event = Message::parse_ask_event(&note);
+        assert!(ask_event.is_some());
+
+        let ask = ask_event.unwrap();
+        assert_eq!(ask.questions.len(), 2);
+
+        match &ask.questions[0] {
+            AskQuestion::SingleSelect { title, question, suggestions } => {
+                assert_eq!(title, "Q1");
+                assert_eq!(question, "What is your name?");
+                assert!(suggestions.is_empty());
+            }
+            _ => panic!("Expected SingleSelect question"),
+        }
+
+        match &ask.questions[1] {
+            AskQuestion::MultiSelect { title, question, options } => {
+                assert_eq!(title, "Q2");
+                assert_eq!(question, "Select your interests");
+                assert_eq!(options, &vec!["Music", "Sports", "Art"]);
+            }
+            _ => panic!("Expected MultiSelect question"),
+        }
+    }
+
+    #[test]
+    fn test_parse_ask_event_not_ask() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let event = EventBuilder::new(Kind::from(1), "Just a regular message")
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(results.len() > 0);
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+
+        let ask_event = Message::parse_ask_event(&note);
+        assert!(ask_event.is_none());
     }
 }
