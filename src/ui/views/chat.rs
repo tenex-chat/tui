@@ -304,9 +304,12 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if !app.in_subthread() {
         if let Some(ref thread) = app.selected_thread {
             if !thread.content.trim().is_empty() {
-                let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+                // Single borrow for thread header
+                let (user_pubkey, author) = {
+                    let store = app.data_store.borrow();
+                    (store.user_pubkey.clone(), store.get_profile_name(&thread.pubkey))
+                };
                 let is_user_thread = user_pubkey.as_ref().map(|pk| pk == &thread.pubkey).unwrap_or(false);
-                let author = app.data_store.borrow().get_profile_name(&thread.pubkey);
 
                 if is_user_thread {
                     // User's thread - render as card
@@ -394,8 +397,25 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     {
         let _span = info_span!("render_messages").entered();
 
-        // Get user's pubkey for distinguishing user vs assistant messages
-        let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+        // Collect all unique pubkeys and cache profile names with single borrow
+        let (user_pubkey, profile_cache) = {
+            let store = app.data_store.borrow();
+            let user_pk = store.user_pubkey.clone();
+
+            // Collect unique pubkeys from ALL messages (includes replies not in display)
+            let mut pubkeys: std::collections::HashSet<&str> = std::collections::HashSet::new();
+            for msg in &all_messages {
+                pubkeys.insert(&msg.pubkey);
+            }
+
+            // Build profile name cache
+            let cache: std::collections::HashMap<String, String> = pubkeys
+                .into_iter()
+                .map(|pk| (pk.to_string(), store.get_profile_name(pk)))
+                .collect();
+
+            (user_pk, cache)
+        };
 
         // Group consecutive action messages
         let grouped = group_messages(&display_messages, user_pubkey.as_deref());
@@ -407,7 +427,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 DisplayItem::ActionGroup { messages: action_msgs, pubkey } => {
                     // Render collapsed action group
                     let border_color = Color::Cyan;
-                    let author = app.data_store.borrow().get_profile_name(pubkey);
+                    let author = profile_cache.get(pubkey).cloned().unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
 
                     // Show header if author changed
                     let show_header = prev_pubkey != Some(pubkey.as_str());
@@ -467,10 +487,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     let show_header = prev_pubkey != Some(msg.pubkey.as_str());
                     prev_pubkey = Some(msg.pubkey.as_str());
 
-                    let author = {
-                        let _span = info_span!("get_profile_name").entered();
-                        app.data_store.borrow().get_profile_name(&msg.pubkey)
-                    };
+                    let author = profile_cache.get(&msg.pubkey).cloned()
+                        .unwrap_or_else(|| msg.pubkey[..8.min(msg.pubkey.len())].to_string());
 
                     if is_user_message {
                         // USER MESSAGE: Card style with box borders
@@ -644,7 +662,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         if !replies.is_empty() {
                             let most_recent = replies.iter().max_by_key(|r| r.created_at);
                             if let Some(recent) = most_recent {
-                                let reply_author = app.data_store.borrow().get_profile_name(&recent.pubkey);
+                                let reply_author = profile_cache.get(&recent.pubkey).cloned()
+                                    .unwrap_or_else(|| recent.pubkey[..8.min(recent.pubkey.len())].to_string());
                                 let preview: String = recent.content.chars().take(60).collect();
                                 let preview = preview.replace('\n', " ");
                                 let suffix = if recent.content.len() > 60 { "..." } else { "" };
@@ -1055,19 +1074,45 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
 pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span> = Vec::new();
 
+    // Borrow data_store once for all project name lookups
+    let data_store = app.data_store.borrow();
+
     for (i, tab) in app.open_tabs.iter().enumerate() {
         let is_active = i == app.active_tab_index;
 
-        // Tab number
+        // Tab number with period separator
         let num_style = if is_active {
             Style::default().fg(Color::Cyan)
         } else {
             Style::default().fg(Color::DarkGray)
         };
-        spans.push(Span::styled(format!("{}", i + 1), num_style));
-        spans.push(Span::raw(":"));
+        spans.push(Span::styled(format!("{}. ", i + 1), num_style));
 
-        // Tab title (truncate if needed)
+        // Unread indicator (moved before project name)
+        if tab.has_unread && !is_active {
+            spans.push(Span::styled("● ", Style::default().fg(Color::Red)));
+        } else {
+            spans.push(Span::raw("● "));
+        }
+
+        // Project name (truncated to 8 chars max)
+        let project_name = data_store.get_project_name(&tab.project_a_tag);
+        let max_project_len = 8;
+        let project_display: String = if project_name.len() > max_project_len {
+            project_name.chars().take(max_project_len).collect()
+        } else {
+            project_name
+        };
+
+        let project_style = if is_active {
+            Style::default().fg(Color::Green)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        };
+        spans.push(Span::styled(project_display, project_style));
+        spans.push(Span::raw(" | "));
+
+        // Tab title (truncated to fit remaining space)
         let max_title_len = 12;
         let title: String = if tab.thread_title.len() > max_title_len {
             format!("{}...", &tab.thread_title[..max_title_len - 3])
@@ -1083,11 +1128,6 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(Color::DarkGray)
         };
         spans.push(Span::styled(title, title_style));
-
-        // Unread indicator
-        if tab.has_unread && !is_active {
-            spans.push(Span::styled("●", Style::default().fg(Color::Red)));
-        }
 
         // Separator between tabs
         if i < app.open_tabs.len() - 1 {

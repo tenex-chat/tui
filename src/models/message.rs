@@ -133,6 +133,60 @@ impl Message {
             is_reasoning: false,
         })
     }
+
+    /// Check if message content contains markdown images
+    pub fn has_images(&self) -> bool {
+        self.content.contains("![")
+    }
+
+    /// Extract all image URLs from markdown content
+    pub fn extract_image_urls(&self) -> Vec<String> {
+        let mut urls = Vec::new();
+        let mut chars = self.content.chars().peekable();
+
+        while let Some(c) = chars.next() {
+            if c == '!' {
+                if chars.peek() == Some(&'[') {
+                    chars.next();
+
+                    // Skip alt text
+                    let mut depth = 1;
+                    while let Some(ch) = chars.next() {
+                        if ch == '[' {
+                            depth += 1;
+                        } else if ch == ']' {
+                            depth -= 1;
+                            if depth == 0 {
+                                break;
+                            }
+                        }
+                    }
+
+                    // Expect opening paren
+                    if chars.peek() == Some(&'(') {
+                        chars.next();
+
+                        // Extract URL
+                        let mut url = String::new();
+                        while let Some(ch) = chars.peek() {
+                            if *ch == ')' {
+                                chars.next();
+                                break;
+                            }
+                            url.push(*ch);
+                            chars.next();
+                        }
+
+                        if !url.is_empty() {
+                            urls.push(url.trim().to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        urls
+    }
 }
 
 #[cfg(test)]
@@ -343,5 +397,90 @@ mod tests {
         let message = message.unwrap();
         assert_eq!(message.thread_id, message.id);
         assert!(message.reply_to.is_none());
+    }
+
+    #[test]
+    fn test_has_images() {
+        let msg = Message {
+            id: "test".to_string(),
+            content: "Here's an image: ![alt](https://example.com/image.png)".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        assert!(msg.has_images());
+
+        let no_images = Message {
+            id: "test".to_string(),
+            content: "Just plain text".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        assert!(!no_images.has_images());
+    }
+
+    #[test]
+    fn test_extract_image_urls_single() {
+        let msg = Message {
+            id: "test".to_string(),
+            content: "Here's an image: ![alt text](https://example.com/image.png)".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        let urls = msg.extract_image_urls();
+        assert_eq!(urls, vec!["https://example.com/image.png"]);
+    }
+
+    #[test]
+    fn test_extract_image_urls_multiple() {
+        let msg = Message {
+            id: "test".to_string(),
+            content: "![first](https://example.com/1.png) some text ![second](https://example.com/2.jpg)".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        let urls = msg.extract_image_urls();
+        assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
+    }
+
+    #[test]
+    fn test_extract_image_urls_none() {
+        let msg = Message {
+            id: "test".to_string(),
+            content: "Just plain text with no images".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        let urls = msg.extract_image_urls();
+        assert!(urls.is_empty());
+    }
+
+    #[test]
+    fn test_extract_image_urls_with_spaces() {
+        let msg = Message {
+            id: "test".to_string(),
+            content: "![diagram]( https://example.com/image.png )".to_string(),
+            pubkey: "pubkey".to_string(),
+            thread_id: "thread".to_string(),
+            created_at: 0,
+            reply_to: None,
+            is_reasoning: false,
+        };
+        let urls = msg.extract_image_urls();
+        assert_eq!(urls, vec!["https://example.com/image.png"]);
     }
 }
