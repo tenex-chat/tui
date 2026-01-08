@@ -289,8 +289,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             .collect()
     } else {
         // Main view: show messages with no parent or parent = thread root
+        // Exclude the thread itself - it's rendered separately above
         all_messages.iter()
             .filter(|m| {
+                // Skip the thread message - already rendered above
+                if Some(m.id.as_str()) == thread_id {
+                    return false;
+                }
                 m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
             })
             .collect()
@@ -768,6 +773,63 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
         )));
         messages_text.push(Line::from(""));
+    }
+
+    // Check for local streaming content (from Unix socket, not Nostr)
+    if let Some(buffer) = app.local_streaming_content() {
+        if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
+            // Get agent name from pubkey
+            let agent_name = app.data_store.borrow().get_profile_name(&buffer.agent_pubkey);
+
+            // Render agent header with streaming indicator
+            messages_text.push(Line::from(vec![
+                Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                Span::styled(
+                    agent_name,
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    " (streaming)",
+                    Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+                ),
+            ]));
+
+            // Render reasoning content first if present (muted style)
+            if !buffer.reasoning_content.is_empty() {
+                let reasoning_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+                for line in buffer.reasoning_content.lines() {
+                    messages_text.push(Line::from(vec![
+                        Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                        Span::styled(line.to_string(), reasoning_style),
+                    ]));
+                }
+            }
+
+            // Render text content with cursor indicator
+            if !buffer.text_content.is_empty() {
+                let markdown_lines = render_markdown(&buffer.text_content);
+                for (i, line) in markdown_lines.iter().enumerate() {
+                    let mut line_spans = vec![
+                        Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                    ];
+                    line_spans.extend(line.spans.clone());
+
+                    // Add cursor indicator at the end of the last line
+                    if i == markdown_lines.len() - 1 && !buffer.is_complete {
+                        line_spans.push(Span::styled("▌", Style::default().fg(Color::Magenta)));
+                    }
+                    messages_text.push(Line::from(line_spans));
+                }
+            } else if !buffer.is_complete {
+                // Show just cursor if we have no text yet but are streaming
+                messages_text.push(Line::from(vec![
+                    Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                    Span::styled("▌", Style::default().fg(Color::Magenta)),
+                ]));
+            }
+
+            messages_text.push(Line::from(""));
+        }
     }
 
     if messages_text.is_empty() {
