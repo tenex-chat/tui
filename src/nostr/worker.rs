@@ -58,6 +58,14 @@ pub enum DataChange {
         created_at: u64,
         delta: String,
     },
+    /// Chunk from local streaming socket (not from Nostr)
+    LocalStreamChunk {
+        agent_pubkey: String,
+        conversation_id: String,
+        text_delta: Option<String>,
+        reasoning_delta: Option<String>,
+        is_finish: bool,
+    },
 }
 
 pub struct NostrWorker {
