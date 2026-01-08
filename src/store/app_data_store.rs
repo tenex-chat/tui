@@ -97,7 +97,8 @@ impl AppDataStore {
             };
 
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
-                if self.note_ptags_user(&note, user_pubkey) {
+                // Only include ask events that p-tag the user
+                if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
                     let project_a_tag = self.find_project_for_thread(&thread_id);
 
                     let inbox_item = InboxItem {
@@ -269,10 +270,11 @@ impl AppDataStore {
                 }
             }
 
-            // Check for p-tag matching current user (for inbox)
+            // Check for p-tag matching current user AND ask tag (for inbox)
             if let Some(ref user_pk) = self.user_pubkey.clone() {
                 if pubkey != *user_pk {  // Don't inbox our own messages
-                    if self.note_ptags_user(note, user_pk) {
+                    // Only include ask events that p-tag the user
+                    if self.note_ptags_user(note, user_pk) && self.note_is_ask_event(note) {
                         // Find project a_tag for this thread
                         let project_a_tag = self.find_project_for_thread(&thread_id);
 
@@ -327,6 +329,26 @@ impl AppDataStore {
         false
     }
 
+    /// Check if a note has an ask tag
+    /// Supports: ["ask", "true"], ["ask", "1"], or just ["ask"]
+    fn note_is_ask_event(&self, note: &Note) -> bool {
+        for tag in note.tags() {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+            if tag_name == Some("ask") {
+                // Check if it's ["ask"], ["ask", "true"], or ["ask", "1"]
+                if tag.count() == 1 {
+                    return true;
+                }
+                if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                    if value == "true" || value == "1" {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// Find which project a thread belongs to
     fn find_project_for_thread(&self, thread_id: &str) -> Option<String> {
         for (a_tag, threads) in &self.threads_by_project {
@@ -340,9 +362,11 @@ impl AppDataStore {
     fn handle_metadata_event(&mut self, note: &Note) {
         // Parse metadata directly from the note to update thread title and status
         if let Some(metadata) = ConversationMetadata::from_note(note) {
+            tracing::debug!("Received kind:513 metadata event for thread {}", metadata.thread_id);
             // Find the thread across all projects and update its fields
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == metadata.thread_id) {
+                    tracing::debug!("Updating thread {} with metadata", metadata.thread_id);
                     if let Some(title) = metadata.title {
                         thread.title = title;
                     }
@@ -356,6 +380,8 @@ impl AppDataStore {
                     break;
                 }
             }
+        } else {
+            tracing::warn!("Failed to parse kind:513 metadata event: note_id={}", hex::encode(note.id()));
         }
     }
 
