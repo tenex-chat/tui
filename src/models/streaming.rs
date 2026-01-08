@@ -67,9 +67,9 @@ impl DeltaContentAccumulator {
 pub struct StreamingSession {
     /// Agent pubkey (the session key)
     pub pubkey: String,
-    /// Message being replied to (from 'e' tag)
+    /// Message being replied to (from 'e' tag with "reply" marker, NIP-10)
     pub message_id: String,
-    /// Thread root (from 'E' tag) - used for filtering by thread
+    /// Thread root (from 'e' tag with "root" marker, NIP-10) - used for filtering by thread
     pub thread_id: String,
     /// Delta accumulator
     pub accumulator: DeltaContentAccumulator,

@@ -156,12 +156,33 @@ impl AppDataStore {
     pub fn handle_event(&mut self, kind: u32, note: &Note) {
         match kind {
             31933 => self.handle_project_event(note),
-            11 => self.handle_thread_event(note),
-            1111 => self.handle_message_event(note),
+            1 => self.handle_text_event(note),
             0 => self.handle_profile_event(note),
             24010 => self.handle_status_event(note),
             513 => self.handle_metadata_event(note),
             _ => {}
+        }
+    }
+
+    /// Unified handler for kind:1 events - dispatches to thread or message handler based on e-tag presence
+    /// Thread detection: kind:1 + has a-tag + NO e-tags
+    /// Message detection: kind:1 + has e-tag (with "root" marker per NIP-10)
+    fn handle_text_event(&mut self, note: &Note) {
+        // Check for e-tags to determine if this is a thread or message
+        let mut has_e_tag = false;
+        for tag in note.tags() {
+            if tag.get(0).and_then(|t| t.variant().str()) == Some("e") {
+                has_e_tag = true;
+                break;
+            }
+        }
+
+        if has_e_tag {
+            // Has e-tag: it's a message
+            self.handle_message_event(note);
+        } else {
+            // No e-tag: it's a thread
+            self.handle_thread_event(note);
         }
     }
 
@@ -512,40 +533,26 @@ impl AppDataStore {
         created_at: u64,
         delta: String,
     ) -> bool {
-        eprintln!(
-            "[STORE] handle_streaming_delta: pubkey={}, thread_id={}, seq={:?}, delta_len={}",
-            &pubkey[..16.min(pubkey.len())],
-            &thread_id[..16.min(thread_id.len())],
-            sequence,
-            delta.len()
-        );
-
         // Check if this is a late chunk (response already finalized)
         let finalization_key = format!("{}:{}", pubkey, message_id);
         if self.finalized_responses.contains(&finalization_key) {
-            eprintln!("[STORE]   Rejected: late chunk (already finalized)");
             return false;
         }
 
         // Get or create streaming session for this agent
         if let Some(session) = self.streaming_sessions.get_mut(&pubkey) {
-            // Update existing session
             session.add_delta(sequence, &delta, created_at);
-            eprintln!("[STORE]   Updated existing session, content_len={}", session.content().len());
         } else {
-            // Create new session
             let mut session = StreamingSession::new(
                 pubkey.clone(),
                 message_id,
-                thread_id.clone(),
+                thread_id,
                 created_at,
             );
             session.add_delta(sequence, &delta, created_at);
-            eprintln!("[STORE]   Created new session for thread_id={}", &thread_id[..16.min(thread_id.len())]);
             self.streaming_sessions.insert(pubkey, session);
         }
 
-        eprintln!("[STORE]   Total active sessions: {}", self.streaming_sessions.len());
         true
     }
 
@@ -568,24 +575,6 @@ impl AppDataStore {
 
     /// Get streaming sessions with content for a thread (for display)
     pub fn streaming_with_content_for_thread(&self, thread_id: &str) -> Vec<&StreamingSession> {
-        if !self.streaming_sessions.is_empty() {
-            eprintln!(
-                "[QUERY] streaming_with_content_for_thread: looking for thread_id={}, total_sessions={}",
-                &thread_id[..16.min(thread_id.len())],
-                self.streaming_sessions.len()
-            );
-
-            for session in self.streaming_sessions.values() {
-                eprintln!(
-                    "[QUERY]   session: pubkey={}, session_thread_id={}, has_content={}, matches={}",
-                    &session.pubkey[..16.min(session.pubkey.len())],
-                    &session.thread_id[..16.min(session.thread_id.len())],
-                    session.has_content(),
-                    session.thread_id == thread_id
-                );
-            }
-        }
-
         self.streaming_sessions
             .values()
             .filter(|session| session.thread_id == thread_id && session.has_content())

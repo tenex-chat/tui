@@ -29,11 +29,11 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
 pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thread>> {
     let txn = Transaction::new(ndb)?;
 
-    // Get threads
+    // Get threads (kind:1 with a-tag, no e-tags)
     let mut threads: Vec<Thread> = {
         let _span = info_span!("query_threads").entered();
         let thread_filter = Filter::new()
-            .kinds([11])
+            .kinds([1])
             .tags([project_a_tag], 'a')
             .build();
         let thread_results = ndb.query(&txn, &[thread_filter], 1000)?;
@@ -93,8 +93,8 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
 
     let mut messages: Vec<Message> = Vec::new();
 
-    // First, get the thread root (kind:11) as the first message
-    // The thread_id is the event ID of the kind:11 thread
+    // First, get the thread root (kind:1, no e-tags) as the first message
+    // The thread_id is the event ID of the kind:1 thread
     {
         let _span = info_span!("get_thread_root").entered();
         if let Ok(thread_id_bytes) = hex::decode(thread_id) {
@@ -112,8 +112,8 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
         }
     }
 
-    // Get all replies (kind:1111) for this thread using uppercase 'E' tag (NIP-22 root reference)
-    // nostrdb stores 'E' tag values as 32-byte IDs, not hex strings, so we must query with bytes
+    // Get all replies (kind:1) for this thread using 'e' tag (NIP-10 with "root" marker)
+    // nostrdb stores 'e' tag values as 32-byte IDs, not hex strings, so we must query with bytes
     let results = {
         let _span = info_span!("query_messages").entered();
 
@@ -128,10 +128,10 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
         };
 
         let mut filter = Filter::new();
-        filter.start_tag_field('E').unwrap();
+        filter.start_tag_field('e').unwrap();
         filter.add_id_element(&thread_id_bytes).unwrap();
         filter.end_field();
-        let filter = filter.kinds([1111]).build();
+        let filter = filter.kinds([1]).build();
 
         ndb.query(&txn, &[filter], 1000)?
     };
@@ -262,7 +262,7 @@ mod tests {
         let keys = Keys::generate();
         let project_a_tag = format!("31933:{}:proj1", keys.public_key().to_hex());
 
-        let thread1 = EventBuilder::new(Kind::Custom(11), "Thread 1 content")
+        let thread1 = EventBuilder::new(Kind::from(1), "Thread 1 content")
             .tag(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                 vec![project_a_tag.clone()],
@@ -274,7 +274,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        let thread2 = EventBuilder::new(Kind::Custom(11), "Thread 2 content")
+        let thread2 = EventBuilder::new(Kind::from(1), "Thread 2 content")
             .tag(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                 vec!["31933:other:proj".to_string()],
@@ -289,7 +289,7 @@ mod tests {
         ingest_events(&db.ndb, &[thread1, thread2], None).unwrap();
 
         // Wait for async processing
-        let filter = nostrdb::Filter::new().kinds([11]).build();
+        let filter = nostrdb::Filter::new().kinds([1]).build();
         let found = wait_for_event_processing(&db.ndb, filter, 5000);
         assert!(found, "Events were not processed within timeout");
 
@@ -309,28 +309,28 @@ mod tests {
         let keys = Keys::generate();
         let thread_id = "a".repeat(64);
 
-        // NIP-22: Uppercase "E" tag = root thread reference
-        let msg1 = EventBuilder::new(Kind::Custom(1111), "Message 1")
+        // NIP-10: e-tag with "root" marker
+        let msg1 = EventBuilder::new(Kind::from(1), "Message 1")
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("E")),
-                vec![thread_id.clone()],
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![thread_id.clone(), "".to_string(), "root".to_string()],
             ))
             .sign_with_keys(&keys)
             .unwrap();
 
         // Different thread - should not be included
-        let msg2 = EventBuilder::new(Kind::Custom(1111), "Message 2")
+        let msg2 = EventBuilder::new(Kind::from(1), "Message 2")
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("E")),
-                vec!["b".repeat(64)],
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec!["b".repeat(64), "".to_string(), "root".to_string()],
             ))
             .sign_with_keys(&keys)
             .unwrap();
 
         ingest_events(&db.ndb, &[msg1.clone(), msg2], None).unwrap();
 
-        // Wait for async processing - wait for kind 1111 events
-        let filter = nostrdb::Filter::new().kinds([1111]).build();
+        // Wait for async processing - wait for kind 1 events
+        let filter = nostrdb::Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         // First check: verify events were ingested using a simple query

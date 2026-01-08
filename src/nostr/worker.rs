@@ -49,10 +49,11 @@ pub enum NostrCommand {
 pub enum DataChange {
     /// Streaming delta (kind 21111) - for real-time typing updates
     /// These need ordered processing via channel, not SubscriptionStream
+    /// NIP-10: Uses lowercase 'e' tags with "root" and "reply" markers (consistent with kind:1)
     StreamingDelta {
         pubkey: String,
-        message_id: String,   // from 'e' tag - message being replied to
-        thread_id: String,    // from 'E' tag - thread root
+        message_id: String,   // from 'e' tag with "reply" marker - message being replied to
+        thread_id: String,    // from 'e' tag with "root" marker - thread root
         sequence: Option<u32>,
         created_at: u64,
         delta: String,
@@ -248,22 +249,15 @@ impl NostrWorker {
         // Only streaming deltas need channel processing (ordered delivery)
         // All other events are handled via SubscriptionStream
         if event.kind.as_u16() == 21111 {
-            eprintln!("[STREAM] Received 21111 event: id={}", &event.id.to_hex()[..16]);
+            // Parse e-tags per NIP-10 (consistent with kind:1 messages)
+            let (thread_id, message_id) = Self::parse_streaming_delta_tags(&event);
 
-            let e_tag = Self::get_e_tag(&event);
-            let upper_e_tag = Self::get_uppercase_e_tag(&event);
-
-            eprintln!("[STREAM]   e tag (message_id): {:?}", e_tag.as_ref().map(|s| &s[..16.min(s.len())]));
-            eprintln!("[STREAM]   E tag (thread_id): {:?}", upper_e_tag.as_ref().map(|s| &s[..16.min(s.len())]));
-
-            // Extract required tags - both 'e' (message being replied to) and 'E' (thread root) are required
-            if let (Some(message_id), Some(thread_id)) = (e_tag, upper_e_tag) {
+            // Both thread_id (root) and message_id (reply) are required
+            if let (Some(thread_id), Some(message_id)) = (thread_id, message_id) {
                 let pubkey = event.pubkey.to_hex();
                 let sequence = Self::get_sequence_tag(&event);
                 let created_at = event.created_at.as_u64();
                 let delta = event.content.to_string();
-
-                eprintln!("[STREAM]   Sending StreamingDelta: seq={:?}, delta_len={}", sequence, delta.len());
 
                 data_tx.send(DataChange::StreamingDelta {
                     pubkey,
@@ -273,32 +267,44 @@ impl NostrWorker {
                     created_at,
                     delta,
                 })?;
-            } else {
-                eprintln!("[STREAM]   Skipping 21111 - missing required tags");
             }
         }
 
         Ok(())
     }
 
-    /// Get message_id from lowercase "e" tag (for streaming deltas)
-    fn get_e_tag(event: &Event) -> Option<String> {
-        event
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s == "e").unwrap_or(false))
-            .and_then(|t| t.as_slice().get(1))
-            .map(|s| s.to_string())
-    }
+    /// Parse streaming delta tags per NIP-10 (consistent with kind:1 messages)
+    /// Returns (thread_id, message_id) from e-tags with "root" and "reply" markers
+    ///
+    /// NIP-10: ["e", <event-id>, <relay-url>, <marker>]
+    /// - "root" marker = thread root reference (required)
+    /// - "reply" marker = message being replied to (required)
+    fn parse_streaming_delta_tags(event: &Event) -> (Option<String>, Option<String>) {
+        let mut thread_id: Option<String> = None;
+        let mut message_id: Option<String> = None;
 
-    /// Get thread_id from uppercase "E" tag (NIP-22 root reference)
-    fn get_uppercase_e_tag(event: &Event) -> Option<String> {
-        event
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s == "E").unwrap_or(false))
-            .and_then(|t| t.as_slice().get(1))
-            .map(|s| s.to_string())
+        for tag in event.tags.iter() {
+            let tag_slice = tag.as_slice();
+            if tag_slice.first().map(|s| s == "e").unwrap_or(false) {
+                // Get event ID (second element)
+                let event_id = tag_slice.get(1).map(|s| s.to_string());
+
+                // Check marker (fourth element)
+                let marker = tag_slice.get(3).map(|s| s.as_str());
+
+                match (marker, event_id) {
+                    (Some("root"), Some(id)) => {
+                        thread_id = Some(id);
+                    }
+                    (Some("reply"), Some(id)) => {
+                        message_id = Some(id);
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        (thread_id, message_id)
     }
 
     /// Get sequence number from "sequence" tag
@@ -413,20 +419,25 @@ impl NostrWorker {
     }
 
     async fn subscribe_to_project_content(&self, client: &Client, project_a_tag: &str) -> Result<()> {
-        let thread_filter = Filter::new()
-            .kind(Kind::Custom(11))
+        // Fetch all kind:1 events for this project (both threads and messages)
+        let kind1_filter = Filter::new()
+            .kind(Kind::from(1))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::A), [project_a_tag]);
 
-        let thread_events = client
-            .fetch_events(vec![thread_filter.clone()], std::time::Duration::from_secs(10))
+        let kind1_events = client
+            .fetch_events(vec![kind1_filter.clone()], std::time::Duration::from_secs(10))
             .await?;
 
-        let thread_events_vec: Vec<Event> = thread_events.iter().cloned().collect();
-        ingest_events(&self.ndb, &thread_events_vec, Some(RELAY_URL))?;
+        let kind1_events_vec: Vec<Event> = kind1_events.iter().cloned().collect();
+        ingest_events(&self.ndb, &kind1_events_vec, Some(RELAY_URL))?;
         // UI gets notified via nostrdb SubscriptionStream when data is ready
 
-        // Fetch messages for each thread
-        let thread_ids: Vec<EventId> = thread_events.iter().map(|e| e.id).collect();
+        // Extract thread IDs (kind:1 events without e-tags)
+        let thread_ids: Vec<EventId> = kind1_events
+            .iter()
+            .filter(|e| !e.tags.iter().any(|t| t.as_slice().first().map(|s| s == "e").unwrap_or(false)))
+            .map(|e| e.id)
+            .collect();
 
         if !thread_ids.is_empty() {
             // Convert thread IDs to hex strings for tag filtering
@@ -445,24 +456,10 @@ impl NostrWorker {
             let metadata_events_vec: Vec<Event> = metadata_events.into_iter().collect();
             ingest_events(&self.ndb, &metadata_events_vec, Some(RELAY_URL))?;
             // UI gets notified via nostrdb SubscriptionStream when data is ready
-
-            // Fetch messages (kind 1111)
-            // Kind 1111 uses uppercase "E" tag (NIP-22 root reference) to reference threads
-            let message_filter = Filter::new()
-                .kind(Kind::Custom(1111))
-                .custom_tag(SingleLetterTag::uppercase(Alphabet::E), thread_id_hexes);
-
-            let message_events = client
-                .fetch_events(vec![message_filter.clone()], std::time::Duration::from_secs(10))
-                .await?;
-
-            let message_events_vec: Vec<Event> = message_events.into_iter().collect();
-            ingest_events(&self.ndb, &message_events_vec, Some(RELAY_URL))?;
-            // UI gets notified via nostrdb SubscriptionStream when data is ready
         }
 
-        // Subscribe for real-time updates
-        client.subscribe(vec![thread_filter], None).await?;
+        // Subscribe for real-time updates on kind:1 events for this project
+        client.subscribe(vec![kind1_filter], None).await?;
 
         Ok(())
     }
@@ -502,7 +499,7 @@ impl NostrWorker {
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
-        let mut event = EventBuilder::new(Kind::Custom(11), &content)
+        let mut event = EventBuilder::new(Kind::from(1), &content)
             // Project reference (a tag) - required
             .tag(Tag::coordinate(coordinate))
             // Title tag
@@ -562,25 +559,20 @@ impl NostrWorker {
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
-        let mut event = EventBuilder::new(Kind::Custom(1111), &content)
-            // NIP-22: Uppercase "E" tag = root thread reference (required)
+        let mut event = EventBuilder::new(Kind::from(1), &content)
+            // NIP-10: e-tag with "root" marker (required)
             .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("E")),
-                vec![thread_id.clone()],
-            ))
-            // Kind of root event
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("K")),
-                vec!["11".to_string()],
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![thread_id.clone(), "".to_string(), "root".to_string()],
             ))
             // Project reference (a tag)
             .tag(Tag::coordinate(coordinate));
 
-        // NIP-22: Lowercase "e" tag = reply-to reference (optional, for threaded replies)
+        // NIP-10: e-tag with "reply" marker (optional, for threaded replies)
         if let Some(reply_id) = reply_to {
             event = event.tag(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                vec![reply_id],
+                vec![reply_id, "".to_string(), "reply".to_string()],
             ));
         }
 
@@ -675,5 +667,137 @@ mod tests {
         let result = Coordinate::parse(a_tag);
         println!("Parse result: {:?}", result);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_parse_streaming_delta_tags_with_root_and_reply() {
+        use nostr_sdk::Tag;
+
+        let thread_id = "thread123";
+        let message_id = "message456";
+
+        let tags = vec![
+            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
+            Tag::parse(vec!["e", message_id, "", "reply"]).unwrap(),
+            Tag::parse(vec!["sequence", "1"]).unwrap(),
+        ];
+
+        let keys = nostr_sdk::Keys::generate();
+        let event = nostr_sdk::EventBuilder::new(
+            nostr_sdk::Kind::Custom(21111),
+            "delta content",
+        )
+        .tags(tags)
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
+
+        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
+        assert_eq!(parsed_message_id, Some(message_id.to_string()));
+    }
+
+    #[test]
+    fn test_parse_streaming_delta_tags_missing_root() {
+        use nostr_sdk::Tag;
+
+        let message_id = "message456";
+
+        let tags = vec![
+            Tag::parse(vec!["e", message_id, "", "reply"]).unwrap(),
+        ];
+
+        let keys = nostr_sdk::Keys::generate();
+        let event = nostr_sdk::EventBuilder::new(
+            nostr_sdk::Kind::Custom(21111),
+            "delta content",
+        )
+        .tags(tags)
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
+
+        assert_eq!(parsed_thread_id, None);
+        assert_eq!(parsed_message_id, Some(message_id.to_string()));
+    }
+
+    #[test]
+    fn test_parse_streaming_delta_tags_missing_reply() {
+        use nostr_sdk::Tag;
+
+        let thread_id = "thread123";
+
+        let tags = vec![
+            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
+        ];
+
+        let keys = nostr_sdk::Keys::generate();
+        let event = nostr_sdk::EventBuilder::new(
+            nostr_sdk::Kind::Custom(21111),
+            "delta content",
+        )
+        .tags(tags)
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
+
+        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
+        assert_eq!(parsed_message_id, None);
+    }
+
+    #[test]
+    fn test_parse_streaming_delta_tags_no_markers() {
+        use nostr_sdk::Tag;
+
+        let event_id = "event789";
+
+        let tags = vec![
+            Tag::parse(vec!["e", event_id]).unwrap(),
+        ];
+
+        let keys = nostr_sdk::Keys::generate();
+        let event = nostr_sdk::EventBuilder::new(
+            nostr_sdk::Kind::Custom(21111),
+            "delta content",
+        )
+        .tags(tags)
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
+
+        // Without markers, both should be None (strict NIP-10 parsing)
+        assert_eq!(parsed_thread_id, None);
+        assert_eq!(parsed_message_id, None);
+    }
+
+    #[test]
+    fn test_parse_streaming_delta_tags_ignores_uppercase_e() {
+        use nostr_sdk::Tag;
+
+        let thread_id = "thread123";
+        let old_style_id = "old_uppercase_id";
+
+        let tags = vec![
+            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
+            Tag::parse(vec!["E", old_style_id]).unwrap(),
+        ];
+
+        let keys = nostr_sdk::Keys::generate();
+        let event = nostr_sdk::EventBuilder::new(
+            nostr_sdk::Kind::Custom(21111),
+            "delta content",
+        )
+        .tags(tags)
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
+
+        // Should parse the lowercase 'e' with root marker, ignore uppercase 'E'
+        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
+        assert_eq!(parsed_message_id, None);
     }
 }

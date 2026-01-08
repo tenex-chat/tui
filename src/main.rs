@@ -17,7 +17,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info_span;
+use tracing::{debug, info_span, warn};
 
 use nostr::{DataChange, NostrCommand, NostrWorker};
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
@@ -29,6 +29,24 @@ use ui::{App, HomeTab, InputMode, NewThreadField, RecentPanelFocus, View};
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set up panic hook to restore terminal on panic
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        // Restore terminal before showing panic
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            crossterm::terminal::LeaveAlternateScreen,
+            crossterm::event::DisableMouseCapture
+        );
+        // Print panic info to stderr
+        eprintln!("\n\n=== PANIC ===");
+        eprintln!("{}", panic_info);
+        eprintln!("=============\n");
+        // Call original hook
+        original_hook(panic_info);
+    }));
+
     tracing_setup::init_tracing();
 
     // Create shared nostrdb instance
@@ -133,20 +151,25 @@ async fn run_app(
 
     // Create nostrdb subscription for all event kinds we care about:
     // - 31933: Projects
-    // - 11: Threads
-    // - 1111: Messages (GenericReply)
+    // - 1: Text (unified kind for threads and messages)
     // - 0: Profiles
     // - 4199: Agent definitions
     // - 24010: Project status
     // - 21111: Streaming deltas
     // - 513: Conversation metadata
     let ndb_filter = FilterBuilder::new()
-        .kinds([31933, 11, 1111, 0, 4199, 24010, 21111, 513])
+        .kinds([31933, 1, 0, 4199, 24010, 21111, 513])
         .build();
     let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
     let mut ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
 
+    let mut loop_count: u64 = 0;
     while app.running {
+        loop_count += 1;
+        if loop_count % 100 == 0 {
+            debug!("Event loop iteration {}", loop_count);
+        }
+
         // Render
         let _span = info_span!("render").entered();
         terminal.draw(|f| render(f, app, login_step))?;
@@ -155,6 +178,7 @@ async fn run_app(
         tokio::select! {
             // Terminal UI events
             maybe_event = event_stream.next() => {
+                debug!("Received terminal event");
                 if let Some(Ok(event)) = maybe_event {
                     match event {
                         Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -230,8 +254,10 @@ async fn run_app(
 
             // nostrdb notifications - events are ready to query
             Some(note_keys) = ndb_stream.next() => {
+                debug!("ndb_stream received {} note keys", note_keys.len());
                 let _span = info_span!("ndb_subscription", note_count = note_keys.len()).entered();
                 handle_ndb_notes(&data_store, app, &ndb, &note_keys)?;
+                debug!("ndb_stream processing complete");
             }
 
             // Tick for regular updates (data channel polling for non-message updates)
@@ -269,11 +295,18 @@ fn handle_ndb_notes(
     ndb: &Ndb,
     note_keys: &[NoteKey]
 ) -> Result<()> {
+    let note_count = note_keys.len();
+    if note_count > 10 {
+        warn!("Processing large batch of {} notes - this may cause UI lag", note_count);
+    }
+    debug!("handle_ndb_notes: processing {} notes", note_count);
+
     let txn = nostrdb::Transaction::new(ndb)?;
 
-    for &note_key in note_keys {
+    for (idx, &note_key) in note_keys.iter().enumerate() {
         if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
             let kind = note.kind();
+            debug!("Processing note {}/{}: kind={}", idx + 1, note_count, kind);
 
             // Update data store (single source of truth)
             data_store.borrow_mut().handle_event(kind, &note);
