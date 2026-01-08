@@ -17,6 +17,7 @@ impl Project {
         let pubkey = hex::encode(note.pubkey());
 
         let mut id: Option<String> = None;
+        let mut title: Option<String> = None;
         let mut name: Option<String> = None;
         let mut participants = Vec::new();
 
@@ -25,6 +26,9 @@ impl Project {
             match tag_name {
                 Some("d") => {
                     id = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("title") => {
+                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
                 }
                 Some("name") => {
                     name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
@@ -39,10 +43,12 @@ impl Project {
         }
 
         let id = id?;
+        // Use title first, then name, then fall back to d-tag (same as web client)
+        let display_name = title.or(name).unwrap_or_else(|| id.clone());
 
         Some(Project {
             id: id.clone(),
-            name: name.unwrap_or_else(|| id.clone()),
+            name: display_name,
             pubkey,
             participants,
         })

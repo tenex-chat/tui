@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "fetch": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-fetch"
+      ],
+      "eventId": "37efc558181013211540f1cb1c229feac385cdd316534a14293cb60e6730dcfe"
+    }
+  },
+  "enabled": true
+}

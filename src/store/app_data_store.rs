@@ -149,6 +149,80 @@ impl AppDataStore {
                 }
             }
         }
+
+        // Apply metadata (kind:513) to threads
+        self.apply_existing_metadata();
+    }
+
+    /// Apply all existing kind:513 metadata events to threads (called during rebuild)
+    /// Only applies the MOST RECENT metadata event for each thread
+    fn apply_existing_metadata(&mut self) {
+        use nostrdb::{Filter, Transaction};
+        use std::collections::HashMap;
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([513]).build();
+        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
+            return;
+        };
+
+        tracing::info!("Processing {} existing kind:513 metadata events", results.len());
+
+        // Group metadata events by thread_id, keeping only the most recent
+        let mut latest_metadata: HashMap<String, ConversationMetadata> = HashMap::new();
+
+        for result in results {
+            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(metadata) = ConversationMetadata::from_note(&note) {
+                    let thread_id = metadata.thread_id.clone();
+
+                    // Keep only the most recent metadata for each thread
+                    match latest_metadata.get(&thread_id) {
+                        Some(existing) if existing.created_at > metadata.created_at => {
+                            // Existing is newer, skip this one
+                        }
+                        _ => {
+                            // This one is newer (or first for this thread)
+                            latest_metadata.insert(thread_id, metadata);
+                        }
+                    }
+                }
+            }
+        }
+
+        tracing::info!("Applying latest metadata for {} unique threads", latest_metadata.len());
+
+        // Apply the latest metadata to each thread
+        for (thread_id, metadata) in latest_metadata {
+            for threads in self.threads_by_project.values_mut() {
+                if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                    let old_title = thread.title.clone();
+                    if let Some(title) = metadata.title {
+                        if title != old_title {
+                            tracing::info!(
+                                "Applied metadata to thread {}: title changed from '{}' to '{}'",
+                                &thread.id[..16.min(thread.id.len())],
+                                old_title,
+                                title
+                            );
+                        }
+                        thread.title = title;
+                    }
+                    thread.status_label = metadata.status_label;
+                    thread.status_current_activity = metadata.status_current_activity;
+                    thread.last_activity = metadata.created_at;
+                    break;
+                }
+            }
+        }
+
+        // Re-sort all thread lists after applying metadata
+        for threads in self.threads_by_project.values_mut() {
+            threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+        }
     }
 
     fn reload_project_status(&mut self, a_tag: &str) {
@@ -362,23 +436,57 @@ impl AppDataStore {
     fn handle_metadata_event(&mut self, note: &Note) {
         // Parse metadata directly from the note to update thread title and status
         if let Some(metadata) = ConversationMetadata::from_note(note) {
-            tracing::debug!("Received kind:513 metadata event for thread {}", metadata.thread_id);
+            let thread_id = metadata.thread_id.clone();
+            let thread_id_short = thread_id[..16.min(thread_id.len())].to_string();
+            let title = metadata.title.clone();
+            let status_label = metadata.status_label;
+            let status_current_activity = metadata.status_current_activity;
+            let created_at = metadata.created_at;
+
+            tracing::debug!(
+                "Received kind:513 metadata for thread {} with title {:?}",
+                thread_id_short,
+                title
+            );
+
             // Find the thread across all projects and update its fields
+            let mut found = false;
             for threads in self.threads_by_project.values_mut() {
-                if let Some(thread) = threads.iter_mut().find(|t| t.id == metadata.thread_id) {
-                    tracing::debug!("Updating thread {} with metadata", metadata.thread_id);
-                    if let Some(title) = metadata.title {
-                        thread.title = title;
+                if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                    let old_title = thread.title.clone();
+                    if let Some(new_title) = title.clone() {
+                        tracing::info!(
+                            "Applying metadata to thread {}: title={} (was: {})",
+                            thread_id_short,
+                            new_title,
+                            old_title
+                        );
+                        thread.title = new_title;
                     }
                     // Update status fields
-                    thread.status_label = metadata.status_label;
-                    thread.status_current_activity = metadata.status_current_activity;
+                    thread.status_label = status_label;
+                    thread.status_current_activity = status_current_activity;
                     // Update last_activity and maintain sort order
-                    thread.last_activity = metadata.created_at;
+                    thread.last_activity = created_at;
                     // Re-sort to maintain order by last_activity (most recent first)
                     threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                    found = true;
                     break;
                 }
+            }
+
+            if !found {
+                let available = self.threads_by_project.values()
+                    .flat_map(|threads| threads.iter().map(|t| &t.id[..16.min(t.id.len())]))
+                    .take(5)
+                    .fold(String::new(), |acc, id| format!("{}{}, ", acc, id));
+
+                tracing::warn!(
+                    "No thread found for metadata event: thread_id={}, title={:?}. Available threads: {}",
+                    thread_id_short,
+                    title,
+                    available
+                );
             }
         } else {
             tracing::warn!("Failed to parse kind:513 metadata event: note_id={}", hex::encode(note.id()));
