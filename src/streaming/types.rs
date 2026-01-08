@@ -32,9 +32,9 @@ impl LocalStreamChunk {
             .unwrap_or(false)
     }
 
-    /// Extract reasoning delta if this is a reasoning chunk
+    /// Extract reasoning delta if this is a reasoning-delta chunk
     pub fn reasoning_delta(&self) -> Option<&str> {
-        if self.data.get("type")?.as_str()? == "reasoning" {
+        if self.data.get("type")?.as_str()? == "reasoning-delta" {
             self.data.get("textDelta")?.as_str()
         } else {
             None
@@ -79,7 +79,7 @@ mod tests {
             agent_pubkey: "abc".to_string(),
             conversation_id: "def".to_string(),
             data: json!({
-                "type": "reasoning",
+                "type": "reasoning-delta",
                 "textDelta": "Let me think..."
             }),
         };

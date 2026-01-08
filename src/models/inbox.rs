@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InboxEventType {
     Mention,
@@ -10,7 +11,6 @@ pub struct InboxItem {
     pub id: String,
     pub event_type: InboxEventType,
     pub title: String,
-    pub preview: String,
     pub project_a_tag: String,
     pub author_pubkey: String,
     pub created_at: u64,
@@ -51,13 +51,6 @@ impl AgentChatter {
         match self {
             AgentChatter::Message { created_at, .. } => *created_at,
             AgentChatter::Lesson { created_at, .. } => *created_at,
-        }
-    }
-
-    pub fn author_pubkey(&self) -> &str {
-        match self {
-            AgentChatter::Message { author_pubkey, .. } => author_pubkey,
-            AgentChatter::Lesson { author_pubkey, .. } => author_pubkey,
         }
     }
 }

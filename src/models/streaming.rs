@@ -67,8 +67,6 @@ impl DeltaContentAccumulator {
 pub struct StreamingSession {
     /// Agent pubkey (the session key)
     pub pubkey: String,
-    /// Message being replied to (from 'e' tag with "reply" marker, NIP-10)
-    pub message_id: String,
     /// Thread root (from 'e' tag with "root" marker, NIP-10) - used for filtering by thread
     pub thread_id: String,
     /// Delta accumulator
@@ -78,10 +76,9 @@ pub struct StreamingSession {
 }
 
 impl StreamingSession {
-    pub fn new(pubkey: String, message_id: String, thread_id: String, created_at: u64) -> Self {
+    pub fn new(pubkey: String, thread_id: String, created_at: u64) -> Self {
         Self {
             pubkey,
-            message_id,
             thread_id,
             accumulator: DeltaContentAccumulator::new(),
             latest_created_at: created_at,

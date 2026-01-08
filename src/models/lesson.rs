@@ -12,9 +12,7 @@ pub struct Lesson {
     pub metacognition: Option<String>,
     pub reflection: Option<String>,
     pub category: Option<String>,
-    pub hashtags: Vec<String>,
     pub created_at: u64,
-    pub agent_id: Option<String>,
 }
 
 impl Lesson {
@@ -35,8 +33,6 @@ impl Lesson {
         let mut metacognition: Option<String> = None;
         let mut reflection: Option<String> = None;
         let mut category: Option<String> = None;
-        let mut hashtags: Vec<String> = Vec::new();
-        let mut agent_id: Option<String> = None;
 
         // Parse tags
         for tag in note.tags() {
@@ -50,8 +46,6 @@ impl Lesson {
                             "metacognition" => metacognition = Some(value.to_string()),
                             "reflection" => reflection = Some(value.to_string()),
                             "category" => category = Some(value.to_string()),
-                            "t" => hashtags.push(value.to_string()),
-                            "e" => agent_id = Some(value.to_string()),
                             _ => {}
                         }
                     }
@@ -69,9 +63,7 @@ impl Lesson {
             metacognition,
             reflection,
             category,
-            hashtags,
             created_at,
-            agent_id,
         })
     }
 
@@ -134,9 +126,7 @@ mod tests {
             metacognition: None,
             reflection: None,
             category: None,
-            hashtags: vec![],
             created_at: 0,
-            agent_id: None,
         };
 
         assert_eq!(lesson.reading_time(), "1 min read");
@@ -154,9 +144,7 @@ mod tests {
             metacognition: Some("Meta content".to_string()),
             reflection: None,
             category: None,
-            hashtags: vec![],
             created_at: 0,
-            agent_id: None,
         };
 
         let sections = lesson.sections();

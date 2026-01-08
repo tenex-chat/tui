@@ -18,10 +18,6 @@ impl SocketStreamClient {
         }
     }
 
-    pub fn with_path(path: PathBuf) -> Self {
-        Self { socket_path: path }
-    }
-
     fn default_socket_path() -> PathBuf {
         if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
             PathBuf::from(runtime_dir).join("tenex-stream.sock")
@@ -92,10 +88,6 @@ impl SocketStreamClient {
 
         info!("Streaming socket disconnected");
         Ok(())
-    }
-
-    pub fn socket_path(&self) -> &PathBuf {
-        &self.socket_path
     }
 }
 

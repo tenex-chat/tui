@@ -113,7 +113,7 @@ fn render_single_select(
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
-    // Custom input mode
+    // Custom input mode - show the text input
     if input_state.mode == InputMode::CustomInput {
         let custom_text = format!("  {}", input_state.custom_input);
         let cursor_pos = input_state.custom_cursor + 2;
@@ -132,12 +132,6 @@ fn render_single_select(
             layout[1].x + cursor_pos as u16 + 1,
             layout[1].y + 1,
         ));
-    } else if suggestions.is_empty() {
-        // No suggestions - show help text
-        let help = Paragraph::new(" Press 'c' to type custom answer ")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
-            .alignment(Alignment::Center);
-        f.render_widget(help, layout[1]);
     } else {
         // Show numbered options with selection indicator
         let items: Vec<ListItem> = suggestions
@@ -161,7 +155,7 @@ fn render_single_select(
             })
             .collect();
 
-        // Add "Type something" option at the end
+        // Add "Or type your own answer..." option at the end
         let custom_idx = suggestions.len();
         let is_custom_selected = custom_idx == input_state.selected_option_index;
         let custom_marker = if is_custom_selected { "❯ " } else { "  " };
@@ -174,7 +168,7 @@ fn render_single_select(
         let mut all_items = items;
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
-            Span::styled("Type something", custom_style),
+            Span::styled("Or type your own answer...", custom_style),
         ])));
 
         let list = List::new(all_items);
@@ -202,7 +196,7 @@ fn render_multi_select(
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
-    // Custom input mode
+    // Custom input mode - show the text input
     if input_state.mode == InputMode::CustomInput {
         let custom_text = format!("  {}", input_state.custom_input);
         let cursor_pos = input_state.custom_cursor + 2;
@@ -221,11 +215,6 @@ fn render_multi_select(
             layout[1].x + cursor_pos as u16 + 1,
             layout[1].y + 1,
         ));
-    } else if options.is_empty() {
-        let help = Paragraph::new(" Press 'c' to type custom answer ")
-            .style(Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC))
-            .alignment(Alignment::Center);
-        f.render_widget(help, layout[1]);
     } else {
         // Show numbered options with checkboxes
         let items: Vec<ListItem> = options
@@ -253,7 +242,7 @@ fn render_multi_select(
             })
             .collect();
 
-        // Add "Type something" option
+        // Add "Or type your own answer..." option
         let custom_idx = options.len();
         let is_custom_selected = custom_idx == input_state.selected_option_index;
         let custom_marker = if is_custom_selected { "❯ " } else { "  " };
@@ -266,7 +255,7 @@ fn render_multi_select(
         let mut all_items = items;
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
-            Span::styled("Type something", custom_style),
+            Span::styled("Or type your own answer...", custom_style),
         ])));
 
         let list = List::new(all_items);
@@ -279,29 +268,39 @@ fn render_help_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputSt
     let help_text = if input_state.mode == InputMode::CustomInput {
         vec![
             Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" to submit · "),
+            Span::raw(" submit · "),
+            Span::styled("Shift+Enter", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(" newline · "),
             Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel"),
+            Span::raw(" cancel"),
         ]
     } else if input_state.is_multi_select() {
         vec![
             Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" to select · "),
+            Span::raw(" select · "),
             Span::styled("Space", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-            Span::raw(" for multi-select · "),
-            Span::styled("Tab/Arrow keys", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw(" to navigate · "),
+            Span::raw(" toggle · "),
+            Span::styled("↑↓", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw(" navigate · "),
+            Span::styled("←", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw(" back · "),
+            Span::styled("→", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw(" skip · "),
             Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel"),
+            Span::raw(" cancel"),
         ]
     } else {
         vec![
             Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
-            Span::raw(" to select · "),
-            Span::styled("Tab/Arrow keys", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-            Span::raw(" to navigate · "),
+            Span::raw(" select · "),
+            Span::styled("↑↓", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw(" navigate · "),
+            Span::styled("←", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw(" back · "),
+            Span::styled("→", Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+            Span::raw(" skip · "),
             Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
-            Span::raw(" to cancel"),
+            Span::raw(" cancel"),
         ]
     };
 

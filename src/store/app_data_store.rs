@@ -105,7 +105,6 @@ impl AppDataStore {
                         id: message.id.clone(),
                         event_type: InboxEventType::Mention,
                         title: message.content.chars().take(50).collect(),
-                        preview: message.content.chars().skip(50).take(100).collect(),
                         project_a_tag: project_a_tag.unwrap_or_default(),
                         author_pubkey: message.pubkey.clone(),
                         created_at: message.created_at,
@@ -356,7 +355,6 @@ impl AppDataStore {
                             id: message_id.clone(),
                             event_type: InboxEventType::Mention,
                             title: message.content.chars().take(50).collect(),
-                            preview: message.content.chars().skip(50).take(100).collect(),
                             project_a_tag: project_a_tag.unwrap_or_default(),
                             author_pubkey: pubkey.clone(),
                             created_at: message.created_at,
@@ -634,10 +632,6 @@ impl AppDataStore {
         self.inbox_read_ids.insert(id.to_string());
     }
 
-    pub fn unread_inbox_count(&self) -> usize {
-        self.inbox_items.iter().filter(|i| !i.is_read).count()
-    }
-
     // ===== Agent Chatter Methods =====
 
     /// Get agent chatter feed items (most recent first)
@@ -688,13 +682,6 @@ impl AppDataStore {
         self.lessons.get(lesson_id)
     }
 
-    /// Get all lessons sorted by created_at (most recent first)
-    pub fn get_all_lessons(&self) -> Vec<&Lesson> {
-        let mut lessons: Vec<&Lesson> = self.lessons.values().collect();
-        lessons.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        lessons
-    }
-
     // ===== Streaming Methods =====
 
     /// Handle an incoming streaming delta (kind 21111)
@@ -720,7 +707,6 @@ impl AppDataStore {
         } else {
             let mut session = StreamingSession::new(
                 pubkey.clone(),
-                message_id,
                 thread_id,
                 created_at,
             );
@@ -729,14 +715,6 @@ impl AppDataStore {
         }
 
         true
-    }
-
-    /// Get streaming sessions for a specific thread
-    pub fn streaming_sessions_for_thread(&self, thread_id: &str) -> Vec<&StreamingSession> {
-        self.streaming_sessions
-            .values()
-            .filter(|session| session.thread_id == thread_id)
-            .collect()
     }
 
     /// Get typing indicators for a thread (streaming sessions with empty content)

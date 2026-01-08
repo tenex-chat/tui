@@ -237,11 +237,12 @@ impl Message {
                     let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
                     let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
 
+                    let tag_count = tag.count();
                     let mut suggestions = Vec::new();
-                    let mut idx = 3;
-                    while let Some(suggestion) = tag.get(idx).and_then(|t| t.variant().str()) {
-                        suggestions.push(suggestion.to_string());
-                        idx += 1;
+                    for idx in 3..tag_count {
+                        if let Some(suggestion) = tag.get(idx).and_then(|t| t.variant().str()) {
+                            suggestions.push(suggestion.to_string());
+                        }
                     }
 
                     questions.push(AskQuestion::SingleSelect {
@@ -255,11 +256,12 @@ impl Message {
                     let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
                     let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
 
+                    let tag_count = tag.count();
                     let mut options = Vec::new();
-                    let mut idx = 3;
-                    while let Some(option) = tag.get(idx).and_then(|t| t.variant().str()) {
-                        options.push(option.to_string());
-                        idx += 1;
+                    for idx in 3..tag_count {
+                        if let Some(option) = tag.get(idx).and_then(|t| t.variant().str()) {
+                            options.push(option.to_string());
+                        }
                     }
 
                     questions.push(AskQuestion::MultiSelect {

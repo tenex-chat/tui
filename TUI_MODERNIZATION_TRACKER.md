@@ -513,7 +513,20 @@ Assistant: Here's the architecture diagram:
 - Total commits: 6 (M1-M6)
 - All tests passing (63/63)
 - Zero hacks, temporary solutions, or fake data
-- PROJECT COMPLETE
+
+**18:45 UTC:** User Testing via ttyd
+- Deployed TUI to web browser via ttyd on port 7681
+- Can now interact with TUI using Chrome MCP
+- User identified UX issues: ask modal requires Ctrl+R, confusing
+
+**18:50 UTC:** UX Improvements
+- Redesigned ask events to inline UI (Claude Code style)
+- Questions replace input box automatically when unanswered ask exists
+- Tab navigation between questions (Feature | Practices | Detail | Submit)
+- Removed modal overlay approach
+- Commit a7ec696: +428 insertions, -90 deletions
+
+**PROJECT COMPLETE** ✅
 
 ---
 

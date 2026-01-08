@@ -1449,7 +1449,6 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
 
     let code = key.code;
     let modifiers = key.modifiers;
-    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
 
     // Extract modal_state to avoid borrow issues
     let modal_state = match &mut app.ask_modal_state {
@@ -1458,6 +1457,8 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
     };
 
     let input_state = &mut modal_state.input_state;
+
+    let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
     match input_state.mode {
         AskInputMode::Selection => {
@@ -1468,6 +1469,17 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Down | KeyCode::Char('j') => {
                     input_state.next_option();
                 }
+                KeyCode::Right => {
+                    // Skip this question
+                    input_state.skip_question();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                }
+                KeyCode::Left => {
+                    // Go back to previous question
+                    input_state.prev_question();
+                }
                 KeyCode::Char(' ') if input_state.is_multi_select() => {
                     input_state.toggle_multi_select();
                 }
@@ -1477,9 +1489,6 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
                         submit_ask_response(app);
                     }
                 }
-                KeyCode::Char('c') => {
-                    input_state.enter_custom_mode();
-                }
                 KeyCode::Esc => {
                     app.close_ask_modal();
                 }
@@ -1488,8 +1497,12 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
         }
         AskInputMode::CustomInput => {
             match code {
-                KeyCode::Enter if has_ctrl => {
-                    // Ctrl+Enter submits custom input
+                KeyCode::Enter if has_shift => {
+                    // Shift+Enter adds newline
+                    input_state.insert_char('\n');
+                }
+                KeyCode::Enter => {
+                    // Enter submits custom input
                     input_state.submit_custom_answer();
                     if input_state.is_complete() {
                         submit_ask_response(app);
@@ -1497,10 +1510,6 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
                 }
                 KeyCode::Esc => {
                     input_state.cancel_custom_mode();
-                }
-                KeyCode::Enter => {
-                    // Regular newline in custom input
-                    input_state.insert_char('\n');
                 }
                 KeyCode::Left => {
                     input_state.move_cursor_left();

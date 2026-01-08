@@ -58,11 +58,26 @@ impl AskInputState {
         self.questions.get(self.current_question_index)
     }
 
+    /// Returns the total number of selectable options including the custom input option
     pub fn option_count(&self) -> usize {
         match self.current_question() {
-            Some(AskQuestion::SingleSelect { suggestions, .. }) => suggestions.len(),
-            Some(AskQuestion::MultiSelect { options, .. }) => options.len(),
+            // +1 for the custom "Type something" option at the end
+            Some(AskQuestion::SingleSelect { suggestions, .. }) => suggestions.len() + 1,
+            Some(AskQuestion::MultiSelect { options, .. }) => options.len() + 1,
             None => 0,
+        }
+    }
+
+    /// Returns true if the custom input option is currently selected
+    pub fn is_custom_option_selected(&self) -> bool {
+        match self.current_question() {
+            Some(AskQuestion::SingleSelect { suggestions, .. }) => {
+                self.selected_option_index == suggestions.len()
+            }
+            Some(AskQuestion::MultiSelect { options, .. }) => {
+                self.selected_option_index == options.len()
+            }
+            None => false,
         }
     }
 
@@ -89,12 +104,22 @@ impl AskInputState {
     }
 
     pub fn toggle_multi_select(&mut self) {
+        // Don't toggle if custom option is selected
+        if self.is_custom_option_selected() {
+            return;
+        }
         if self.is_multi_select() && self.selected_option_index < self.multi_select_state.len() {
             self.multi_select_state[self.selected_option_index] = !self.multi_select_state[self.selected_option_index];
         }
     }
 
     pub fn select_current_option(&mut self) {
+        // If custom option is selected, enter custom input mode
+        if self.is_custom_option_selected() {
+            self.enter_custom_mode();
+            return;
+        }
+
         match self.current_question() {
             Some(AskQuestion::SingleSelect { suggestions, .. }) => {
                 if let Some(suggestion) = suggestions.get(self.selected_option_index) {
@@ -160,6 +185,35 @@ impl AskInputState {
     fn next_question(&mut self) {
         if self.current_question_index + 1 < self.questions.len() {
             self.current_question_index += 1;
+            self.selected_option_index = 0;
+
+            self.multi_select_state = match &self.questions[self.current_question_index] {
+                AskQuestion::MultiSelect { options, .. } => vec![false; options.len()],
+                _ => Vec::new(),
+            };
+        }
+    }
+
+    /// Skip current question without answering (Right arrow)
+    pub fn skip_question(&mut self) {
+        if self.current_question_index + 1 < self.questions.len() {
+            self.current_question_index += 1;
+            self.selected_option_index = 0;
+
+            self.multi_select_state = match &self.questions[self.current_question_index] {
+                AskQuestion::MultiSelect { options, .. } => vec![false; options.len()],
+                _ => Vec::new(),
+            };
+        }
+    }
+
+    /// Go back to previous question (Left arrow)
+    pub fn prev_question(&mut self) {
+        if self.current_question_index > 0 {
+            // Remove the answer for the previous question if it exists
+            self.answers.retain(|a| a.question_index != self.current_question_index - 1);
+
+            self.current_question_index -= 1;
             self.selected_option_index = 0;
 
             self.multi_select_state = match &self.questions[self.current_question_index] {
@@ -248,7 +302,8 @@ mod tests {
         let mut state = AskInputState::new(questions);
         assert_eq!(state.current_question_index, 0);
         assert_eq!(state.selected_option_index, 0);
-        assert_eq!(state.option_count(), 3);
+        // option_count includes +1 for custom input option
+        assert_eq!(state.option_count(), 4);
 
         state.next_option();
         assert_eq!(state.selected_option_index, 1);

@@ -38,6 +38,7 @@ pub enum NostrCommand {
         reply_to: Option<String>,
         branch: Option<String>,
     },
+    #[allow(dead_code)]
     BootProject {
         project_a_tag: String,
         project_pubkey: Option<String>,

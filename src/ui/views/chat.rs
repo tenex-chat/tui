@@ -197,8 +197,17 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate dynamic input height based on what we're showing
     let input_height = if should_show_ask_ui {
-        // Ask UI needs fixed height: tab bar (1) + question content (min 5) + help (3) = 9
-        9
+        // Ask UI height: tab bar (1) + question header (2) + options + custom (n+1) + help (3)
+        // Calculate based on current question's option count
+        let option_count = app.ask_modal_state.as_ref()
+            .and_then(|state| state.input_state.current_question())
+            .map(|q| match q {
+                crate::models::AskQuestion::SingleSelect { suggestions, .. } => suggestions.len() + 1, // +1 for custom
+                crate::models::AskQuestion::MultiSelect { options, .. } => options.len() + 1, // +1 for custom
+            })
+            .unwrap_or(3);
+        // tab(1) + header(2) + options(n) + help(3) = 6 + n, min 9, max 15
+        (6 + option_count).clamp(9, 15) as u16
     } else {
         // Normal input: dynamic based on line count (min 3, max 10)
         let input_lines = app.chat_editor.line_count().max(1);
@@ -776,16 +785,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Check for local streaming content (from Unix socket, not Nostr)
-    if let Some(buffer) = app.local_streaming_content() {
+    // Clone the buffer to avoid borrowing app across the mutation below
+    if let Some(buffer) = app.local_streaming_content().cloned() {
         if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
-            // Get agent name from pubkey
-            let agent_name = app.data_store.borrow().get_profile_name(&buffer.agent_pubkey);
-
             // Render agent header with streaming indicator
             messages_text.push(Line::from(vec![
                 Span::styled("│ ", Style::default().fg(Color::Magenta)),
                 Span::styled(
-                    agent_name,
+                    "Agent",
                     Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
