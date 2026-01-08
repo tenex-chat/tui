@@ -40,6 +40,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let mut in_code_block = false;
     let mut code_block_lines: Vec<String> = Vec::new();
     let mut list_level: usize = 0;
+    let mut in_image = false;
+    let mut image_alt = String::new();
+    let mut image_url = String::new();
 
     for event in parser {
         match event {
@@ -74,7 +77,10 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 Tag::Link { .. } => {
                     style_stack.push(|s| s.fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
                 }
-                Tag::Image { .. } => {
+                Tag::Image { dest_url, .. } => {
+                    in_image = true;
+                    image_alt.clear();
+                    image_url = dest_url.to_string();
                     style_stack.push(|s| s.fg(Color::Magenta));
                 }
                 _ => {}
@@ -126,7 +132,47 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                         current_line.clear();
                     }
                 }
-                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link | TagEnd::Image => {
+                TagEnd::Image => {
+                    in_image = false;
+
+                    // Flush current line if any
+                    if !current_line.is_empty() {
+                        lines.push(Line::from(current_line.clone()));
+                        current_line.clear();
+                    }
+
+                    // Render image block - clone strings to ensure 'static lifetime
+                    let alt_text = if image_alt.is_empty() {
+                        "Image".to_string()
+                    } else {
+                        image_alt.clone()
+                    };
+
+                    lines.push(Line::from(""));
+                    lines.push(Line::from(vec![
+                        Span::styled("   🖼  ".to_string(), Style::default().fg(Color::Magenta)),
+                        Span::styled(
+                            alt_text,
+                            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                        ),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("       ".to_string(), Style::default()),
+                        Span::styled(
+                            image_url.clone(),
+                            Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED)
+                        ),
+                    ]));
+                    lines.push(Line::from(vec![
+                        Span::styled("       [Press 'o' to open in viewer]".to_string(), Style::default().fg(Color::DarkGray)),
+                    ]));
+                    lines.push(Line::from(""));
+
+                    image_alt.clear();
+                    image_url.clear();
+                    style_stack.pop();
+                }
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link => {
                     style_stack.pop();
                 }
                 _ => {}
@@ -137,6 +183,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     for line in text.lines() {
                         code_block_lines.push(line.to_string());
                     }
+                } else if in_image {
+                    // Collect alt text for image
+                    image_alt.push_str(&text);
                 } else {
                     current_line.push(Span::styled(text.to_string(), style_stack.current()));
                 }
@@ -208,5 +257,53 @@ mod tests {
         let text = "```\ncode block\n```";
         let lines = render_markdown(text);
         assert!(lines.len() > 1);
+    }
+
+    #[test]
+    fn test_render_image() {
+        let text = "![diagram](https://example.com/image.png)";
+        let lines = render_markdown(text);
+
+        // Should contain image block with icon, alt text, URL, and hint
+        assert!(lines.len() >= 4);
+
+        // Find the line with the icon
+        let icon_line = lines.iter().find(|line| {
+            line.spans.iter().any(|span| span.content.contains("🖼"))
+        });
+        assert!(icon_line.is_some(), "Should have icon line");
+
+        // Find the line with the URL
+        let url_line = lines.iter().find(|line| {
+            line.spans.iter().any(|span| span.content.contains("https://example.com/image.png"))
+        });
+        assert!(url_line.is_some(), "Should have URL line");
+    }
+
+    #[test]
+    fn test_render_image_with_text() {
+        let text = "Here's an image: ![diagram](https://example.com/image.png) and some more text";
+        let lines = render_markdown(text);
+
+        // Should contain both text and image block
+        assert!(lines.len() > 1);
+
+        // Should have image icon
+        let has_icon = lines.iter().any(|line| {
+            line.spans.iter().any(|span| span.content.contains("🖼"))
+        });
+        assert!(has_icon, "Should have image icon");
+    }
+
+    #[test]
+    fn test_render_multiple_images() {
+        let text = "![first](https://example.com/1.png) ![second](https://example.com/2.png)";
+        let lines = render_markdown(text);
+
+        // Should have blocks for both images
+        let icon_count = lines.iter().filter(|line| {
+            line.spans.iter().any(|span| span.content.contains("🖼"))
+        }).count();
+        assert_eq!(icon_count, 2, "Should have two image blocks");
     }
 }

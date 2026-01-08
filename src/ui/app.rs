@@ -864,4 +864,56 @@ impl App {
             && self.new_thread_selected_agent.is_some()
             && !self.new_thread_editor.text.trim().is_empty()
     }
+
+    /// Get all image URLs from messages in the current thread
+    pub fn get_image_urls_from_thread(&self) -> Vec<String> {
+        let messages = self.messages();
+        let mut urls = Vec::new();
+
+        for msg in &messages {
+            if msg.has_images() {
+                urls.extend(msg.extract_image_urls());
+            }
+        }
+
+        urls
+    }
+
+    /// Open an image URL in the system default viewer
+    pub fn open_image_in_viewer(&self, url: &str) -> Result<(), String> {
+        use std::process::Command;
+
+        #[cfg(target_os = "macos")]
+        let cmd = "open";
+        #[cfg(target_os = "linux")]
+        let cmd = "xdg-open";
+        #[cfg(target_os = "windows")]
+        let cmd = "start";
+
+        Command::new(cmd)
+            .arg(url)
+            .spawn()
+            .map_err(|e| format!("Failed to open image: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Open the first image from the current thread in the system viewer
+    pub fn open_first_image(&mut self) {
+        let urls = self.get_image_urls_from_thread();
+
+        if urls.is_empty() {
+            self.set_status("No images in current conversation");
+            return;
+        }
+
+        match self.open_image_in_viewer(&urls[0]) {
+            Ok(_) => {
+                self.set_status(&format!("Opening image in viewer..."));
+            }
+            Err(e) => {
+                self.set_status(&e);
+            }
+        }
+    }
 }

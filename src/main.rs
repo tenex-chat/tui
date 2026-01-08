@@ -590,6 +590,8 @@ fn handle_key(
                 } else if (c == 'a' || c == '@') && (app.view == View::Threads || app.view == View::Chat) && !app.available_agents().is_empty() {
                     app.showing_agent_selector = true;
                     app.agent_selector_index = 0;
+                } else if c == 'o' && app.view == View::Chat {
+                    app.open_first_image();
                 }
             }
             KeyCode::Up => match app.view {
