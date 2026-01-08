@@ -387,24 +387,46 @@ impl App {
     /// Process streaming deltas from the worker channel.
     /// All other updates are handled via nostrdb SubscriptionStream in main.rs.
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
-        if let Some(ref data_rx) = self.data_rx {
-            // Process streaming deltas (need ordered delivery)
-            while let Ok(DataChange::StreamingDelta {
-                pubkey,
-                message_id,
-                thread_id,
-                sequence,
-                created_at,
-                delta,
-            }) = data_rx.try_recv() {
-                self.data_store.borrow_mut().handle_streaming_delta(
+        // Collect all pending changes first to avoid borrow conflicts
+        let changes: Vec<DataChange> = self.data_rx
+            .as_ref()
+            .map(|rx| std::iter::from_fn(|| rx.try_recv().ok()).collect())
+            .unwrap_or_default();
+
+        for change in changes {
+            match change {
+                DataChange::StreamingDelta {
                     pubkey,
                     message_id,
                     thread_id,
                     sequence,
                     created_at,
                     delta,
-                );
+                } => {
+                    self.data_store.borrow_mut().handle_streaming_delta(
+                        pubkey,
+                        message_id,
+                        thread_id,
+                        sequence,
+                        created_at,
+                        delta,
+                    );
+                }
+                DataChange::LocalStreamChunk {
+                    agent_pubkey,
+                    conversation_id,
+                    text_delta,
+                    reasoning_delta,
+                    is_finish,
+                } => {
+                    self.handle_local_stream_chunk(
+                        agent_pubkey,
+                        conversation_id,
+                        text_delta,
+                        reasoning_delta,
+                        is_finish,
+                    );
+                }
             }
         }
         Ok(())
