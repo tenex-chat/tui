@@ -690,11 +690,6 @@ impl App {
         }
     }
 
-    /// Count unread tabs
-    pub fn unread_tab_count(&self) -> usize {
-        self.open_tabs.iter().filter(|t| t.has_unread).count()
-    }
-
     // ===== Home View Methods =====
 
     /// Get recent threads across all projects for Home view
@@ -990,11 +985,6 @@ impl App {
         self.input_mode = InputMode::Editing;
     }
 
-    /// Check if ask UI is active
-    pub fn is_ask_modal_open(&self) -> bool {
-        self.ask_modal_state.is_some()
-    }
-
     /// Check for unanswered ask events in current thread
     /// Returns the first unanswered ask event found
     pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
@@ -1035,6 +1025,7 @@ impl App {
     // ===== Local Streaming Methods =====
 
     /// Get streaming content for current conversation
+    #[allow(dead_code)]
     pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
         let conv_id = self.current_conversation_id()?;
         self.local_stream_buffers.get(&conv_id)
@@ -1051,11 +1042,9 @@ impl App {
     ) {
         let buffer = self.local_stream_buffers
             .entry(conversation_id)
-            .or_insert_with(|| LocalStreamBuffer {
-                agent_pubkey: agent_pubkey.clone(),
-                ..Default::default()
-            });
+            .or_default();
 
+        buffer.agent_pubkey = agent_pubkey;
         if let Some(delta) = text_delta {
             buffer.text_content.push_str(&delta);
         }
@@ -1067,13 +1056,13 @@ impl App {
         }
     }
 
-    /// Clear streaming buffer when Nostr event arrives
+    /// Clear the local stream buffer for a conversation
     pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
         self.local_stream_buffers.remove(conversation_id);
     }
 
     /// Get current conversation ID (thread ID)
-    fn current_conversation_id(&self) -> Option<String> {
+    pub fn current_conversation_id(&self) -> Option<String> {
         self.selected_thread.as_ref().map(|t| t.id.clone())
     }
 }
