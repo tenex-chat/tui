@@ -6,9 +6,11 @@ use anyhow::Result;
 use nostr_sdk::prelude::*;
 use nostrdb::Ndb;
 use tokio::runtime::Runtime;
+use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, info};
 
 use crate::store::ingest_events;
+use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
 const RELAY_URL: &str = "wss://tenex.chat";
 
@@ -99,6 +101,35 @@ impl NostrWorker {
         let rt = Runtime::new().expect("Failed to create runtime");
         self.rt_handle = Some(rt.handle().clone());
         info!("Nostr worker thread started");
+
+        // Setup local streaming socket client
+        let (local_chunk_tx, mut local_chunk_rx) = tokio_mpsc::channel::<LocalStreamChunk>(256);
+        let socket_client = SocketStreamClient::new();
+        let data_tx_for_socket = self.data_tx.clone();
+
+        // Spawn socket client task
+        rt.spawn(async move {
+            socket_client.run(local_chunk_tx).await;
+        });
+
+        // Spawn task to forward local chunks to data_tx
+        let rt_handle = rt.handle().clone();
+        rt_handle.spawn(async move {
+            while let Some(chunk) = local_chunk_rx.recv().await {
+                // Extract borrowed values before moving owned fields
+                let text_delta = chunk.text_delta().map(String::from);
+                let reasoning_delta = chunk.reasoning_delta().map(String::from);
+                let is_finish = chunk.is_finish();
+                let data_change = DataChange::LocalStreamChunk {
+                    agent_pubkey: chunk.agent_pubkey,
+                    conversation_id: chunk.conversation_id,
+                    text_delta,
+                    reasoning_delta,
+                    is_finish,
+                };
+                let _ = data_tx_for_socket.send(data_change);
+            }
+        });
 
         loop {
             if let Ok(cmd) = self.command_rx.recv() {

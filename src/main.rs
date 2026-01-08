@@ -1,6 +1,7 @@
 mod models;
 mod nostr;
 mod store;
+mod streaming;
 mod tracing_setup;
 mod ui;
 
