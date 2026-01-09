@@ -180,7 +180,7 @@ impl AvatarCache {
                     picker.new_resize_protocol(image.clone())
                 });
 
-                let stateful_image = StatefulImage::new(None).resize(Resize::Fit(None));
+                let stateful_image = StatefulImage::default().resize(Resize::Fit(None));
                 f.render_stateful_widget(stateful_image, area, protocol);
                 return true;
             }

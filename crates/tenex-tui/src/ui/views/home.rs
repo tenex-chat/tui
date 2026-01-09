@@ -1154,16 +1154,3 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
-
-/// Check if a color is light (for text contrast calculation)
-fn is_light_color(color: ratatui::style::Color) -> bool {
-    match color {
-        ratatui::style::Color::Rgb(r, g, b) => {
-            // Simple luminance calculation
-            let luminance = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
-            luminance > 0.5
-        }
-        // For non-RGB colors, assume dark
-        _ => false,
-    }
-}
