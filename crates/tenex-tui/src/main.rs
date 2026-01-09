@@ -1,9 +1,10 @@
-mod models;
-mod nostr;
-mod store;
-mod streaming;
-mod tracing_setup;
 mod ui;
+
+pub use tenex_core::models;
+pub use tenex_core::nostr;
+pub use tenex_core::store;
+pub use tenex_core::streaming;
+pub use tenex_core::tracing_setup;
 
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind};
@@ -14,18 +15,16 @@ use ratatui::{
     widgets::{Block, Paragraph},
     Frame,
 };
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
-use tracing::{debug, info_span, warn};
+use tracing::{debug, info_span};
 
-use nostr::{DataChange, NostrCommand, NostrWorker};
-use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
-use std::sync::mpsc;
-use store::AppDataStore;
+use nostr::NostrCommand;
+use tenex_core::config::CoreConfig;
+use tenex_core::events::CoreEvent;
+use tenex_core::runtime::CoreRuntime;
 
 use ui::views::login::{render_login, LoginStep};
+use ui::views::home::get_hierarchical_threads;
 use ui::{App, HomeTab, InputMode, ModalState, NewThreadField, View};
 use ui::selector::{handle_selector_key, SelectorAction};
 
@@ -51,27 +50,16 @@ async fn main() -> Result<()> {
 
     tracing_setup::init_tracing();
 
-    // Create shared nostrdb instance
-    std::fs::create_dir_all("tenex_data")?;
-    let ndb = Arc::new(nostrdb::Ndb::new("tenex_data", &nostrdb::Config::new())?);
-
-    // Create app data store (single source of truth)
-    let data_store = Rc::new(RefCell::new(AppDataStore::new(ndb.clone())));
-
-    let db = store::Database::with_ndb(ndb.clone(), "tenex_data")?;
-    let mut app = App::new(db, data_store.clone());
+    let mut core_runtime = CoreRuntime::new(CoreConfig::default())?;
+    let data_store = core_runtime.data_store();
+    let db = core_runtime.database();
+    let mut app = App::new(db.clone(), data_store);
     let mut terminal = ui::init_terminal()?;
-
-    let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
-    let (data_tx, data_rx) = mpsc::channel::<DataChange>();
-
-    app.set_channels(command_tx.clone(), data_rx);
-
-    let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx);
-
-    let worker_handle = std::thread::spawn(move || {
-        worker.run();
-    });
+    let core_handle = core_runtime.handle();
+    let data_rx = core_runtime
+        .take_data_rx()
+        .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
+    app.set_core_handle(core_handle.clone(), data_rx);
 
     let mut login_step = if nostr::has_stored_credentials(&app.db.credentials_conn()) {
         if nostr::credentials_need_password(&app.db.credentials_conn()) {
@@ -86,17 +74,18 @@ async fn main() -> Result<()> {
                     app.keys = Some(keys.clone());
                     app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
 
-                    if let Err(e) = command_tx.send(NostrCommand::Connect {
+                    if let Err(e) = core_handle.send(NostrCommand::Connect {
                         keys: keys.clone(),
                         user_pubkey: user_pubkey.clone(),
                     }) {
                         app.set_status(&format!("Failed to connect: {}", e));
                         LoginStep::Nsec
-                    } else if let Err(e) = command_tx.send(NostrCommand::Sync) {
+                    } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
                         app.set_status(&format!("Failed to sync: {}", e));
                         LoginStep::Nsec
                     } else {
                         app.view = View::Home;
+                        app.load_filter_preferences();
                         LoginStep::Nsec // Won't be shown since view is Home
                     }
                 }
@@ -111,10 +100,16 @@ async fn main() -> Result<()> {
     };
     let mut pending_nsec: Option<String> = None;
 
-    let result = run_app(&mut terminal, &mut app, data_store.clone(), ndb.clone(), &mut login_step, &mut pending_nsec).await;
+    let result = run_app(
+        &mut terminal,
+        &mut app,
+        &mut core_runtime,
+        &mut login_step,
+        &mut pending_nsec,
+    )
+    .await;
 
-    command_tx.send(NostrCommand::Shutdown).ok();
-    worker_handle.join().ok();
+    core_runtime.shutdown();
 
     ui::restore_terminal()?;
 
@@ -137,8 +132,7 @@ enum UploadResult {
 async fn run_app(
     terminal: &mut ui::Tui,
     app: &mut App,
-    data_store: Rc<RefCell<AppDataStore>>,
-    ndb: Arc<Ndb>,
+    core_runtime: &mut CoreRuntime,
     login_step: &mut LoginStep,
     pending_nsec: &mut Option<String>,
 ) -> Result<()> {
@@ -150,19 +144,6 @@ async fn run_app(
 
     // Channel for receiving upload results from background tasks
     let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(10);
-
-    // Create nostrdb subscription for all event kinds we care about:
-    // - 31933: Projects
-    // - 1: Text (unified kind for threads and messages)
-    // - 0: Profiles
-    // - 4199: Agent definitions
-    // - 24010: Project status
-    // - 513: Conversation metadata
-    let ndb_filter = FilterBuilder::new()
-        .kinds([31933, 1, 0, 4199, 24010, 513])
-        .build();
-    let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
-    let mut ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
 
     let mut loop_count: u64 = 0;
     while app.running {
@@ -225,9 +206,8 @@ async fn run_app(
                         Event::Paste(text) => {
                             // Handle paste event - only in Chat view with editing mode
                             if app.view == View::Chat && app.input_mode == InputMode::Editing {
-                                if let Some(editor) = app.attachment_modal_editor_mut() {
-                                    // Paste into attachment modal
-                                    editor.handle_paste(&text);
+                                if app.showing_attachment_modal {
+                                    app.attachment_modal_editor_mut().handle_paste(&text);
                                 } else {
                                     // Check if pasted text is an image file path (drag & drop)
                                     if let Some(keys) = app.keys.clone() {
@@ -254,11 +234,12 @@ async fn run_app(
             }
 
             // nostrdb notifications - events are ready to query
-            Some(note_keys) = ndb_stream.next() => {
-                debug!("ndb_stream received {} note keys", note_keys.len());
+            Some(note_keys) = core_runtime.next_note_keys() => {
+                debug!("core_runtime received {} note keys", note_keys.len());
                 let _span = info_span!("ndb_subscription", note_count = note_keys.len()).entered();
-                handle_ndb_notes(&data_store, app, &ndb, &note_keys)?;
-                debug!("ndb_stream processing complete");
+                let events = core_runtime.process_note_keys(&note_keys)?;
+                handle_core_events(app, events);
+                debug!("core_runtime processing complete");
             }
 
             // Tick for regular updates (data channel polling for non-message updates)
@@ -289,68 +270,38 @@ async fn run_app(
     Ok(())
 }
 
-/// Handle notes that nostrdb reports as ready
-fn handle_ndb_notes(
-    data_store: &Rc<RefCell<AppDataStore>>,
-    app: &mut App,
-    ndb: &Ndb,
-    note_keys: &[NoteKey]
-) -> Result<()> {
-    let note_count = note_keys.len();
-    if note_count > 10 {
-        warn!("Processing large batch of {} notes - this may cause UI lag", note_count);
-    }
-    debug!("handle_ndb_notes: processing {} notes", note_count);
+fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
+    for event in events {
+        match event {
+            CoreEvent::Message(message) => {
+                let thread_id = message.thread_id;
 
-    let txn = nostrdb::Transaction::new(ndb)?;
+                // Mark tab as unread if it's not the active one
+                app.mark_tab_unread(&thread_id);
 
-    for (idx, &note_key) in note_keys.iter().enumerate() {
-        if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
-            let kind = note.kind();
-            debug!("Processing note {}/{}: kind={}", idx + 1, note_count, kind);
+                // Clear local streaming buffer when Nostr message arrives
+                // This ensures streaming content is replaced by the final message
+                app.clear_local_stream_buffer(&thread_id);
 
-            // Update data store (single source of truth)
-            data_store.borrow_mut().handle_event(kind, &note);
-
-            // Handle UI-specific updates (auto-select agent/branch, scroll, streaming)
-            match kind {
-                1 => {
-                    if let Some(message) = models::Message::from_note(&note) {
-                        let thread_id = message.thread_id;
-
-                        // Mark tab as unread if it's not the active one
-                        app.mark_tab_unread(&thread_id);
-
-                        // Clear local streaming buffer when Nostr message arrives
-                        // This ensures streaming content is replaced by the final message
-                        app.clear_local_stream_buffer(&thread_id);
-
-                        // Scroll to bottom if it's the current thread
-                        if app.selected_thread.as_ref().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {
-                            app.scroll_offset = usize::MAX;
+                // Scroll to bottom if it's the current thread
+                if app.selected_thread.as_ref().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {
+                    app.scroll_offset = usize::MAX;
+                }
+            }
+            CoreEvent::ProjectStatus(status) => {
+                if app.selected_project.as_ref().map(|p| p.a_tag()) == Some(status.project_coordinate.clone()) {
+                    if app.selected_agent.is_none() {
+                        if let Some(pm) = status.pm_agent() {
+                            app.selected_agent = Some(pm.clone());
                         }
                     }
-                }
-                24010 => {
-                    // Project status - auto-select agent/branch if this is for the selected project
-                    if let Some(status) = models::ProjectStatus::from_note(&note) {
-                        if app.selected_project.as_ref().map(|p| p.a_tag()) == Some(status.project_coordinate.clone()) {
-                            if app.selected_agent.is_none() {
-                                if let Some(pm) = status.pm_agent() {
-                                    app.selected_agent = Some(pm.clone());
-                                }
-                            }
-                            if app.selected_branch.is_none() {
-                                app.selected_branch = status.default_branch().map(String::from);
-                            }
-                        }
+                    if app.selected_branch.is_none() {
+                        app.selected_branch = status.default_branch().map(String::from);
                     }
                 }
-                _ => {}
             }
         }
     }
-    Ok(())
 }
 
 fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
@@ -603,10 +554,9 @@ fn handle_key(
                 app.input_mode = InputMode::Editing;
             }
             KeyCode::Char('r') => {
-                if let Some(ref command_tx) = app.command_tx {
-                    let tx = command_tx.clone();
+                if let Some(core_handle) = app.core_handle.clone() {
                     app.set_status("Syncing...");
-                    if let Err(e) = tx.send(NostrCommand::Sync) {
+                    if let Err(e) = core_handle.send(NostrCommand::Sync) {
                         app.set_status(&format!("Sync request failed: {}", e));
                     }
                 }
@@ -791,17 +741,18 @@ fn handle_key(
                                     app.keys = Some(keys.clone());
                                     app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
 
-                                    if let Some(ref command_tx) = app.command_tx {
-                                        if let Err(e) = command_tx.send(NostrCommand::Connect {
+                                    if let Some(ref core_handle) = app.core_handle {
+                                        if let Err(e) = core_handle.send(NostrCommand::Connect {
                                             keys: keys.clone(),
                                             user_pubkey: user_pubkey.clone(),
                                         }) {
                                             app.set_status(&format!("Failed to connect: {}", e));
                                             *login_step = LoginStep::Nsec;
-                                        } else if let Err(e) = command_tx.send(NostrCommand::Sync) {
+                                        } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
                                             app.set_status(&format!("Failed to sync: {}", e));
                                         } else {
                                             app.view = View::Home;
+                                            app.load_filter_preferences();
                                             app.clear_status();
                                         }
                                     }
@@ -822,17 +773,18 @@ fn handle_key(
                                     app.keys = Some(keys.clone());
                                     app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
 
-                                    if let Some(ref command_tx) = app.command_tx {
-                                        if let Err(e) = command_tx.send(NostrCommand::Connect {
+                                    if let Some(ref core_handle) = app.core_handle {
+                                        if let Err(e) = core_handle.send(NostrCommand::Connect {
                                             keys: keys.clone(),
                                             user_pubkey: user_pubkey.clone(),
                                         }) {
                                             app.set_status(&format!("Failed to connect: {}", e));
                                             *login_step = LoginStep::Unlock;
-                                        } else if let Err(e) = command_tx.send(NostrCommand::Sync) {
+                                        } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
                                             app.set_status(&format!("Failed to sync: {}", e));
                                         } else {
                                             app.view = View::Home;
+                                            app.load_filter_preferences();
                                             app.clear_status();
                                         }
                                     }
@@ -927,8 +879,8 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     NewThreadField::Content => {
                         // Submit if valid
                         if app.can_submit_new_thread() {
-                            if let (Some(ref command_tx), Some(ref project), Some(ref agent)) = (
-                                &app.command_tx,
+                            if let (Some(ref core_handle), Some(ref project), Some(ref agent)) = (
+                                &app.core_handle,
                                 &app.new_thread_selected_project,
                                 &app.new_thread_selected_agent,
                             ) {
@@ -937,7 +889,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                                 let agent_pubkey = Some(agent.pubkey.clone());
 
                                 // Publish the thread (kind:1)
-                                if let Err(e) = command_tx.send(NostrCommand::PublishThread {
+                                if let Err(e) = core_handle.send(NostrCommand::PublishThread {
                                     project_a_tag: project_a_tag.clone(),
                                     title: content.lines().next().unwrap_or("New Thread").to_string(),
                                     content: content.clone(),
@@ -1032,6 +984,14 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('n') => {
             app.open_new_thread_modal();
         }
+        KeyCode::Char('m') => {
+            // Toggle "only by me" filter
+            app.toggle_only_by_me();
+        }
+        KeyCode::Char('f') => {
+            // Cycle through time filter options
+            app.cycle_time_filter();
+        }
         KeyCode::Tab => {
             // Switch between tabs (forward)
             app.home_panel_focus = match app.home_panel_focus {
@@ -1094,7 +1054,9 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
                     HomeTab::Recent => {
-                        let max = app.recent_threads().len().saturating_sub(1);
+                        // Use hierarchy for navigation (respects collapsed state)
+                        let hierarchy = get_hierarchical_threads(app);
+                        let max = hierarchy.len().saturating_sub(1);
                         if app.selected_recent_index < max {
                             app.selected_recent_index += 1;
                         }
@@ -1113,6 +1075,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 } else {
                     app.visible_projects.insert(a_tag);
                 }
+                app.save_selected_projects();
             }
         }
         KeyCode::Enter => {
@@ -1127,6 +1090,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     } else {
                         app.visible_projects.insert(a_tag);
                     }
+                    app.save_selected_projects();
                 }
             } else {
                 // Open selected item
@@ -1155,8 +1119,11 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
                     HomeTab::Recent => {
-                        let recent = app.recent_threads();
-                        if let Some((thread, a_tag)) = recent.get(app.selected_recent_index).cloned() {
+                        // Use hierarchy for selection (respects collapsed state)
+                        let hierarchy = get_hierarchical_threads(app);
+                        if let Some(item) = hierarchy.get(app.selected_recent_index) {
+                            let thread = item.thread.clone();
+                            let a_tag = item.a_tag.clone();
                             app.open_thread_from_home(&thread, &a_tag);
                         }
                     }
@@ -1169,6 +1136,15 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if let Some(item) = items.get(app.selected_inbox_index) {
                 let item_id = item.id.clone();
                 app.data_store.borrow_mut().mark_inbox_read(&item_id);
+            }
+        }
+        KeyCode::Char(' ') if app.home_panel_focus == HomeTab::Recent => {
+            // Toggle collapse for threads with children
+            let hierarchy = get_hierarchical_threads(app);
+            if let Some(item) = hierarchy.get(app.selected_recent_index) {
+                if item.has_children {
+                    app.toggle_thread_collapse(&item.thread.id);
+                }
             }
         }
         // Number keys for tab switching (same as Chat view)
@@ -1201,8 +1177,8 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Enter => {
             let content = app.chat_editor.submit();
             if !content.is_empty() {
-                if let (Some(ref command_tx), Some(ref thread), Some(ref project)) =
-                    (&app.command_tx, &app.selected_thread, &app.selected_project)
+                if let (Some(ref core_handle), Some(ref thread), Some(ref project)) =
+                    (&app.core_handle, &app.selected_thread, &app.selected_project)
                 {
                     let thread_id = thread.id.clone();
                     let project_a_tag = project.a_tag();
@@ -1217,7 +1193,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                         Some(thread_id.clone())
                     };
 
-                    if let Err(e) = command_tx.send(NostrCommand::PublishMessage {
+                    if let Err(e) = core_handle.send(NostrCommand::PublishMessage {
                         thread_id,
                         project_a_tag,
                         content,
@@ -1446,10 +1422,10 @@ fn submit_ask_response(app: &mut App) {
     let message_id = modal_state.message_id;
 
     // Send reply to the ask event
-    if let (Some(ref command_tx), Some(ref thread), Some(ref project)) =
-        (&app.command_tx, &app.selected_thread, &app.selected_project)
+    if let (Some(ref core_handle), Some(ref thread), Some(ref project)) =
+        (&app.core_handle, &app.selected_thread, &app.selected_project)
     {
-        let _ = command_tx.send(NostrCommand::PublishMessage {
+        let _ = core_handle.send(NostrCommand::PublishMessage {
             thread_id: thread.id.clone(),
             project_a_tag: project.a_tag(),
             content: response_text,
@@ -1483,66 +1459,44 @@ fn handle_attachment_modal_key(app: &mut App, key: KeyEvent) {
         }
         // Enter = newline in modal
         KeyCode::Enter => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.insert_newline();
-            }
+            app.attachment_modal_editor_mut().insert_newline();
         }
         // Ctrl+A = move to beginning of line
         KeyCode::Char('a') if has_ctrl => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_to_line_start();
-            }
+            app.attachment_modal_editor_mut().move_to_line_start();
         }
         // Ctrl+E = move to end of line
         KeyCode::Char('e') if has_ctrl => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_to_line_end();
-            }
+            app.attachment_modal_editor_mut().move_to_line_end();
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.kill_to_line_end();
-            }
+            app.attachment_modal_editor_mut().kill_to_line_end();
         }
         // Alt+Left = word left
         KeyCode::Left if has_alt => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_word_left();
-            }
+            app.attachment_modal_editor_mut().move_word_left();
         }
         // Alt+Right = word right
         KeyCode::Right if has_alt => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_word_right();
-            }
+            app.attachment_modal_editor_mut().move_word_right();
         }
         // Basic navigation
         KeyCode::Left => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_left();
-            }
+            app.attachment_modal_editor_mut().move_left();
         }
         KeyCode::Right => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.move_right();
-            }
+            app.attachment_modal_editor_mut().move_right();
         }
         KeyCode::Backspace => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.delete_char_before();
-            }
+            app.attachment_modal_editor_mut().delete_char_before();
         }
         KeyCode::Delete => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.delete_char_at();
-            }
+            app.attachment_modal_editor_mut().delete_char_at();
         }
         // Regular character input
         KeyCode::Char(c) => {
-            if let Some(editor) = app.attachment_modal_editor_mut() {
-                editor.insert_char(c);
-            }
+            app.attachment_modal_editor_mut().insert_char(c);
         }
         _ => {}
     }

@@ -12,6 +12,17 @@ pub struct Thread {
     pub status_label: Option<String>,
     /// Current activity from kind:513 metadata (e.g., "Writing tests...")
     pub status_current_activity: Option<String>,
+    /// Parent conversation ID from "delegation" tag (for hierarchical nesting)
+    pub parent_conversation_id: Option<String>,
+    /// Pubkeys mentioned in p-tags of the root event
+    pub p_tags: Vec<String>,
+}
+
+impl Thread {
+    /// Check if this thread was created by or p-tags the given pubkey
+    pub fn involves_user(&self, user_pubkey: &str) -> bool {
+        self.pubkey == user_pubkey || self.p_tags.iter().any(|p| p == user_pubkey)
+    }
 }
 
 impl Thread {
@@ -29,6 +40,8 @@ impl Thread {
         let mut title: Option<String> = None;
         let mut has_a_tag = false;
         let mut has_e_tag = false;
+        let mut parent_conversation_id: Option<String> = None;
+        let mut p_tags = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -45,6 +58,15 @@ impl Thread {
                 Some("e") => {
                     // Thread must NOT have e-tags (messages have e-tags)
                     has_e_tag = true;
+                }
+                Some("delegation") => {
+                    // Delegation tag format: ["delegation", "<parent-conversation-id>"]
+                    parent_conversation_id = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("p") => {
+                    if let Some(pubkey) = tag.get(1).and_then(|t| t.variant().str()) {
+                        p_tags.push(pubkey.to_string());
+                    }
                 }
                 _ => {}
             }
@@ -65,6 +87,8 @@ impl Thread {
             last_activity: created_at,
             status_label: None,
             status_current_activity: None,
+            parent_conversation_id,
+            p_tags,
         })
     }
 }

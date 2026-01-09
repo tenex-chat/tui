@@ -17,7 +17,8 @@ impl LocalStreamChunk {
     /// Extract text delta if this is a text-delta chunk
     pub fn text_delta(&self) -> Option<&str> {
         if self.data.get("type")?.as_str()? == "text-delta" {
-            self.data.get("textDelta")?.as_str()
+            // AI SDK v6 uses "text", older versions used "textDelta"
+            self.data.get("text")?.as_str()
         } else {
             None
         }
@@ -35,7 +36,10 @@ impl LocalStreamChunk {
     /// Extract reasoning delta if this is a reasoning-delta chunk
     pub fn reasoning_delta(&self) -> Option<&str> {
         if self.data.get("type")?.as_str()? == "reasoning-delta" {
-            self.data.get("textDelta")?.as_str()
+            // AI SDK uses "delta" or "text" for reasoning chunks
+            self.data.get("delta")
+                .or_else(|| self.data.get("text"))
+                .and_then(|v| v.as_str())
         } else {
             None
         }
@@ -54,7 +58,7 @@ mod tests {
             conversation_id: "def".to_string(),
             data: json!({
                 "type": "text-delta",
-                "textDelta": "Hello"
+                "text": "Hello"
             }),
         };
         assert_eq!(chunk.text_delta(), Some("Hello"));
@@ -80,7 +84,7 @@ mod tests {
             conversation_id: "def".to_string(),
             data: json!({
                 "type": "reasoning-delta",
-                "textDelta": "Let me think..."
+                "delta": "Let me think..."
             }),
         };
         assert_eq!(chunk.reasoning_delta(), Some("Let me think..."));

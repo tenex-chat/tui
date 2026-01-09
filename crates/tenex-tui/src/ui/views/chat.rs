@@ -773,17 +773,36 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             Span::styled(" ".repeat(pad + 2), Style::default().bg(input_bg)), // +2 right padding
         ]));
     } else {
-        // Render each line of input with padding
+        // Render each line of input with padding, wrapping long lines
         for line in input_text.lines() {
-            let pad = input_content_width.saturating_sub(line.len());
-            input_lines.push(Line::from(vec![
-                Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-                Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
-                Span::styled(line.to_string(), Style::default().fg(text_color).bg(input_bg)),
-                Span::styled(" ".repeat(pad + 2), Style::default().bg(input_bg)), // +2 right padding
-            ]));
+            // Wrap long lines to fit within content width
+            let mut remaining = line;
+            while !remaining.is_empty() {
+                let (chunk, rest) = if remaining.len() > input_content_width {
+                    // Find a safe UTF-8 boundary
+                    let mut split_at = input_content_width;
+                    while split_at > 0 && !remaining.is_char_boundary(split_at) {
+                        split_at -= 1;
+                    }
+                    if split_at == 0 {
+                        split_at = remaining.len().min(input_content_width);
+                    }
+                    (&remaining[..split_at], &remaining[split_at..])
+                } else {
+                    (remaining, "")
+                };
+
+                let pad = input_content_width.saturating_sub(chunk.len());
+                input_lines.push(Line::from(vec![
+                    Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+                    Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
+                    Span::styled(chunk.to_string(), Style::default().fg(text_color).bg(input_bg)),
+                    Span::styled(" ".repeat(pad + 2), Style::default().bg(input_bg)), // +2 right padding
+                ]));
+                remaining = rest;
+            }
         }
-        // Handle case where input ends with newline
+        // Handle case where input ends with newline or is single line
         if input_text.ends_with('\n') || input_lines.len() == 1 {
             input_lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
@@ -819,10 +838,20 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Show cursor in input mode (but not when ask modal is active)
     // +1 for top padding line, +3 for "│  " prefix
     if is_input_active && !app.is_attachment_modal_open() {
-        let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
+        // Calculate visual cursor position accounting for line wrapping
+        let cursor_pos = app.chat_editor.cursor;
+        let text = app.chat_editor.text.as_str();
+        let before_cursor = &text[..cursor_pos.min(text.len())];
+
+        // Handle cursor at end of text with trailing content
+        let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col_in_last_line = cursor_pos - last_line_start;
+        let visual_row = before_cursor.matches('\n').count() + col_in_last_line / input_content_width.max(1);
+        let visual_col = col_in_last_line % input_content_width.max(1);
+
         f.set_cursor_position((
-            input_area.x + cursor_col as u16 + 3, // +3 for "│  "
-            input_area.y + cursor_row as u16 + 1, // +1 for top padding
+            input_area.x + visual_col as u16 + 3, // +3 for "│  "
+            input_area.y + visual_row as u16 + 1, // +1 for top padding
         ));
     }
     idx += 1;

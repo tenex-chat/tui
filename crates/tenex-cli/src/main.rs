@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use tenex_tui::cli::{run_daemon, send_command, CliCommand};
+use tenex_cli::cli::{run_daemon, send_command, CliCommand};
 
 #[derive(Parser)]
 #[command(name = "tenex-cli")]

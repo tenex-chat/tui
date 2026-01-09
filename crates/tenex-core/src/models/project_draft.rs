@@ -1,3 +1,4 @@
+use super::TimeFilter;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -65,6 +66,12 @@ impl ProjectDraftStorage {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Preferences {
     pub last_project_a_tag: Option<String>,
+    #[serde(default)]
+    pub selected_projects: Vec<String>,
+    #[serde(default)]
+    pub only_by_me: bool,
+    #[serde(default)]
+    pub time_filter: Option<TimeFilter>,
 }
 
 pub struct PreferencesStorage {
@@ -97,5 +104,32 @@ impl PreferencesStorage {
 
     pub fn last_project(&self) -> Option<&str> {
         self.prefs.last_project_a_tag.as_deref()
+    }
+
+    pub fn selected_projects(&self) -> &[String] {
+        &self.prefs.selected_projects
+    }
+
+    pub fn set_selected_projects(&mut self, projects: Vec<String>) {
+        self.prefs.selected_projects = projects;
+        self.save_to_file();
+    }
+
+    pub fn only_by_me(&self) -> bool {
+        self.prefs.only_by_me
+    }
+
+    pub fn set_only_by_me(&mut self, value: bool) {
+        self.prefs.only_by_me = value;
+        self.save_to_file();
+    }
+
+    pub fn time_filter(&self) -> Option<TimeFilter> {
+        self.prefs.time_filter
+    }
+
+    pub fn set_time_filter(&mut self, filter: Option<TimeFilter>) {
+        self.prefs.time_filter = filter;
+        self.save_to_file();
     }
 }

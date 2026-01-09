@@ -1,5 +1,5 @@
-use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread};
-use crate::nostr::{DataChange, NostrCommand};
+use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread, TimeFilter};
+use crate::nostr::DataChange;
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::ModalState;
@@ -9,8 +9,9 @@ use nostr_sdk::Keys;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use tenex_core::runtime::CoreHandle;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
@@ -82,7 +83,7 @@ pub struct App {
     pub creating_thread: bool,
     pub selected_branch: Option<String>,
 
-    pub command_tx: Option<Sender<NostrCommand>>,
+    pub core_handle: Option<CoreHandle>,
     pub data_rx: Option<Receiver<DataChange>>,
 
     /// Whether user pressed Ctrl+C once (pending quit confirmation)
@@ -129,8 +130,12 @@ pub struct App {
     pub sidebar_focused: bool,
     /// Selected index in sidebar project list
     pub sidebar_project_index: usize,
-    /// Projects to show in Recent/Inbox (empty = all projects)
+    /// Projects to show in Recent/Inbox (empty = none)
     pub visible_projects: HashSet<String>,
+    /// Filter to show only threads created by or p-tagging current user
+    pub only_by_me: bool,
+    /// Filter by time since last activity
+    pub time_filter: Option<TimeFilter>,
 
     // New thread modal state
     pub showing_new_thread_modal: bool,
@@ -160,10 +165,13 @@ pub struct App {
 
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
+
+    /// Collapsed thread IDs (parent threads whose children are hidden)
+    pub collapsed_threads: HashSet<String>,
 }
 
 impl App {
-    pub fn new(db: Database, data_store: Rc<RefCell<AppDataStore>>) -> Self {
+    pub fn new(db: Arc<Database>, data_store: Rc<RefCell<AppDataStore>>) -> Self {
         Self {
             running: true,
             view: View::Login,
@@ -171,7 +179,7 @@ impl App {
             input: String::new(),
             cursor_position: 0,
 
-            db: Arc::new(db),
+            db,
             keys: None,
 
             selected_project: None,
@@ -185,7 +193,7 @@ impl App {
             creating_thread: false,
             selected_branch: None,
 
-            command_tx: None,
+            core_handle: None,
             data_rx: None,
 
             pending_quit: false,
@@ -208,6 +216,8 @@ impl App {
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
+            only_by_me: false,
+            time_filter: None,
             showing_new_thread_modal: false,
             new_thread_modal_focus: NewThreadField::Content,
             new_thread_project_filter: String::new(),
@@ -225,6 +235,16 @@ impl App {
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
             todo_sidebar_visible: true,
+            collapsed_threads: HashSet::new(),
+        }
+    }
+
+    /// Toggle collapse state for a thread (for hierarchical folding)
+    pub fn toggle_thread_collapse(&mut self, thread_id: &str) {
+        if self.collapsed_threads.contains(thread_id) {
+            self.collapsed_threads.remove(thread_id);
+        } else {
+            self.collapsed_threads.insert(thread_id.to_string());
         }
     }
 
@@ -398,13 +418,13 @@ impl App {
         }
     }
 
-    pub fn set_channels(&mut self, command_tx: Sender<NostrCommand>, data_rx: Receiver<DataChange>) {
-        self.command_tx = Some(command_tx);
+    pub fn set_core_handle(&mut self, core_handle: CoreHandle, data_rx: Receiver<DataChange>) {
+        self.core_handle = Some(core_handle);
         self.data_rx = Some(data_rx);
     }
 
     /// Process local streaming chunks from the worker channel.
-    /// All other updates are handled via nostrdb SubscriptionStream in main.rs.
+    /// All other updates are handled via the core runtime's nostrdb subscription.
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
         // Collect all pending changes first to avoid borrow conflicts
         let changes: Vec<DataChange> = self.data_rx
@@ -868,28 +888,76 @@ impl App {
 
     // ===== Home View Methods =====
 
-    /// Get recent threads across all projects for Home view (filtered by visible_projects)
+    /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
-        let threads = self.data_store.borrow().get_all_recent_threads(50);
+        // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
-            threads
-        } else {
-            threads.into_iter()
-                .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
-                .collect()
+            return vec![];
         }
+
+        let threads = self.data_store.borrow().get_all_recent_threads(50);
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        threads.into_iter()
+            // Project filter
+            .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
+            // "Only by me" filter
+            .filter(|(thread, _)| {
+                if !self.only_by_me {
+                    return true;
+                }
+                user_pubkey.as_ref().map_or(false, |pk| thread.involves_user(pk))
+            })
+            // Time filter
+            .filter(|(thread, _)| {
+                if let Some(ref tf) = self.time_filter {
+                    let cutoff = now.saturating_sub(tf.seconds());
+                    thread.last_activity >= cutoff
+                } else {
+                    true
+                }
+            })
+            .collect()
     }
 
-    /// Get inbox items for Home view (filtered by visible_projects)
+    /// Get inbox items for Home view (filtered by visible_projects, only_by_me, time_filter)
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
-        let items = self.data_store.borrow().get_inbox_items().to_vec();
+        // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
-            items
-        } else {
-            items.into_iter()
-                .filter(|item| self.visible_projects.contains(&item.project_a_tag))
-                .collect()
+            return vec![];
         }
+
+        let items = self.data_store.borrow().get_inbox_items().to_vec();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        items.into_iter()
+            // Project filter
+            .filter(|item| self.visible_projects.contains(&item.project_a_tag))
+            // "Only by me" filter - based on author_pubkey
+            .filter(|item| {
+                if !self.only_by_me {
+                    return true;
+                }
+                user_pubkey.as_ref().map_or(false, |pk| &item.author_pubkey == pk)
+            })
+            // Time filter
+            .filter(|item| {
+                if let Some(ref tf) = self.time_filter {
+                    let cutoff = now.saturating_sub(tf.seconds());
+                    item.created_at >= cutoff
+                } else {
+                    true
+                }
+            })
+            .collect()
     }
 
     /// Open thread from Home view (recent conversations or inbox)
@@ -1298,5 +1366,33 @@ impl App {
     /// Get current conversation ID (thread ID)
     pub fn current_conversation_id(&self) -> Option<String> {
         self.selected_thread.as_ref().map(|t| t.id.clone())
+    }
+
+    // ===== Filter Management Methods =====
+
+    /// Load filter preferences from storage
+    pub fn load_filter_preferences(&mut self) {
+        let prefs = self.preferences.borrow();
+        self.visible_projects = prefs.selected_projects().iter().cloned().collect();
+        self.only_by_me = prefs.only_by_me();
+        self.time_filter = prefs.time_filter();
+    }
+
+    /// Save selected projects to preferences
+    pub fn save_selected_projects(&self) {
+        let projects: Vec<String> = self.visible_projects.iter().cloned().collect();
+        self.preferences.borrow_mut().set_selected_projects(projects);
+    }
+
+    /// Toggle "only by me" filter and persist
+    pub fn toggle_only_by_me(&mut self) {
+        self.only_by_me = !self.only_by_me;
+        self.preferences.borrow_mut().set_only_by_me(self.only_by_me);
+    }
+
+    /// Cycle through time filter options and persist
+    pub fn cycle_time_filter(&mut self) {
+        self.time_filter = TimeFilter::cycle_next(self.time_filter);
+        self.preferences.borrow_mut().set_time_filter(self.time_filter);
     }
 }

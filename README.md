@@ -15,7 +15,15 @@ A terminal user interface client for TENEX built with Rust.
 Start the application:
 
 ```bash
-cargo run
+cargo run -p tenex-tui
+```
+
+## GUI (Preview)
+
+Run the experimental GUI (uses stored credentials; password prompt supported):
+
+```bash
+cargo run -p tenex-gui
 ```
 
 On first run, you'll be prompted to enter your nsec (Nostr private key). The application will securely store your credentials for future sessions.
@@ -40,7 +48,7 @@ On first run, you'll be prompted to enter your nsec (Nostr private key). The app
 Build the release version:
 
 ```bash
-cargo build --release
+cargo build -p tenex-tui --release
 ```
 
 The compiled binary will be available at `target/release/tenex-tui`.
@@ -50,13 +58,13 @@ The compiled binary will be available at `target/release/tenex-tui`.
 Run tests:
 
 ```bash
-cargo test
+cargo test -p tenex-tui
 ```
 
 Run with trace output:
 
 ```bash
-RUST_LOG=info cargo run
+RUST_LOG=info cargo run -p tenex-tui
 ```
 
 ## Database

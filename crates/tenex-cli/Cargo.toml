@@ -1,0 +1,23 @@
+[package]
+name = "tenex-cli"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "tenex_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "tenex-cli"
+path = "src/main.rs"
+
+[dependencies]
+tenex-core = { path = "../tenex-core" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+nostr-sdk.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+clap.workspace = true
+dirs.workspace = true

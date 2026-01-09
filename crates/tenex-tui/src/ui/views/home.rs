@@ -9,7 +9,129 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
+use std::collections::{HashMap, HashSet};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Hierarchical thread item with depth for nesting display
+#[derive(Clone)]
+pub struct HierarchicalThread {
+    pub thread: Thread,
+    pub a_tag: String,
+    pub depth: usize,
+    pub has_children: bool,
+    pub child_count: usize,
+    pub is_collapsed: bool,
+}
+
+/// Build hierarchical thread list from flat list with delegation relationships
+fn build_thread_hierarchy(
+    threads: &[(Thread, String)],
+    collapsed_ids: &HashSet<String>,
+) -> Vec<HierarchicalThread> {
+    // Map from child ID -> parent ID (based on delegation tag)
+    let mut child_to_parent: HashMap<&str, &str> = HashMap::new();
+    // Map from parent ID -> array of child threads (thread, a_tag)
+    let mut parent_to_children: HashMap<&str, Vec<(&Thread, &String)>> = HashMap::new();
+    // Set of threads that are children (have a parent)
+    let mut child_ids: HashSet<&str> = HashSet::new();
+
+    // Build the mappings
+    for (thread, a_tag) in threads {
+        if let Some(ref parent_id) = thread.parent_conversation_id {
+            child_to_parent.insert(&thread.id, parent_id);
+            child_ids.insert(&thread.id);
+            parent_to_children
+                .entry(parent_id.as_str())
+                .or_default()
+                .push((thread, a_tag));
+        }
+    }
+
+    // Sort children by most recent activity (same as parent sorting)
+    for children in parent_to_children.values_mut() {
+        children.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
+    }
+
+    // Count all descendants (recursive) for a thread
+    fn count_descendants(
+        thread_id: &str,
+        parent_to_children: &HashMap<&str, Vec<(&Thread, &String)>>,
+    ) -> usize {
+        let children = parent_to_children.get(thread_id);
+        match children {
+            None => 0,
+            Some(children) => {
+                let mut count = children.len();
+                for (child, _) in children {
+                    count += count_descendants(&child.id, parent_to_children);
+                }
+                count
+            }
+        }
+    }
+
+    // Build flattened hierarchical list with depth information
+    let mut result: Vec<HierarchicalThread> = Vec::new();
+
+    fn add_thread_with_children(
+        thread: &Thread,
+        a_tag: &String,
+        depth: usize,
+        collapsed_ids: &HashSet<String>,
+        parent_to_children: &HashMap<&str, Vec<(&Thread, &String)>>,
+        result: &mut Vec<HierarchicalThread>,
+    ) {
+        let children = parent_to_children.get(thread.id.as_str());
+        let has_children = children.map(|c| !c.is_empty()).unwrap_or(false);
+        let child_count = count_descendants(&thread.id, parent_to_children);
+        let is_collapsed = collapsed_ids.contains(&thread.id);
+
+        result.push(HierarchicalThread {
+            thread: thread.clone(),
+            a_tag: a_tag.clone(),
+            depth,
+            has_children,
+            child_count,
+            is_collapsed,
+        });
+
+        // Only add children if this thread is not collapsed
+        if !is_collapsed {
+            if let Some(children) = children {
+                for (child, child_a_tag) in children {
+                    add_thread_with_children(
+                        child,
+                        child_a_tag,
+                        depth + 1,
+                        collapsed_ids,
+                        parent_to_children,
+                        result,
+                    );
+                }
+            }
+        }
+    }
+
+    // Start with root threads (those that have no parent in our list)
+    let root_threads: Vec<(&Thread, &String)> = threads
+        .iter()
+        .filter(|(t, _)| !child_ids.contains(t.id.as_str()))
+        .map(|(t, a)| (t, a))
+        .collect();
+
+    for (thread, a_tag) in root_threads {
+        add_thread_with_children(
+            thread,
+            a_tag,
+            0,
+            collapsed_ids,
+            &parent_to_children,
+            &mut result,
+        );
+    }
+
+    result
+}
 
 /// Map status label to Unicode symbol
 fn status_label_to_symbol(label: &str) -> &'static str {
@@ -187,12 +309,24 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
         return;
     }
 
-    let items: Vec<ListItem> = recent
+    // Build hierarchical thread list
+    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads);
+
+    let items: Vec<ListItem> = hierarchy
         .iter()
         .enumerate()
-        .map(|(i, (thread, a_tag))| {
+        .map(|(i, item)| {
             let is_selected = is_focused && i == app.selected_recent_index;
-            render_conversation_card(app, thread, a_tag, is_selected)
+            render_conversation_card(
+                app,
+                &item.thread,
+                &item.a_tag,
+                is_selected,
+                item.depth,
+                item.has_children,
+                item.child_count,
+                item.is_collapsed,
+            )
         })
         .collect();
 
@@ -204,12 +338,28 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
+/// Get the hierarchical thread list (used for navigation and selection)
+pub fn get_hierarchical_threads(app: &App) -> Vec<HierarchicalThread> {
+    let recent = app.recent_threads();
+    build_thread_hierarchy(&recent, &app.collapsed_threads)
+}
+
 fn render_conversation_card(
     app: &App,
     thread: &Thread,
     a_tag: &str,
     is_selected: bool,
+    depth: usize,
+    has_children: bool,
+    child_count: usize,
+    is_collapsed: bool,
 ) -> ListItem<'static> {
+    // Use compact mode for nested threads (depth > 0)
+    let is_compact = depth > 0;
+
+    // Indentation based on nesting level
+    let indent = "  ".repeat(depth);
+
     // Single borrow to extract all needed data
     let (project_name, author_name, preview, timestamp) = {
         let store = app.data_store.borrow();
@@ -242,74 +392,156 @@ fn render_conversation_card(
         Style::default().fg(theme::TEXT_PRIMARY)
     };
 
-    // Line 1: Status label (if present) + Title + time
-    let mut line1_spans = vec![Span::styled(border_char, border_style)];
+    // Collapse/expand indicator
+    let collapse_indicator = if has_children {
+        if is_collapsed {
+            format!("▶ ")  // Collapsed - point right
+        } else {
+            format!("▼ ")  // Expanded - point down
+        }
+    } else if depth > 0 {
+        "└─".to_string()  // Nested leaf node
+    } else {
+        "".to_string()
+    };
 
-    // Add status label with symbol if present
-    if let Some(ref status_label) = thread.status_label {
-        let symbol = status_label_to_symbol(status_label);
-        line1_spans.push(Span::styled(
-            format!("[{} {}] ", symbol, status_label),
-            Style::default().fg(theme::ACCENT_WARNING),
-        ));
-    }
-
-    line1_spans.push(Span::styled(
-        truncate_string(&thread.title, 60),
-        title_style,
-    ));
-
-    // Add time on the right (we'll pad later in rendering)
-    let time_padding = "  ";
-    line1_spans.push(Span::styled(time_padding, Style::default()));
-    line1_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
-
-    // Line 2: Project + agent
-    let line2_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled("● ", Style::default().fg(theme::ACCENT_SUCCESS)),
-        Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
-        Span::styled("  ", Style::default()),
-        Span::styled(format!("@{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
-    ];
-
-    // Line 3: Preview
-    let mut line3_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(
-            truncate_string(&preview, 70),
-            Style::default().fg(theme::TEXT_MUTED),
-        ),
-    ];
-
-    // Build lines list
-    let mut lines = vec![
-        Line::from(line1_spans),
-        Line::from(line2_spans),
-        Line::from(line3_spans),
-    ];
-
-    // Line 4: Current activity (if present)
-    if let Some(ref activity) = thread.status_current_activity {
-        let activity_spans = vec![
+    if is_compact {
+        // COMPACT MODE: Single line for nested threads
+        let mut line_spans = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(border_char, border_style),
-            Span::styled("⟳ ", Style::default().fg(theme::ACCENT_PRIMARY)),
+        ];
+
+        // Add status indicator if present
+        if let Some(ref status_label) = thread.status_label {
+            let symbol = status_label_to_symbol(status_label);
+            line_spans.push(Span::styled(
+                format!("{} ", symbol),
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
+        }
+
+        // Title (truncated more for compact view)
+        line_spans.push(Span::styled(
+            truncate_string(&thread.title, 40),
+            title_style,
+        ));
+
+        // Collapsed indicator showing child count
+        if is_collapsed && child_count > 0 {
+            line_spans.push(Span::styled(
+                format!("  +{}", child_count),
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
+        }
+
+        // Time
+        line_spans.push(Span::styled("  ", Style::default()));
+        line_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+
+        let lines = vec![Line::from(line_spans), Line::from("")];
+
+        let item = ListItem::new(lines);
+        if is_selected {
+            item.style(Style::default().bg(theme::BG_SELECTED))
+        } else {
+            item
+        }
+    } else {
+        // FULL MODE: For root threads
+
+        // Line 1: Collapse indicator + Status label (if present) + Title + time
+        let mut line1_spans = vec![
+            Span::styled(indent.clone(), Style::default()),
+        ];
+
+        if !collapse_indicator.is_empty() {
+            line1_spans.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+        }
+
+        line1_spans.push(Span::styled(border_char, border_style));
+
+        // Add status label with symbol if present
+        if let Some(ref status_label) = thread.status_label {
+            let symbol = status_label_to_symbol(status_label);
+            line1_spans.push(Span::styled(
+                format!("[{} {}] ", symbol, status_label),
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
+        }
+
+        line1_spans.push(Span::styled(
+            truncate_string(&thread.title, 60),
+            title_style,
+        ));
+
+        // Add time on the right (we'll pad later in rendering)
+        let time_padding = "  ";
+        line1_spans.push(Span::styled(time_padding, Style::default()));
+        line1_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+
+        // Line 2: Project + agent + nested count
+        let mut line2_spans = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),  // Space for collapse indicator
+            Span::styled(border_char, border_style),
+            Span::styled("● ", Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled("  ", Style::default()),
+            Span::styled(format!("@{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
+        ];
+
+        // Add nested conversations indicator
+        if has_children && child_count > 0 {
+            line2_spans.push(Span::styled(
+                format!("  {} nested", child_count),
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
+        }
+
+        // Line 3: Preview
+        let line3_spans = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),  // Space for collapse indicator
+            Span::styled(border_char, border_style),
             Span::styled(
-                truncate_string(activity, 70),
-                Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM),
+                truncate_string(&preview, 70),
+                Style::default().fg(theme::TEXT_MUTED),
             ),
         ];
-        lines.push(Line::from(activity_spans));
-    }
 
-    // Final line: Empty line for spacing
-    lines.push(Line::from(vec![Span::raw("")]));
+        // Build lines list
+        let mut lines = vec![
+            Line::from(line1_spans),
+            Line::from(line2_spans),
+            Line::from(line3_spans),
+        ];
 
-    let item = ListItem::new(lines);
-    if is_selected {
-        item.style(Style::default().bg(theme::BG_SELECTED))
-    } else {
-        item
+        // Line 4: Current activity (if present)
+        if let Some(ref activity) = thread.status_current_activity {
+            let activity_spans = vec![
+                Span::styled(indent.clone(), Style::default()),
+                Span::styled("  ", Style::default()),  // Space for collapse indicator
+                Span::styled(border_char, border_style),
+                Span::styled("⟳ ", Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(
+                    truncate_string(activity, 70),
+                    Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM),
+                ),
+            ];
+            lines.push(Line::from(activity_spans));
+        }
+
+        // Final line: Empty line for spacing
+        lines.push(Line::from(vec![Span::raw("")]));
+
+        let item = ListItem::new(lines);
+        if is_selected {
+            item.style(Style::default().bg(theme::BG_SELECTED))
+        } else {
+            item
+        }
     }
 }
 
@@ -412,6 +644,19 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
 
 /// Render the project sidebar with checkboxes for filtering
 fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    // Split sidebar into projects list and filter section
+    let chunks = Layout::vertical([
+        Constraint::Min(5),    // Projects list
+        Constraint::Length(4), // Filter section
+    ])
+    .split(area);
+
+    render_projects_list(f, app, chunks[0]);
+    render_filters_section(f, app, chunks[1]);
+}
+
+/// Render the projects list with checkboxes
+fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     let (online_projects, offline_projects) = app.filtered_projects();
 
     let mut items: Vec<ListItem> = Vec::new();
@@ -424,10 +669,10 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         ])));
     }
 
-    // Online projects
+    // Online projects - now empty = none (inverted)
     for project in &online_projects {
         let a_tag = project.a_tag();
-        let is_visible = app.visible_projects.is_empty() || app.visible_projects.contains(&a_tag);
+        let is_visible = app.visible_projects.contains(&a_tag);
         let checkbox = if is_visible { "[✓] " } else { "[ ] " };
         let name = truncate_string(&project.name, 14);
         items.push(ListItem::new(Line::from(vec![
@@ -444,10 +689,10 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         ])));
     }
 
-    // Offline projects
+    // Offline projects - now empty = none (inverted)
     for project in &offline_projects {
         let a_tag = project.a_tag();
-        let is_visible = app.visible_projects.is_empty() || app.visible_projects.contains(&a_tag);
+        let is_visible = app.visible_projects.contains(&a_tag);
         let checkbox = if is_visible { "[✓] " } else { "[ ] " };
         let name = truncate_string(&project.name, 14);
         items.push(ListItem::new(Line::from(vec![
@@ -459,7 +704,7 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items)
         .block(Block::default()
             .borders(Borders::NONE)
-            .padding(Padding::new(2, 2, 1, 1))) // left, right, top, bottom
+            .padding(Padding::new(2, 2, 1, 0))) // left, right, top, bottom
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     // Calculate selected index (accounting for headers)
@@ -484,13 +729,60 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
+/// Render the filters section below projects
+fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Separator line
+    lines.push(Line::from(Span::styled(
+        "─ Filters ─",
+        Style::default().fg(theme::TEXT_MUTED),
+    )));
+
+    // "Only by me" filter
+    let only_by_me_checkbox = if app.only_by_me { "[✓]" } else { "[ ]" };
+    let only_by_me_style = if app.only_by_me {
+        Style::default().fg(theme::ACCENT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    lines.push(Line::from(vec![
+        Span::styled("[m] ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(only_by_me_checkbox, only_by_me_style),
+        Span::styled(" By me", only_by_me_style),
+    ]));
+
+    // Time filter
+    let time_label = app.time_filter
+        .map(|tf| tf.label())
+        .unwrap_or("All");
+    let time_style = if app.time_filter.is_some() {
+        Style::default().fg(theme::ACCENT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    let time_indicator = if app.time_filter.is_some() { " ✓" } else { "" };
+    lines.push(Line::from(vec![
+        Span::styled("[f] ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(format!("Time: {}{}", time_label, time_indicator), time_style),
+    ]));
+
+    let filter_widget = Paragraph::new(lines)
+        .block(Block::default()
+            .borders(Borders::NONE)
+            .padding(Padding::new(2, 2, 0, 1))) // left, right, top, bottom
+        .style(Style::default().bg(theme::BG_SIDEBAR));
+
+    f.render_widget(filter_widget, area);
+}
+
 fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = if app.sidebar_focused {
-        "← back · ↑↓ navigate · Space toggle · Tab switch · q quit"
+        "← back · ↑↓ navigate · Space toggle · m filter · f time · Tab switch · q quit"
     } else {
         match app.home_panel_focus {
-            HomeTab::Recent => "→ projects · ↑↓ navigate · Enter open · n new · Tab switch · q quit",
-            HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
+            HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · q quit",
+            HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · q quit",
         }
     };
 

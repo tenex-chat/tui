@@ -4,19 +4,18 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::net::UnixListener;
 
 use anyhow::Result;
-use nostrdb::Ndb;
 use tracing::{info, instrument};
 
-use crate::nostr::{self, DataChange, NostrCommand, NostrWorker};
+use crate::nostr::{self, NostrCommand};
 use crate::store::{AppDataStore, Database};
 use crate::tracing_setup::init_tracing_with_service;
+use tenex_core::config::CoreConfig;
+use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
 use super::protocol::{Request, Response};
 
@@ -69,32 +68,15 @@ pub async fn run_daemon() -> Result<()> {
     let listener = UnixListener::bind(&socket_path)?;
     eprintln!("Listening on {:?}", socket_path);
 
-    // Initialize nostrdb
+    // Initialize core runtime
     let data_dir = get_data_dir();
-    fs::create_dir_all(&data_dir)?;
-    let ndb = Arc::new(Ndb::new(
-        data_dir.to_str().unwrap_or("tenex_data"),
-        &nostrdb::Config::new(),
-    )?);
-
-    // Create app data store
-    let data_store = Rc::new(RefCell::new(AppDataStore::new(ndb.clone())));
-
-    // Create database for credentials
-    let db = Database::with_ndb(ndb.clone(), &data_dir)?;
-
-    // Set up channels for NostrWorker
-    let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
-    let (data_tx, _data_rx) = mpsc::channel::<DataChange>();
-
-    // Start NostrWorker thread
-    let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx);
-    let worker_handle = std::thread::spawn(move || {
-        worker.run();
-    });
+    let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
+    let data_store = core_runtime.data_store();
+    let db = core_runtime.database();
+    let core_handle = core_runtime.handle();
 
     // Try to auto-login if credentials are available
-    let keys = try_auto_login(&db, &command_tx);
+    let keys = try_auto_login(db.as_ref(), &core_handle);
     if keys.is_some() {
         eprintln!("Auto-login successful");
     } else {
@@ -106,34 +88,42 @@ pub async fn run_daemon() -> Result<()> {
 
     // Handle connections - use async accept to allow batch exporter to run
     loop {
-        match listener.accept().await {
-            Ok((stream, _)) => {
-                // Convert tokio UnixStream to std UnixStream for blocking I/O
-                let std_stream = stream.into_std()?;
-                std_stream.set_nonblocking(false)?;
-                let should_shutdown = handle_connection(
-                    std_stream,
-                    &data_store,
-                    &command_tx,
-                    &db,
-                    start_time,
-                    keys.is_some(),
-                )?;
+        tokio::select! {
+            accept_result = listener.accept() => {
+                match accept_result {
+                    Ok((stream, _)) => {
+                        // Convert tokio UnixStream to std UnixStream for blocking I/O
+                        let std_stream = stream.into_std()?;
+                        std_stream.set_nonblocking(false)?;
+                        let should_shutdown = handle_connection(
+                            std_stream,
+                            &data_store,
+                            &core_handle,
+                            db.as_ref(),
+                            start_time,
+                            keys.is_some(),
+                        )?;
 
-                if should_shutdown {
-                    eprintln!("Shutdown requested");
-                    break;
+                        if should_shutdown {
+                            eprintln!("Shutdown requested");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Connection error: {}", e);
+                    }
                 }
             }
-            Err(e) => {
-                eprintln!("Connection error: {}", e);
+            Some(note_keys) = core_runtime.next_note_keys() => {
+                if let Err(e) = core_runtime.process_note_keys(&note_keys) {
+                    eprintln!("Failed to process core events: {}", e);
+                }
             }
         }
     }
 
     // Cleanup
-    command_tx.send(NostrCommand::Shutdown).ok();
-    worker_handle.join().ok();
+    core_runtime.shutdown();
     fs::remove_file(&socket_path).ok();
     fs::remove_file(&pid_path).ok();
 
@@ -144,10 +134,7 @@ pub async fn run_daemon() -> Result<()> {
     Ok(())
 }
 
-fn try_auto_login(
-    db: &Database,
-    command_tx: &mpsc::Sender<NostrCommand>,
-) -> Option<nostr_sdk::Keys> {
+fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::Keys> {
     let conn = db.credentials_conn();
 
     if !nostr::has_stored_credentials(&conn) {
@@ -161,14 +148,14 @@ fn try_auto_login(
             match nostr::load_stored_keys(&password, &conn) {
                 Ok(keys) => {
                     let pubkey = nostr::get_current_pubkey(&keys);
-                    if command_tx
+                    if core_handle
                         .send(NostrCommand::Connect {
                             keys: keys.clone(),
                             user_pubkey: pubkey,
                         })
                         .is_ok()
                     {
-                        command_tx.send(NostrCommand::Sync).ok();
+                        core_handle.send(NostrCommand::Sync).ok();
                         return Some(keys);
                     }
                 }
@@ -184,14 +171,14 @@ fn try_auto_login(
     match nostr::load_unencrypted_keys(&conn) {
         Ok(keys) => {
             let pubkey = nostr::get_current_pubkey(&keys);
-            if command_tx
+            if core_handle
                 .send(NostrCommand::Connect {
                     keys: keys.clone(),
                     user_pubkey: pubkey,
                 })
                 .is_ok()
             {
-                command_tx.send(NostrCommand::Sync).ok();
+                core_handle.send(NostrCommand::Sync).ok();
                 return Some(keys);
             }
         }
@@ -206,7 +193,7 @@ fn try_auto_login(
 fn handle_connection(
     stream: UnixStream,
     data_store: &Rc<RefCell<AppDataStore>>,
-    command_tx: &mpsc::Sender<NostrCommand>,
+    core_handle: &CoreHandle,
     db: &Database,
     start_time: Instant,
     logged_in: bool,
@@ -227,7 +214,7 @@ fn handle_connection(
         };
 
         let (response, should_shutdown) =
-            handle_request(&request, data_store, command_tx, db, start_time, logged_in);
+            handle_request(&request, data_store, core_handle, db, start_time, logged_in);
 
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
         writer.flush()?;
@@ -246,7 +233,7 @@ fn handle_connection(
 fn handle_request(
     request: &Request,
     data_store: &Rc<RefCell<AppDataStore>>,
-    command_tx: &mpsc::Sender<NostrCommand>,
+    core_handle: &CoreHandle,
     _db: &Database,
     start_time: Instant,
     logged_in: bool,
@@ -368,7 +355,7 @@ fn handle_request(
 
             match project_a_tag {
                 Some(project_a_tag) => {
-                    if command_tx
+                    if core_handle
                         .send(NostrCommand::PublishMessage {
                             thread_id: thread_id.to_string(),
                             project_a_tag,
@@ -408,7 +395,7 @@ fn handle_request(
                 );
             }
 
-            if command_tx
+            if core_handle
                 .send(NostrCommand::PublishThread {
                     project_a_tag: project_id.to_string(),
                     title: title.to_string(),
@@ -431,7 +418,7 @@ fn handle_request(
         }
 
         "sync" => {
-            if command_tx.send(NostrCommand::Sync).is_ok() {
+            if core_handle.send(NostrCommand::Sync).is_ok() {
                 (
                     Response::success(id, serde_json::json!({"status": "syncing"})),
                     false,
@@ -460,7 +447,7 @@ fn handle_request(
                 .map(|p| p.pubkey.clone());
             drop(store);
 
-            if command_tx
+            if core_handle
                 .send(NostrCommand::BootProject {
                     project_a_tag: project_id.to_string(),
                     project_pubkey,

@@ -642,10 +642,10 @@ git commit -m "test(streaming): add LocalStreamChunk tests"
 
 After completing all tasks:
 
-1. Build: `cargo build`
-2. Run tests: `cargo test`
+1. Build: `cargo build -p tenex-tui`
+2. Run tests: `cargo test -p tenex-tui`
 3. Start backend daemon (should create socket)
-4. Start TUI: `cargo run`
+4. Start TUI: `cargo run -p tenex-tui`
 5. Verify connection log: "Connected to streaming socket"
 6. Send a message to an agent
 7. Verify streaming text appears with cursor indicator before final Nostr event

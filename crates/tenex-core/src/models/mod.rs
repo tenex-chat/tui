@@ -7,6 +7,7 @@ pub mod project;
 pub mod project_draft;
 pub mod project_status;
 pub mod thread;
+pub mod time_filter;
 
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{ChatDraft, DraftStorage};
@@ -17,3 +18,4 @@ pub use project::Project;
 pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage};
 pub use project_status::{ProjectAgent, ProjectStatus};
 pub use thread::Thread;
+pub use time_filter::TimeFilter;
