@@ -412,24 +412,19 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     }
                     // If answered, don't render anything special - answer shows as reply message
 
-                    // Tool calls
+                    // Tool calls - muted text, no background
                     if let MessageContent::Mixed { tool_calls, .. } = &parsed {
                         for tool_call in tool_calls {
                             let icon = tool_icon(&tool_call.name);
                             let target = extract_target(tool_call).unwrap_or_default();
-                            let tool_text = format!("{} {} {}", icon, tool_call.name.to_uppercase(), target);
-                            let tool_len = 3 + tool_text.len(); // "│  " + content
-                            let mut tool_spans = vec![
-                                Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled("  ", Style::default().bg(bg)),
-                                Span::styled(icon, Style::default().bg(bg)),
-                                Span::styled(" ", Style::default().bg(bg)),
-                                Span::styled(tool_call.name.to_uppercase(), Style::default().fg(theme::TEXT_MUTED).bg(bg)),
-                                Span::styled(" ", Style::default().bg(bg)),
-                                Span::styled(target, Style::default().fg(theme::ACCENT_PRIMARY).bg(bg)),
-                            ];
-                            pad_line(&mut tool_spans, tool_len);
-                            messages_text.push(Line::from(tool_spans));
+                            messages_text.push(Line::from(vec![
+                                Span::styled("  ", Style::default()),
+                                Span::styled(icon, Style::default().fg(theme::TEXT_MUTED)),
+                                Span::styled(" ", Style::default()),
+                                Span::styled(tool_call.name.to_uppercase(), Style::default().fg(theme::TEXT_MUTED)),
+                                Span::styled(" ", Style::default()),
+                                Span::styled(target, Style::default().fg(theme::TEXT_MUTED)),
+                            ]));
                         }
                     }
 

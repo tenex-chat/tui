@@ -473,6 +473,191 @@ fn render_conversation_card(
     }
 }
 
+/// Render avatar for a card - tries to use actual image, falls back to colored initials
+fn render_card_avatar(f: &mut Frame, app: &App, thread: &Thread, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+
+    // Get the author pubkey from last message
+    let author_pubkey = {
+        let store = app.data_store.borrow();
+        let messages = store.get_messages(&thread.id);
+        messages.last().map(|m| m.pubkey.clone()).unwrap_or_else(|| thread.pubkey.clone())
+    };
+
+    // Try to get cached image and render it
+    let mut avatar_cache = app.avatar_cache.borrow_mut();
+
+    // Request fetch if we have a picture URL and haven't fetched yet
+    if !avatar_cache.is_resolved(&author_pubkey) && !avatar_cache.is_pending(&author_pubkey) {
+        if let Some(picture_url) = app.data_store.borrow().get_profile_picture(&author_pubkey) {
+            avatar_cache.request_fetch(&author_pubkey, &picture_url);
+        }
+    }
+
+    // Try to render actual image
+    if avatar_cache.render_avatar(f, &author_pubkey, &get_author_name(app, &author_pubkey), area) {
+        return;
+    }
+    // Fallback is handled inside render_avatar
+}
+
+/// Get author display name
+fn get_author_name(app: &App, pubkey: &str) -> String {
+    app.data_store.borrow().get_profile_name(pubkey)
+}
+
+/// Render card content (without avatar - avatar is rendered separately)
+fn render_card_content(
+    f: &mut Frame,
+    app: &App,
+    thread: &Thread,
+    a_tag: &str,
+    is_selected: bool,
+    depth: usize,
+    has_children: bool,
+    child_count: usize,
+    is_collapsed: bool,
+    area: Rect,
+) {
+    let is_compact = depth > 0;
+    let indent = "  ".repeat(depth);
+
+    // Extract data
+    let (project_name, author_name, preview, timestamp) = {
+        let store = app.data_store.borrow();
+        let project_name = store.get_project_name(a_tag);
+        let messages = store.get_messages(&thread.id);
+        let (author_name, preview, timestamp) = if let Some(msg) = messages.last() {
+            let name = store.get_profile_name(&msg.pubkey);
+            let preview: String = msg.content.chars().take(80).collect();
+            let preview = preview.replace('\n', " ");
+            (name, preview, msg.created_at)
+        } else {
+            ("".to_string(), "No messages yet".to_string(), thread.last_activity)
+        };
+        (project_name, author_name, preview, timestamp)
+    };
+
+    let time_str = format_relative_time(timestamp);
+    let project_indicator_color = theme::project_color(a_tag);
+    let border_char = "│ ";
+    let border_style = Style::default().fg(project_indicator_color);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let collapse_indicator = if has_children {
+        if is_collapsed { "▶ " } else { "▼ " }
+    } else if depth > 0 {
+        "└─"
+    } else {
+        ""
+    };
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    if is_compact {
+        // COMPACT: single content line + spacing
+        let mut line1 = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(border_char, border_style),
+        ];
+        if let Some(ref status_label) = thread.status_label {
+            line1.push(Span::styled(format!("{} ", status_label_to_symbol(status_label)), Style::default().fg(theme::ACCENT_WARNING)));
+        }
+        line1.push(Span::styled(truncate_with_ellipsis(&thread.title, 40), title_style));
+        if is_collapsed && child_count > 0 {
+            line1.push(Span::styled(format!("  +{}", child_count), Style::default().fg(theme::TEXT_MUTED)));
+        }
+        line1.push(Span::styled("  ", Style::default()));
+        line1.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        lines.push(Line::from(line1));
+
+        // Spacing line
+        lines.push(Line::from(vec![
+            Span::styled(indent, Style::default()),
+            Span::styled("  ", Style::default()),
+            Span::styled(border_char, border_style),
+        ]));
+    } else {
+        // FULL MODE: 4-5 lines
+        // Line 1: Title + time
+        let mut line1 = vec![Span::styled(indent.clone(), Style::default())];
+        if !collapse_indicator.is_empty() {
+            line1.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+        }
+        line1.push(Span::styled(border_char, border_style));
+        if let Some(ref status_label) = thread.status_label {
+            line1.push(Span::styled(format!("[{} {}] ", status_label_to_symbol(status_label), status_label), Style::default().fg(theme::ACCENT_WARNING)));
+        }
+        line1.push(Span::styled(truncate_with_ellipsis(&thread.title, 60), title_style));
+        line1.push(Span::styled("  ", Style::default()));
+        line1.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        lines.push(Line::from(line1));
+
+        // Line 2: Project + author
+        let mut line2 = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),
+            Span::styled(border_char, border_style),
+            Span::styled("● ", Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled("  ", Style::default()),
+            Span::styled(format!("@{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
+        ];
+        if has_children && child_count > 0 {
+            line2.push(Span::styled(format!("  {} nested", child_count), Style::default().fg(theme::TEXT_MUTED)));
+        }
+        lines.push(Line::from(line2));
+
+        // Line 3: Preview
+        lines.push(Line::from(vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),
+            Span::styled(border_char, border_style),
+            Span::styled(truncate_with_ellipsis(&preview, 70), Style::default().fg(theme::TEXT_MUTED)),
+        ]));
+
+        // Line 4: Activity or spacing
+        if let Some(ref activity) = thread.status_current_activity {
+            lines.push(Line::from(vec![
+                Span::styled(indent.clone(), Style::default()),
+                Span::styled("  ", Style::default()),
+                Span::styled(border_char, border_style),
+                Span::styled("⟳ ", Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(truncate_with_ellipsis(activity, 70), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)),
+            ]));
+            // Line 5: spacing
+            lines.push(Line::from(vec![
+                Span::styled(indent, Style::default()),
+                Span::styled("  ", Style::default()),
+                Span::styled(border_char, border_style),
+            ]));
+        } else {
+            // Line 4: spacing
+            lines.push(Line::from(vec![
+                Span::styled(indent, Style::default()),
+                Span::styled("  ", Style::default()),
+                Span::styled(border_char, border_style),
+            ]));
+        }
+    }
+
+    let mut style = Style::default();
+    if is_selected {
+        style = style.bg(theme::BG_SELECTED);
+    }
+
+    let paragraph = Paragraph::new(lines).style(style);
+    f.render_widget(paragraph, area);
+}
+
 fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     let inbox_items = app.inbox_items();
 
