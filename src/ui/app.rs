@@ -1024,6 +1024,30 @@ impl App {
         None
     }
 
+    /// Check if a specific message's ask event has been answered by the current user
+    pub fn is_ask_answered_by_user(&self, message_id: &str) -> bool {
+        let messages = self.messages();
+
+        // Get current user's pubkey
+        let user_pubkey = match self.data_store.borrow().user_pubkey.clone() {
+            Some(pk) => pk,
+            None => return false,
+        };
+
+        // Check if there's a reply from current user to this message
+        for msg in &messages {
+            if msg.pubkey == user_pubkey {
+                if let Some(ref reply_to) = msg.reply_to {
+                    if reply_to == message_id {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     // ===== Local Streaming Methods =====
 
     /// Get streaming content for current conversation
