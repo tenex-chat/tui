@@ -5,7 +5,7 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -14,7 +14,6 @@ use std::sync::Arc;
 pub enum View {
     Login,
     Home,
-    Threads,
     Chat,
     LessonViewer,
 }
@@ -30,12 +29,6 @@ pub enum HomeTab {
     Recent,
     Inbox,
     Projects,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum RecentPanelFocus {
-    Conversations,
-    Feed,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -85,7 +78,6 @@ pub struct App {
     pub keys: Option<Keys>,
 
     pub selected_project_index: usize,
-    pub selected_thread_index: usize,
     pub selected_project: Option<Project>,
     pub selected_thread: Option<Thread>,
     pub selected_agent: Option<ProjectAgent>,
@@ -141,11 +133,15 @@ pub struct App {
 
     // Home view state
     pub home_panel_focus: HomeTab,
-    pub recent_panel_focus: RecentPanelFocus,
     pub selected_inbox_index: usize,
     pub selected_recent_index: usize,
-    pub selected_feed_index: usize,
     pub showing_projects_modal: bool,
+    /// Whether sidebar is focused (vs content area)
+    pub sidebar_focused: bool,
+    /// Selected index in sidebar project list
+    pub sidebar_project_index: usize,
+    /// Projects to show in Recent/Inbox (empty = all projects)
+    pub visible_projects: HashSet<String>,
 
     // New thread modal state
     pub showing_new_thread_modal: bool,
@@ -169,6 +165,12 @@ pub struct App {
 
     /// Local streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
+
+    /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
+    pub show_llm_metadata: bool,
+
+    /// Toggle for showing/hiding the todo sidebar
+    pub todo_sidebar_visible: bool,
 }
 
 impl App {
@@ -184,7 +186,6 @@ impl App {
             keys: None,
 
             selected_project_index: 0,
-            selected_thread_index: 0,
             selected_project: None,
             selected_thread: None,
             selected_agent: None,
@@ -217,11 +218,12 @@ impl App {
             open_tabs: Vec::new(),
             active_tab_index: 0,
             home_panel_focus: HomeTab::Recent,
-            recent_panel_focus: RecentPanelFocus::Conversations,
             selected_inbox_index: 0,
             selected_recent_index: 0,
-            selected_feed_index: 0,
             showing_projects_modal: false,
+            sidebar_focused: false,
+            sidebar_project_index: 0,
+            visible_projects: HashSet::new(),
             showing_new_thread_modal: false,
             new_thread_modal_focus: NewThreadField::Content,
             new_thread_project_filter: String::new(),
@@ -237,6 +239,8 @@ impl App {
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
             local_stream_buffers: HashMap::new(),
+            show_llm_metadata: false,
+            todo_sidebar_visible: true,
         }
     }
 
@@ -609,11 +613,11 @@ impl App {
         self.open_tabs.remove(self.active_tab_index);
 
         if self.open_tabs.is_empty() {
-            // No more tabs - go back to threads view
+            // No more tabs - go back to home view
             self.save_chat_draft();
             self.chat_editor.clear();
             self.selected_thread = None;
-            self.view = View::Threads;
+            self.view = View::Home;
             self.active_tab_index = 0;
         } else {
             // Move to next tab (or previous if we were at the end)
@@ -692,19 +696,28 @@ impl App {
 
     // ===== Home View Methods =====
 
-    /// Get recent threads across all projects for Home view
+    /// Get recent threads across all projects for Home view (filtered by visible_projects)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
-        self.data_store.borrow().get_all_recent_threads(50)
+        let threads = self.data_store.borrow().get_all_recent_threads(50);
+        if self.visible_projects.is_empty() {
+            threads
+        } else {
+            threads.into_iter()
+                .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
+                .collect()
+        }
     }
 
-    /// Get inbox items for Home view
+    /// Get inbox items for Home view (filtered by visible_projects)
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
-        self.data_store.borrow().get_inbox_items().to_vec()
-    }
-
-    /// Get agent chatter feed for Home view
-    pub fn agent_chatter(&self) -> Vec<crate::models::AgentChatter> {
-        self.data_store.borrow().get_agent_chatter().to_vec()
+        let items = self.data_store.borrow().get_inbox_items().to_vec();
+        if self.visible_projects.is_empty() {
+            items
+        } else {
+            items.into_iter()
+                .filter(|item| self.visible_projects.contains(&item.project_a_tag))
+                .collect()
+        }
     }
 
     /// Open thread from Home view (recent conversations or inbox)

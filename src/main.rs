@@ -11,7 +11,7 @@ use futures::StreamExt;
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 use std::cell::RefCell;
@@ -26,7 +26,7 @@ use std::sync::mpsc;
 use store::AppDataStore;
 
 use ui::views::login::{render_login, LoginStep};
-use ui::{App, HomeTab, InputMode, NewThreadField, RecentPanelFocus, View};
+use ui::{App, HomeTab, InputMode, NewThreadField, View};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -379,38 +379,30 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     }
 
     let chunks = Layout::vertical([
-        Constraint::Length(3),
+        Constraint::Length(1),
         Constraint::Min(0),
-        Constraint::Length(3),
+        Constraint::Length(1),
     ])
     .split(f.area());
 
     // Determine chrome color based on pending_quit state
     let chrome_color = if app.pending_quit { Color::Red } else { Color::Cyan };
-    let border_style = if app.pending_quit {
-        Style::default().fg(Color::Red)
-    } else {
-        Style::default()
-    };
 
     // Header
     let title = match app.view {
         View::Login => "TENEX - Login",
         View::Home => "TENEX - Home", // Won't reach here
-        View::Threads => "TENEX - Threads",
         View::Chat => "TENEX - Chat",
         View::LessonViewer => "TENEX - Lesson",
     };
     let header = Paragraph::new(title)
-        .style(Style::default().fg(chrome_color))
-        .block(Block::default().borders(Borders::BOTTOM).border_style(border_style));
+        .style(Style::default().fg(chrome_color));
     f.render_widget(header, chunks[0]);
 
     // Main content
     match app.view {
         View::Login => render_login(f, app, chunks[1], login_step),
         View::Home => {} // Won't reach here
-        View::Threads => ui::views::render_threads(f, app, chunks[1]),
         View::Chat => ui::views::render_chat(f, app, chunks[1]),
         View::LessonViewer => {
             if let Some(ref lesson_id) = app.viewing_lesson_id.clone() {
@@ -433,8 +425,7 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         (text, Style::default().fg(Color::DarkGray))
     };
     let footer = Paragraph::new(footer_text)
-        .style(footer_style)
-        .block(Block::default().borders(Borders::TOP).border_style(border_style));
+        .style(footer_style);
     f.render_widget(footer, chunks[2]);
 }
 
@@ -559,8 +550,21 @@ fn handle_key(
     if app.view == View::Chat && app.input_mode == InputMode::Normal {
         let modifiers = key.modifiers;
         let has_shift = modifiers.contains(KeyModifiers::SHIFT);
+        let has_alt = modifiers.contains(KeyModifiers::ALT);
 
         match code {
+            // Alt+M = toggle LLM metadata display
+            KeyCode::Char('m') if has_alt => {
+                app.show_llm_metadata = !app.show_llm_metadata;
+                return Ok(());
+            }
+            // Alt+B = open branch selector
+            KeyCode::Char('b') if has_alt => {
+                app.showing_branch_selector = true;
+                app.branch_selector_index = 0;
+                app.selector_filter.clear();
+                return Ok(());
+            }
             // Number keys 1-9 to jump to tabs
             KeyCode::Char(c) if c >= '1' && c <= '9' => {
                 let tab_index = (c as usize) - ('1' as usize);
@@ -605,17 +609,16 @@ fn handle_key(
                 }
             }
             KeyCode::Char(c) => {
-                if c == 'n' && app.view == View::Threads {
-                    app.creating_thread = true;
-                    app.input_mode = InputMode::Editing;
-                    app.clear_input();
-                } else if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
+                if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
                     // 'a' opens agent selector
                     app.showing_agent_selector = true;
                     app.agent_selector_index = 0;
-                } else if c == '@' && (app.view == View::Threads || app.view == View::Chat) && !app.available_agents().is_empty() {
+                } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
                     app.showing_agent_selector = true;
                     app.agent_selector_index = 0;
+                } else if c == 't' && app.view == View::Chat {
+                    // 't' toggles todo sidebar
+                    app.todo_sidebar_visible = !app.todo_sidebar_visible;
                 } else if c == 'o' && app.view == View::Chat {
                     app.open_first_image();
                 } else if c == 'j' && app.view == View::LessonViewer {
@@ -636,9 +639,6 @@ fn handle_key(
                 }
             }
             KeyCode::Up => match app.view {
-                View::Threads if app.selected_thread_index > 0 => {
-                    app.selected_thread_index -= 1;
-                }
                 View::Chat => {
                     if app.selected_message_index > 0 {
                         app.selected_message_index -= 1;
@@ -650,9 +650,6 @@ fn handle_key(
                 _ => {}
             },
             KeyCode::Down => match app.view {
-                View::Threads if app.selected_thread_index < app.threads().len().saturating_sub(1) => {
-                    app.selected_thread_index += 1;
-                }
                 View::LessonViewer => {
                     app.scroll_down(3);
                 }
@@ -697,30 +694,6 @@ fn handle_key(
                 }
             }
             KeyCode::Enter => match app.view {
-                View::Threads => {
-                    let threads = app.threads();
-                    if !threads.is_empty() && app.selected_thread_index < threads.len() {
-                        let thread = threads[app.selected_thread_index].clone();
-                        let project_a_tag = app.selected_project.as_ref().map(|p| p.a_tag()).unwrap_or_default();
-
-                        // Open thread in a tab
-                        app.open_tab(&thread, &project_a_tag);
-                        app.selected_thread = Some(thread);
-
-                        // Auto-select first available agent if none selected
-                        if app.selected_agent.is_none() {
-                            app.select_agent_by_index(0);
-                        }
-
-                        // Restore any saved draft for this thread
-                        app.restore_chat_draft();
-
-                        // Enter chat view with editing mode
-                        app.view = View::Chat;
-                        app.input_mode = InputMode::Editing;
-                        app.scroll_offset = usize::MAX; // Scroll to bottom
-                    }
-                }
                 View::Chat => {
                     // Navigate into subthread if selected message has replies
                     let messages = app.messages();
@@ -748,16 +721,15 @@ fn handle_key(
                 _ => {}
             },
             KeyCode::Esc => match app.view {
-                View::Threads => app.view = View::Home,
                 View::Chat => {
                     if app.in_subthread() {
                         // Exit subthread view and return to main thread view
                         app.exit_subthread();
                     } else {
-                        // Exit chat and go back to threads
+                        // Exit chat and go back to home
                         app.save_chat_draft();
                         app.chat_editor.clear();
-                        app.view = View::Threads;
+                        app.view = View::Home;
                     }
                 }
                 View::LessonViewer => {
@@ -873,31 +845,6 @@ fn handle_key(
                             }
                         }
                     },
-                    View::Threads => {
-                        if app.creating_thread && !input.is_empty() {
-                            if let (Some(ref command_tx), Some(ref project)) =
-                                (&app.command_tx, &app.selected_project)
-                            {
-                                let title = input.clone();
-                                let content = input.clone();
-                                let project_a_tag = project.a_tag();
-                                let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
-                                let branch = app.selected_branch.clone();
-
-                                if let Err(e) = command_tx.send(NostrCommand::PublishThread {
-                                    project_a_tag,
-                                    title,
-                                    content,
-                                    agent_pubkey,
-                                    branch,
-                                }) {
-                                    app.set_status(&format!("Failed to publish thread: {}", e));
-                                }
-
-                                app.creating_thread = false;
-                            }
-                        }
-                    }
                     _ => {}
                 }
             }
@@ -922,7 +869,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.project_filter.clear();
             }
             KeyCode::Enter => {
-                // Select project and go to Threads view
+                // Select project and filter to show only its threads
                 if let Some((project, _)) = ui::views::get_project_at_index(app, app.selected_project_index) {
                     let a_tag = project.a_tag();
                     app.selected_project = Some(project);
@@ -939,10 +886,11 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
 
-                    app.selected_thread_index = 0;
+                    // Set filter to show only this project
+                    app.visible_projects.clear();
+                    app.visible_projects.insert(a_tag);
                     app.project_filter.clear();
                     app.showing_projects_modal = false;
-                    app.view = View::Threads;
                 }
             }
             KeyCode::Up if app.selected_project_index > 0 => {
@@ -1116,12 +1064,6 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Projects => HomeTab::Inbox,
             };
         }
-        KeyCode::Left if app.home_panel_focus == HomeTab::Recent => {
-            app.recent_panel_focus = RecentPanelFocus::Conversations;
-        }
-        KeyCode::Right if app.home_panel_focus == HomeTab::Recent => {
-            app.recent_panel_focus = RecentPanelFocus::Feed;
-        }
         KeyCode::Up => {
             match app.home_panel_focus {
                 HomeTab::Inbox => {
@@ -1130,22 +1072,13 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                 }
                 HomeTab::Recent => {
-                    match app.recent_panel_focus {
-                        RecentPanelFocus::Conversations => {
-                            if app.selected_recent_index > 0 {
-                                app.selected_recent_index -= 1;
-                            }
-                        }
-                        RecentPanelFocus::Feed => {
-                            if app.selected_feed_index > 0 {
-                                app.selected_feed_index -= 1;
-                            }
-                        }
+                    if app.selected_recent_index > 0 {
+                        app.selected_recent_index -= 1;
                     }
                 }
                 HomeTab::Projects => {
-                    if app.selected_project_index > 0 {
-                        app.selected_project_index -= 1;
+                    if app.sidebar_project_index > 0 {
+                        app.sidebar_project_index -= 1;
                     }
                 }
             }
@@ -1159,26 +1092,16 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                 }
                 HomeTab::Recent => {
-                    match app.recent_panel_focus {
-                        RecentPanelFocus::Conversations => {
-                            let max = app.recent_threads().len().saturating_sub(1);
-                            if app.selected_recent_index < max {
-                                app.selected_recent_index += 1;
-                            }
-                        }
-                        RecentPanelFocus::Feed => {
-                            let max = app.agent_chatter().len().saturating_sub(1);
-                            if app.selected_feed_index < max {
-                                app.selected_feed_index += 1;
-                            }
-                        }
+                    let max = app.recent_threads().len().saturating_sub(1);
+                    if app.selected_recent_index < max {
+                        app.selected_recent_index += 1;
                     }
                 }
                 HomeTab::Projects => {
                     let (online, offline) = app.filtered_projects();
                     let max = (online.len() + offline.len()).saturating_sub(1);
-                    if app.selected_project_index < max {
-                        app.selected_project_index += 1;
+                    if app.sidebar_project_index < max {
+                        app.sidebar_project_index += 1;
                     }
                 }
             }
@@ -1209,50 +1132,17 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                 }
                 HomeTab::Recent => {
-                    match app.recent_panel_focus {
-                        RecentPanelFocus::Conversations => {
-                            let recent = app.recent_threads();
-                            if let Some((thread, a_tag)) = recent.get(app.selected_recent_index).cloned() {
-                                app.open_thread_from_home(&thread, &a_tag);
-                            }
-                        }
-                        RecentPanelFocus::Feed => {
-                            let chatter = app.agent_chatter();
-                            if let Some(item) = chatter.get(app.selected_feed_index).cloned() {
-                                use crate::models::AgentChatter;
-                                match item {
-                                    AgentChatter::Message { thread_id, project_a_tag, .. } => {
-                                        // Find the thread
-                                        let thread = app.data_store.borrow().get_threads(&project_a_tag)
-                                            .iter()
-                                            .find(|t| t.id == thread_id)
-                                            .cloned();
-
-                                        if let Some(thread) = thread {
-                                            app.open_thread_from_home(&thread, &project_a_tag);
-                                        }
-                                    }
-                                    AgentChatter::Lesson { id, .. } => {
-                                        // Open lesson viewer
-                                        app.viewing_lesson_id = Some(id);
-                                        app.lesson_viewer_section = 0;
-                                        app.scroll_offset = 0;
-                                        app.view = View::LessonViewer;
-                                    }
-                                }
-                            }
-                        }
+                    let recent = app.recent_threads();
+                    if let Some((thread, a_tag)) = recent.get(app.selected_recent_index).cloned() {
+                        app.open_thread_from_home(&thread, &a_tag);
                     }
                 }
                 HomeTab::Projects => {
-                    // Select project and go to threads view
                     let (online, offline) = app.filtered_projects();
                     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-
-                    if let Some(project) = all_projects.get(app.selected_project_index) {
+                    if let Some(project) = all_projects.get(app.sidebar_project_index) {
                         app.selected_project = Some((*project).clone());
-                        app.view = View::Threads;
-                        app.selected_thread_index = 0;
+                        app.view = View::Chat;
                     }
                 }
             }

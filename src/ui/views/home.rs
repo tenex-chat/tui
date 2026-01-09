@@ -1,6 +1,6 @@
-use crate::models::{AgentChatter, InboxEventType, InboxItem, Thread};
+use crate::models::{InboxEventType, InboxItem, Thread};
 use crate::ui::views::chat::render_tab_bar;
-use crate::ui::{App, HomeTab, NewThreadField, RecentPanelFocus};
+use crate::ui::{App, HomeTab, NewThreadField};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -77,7 +77,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     match app.home_panel_focus {
         HomeTab::Recent => render_recent_with_feed(f, app, chunks[1]),
         HomeTab::Inbox => render_inbox_cards(f, app, chunks[1]),
-        HomeTab::Projects => render_projects_cards(f, app, chunks[1]),
+        HomeTab::Projects => {
+            // Projects panel (placeholder)
+            let projects_msg = Paragraph::new("Projects panel (placeholder)");
+            f.render_widget(projects_msg, chunks[1]);
+        }
     }
 
     // Single consolidated help bar
@@ -126,9 +130,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
-    spans.push(Span::styled("   ", Style::default()));
-    spans.push(Span::styled("Projects", tab_style(HomeTab::Projects)));
-
     let header_line = Line::from(spans);
 
     // Second line: tab indicator underline
@@ -143,9 +144,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Inbox { cyan } else { blank }),
         Span::styled(if inbox_count > 0 { "    " } else { "" }, blank), // account for count
-        Span::styled("   ", blank),
-        Span::styled(if app.home_panel_focus == HomeTab::Projects { "────────" } else { "        " },
-            if app.home_panel_focus == HomeTab::Projects { cyan } else { blank }),
     ];
     let indicator_line = Line::from(indicator_spans);
 
@@ -154,18 +152,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_recent_with_feed(f: &mut Frame, app: &App, area: Rect) {
-    // Split horizontally: conversations (60%) | feed sidebar (40%)
-    let chunks = Layout::horizontal([
-        Constraint::Percentage(60),
-        Constraint::Percentage(40),
-    ])
-    .split(area);
-
-    let conversations_focused = app.recent_panel_focus == RecentPanelFocus::Conversations;
-    let feed_focused = app.recent_panel_focus == RecentPanelFocus::Feed;
-
-    render_recent_cards(f, app, chunks[0], conversations_focused);
-    render_feed_sidebar(f, app, chunks[1], feed_focused);
+    render_recent_cards(f, app, area, true);
 }
 
 fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
@@ -322,185 +309,11 @@ fn render_conversation_card(
     // Final line: Empty line for spacing
     lines.push(Line::from(vec![Span::raw("")]));
 
-    ListItem::new(lines)
-}
-
-fn render_feed_sidebar(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
-    let chatter = app.agent_chatter();
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
-    let title_color = if is_focused { Color::Cyan } else { Color::DarkGray };
-
-    if chatter.is_empty() {
-        let empty_lines = vec![
-            Line::from(""),
-            Line::from(Span::styled("📡", Style::default().fg(Color::DarkGray))),
-            Line::from(""),
-            Line::from(Span::styled(
-                "No agent chatter yet",
-                Style::default().fg(Color::DarkGray),
-            )),
-        ];
-        let empty = Paragraph::new(empty_lines)
-            .alignment(ratatui::layout::Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color)));
-        f.render_widget(empty, area);
-        return;
-    }
-
-    let items: Vec<ListItem> = chatter
-        .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            let is_selected = is_focused && i == app.selected_feed_index;
-            render_feed_card(app, item, is_selected)
-        })
-        .collect();
-
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color))
-                .title(Span::styled(
-                    "Agent Chatter",
-                    Style::default().fg(title_color),
-                )),
-        )
-        .highlight_style(Style::default());
-
-    let mut state = ListState::default();
-    state.select(Some(app.selected_feed_index));
-    f.render_stateful_widget(list, area, &mut state);
-}
-
-fn render_feed_card(app: &App, item: &AgentChatter, is_selected: bool) -> ListItem<'static> {
-    use crate::models::AgentChatter;
-
-    // Card styling
-    let border_char = if is_selected { "│ " } else { "  " };
-    let border_style = if is_selected {
-        Style::default().fg(Color::Cyan)
+    let item = ListItem::new(lines);
+    if is_selected {
+        item.style(Style::default().bg(Color::Rgb(40, 40, 50)))
     } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let author_style = if is_selected {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(Color::Magenta)
-    };
-
-    match item {
-        AgentChatter::Message { id: _, content, project_a_tag, author_pubkey, created_at, thread_id: _ } => {
-            // Single borrow to extract all needed data
-            let (project_name, author_name) = {
-                let store = app.data_store.borrow();
-                (store.get_project_name(project_a_tag), store.get_profile_name(author_pubkey))
-            };
-            let time_str = format_relative_time(*created_at);
-
-            // Get first line of content as preview
-            let preview: String = content
-                .lines()
-                .next()
-                .unwrap_or("")
-                .chars()
-                .take(70)
-                .collect();
-
-            // Line 1: Author + time
-            let line1_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled(format!("@{}", author_name), author_style),
-                Span::styled("  ", Style::default()),
-                Span::styled(time_str, Style::default().fg(Color::DarkGray)),
-            ];
-
-            // Line 2: Project
-            let line2_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled("● ", Style::default().fg(Color::Green)),
-                Span::styled(project_name, Style::default().fg(Color::Green)),
-            ];
-
-            // Line 3: Preview
-            let line3_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled(
-                    truncate_string(&preview, 70),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ];
-
-            // Line 4: Empty for spacing
-            let line4_spans = vec![Span::raw("")];
-
-            ListItem::new(vec![
-                Line::from(line1_spans),
-                Line::from(line2_spans),
-                Line::from(line3_spans),
-                Line::from(line4_spans),
-            ])
-        }
-        AgentChatter::Lesson { id: _, title, content, author_pubkey, created_at, category } => {
-            // Single borrow to extract all needed data
-            let author_name = app.data_store.borrow().get_profile_name(author_pubkey);
-            let time_str = format_relative_time(*created_at);
-
-            // Get first line of content as preview
-            let preview: String = content
-                .lines()
-                .next()
-                .unwrap_or("")
-                .chars()
-                .take(60)
-                .collect();
-
-            // Line 1: 📚 icon + title
-            let line1_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled("📚 ", Style::default().fg(Color::Yellow)),
-                Span::styled(
-                    truncate_string(title, 60),
-                    if is_selected {
-                        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                    }
-                ),
-            ];
-
-            // Line 2: Author + time + category
-            let mut line2_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled(format!("by @{}", author_name), author_style),
-                Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-                Span::styled(time_str, Style::default().fg(Color::DarkGray)),
-            ];
-            if let Some(cat) = category {
-                line2_spans.push(Span::styled(" • ", Style::default().fg(Color::DarkGray)));
-                line2_spans.push(Span::styled(cat.to_string(), Style::default().fg(Color::Magenta)));
-            }
-
-            // Line 3: Preview
-            let line3_spans = vec![
-                Span::styled(border_char, border_style),
-                Span::styled(
-                    truncate_string(&preview, 70),
-                    Style::default().fg(Color::DarkGray),
-                ),
-            ];
-
-            // Line 4: Empty for spacing
-            let line4_spans = vec![Span::raw("")];
-
-            ListItem::new(vec![
-                Line::from(line1_spans),
-                Line::from(line2_spans),
-                Line::from(line3_spans),
-                Line::from(line4_spans),
-            ])
-        }
+        item
     }
 }
 
@@ -758,9 +571,9 @@ fn render_project_card(
 
 fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = match app.home_panel_focus {
-        HomeTab::Recent => "↑↓ navigate · ←→ panels · Enter open · n new · Tab switch · q quit",
+        HomeTab::Recent => "↑↓ navigate · Enter open · n new · Tab switch · q quit",
         HomeTab::Inbox => "↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
-        HomeTab::Projects => "↑↓ navigate · Enter select · b boot offline · Tab switch · q quit",
+        HomeTab::Projects => "↑↓ navigate · Enter select · Tab switch · n new thread · q quit",
     };
 
     let help = Paragraph::new(hints).style(Style::default().fg(Color::DarkGray));
