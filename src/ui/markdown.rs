@@ -1,8 +1,10 @@
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
+
+use crate::ui::theme;
 
 #[derive(Debug, Clone)]
 struct StyleStack {
@@ -12,7 +14,7 @@ struct StyleStack {
 impl StyleStack {
     fn new() -> Self {
         Self {
-            styles: vec![Style::default().fg(Color::White)],
+            styles: vec![Style::default().fg(theme::TEXT_PRIMARY)],
         }
     }
 
@@ -49,10 +51,10 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::Start(tag) => match tag {
                 Tag::Paragraph => {}
                 Tag::Heading { .. } => {
-                    style_stack.push(|s| s.fg(Color::Yellow).add_modifier(Modifier::BOLD));
+                    style_stack.push(|s| s.fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD));
                 }
                 Tag::BlockQuote(_) => {
-                    style_stack.push(|s| s.fg(Color::Gray).add_modifier(Modifier::ITALIC));
+                    style_stack.push(|s| s.fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC));
                 }
                 Tag::CodeBlock(_) => {
                     in_code_block = true;
@@ -65,7 +67,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     let indent = "  ".repeat(list_level.saturating_sub(1));
                     current_line.push(Span::styled(
                         format!("{}• ", indent).to_string(),
-                        Style::default().fg(Color::Cyan),
+                        Style::default().fg(theme::TEXT_MUTED),
                     ));
                 }
                 Tag::Emphasis => {
@@ -75,13 +77,13 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     style_stack.push(|s| s.add_modifier(Modifier::BOLD));
                 }
                 Tag::Link { .. } => {
-                    style_stack.push(|s| s.fg(Color::Blue).add_modifier(Modifier::UNDERLINED));
+                    style_stack.push(|s| s.fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::UNDERLINED));
                 }
                 Tag::Image { dest_url, .. } => {
                     in_image = true;
                     image_alt.clear();
                     image_url = dest_url.to_string();
-                    style_stack.push(|s| s.fg(Color::Magenta));
+                    style_stack.push(|s| s.fg(theme::ACCENT_SPECIAL));
                 }
                 _ => {}
             },
@@ -114,7 +116,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     for code_line in &code_block_lines {
                         lines.push(Line::from(Span::styled(
                             code_line.clone(),
-                            Style::default().fg(Color::Green),
+                            Style::default().fg(theme::ACCENT_SUCCESS),
                         )));
                     }
                     lines.push(Line::from(""));
@@ -150,21 +152,21 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
 
                     lines.push(Line::from(""));
                     lines.push(Line::from(vec![
-                        Span::styled("   🖼  ".to_string(), Style::default().fg(Color::Magenta)),
+                        Span::styled("   🖼  ".to_string(), Style::default().fg(theme::ACCENT_SPECIAL)),
                         Span::styled(
                             alt_text,
-                            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                            Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)
                         ),
                     ]));
                     lines.push(Line::from(vec![
                         Span::styled("       ".to_string(), Style::default()),
                         Span::styled(
                             image_url.clone(),
-                            Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED)
+                            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::UNDERLINED)
                         ),
                     ]));
                     lines.push(Line::from(vec![
-                        Span::styled("       [Press 'o' to open in viewer]".to_string(), Style::default().fg(Color::DarkGray)),
+                        Span::styled("       [Press 'o' to open in viewer]".to_string(), Style::default().fg(theme::TEXT_DIM)),
                     ]));
                     lines.push(Line::from(""));
 
@@ -193,7 +195,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::Code(code) => {
                 current_line.push(Span::styled(
                     code.to_string(),
-                    Style::default().fg(Color::Green),
+                    Style::default().fg(theme::ACCENT_SUCCESS),
                 ));
             }
             Event::SoftBreak | Event::HardBreak => {
@@ -205,7 +207,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
             Event::Rule => {
                 lines.push(Line::from(Span::styled(
                     "─".repeat(80),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::TEXT_DIM),
                 )));
                 lines.push(Line::from(""));
             }
@@ -220,7 +222,7 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
     if lines.is_empty() {
         lines.push(Line::from(Span::styled(
             text.to_string(),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme::TEXT_PRIMARY),
         )));
     }
 

@@ -1,9 +1,9 @@
 use crate::models::{InboxEventType, InboxItem, Thread};
 use crate::ui::views::chat::render_tab_bar;
-use crate::ui::{App, HomeTab, NewThreadField};
+use crate::ui::{theme, App, HomeTab, NewThreadField};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
     Frame,
@@ -113,15 +113,15 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         }
     };
 
     // Build tab spans
     let mut spans = vec![
-        Span::styled("  TENEX", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled("  TENEX", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("    ", Style::default()),
         Span::styled("Recent", tab_style(HomeTab::Recent)),
         Span::styled("   ", Style::default()),
@@ -131,23 +131,23 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     if inbox_count > 0 {
         spans.push(Span::styled(
             format!(" ({})", inbox_count),
-            Style::default().fg(Color::Red),
+            Style::default().fg(theme::ACCENT_ERROR),
         ));
     }
 
     let header_line = Line::from(spans);
 
     // Second line: tab indicator underline
-    let cyan = Style::default().fg(Color::Cyan);
+    let accent = Style::default().fg(theme::ACCENT_PRIMARY);
     let blank = Style::default();
 
     let indicator_spans = vec![
         Span::styled("         ", blank), // Padding for "  TENEX  "
         Span::styled(if app.home_panel_focus == HomeTab::Recent { "──────" } else { "      " },
-            if app.home_panel_focus == HomeTab::Recent { cyan } else { blank }),
+            if app.home_panel_focus == HomeTab::Recent { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
-            if app.home_panel_focus == HomeTab::Inbox { cyan } else { blank }),
+            if app.home_panel_focus == HomeTab::Inbox { accent } else { blank }),
         Span::styled(if inbox_count > 0 { "    " } else { "" }, blank), // account for count
     ];
     let indicator_line = Line::from(indicator_spans);
@@ -162,12 +162,12 @@ fn render_recent_with_feed(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let recent = app.recent_threads();
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
-    let title_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
+    let title_color = if is_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
 
     if recent.is_empty() {
         let empty = Paragraph::new("No recent conversations")
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme::TEXT_MUTED))
             .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color)));
         f.render_widget(empty, area);
         return;
@@ -231,15 +231,15 @@ fn render_conversation_card(
     // Card styling
     let border_char = if is_selected { "│ " } else { "  " };
     let border_style = if is_selected {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme::ACCENT_PRIMARY)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let title_style = if is_selected {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(theme::TEXT_PRIMARY)
     };
 
     // Line 1: Status label (if present) + Title + time
@@ -250,7 +250,7 @@ fn render_conversation_card(
         let symbol = status_label_to_symbol(status_label);
         line1_spans.push(Span::styled(
             format!("[{} {}] ", symbol, status_label),
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::ACCENT_WARNING),
         ));
     }
 
@@ -262,15 +262,15 @@ fn render_conversation_card(
     // Add time on the right (we'll pad later in rendering)
     let time_padding = "  ";
     line1_spans.push(Span::styled(time_padding, Style::default()));
-    line1_spans.push(Span::styled(time_str, Style::default().fg(Color::DarkGray)));
+    line1_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
 
     // Line 2: Project + agent
     let line2_spans = vec![
         Span::styled(border_char, border_style),
-        Span::styled("● ", Style::default().fg(Color::Green)),
-        Span::styled(project_name, Style::default().fg(Color::Green)),
+        Span::styled("● ", Style::default().fg(theme::ACCENT_SUCCESS)),
+        Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
         Span::styled("  ", Style::default()),
-        Span::styled(format!("@{}", author_name), Style::default().fg(Color::Magenta)),
+        Span::styled(format!("@{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
     ];
 
     // Line 3: Preview
@@ -278,7 +278,7 @@ fn render_conversation_card(
         Span::styled(border_char, border_style),
         Span::styled(
             truncate_string(&preview, 70),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::TEXT_MUTED),
         ),
     ];
 
@@ -287,7 +287,7 @@ fn render_conversation_card(
         line3_spans.push(Span::styled("  ", Style::default()));
         line3_spans.push(Span::styled(
             "● Streaming",
-            Style::default().fg(Color::Yellow),
+            Style::default().fg(theme::ACCENT_WARNING),
         ));
     }
 
@@ -302,10 +302,10 @@ fn render_conversation_card(
     if let Some(ref activity) = thread.status_current_activity {
         let activity_spans = vec![
             Span::styled(border_char, border_style),
-            Span::styled("⟳ ", Style::default().fg(Color::Cyan)),
+            Span::styled("⟳ ", Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled(
                 truncate_string(activity, 70),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM),
+                Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM),
             ),
         ];
         lines.push(Line::from(activity_spans));
@@ -316,7 +316,7 @@ fn render_conversation_card(
 
     let item = ListItem::new(lines);
     if is_selected {
-        item.style(Style::default().bg(Color::Rgb(40, 40, 50)))
+        item.style(Style::default().bg(theme::BG_SELECTED))
     } else {
         item
     }
@@ -328,16 +328,16 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     if inbox_items.is_empty() {
         let empty_lines = vec![
             Line::from(""),
-            Line::from(Span::styled("📭", Style::default().fg(Color::DarkGray))),
+            Line::from(Span::styled("📭", Style::default().fg(theme::TEXT_MUTED))),
             Line::from(""),
             Line::from(Span::styled(
                 "No notifications",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::TEXT_MUTED),
             )),
         ];
         let empty = Paragraph::new(empty_lines)
             .alignment(ratatui::layout::Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::TEXT_MUTED)));
         f.render_widget(empty, area);
         return;
     }
@@ -355,8 +355,8 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(Span::styled("Inbox", Style::default().fg(Color::DarkGray))),
+                .border_style(Style::default().fg(theme::TEXT_MUTED))
+                .title(Span::styled("Inbox", Style::default().fg(theme::TEXT_MUTED))),
         )
         .highlight_style(Style::default());
 
@@ -382,22 +382,22 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     // Card styling
     let border_char = if is_selected { "│ " } else { "  " };
     let border_style = if is_selected {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme::ACCENT_PRIMARY)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let title_style = if is_selected {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
     } else if !item.is_read {
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+        Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(theme::TEXT_PRIMARY)
     };
 
     // Unread indicator
     let unread_indicator = if !item.is_read {
-        Span::styled("● ", Style::default().fg(Color::Cyan))
+        Span::styled("● ", Style::default().fg(theme::ACCENT_PRIMARY))
     } else {
         Span::styled("  ", Style::default())
     };
@@ -408,17 +408,17 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
         unread_indicator,
         Span::styled(truncate_string(&item.title, 55), title_style),
         Span::styled("  ", Style::default()),
-        Span::styled(time_str, Style::default().fg(Color::DarkGray)),
+        Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
     ];
 
     // Line 2: Type + Project + Author
     let line2_spans = vec![
         Span::styled(border_char, border_style),
-        Span::styled(type_str, Style::default().fg(Color::Yellow)),
-        Span::styled(" in ", Style::default().fg(Color::DarkGray)),
-        Span::styled(project_name, Style::default().fg(Color::Green)),
-        Span::styled(" by ", Style::default().fg(Color::DarkGray)),
-        Span::styled(author_name, Style::default().fg(Color::Magenta)),
+        Span::styled(type_str, Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" in ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
+        Span::styled(" by ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(author_name, Style::default().fg(theme::ACCENT_SPECIAL)),
     ];
 
     // Line 3: Empty for spacing
@@ -440,8 +440,8 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Online section header
     if !online_projects.is_empty() {
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("● ", Style::default().fg(Color::Green)),
-            Span::styled("Online", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("● ", Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled("Online", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
         ])));
     }
 
@@ -452,7 +452,7 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         let checkbox = if is_visible { "[✓] " } else { "[ ] " };
         let name = truncate_string(&project.name, 14);
         items.push(ListItem::new(Line::from(vec![
-            Span::styled(checkbox, Style::default().fg(Color::Cyan)),
+            Span::styled(checkbox, Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::raw(name),
         ])));
     }
@@ -460,8 +460,8 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Offline section header
     if !offline_projects.is_empty() {
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("○ ", Style::default().fg(Color::DarkGray)),
-            Span::styled("Offline", Style::default().fg(Color::DarkGray)),
+            Span::styled("○ ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Offline", Style::default().fg(theme::TEXT_MUTED)),
         ])));
     }
 
@@ -472,12 +472,12 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         let checkbox = if is_visible { "[✓] " } else { "[ ] " };
         let name = truncate_string(&project.name, 14);
         items.push(ListItem::new(Line::from(vec![
-            Span::styled(checkbox, Style::default().fg(Color::DarkGray)),
-            Span::styled(name, Style::default().fg(Color::DarkGray)),
+            Span::styled(checkbox, Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(name, Style::default().fg(theme::TEXT_MUTED)),
         ])));
     }
 
-    let border_color = if app.sidebar_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if app.sidebar_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
 
     let list = List::new(items)
         .block(Block::default()
@@ -516,7 +516,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let help = Paragraph::new(hints).style(Style::default().fg(Color::DarkGray));
+    let help = Paragraph::new(hints).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(help, area);
 }
 
@@ -569,19 +569,19 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
 
     // Title bar
     let title = Paragraph::new("Switch Project")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
         .block(
             Block::default()
                 .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
         );
     f.render_widget(title, modal_chunks[0]);
 
     // Filter input
     let filter_style = if app.project_filter.is_empty() {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     } else {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme::ACCENT_WARNING)
     };
 
     let filter_text = if app.project_filter.is_empty() {
@@ -593,7 +593,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     let filter_input = Paragraph::new(filter_text).style(filter_style).block(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
     );
     f.render_widget(filter_input, modal_chunks[1]);
 
@@ -608,7 +608,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::from(Span::styled(
             format!("● ONLINE ({})", online_projects.len()),
             Style::default()
-                .fg(Color::Green)
+                .fg(theme::ACCENT_SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ))));
 
@@ -624,17 +624,17 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
 
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme::ACCENT_SUCCESS)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::White)
+                Style::default().fg(theme::TEXT_PRIMARY)
             };
 
             let content = vec![
                 Line::from(Span::styled(format!("{}{}", prefix, project.name), style)),
                 Line::from(Span::styled(
                     format!("      {} agent(s) · {}", agent_count, owner_name),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::TEXT_MUTED),
                 )),
             ];
 
@@ -651,7 +651,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
         items.push(ListItem::new(Line::from(Span::styled(
             format!("○ OFFLINE ({})", offline_projects.len()),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::TEXT_MUTED)
                 .add_modifier(Modifier::BOLD),
         ))));
 
@@ -664,17 +664,17 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
 
             let style = if is_selected {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::ACCENT_WARNING)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(theme::TEXT_MUTED)
             };
 
             let content = vec![
                 Line::from(Span::styled(format!("{}{}", prefix, project.name), style)),
                 Line::from(Span::styled(
                     format!("      {}", owner_name),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::TEXT_MUTED),
                 )),
             ];
 
@@ -686,17 +686,17 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(Color::Cyan)),
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
     );
     f.render_widget(list, modal_chunks[2]);
 
     // Hints
     let hints = Paragraph::new("↑↓ navigate · Enter select · Tab expand · Esc close")
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(theme::TEXT_MUTED))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
         );
     f.render_widget(hints, modal_chunks[3]);
 }
@@ -720,11 +720,11 @@ fn render_new_thread_modal(f: &mut Frame, app: &App, area: Rect) {
     .split(popup_area);
 
     let title = Paragraph::new(" New Thread")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
         .block(
             Block::default()
                 .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
         );
     f.render_widget(title, modal_chunks[0]);
 
@@ -736,18 +736,18 @@ fn render_new_thread_modal(f: &mut Frame, app: &App, area: Rect) {
     let submit_hint = if can_submit { "Enter send" } else { "" };
     let hints = format!("Tab next field · {} · Esc cancel", submit_hint);
     let hints = Paragraph::new(hints)
-        .style(Style::default().fg(Color::DarkGray))
+        .style(Style::default().fg(theme::TEXT_MUTED))
         .block(
             Block::default()
                 .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
         );
     f.render_widget(hints, modal_chunks[4]);
 }
 
 fn render_new_thread_project_field(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.new_thread_modal_focus == NewThreadField::Project;
-    let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
+    let border_color = if is_focused { theme::ACCENT_WARNING } else { theme::TEXT_MUTED };
     let projects = app.new_thread_filtered_projects();
 
     let display_text = if is_focused {
@@ -765,14 +765,14 @@ fn render_new_thread_project_field(f: &mut Frame, app: &App, area: Rect) {
 
     let text_style = if is_focused {
         if app.new_thread_project_filter.is_empty() {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         } else {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme::ACCENT_WARNING)
         }
     } else if app.new_thread_selected_project.is_some() {
-        Style::default().fg(Color::Green)
+        Style::default().fg(theme::ACCENT_SUCCESS)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let project_field = Paragraph::new(display_text)
@@ -803,9 +803,9 @@ fn render_new_thread_project_field(f: &mut Frame, app: &App, area: Rect) {
                 .map(|(i, p)| {
                     let is_selected = i == app.new_thread_project_index;
                     let style = if is_selected {
-                        Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                        Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(theme::TEXT_PRIMARY)
                     };
                     let prefix = if is_selected { "▶ " } else { "  " };
                     ListItem::new(Line::from(Span::styled(format!("{}{}", prefix, p.name), style)))
@@ -815,7 +815,7 @@ fn render_new_thread_project_field(f: &mut Frame, app: &App, area: Rect) {
             let list = List::new(items).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow)),
+                    .border_style(Style::default().fg(theme::ACCENT_WARNING)),
             );
             f.render_widget(list, dropdown_area);
         }
@@ -824,7 +824,7 @@ fn render_new_thread_project_field(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_new_thread_agent_field(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.new_thread_modal_focus == NewThreadField::Agent;
-    let border_color = if is_focused { Color::Yellow } else { Color::DarkGray };
+    let border_color = if is_focused { theme::ACCENT_WARNING } else { theme::TEXT_MUTED };
     let agents = app.new_thread_filtered_agents();
 
     let display_text = if is_focused {
@@ -842,14 +842,14 @@ fn render_new_thread_agent_field(f: &mut Frame, app: &App, area: Rect) {
 
     let text_style = if is_focused {
         if app.new_thread_agent_filter.is_empty() {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         } else {
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme::ACCENT_WARNING)
         }
     } else if app.new_thread_selected_agent.is_some() {
-        Style::default().fg(Color::Magenta)
+        Style::default().fg(theme::ACCENT_SPECIAL)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let agent_field = Paragraph::new(display_text)
@@ -880,9 +880,9 @@ fn render_new_thread_agent_field(f: &mut Frame, app: &App, area: Rect) {
                 .map(|(i, a)| {
                     let is_selected = i == app.new_thread_agent_index;
                     let style = if is_selected {
-                        Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+                        Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(Color::White)
+                        Style::default().fg(theme::TEXT_PRIMARY)
                     };
                     let prefix = if is_selected { "▶ " } else { "  " };
                     ListItem::new(Line::from(Span::styled(format!("{}@{}", prefix, a.name), style)))
@@ -892,7 +892,7 @@ fn render_new_thread_agent_field(f: &mut Frame, app: &App, area: Rect) {
             let list = List::new(items).block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow)),
+                    .border_style(Style::default().fg(theme::ACCENT_WARNING)),
             );
             f.render_widget(list, dropdown_area);
         }
@@ -901,7 +901,7 @@ fn render_new_thread_agent_field(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_new_thread_content_field(f: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.new_thread_modal_focus == NewThreadField::Content;
-    let border_color = if is_focused { Color::Cyan } else { Color::DarkGray };
+    let border_color = if is_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
 
     let content = &app.new_thread_editor.text;
     let display_text = if content.is_empty() && !is_focused {
@@ -913,9 +913,9 @@ fn render_new_thread_content_field(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let text_style = if content.is_empty() {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     } else {
-        Style::default().fg(Color::White)
+        Style::default().fg(theme::TEXT_PRIMARY)
     };
 
     // Account for 1 char padding on left

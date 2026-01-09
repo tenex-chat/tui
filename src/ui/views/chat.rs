@@ -1,5 +1,6 @@
 use crate::models::Message;
 use crate::ui::markdown::render_markdown;
+use crate::ui::theme;
 use crate::ui::todo::{aggregate_todo_state, TodoState, TodoStatus};
 use crate::ui::tool_calls::{parse_message_content, MessageContent, tool_icon, extract_target};
 use crate::ui::{App, InputMode};
@@ -17,26 +18,6 @@ use tracing::info_span;
 struct StreamingContent {
     agent_name: String,
     content: String,
-}
-
-/// Generate a deterministic color from a pubkey
-/// Uses a simple hash to pick from a palette of distinct colors
-fn color_from_pubkey(pubkey: &str) -> Color {
-    // Palette of distinct, visually pleasing colors for the left indicator
-    let colors = [
-        Color::Rgb(86, 156, 214),   // Blue
-        Color::Rgb(152, 195, 121),  // Green
-        Color::Rgb(197, 134, 192),  // Purple
-        Color::Rgb(206, 145, 120),  // Orange
-        Color::Rgb(86, 212, 221),   // Cyan
-        Color::Rgb(220, 220, 170),  // Yellow
-        Color::Rgb(244, 112, 112),  // Red
-        Color::Rgb(169, 154, 203),  // Lavender
-    ];
-
-    // Simple hash: sum of bytes modulo palette size
-    let hash: usize = pubkey.bytes().map(|b| b as usize).sum();
-    colors[hash % colors.len()]
 }
 
 /// Check if a message looks like a short action/status message
@@ -202,6 +183,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
 
+    // Auto-open ask modal for first unanswered question (if not already open)
+    if app.ask_modal_state.is_none() {
+        if let Some((message_id, ask_event)) = app.has_unanswered_ask_event() {
+            app.open_ask_modal(message_id, ask_event);
+        }
+    }
+
     // Calculate dynamic input height - always normal input now (ask UI is inline with messages)
     let input_lines = app.chat_editor.line_count().max(1);
     let input_height = (input_lines as u16 + 2).clamp(3, 10); // +2 for borders
@@ -339,8 +327,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 };
 
                 // Same card style as all messages - deterministic color from pubkey
-                let indicator_color = color_from_pubkey(&thread.pubkey);
-                let card_bg = Color::Rgb(30, 30, 30);
+                let indicator_color = theme::user_color(&thread.pubkey);
+                let card_bg = theme::BG_CARD;
 
                 // Author line with card background
                 let author_line = format!("│ {}", author);
@@ -384,7 +372,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let author = app.data_store.borrow().get_profile_name(&root_msg.pubkey);
         messages_text.push(Line::from(Span::styled(
             format!("{}{} :", padding, author),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD),
         )));
 
         // Render root message content (truncated)
@@ -396,13 +384,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             messages_text.push(Line::from(padded_spans));
         }
         if root_msg.content.len() > 200 {
-            messages_text.push(Line::from(Span::styled(format!("{}...", padding), Style::default().fg(Color::DarkGray))));
+            messages_text.push(Line::from(Span::styled(format!("{}...", padding), Style::default().fg(theme::TEXT_MUTED))));
         }
 
         // Separator
         messages_text.push(Line::from(Span::styled(
             format!("{}────────────────────────────────────────", padding),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::BORDER_INACTIVE),
         )));
         messages_text.push(Line::from(""));
     }
@@ -440,7 +428,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             match item {
                 DisplayItem::ActionGroup { messages: action_msgs, pubkey } => {
                     // Render collapsed action group
-                    let indicator_color = color_from_pubkey(pubkey);
+                    let indicator_color = theme::user_color(pubkey);
                     let author = profile_cache.get(pubkey).cloned().unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
 
                     // Show header if author changed
@@ -468,20 +456,20 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
                     messages_text.push(Line::from(vec![
                         Span::styled("│ ", Style::default().fg(indicator_color)),
-                        Span::styled("▸ ", Style::default().fg(Color::DarkGray)),
+                        Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED)),
                         Span::styled(
                             format!("{} actions", count),
-                            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                            Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD),
                         ),
-                        Span::styled(" · ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
                         Span::styled(
                             first_action,
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::TEXT_MUTED),
                         ),
-                        Span::styled(" → ", Style::default().fg(Color::DarkGray)),
+                        Span::styled(" → ", Style::default().fg(theme::TEXT_MUTED)),
                         Span::styled(
                             last_action,
-                            Style::default().fg(Color::DarkGray),
+                            Style::default().fg(theme::TEXT_MUTED),
                         ),
                     ]));
 
@@ -502,9 +490,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     // - Full-width shaded background
                     // - Author on first line, content below
 
-                    let indicator_color = color_from_pubkey(&msg.pubkey);
-                    let card_bg = Color::Rgb(30, 30, 30);
-                    let card_bg_selected = Color::Rgb(45, 45, 45);
+                    let indicator_color = theme::user_color(&msg.pubkey);
+                    let card_bg = theme::BG_CARD;
+                    let card_bg_selected = theme::BG_SELECTED;
                     let bg = if is_selected { card_bg_selected } else { card_bg };
 
                     // Helper to pad line to full width
@@ -550,16 +538,12 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         messages_text.push(Line::from(line_spans));
                     }
 
-                    // Ask event - render inline UI if active, otherwise show indicator
-                    if msg.ask_event.is_some() {
-                        // Check if this message has an active ask modal
-                        let is_active_ask = app.ask_modal_state.as_ref()
-                            .map(|state| state.message_id == msg.id)
-                            .unwrap_or(false);
-
-                        if is_active_ask {
-                            // Render full inline ask UI
-                            if let Some(ref modal_state) = app.ask_modal_state {
+                    // Ask event - only render if NOT answered by current user
+                    if msg.ask_event.is_some() && !app.is_ask_answered_by_user(&msg.id) {
+                        // Unanswered question - render full inline ask UI
+                        // The modal should be auto-opened (handled at start of render)
+                        if let Some(ref modal_state) = app.ask_modal_state {
+                            if modal_state.message_id == msg.id {
                                 let ask_lines = crate::ui::views::render_inline_ask_lines(
                                     modal_state,
                                     indicator_color,
@@ -568,25 +552,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                                 );
                                 messages_text.extend(ask_lines);
                             }
-                        } else {
-                            // Show indicator for unanswered question
-                            let ask = msg.ask_event.as_ref().unwrap();
-                            let question_count = ask.questions.len();
-                            let indicator_text = if question_count == 1 {
-                                "❓ Question - Press 'i' to answer".to_string()
-                            } else {
-                                format!("❓ {} Questions - Press 'i' to answer", question_count)
-                            };
-                            let ask_len = 2 + indicator_text.len();
-                            let mut ask_spans = vec![
-                                Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled(" ", Style::default().bg(bg)),
-                                Span::styled(indicator_text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(bg)),
-                            ];
-                            pad_line(&mut ask_spans, ask_len);
-                            messages_text.push(Line::from(ask_spans));
                         }
+                        // If modal not open for this message yet, it will be auto-opened
+                        // on next render cycle (handled at start of render_chat)
                     }
+                    // If answered, don't render anything special - answer shows as reply message
 
                     // Tool calls
                     if let MessageContent::Mixed { tool_calls, .. } = &parsed {
@@ -600,9 +570,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                                 Span::styled("  ", Style::default().bg(bg)),
                                 Span::styled(icon, Style::default().bg(bg)),
                                 Span::styled(" ", Style::default().bg(bg)),
-                                Span::styled(tool_call.name.to_uppercase(), Style::default().fg(Color::DarkGray).bg(bg)),
+                                Span::styled(tool_call.name.to_uppercase(), Style::default().fg(theme::TEXT_MUTED).bg(bg)),
                                 Span::styled(" ", Style::default().bg(bg)),
-                                Span::styled(target, Style::default().fg(Color::Cyan).bg(bg)),
+                                Span::styled(target, Style::default().fg(theme::ACCENT_PRIMARY).bg(bg)),
                             ];
                             pad_line(&mut tool_spans, tool_len);
                             messages_text.push(Line::from(tool_spans));
@@ -616,8 +586,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                             let replies_len = 7 + replies_text.len(); // "│  └→ " + text
                             let mut replies_spans = vec![
                                 Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled("  └→ ", Style::default().fg(Color::DarkGray).bg(bg)),
-                                Span::styled(replies_text, Style::default().fg(Color::Magenta).bg(bg)),
+                                Span::styled("  └→ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
+                                Span::styled(replies_text, Style::default().fg(theme::ACCENT_SPECIAL).bg(bg)),
                             ];
                             pad_line(&mut replies_spans, replies_len);
                             messages_text.push(Line::from(replies_spans));
@@ -641,7 +611,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     for streaming in &streaming_sessions {
         messages_text.push(Line::from(Span::styled(
             format!("{}{} (streaming...):", padding, streaming.agent_name),
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+            theme::streaming_indicator(),
         )));
 
         let markdown_lines = render_markdown(&streaming.content);
@@ -662,7 +632,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     for agent_name in &typing_agents {
         messages_text.push(Line::from(Span::styled(
             format!("{}{} is typing...", padding, agent_name),
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            theme::typing_indicator(),
         )));
         messages_text.push(Line::from(""));
     }
@@ -673,23 +643,23 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
             // Render agent header with streaming indicator
             messages_text.push(Line::from(vec![
-                Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
                 Span::styled(
                     "Agent",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD),
+                    Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     " (streaming)",
-                    Style::default().fg(Color::Magenta).add_modifier(Modifier::ITALIC),
+                    Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::ITALIC),
                 ),
             ]));
 
             // Render reasoning content first if present (muted style)
             if !buffer.reasoning_content.is_empty() {
-                let reasoning_style = Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC);
+                let reasoning_style = Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC);
                 for line in buffer.reasoning_content.lines() {
                     messages_text.push(Line::from(vec![
-                        Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                        Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
                         Span::styled(line.to_string(), reasoning_style),
                     ]));
                 }
@@ -700,21 +670,21 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 let markdown_lines = render_markdown(&buffer.text_content);
                 for (i, line) in markdown_lines.iter().enumerate() {
                     let mut line_spans = vec![
-                        Span::styled("│ ", Style::default().fg(Color::Magenta)),
+                        Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
                     ];
                     line_spans.extend(line.spans.clone());
 
                     // Add cursor indicator at the end of the last line
                     if i == markdown_lines.len() - 1 && !buffer.is_complete {
-                        line_spans.push(Span::styled("▌", Style::default().fg(Color::Magenta)));
+                        line_spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_SPECIAL)));
                     }
                     messages_text.push(Line::from(line_spans));
                 }
             } else if !buffer.is_complete {
                 // Show just cursor if we have no text yet but are streaming
                 messages_text.push(Line::from(vec![
-                    Span::styled("│ ", Style::default().fg(Color::Magenta)),
-                    Span::styled("▌", Style::default().fg(Color::Magenta)),
+                    Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
+                    Span::styled("▌", Style::default().fg(theme::ACCENT_SPECIAL)),
                 ]));
             }
 
@@ -724,7 +694,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     if messages_text.is_empty() {
         let empty = Paragraph::new("No messages yet. Press 'i' to start typing.")
-            .style(Style::default().fg(Color::DarkGray));
+            .style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty, messages_area);
     } else {
         let visible_height = messages_area.height as usize;
@@ -771,8 +741,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if has_status {
         if let Some(ref msg) = app.status_message {
             let status_line = Line::from(vec![
-                Span::styled("⏳ ", Style::default().fg(Color::Yellow)),
-                Span::styled(msg.as_str(), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("⏳ ", Style::default().fg(theme::ACCENT_WARNING)),
+                Span::styled(msg.as_str(), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
             ]);
             let status = Paragraph::new(status_line);
             f.render_widget(status, chunks[idx]);
@@ -795,9 +765,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     let context_line = Line::from(vec![
         Span::raw(padding),
-        Span::styled("→ @", Style::default().fg(Color::DarkGray)),
-        Span::styled(agent_display, Style::default().fg(Color::Cyan)),
-        Span::styled(branch_display, Style::default().fg(Color::Green)),
+        Span::styled("→ @", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(agent_display, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(branch_display, Style::default().fg(theme::ACCENT_SUCCESS)),
     ]);
     let context = Paragraph::new(context_line);
     f.render_widget(context, chunks[idx]);
@@ -805,16 +775,16 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Attachments line (if any)
     if has_attachments {
-        let mut attachment_spans: Vec<Span> = vec![Span::styled("Attachments: ", Style::default().fg(Color::DarkGray))];
+        let mut attachment_spans: Vec<Span> = vec![Span::styled("Attachments: ", Style::default().fg(theme::TEXT_MUTED))];
         let img_count = app.chat_editor.image_attachments.len();
 
         // Show image attachments (focus index 0..img_count)
         for (i, img) in app.chat_editor.image_attachments.iter().enumerate() {
             let is_focused = app.chat_editor.focused_attachment == Some(i);
             let style = if is_focused {
-                Style::default().fg(Color::Black).bg(Color::Magenta).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Black).bg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Magenta)
+                Style::default().fg(theme::ACCENT_SPECIAL)
             };
             attachment_spans.push(Span::styled(
                 format!("[Image #{}] ", img.id),
@@ -826,9 +796,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         for (i, attachment) in app.chat_editor.attachments.iter().enumerate() {
             let is_focused = app.chat_editor.focused_attachment == Some(img_count + i);
             let style = if is_focused {
-                Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default().fg(Color::Black).bg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Yellow)
+                Style::default().fg(theme::ACCENT_WARNING)
             };
             attachment_spans.push(Span::styled(
                 format!("[Paste #{}] ", attachment.id),
@@ -838,9 +808,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
         // Show hint based on what's focused
         if app.chat_editor.focused_attachment.is_some() {
-            attachment_spans.push(Span::styled("(Backspace to delete, ↓ to exit)", Style::default().fg(Color::DarkGray)));
+            attachment_spans.push(Span::styled("(Backspace to delete, ↓ to exit)", Style::default().fg(theme::TEXT_MUTED)));
         } else {
-            attachment_spans.push(Span::styled("(↑ to select)", Style::default().fg(Color::DarkGray)));
+            attachment_spans.push(Span::styled("(↑ to select)", Style::default().fg(theme::TEXT_MUTED)));
         }
         let attachments_line = Line::from(attachment_spans);
         let attachments = Paragraph::new(attachments_line);
@@ -856,20 +826,20 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Get user's deterministic color for the left border
     let user_color = app.data_store.borrow().user_pubkey.as_ref()
-        .map(|pk| color_from_pubkey(pk))
-        .unwrap_or(Color::Rgb(86, 156, 214)); // Fallback to blue
+        .map(|pk| theme::user_color(pk))
+        .unwrap_or(theme::ACCENT_PRIMARY); // Fallback to accent
 
     let input_indicator_color = if is_input_active {
         user_color
     } else {
-        Color::Rgb(60, 60, 60) // Dim when inactive or ask modal is active
+        theme::BORDER_INACTIVE // Dim when inactive or ask modal is active
     };
     let text_color = if is_input_active {
-        Color::White
+        theme::TEXT_PRIMARY
     } else {
-        Color::DarkGray
+        theme::TEXT_MUTED
     };
-    let input_bg = Color::Rgb(30, 30, 30);
+    let input_bg = theme::BG_INPUT;
 
     // Build input lines with left indicator and padding
     let input_text = app.chat_editor.text.as_str();
@@ -883,7 +853,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         input_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
             Span::styled(" ", Style::default().bg(input_bg)),
-            Span::styled(placeholder, Style::default().fg(Color::DarkGray).bg(input_bg)),
+            Span::styled(placeholder, Style::default().fg(theme::TEXT_DIM).bg(input_bg)),
             Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
         ]));
     } else {
@@ -977,11 +947,11 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
 
     // Render the modal content
     let modal = Paragraph::new(app.attachment_modal_editor.text.as_str())
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::TEXT_PRIMARY))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow))
+                .border_style(Style::default().fg(theme::ACCENT_WARNING))
                 .title(title),
         )
         .wrap(Wrap { trim: false });
@@ -1019,7 +989,7 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
         } else {
             "No matching agents"
         };
-        vec![ListItem::new(msg).style(Style::default().fg(Color::DarkGray))]
+        vec![ListItem::new(msg).style(Style::default().fg(theme::TEXT_MUTED))]
     } else {
         agents
             .iter()
@@ -1028,10 +998,10 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
                 let style = if i == app.agent_selector_index {
                     Style::default()
                         .fg(Color::Black)
-                        .bg(Color::Cyan)
+                        .bg(theme::ACCENT_PRIMARY)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(theme::TEXT_PRIMARY)
                 };
 
                 let model_info = agent
@@ -1054,7 +1024,7 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
             .title(title),
     );
 
@@ -1084,7 +1054,7 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
         } else {
             "No matching branches"
         };
-        vec![ListItem::new(msg).style(Style::default().fg(Color::DarkGray))]
+        vec![ListItem::new(msg).style(Style::default().fg(theme::TEXT_MUTED))]
     } else {
         branches
             .iter()
@@ -1093,10 +1063,10 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
                 let style = if i == app.branch_selector_index {
                     Style::default()
                         .fg(Color::Black)
-                        .bg(Color::Green)
+                        .bg(theme::ACCENT_SUCCESS)
                         .add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::White)
+                    Style::default().fg(theme::TEXT_PRIMARY)
                 };
 
                 ListItem::new(branch.clone()).style(style)
@@ -1113,7 +1083,7 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green))
+            .border_style(Style::default().fg(theme::ACCENT_SUCCESS))
             .title(title),
     );
 
@@ -1145,15 +1115,15 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
         // Tab number with period separator
         let num_style = if is_active {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(theme::ACCENT_PRIMARY)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         };
         spans.push(Span::styled(format!("{}. ", i + 1), num_style));
 
         // Unread indicator (moved before project name)
         if tab.has_unread && !is_active {
-            spans.push(Span::styled("● ", Style::default().fg(Color::Red)));
+            spans.push(Span::styled("● ", Style::default().fg(theme::ACCENT_ERROR)));
         } else {
             spans.push(Span::raw("● "));
         }
@@ -1168,9 +1138,9 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let project_style = if is_active {
-            Style::default().fg(Color::Green)
+            Style::default().fg(theme::ACCENT_SUCCESS)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         };
         spans.push(Span::styled(project_display, project_style));
         spans.push(Span::raw(" | "));
@@ -1184,23 +1154,23 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
 
         let title_style = if is_active {
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+            theme::tab_active()
         } else if tab.has_unread {
-            Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD)
+            theme::tab_unread()
         } else {
-            Style::default().fg(Color::DarkGray)
+            theme::tab_inactive()
         };
         spans.push(Span::styled(title, title_style));
 
         // Separator between tabs
         if i < app.open_tabs.len() - 1 {
-            spans.push(Span::styled(" │ ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
         }
     }
 
     // Add hint at the end
     spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled("Tab:cycle x:close", Style::default().fg(Color::DarkGray)));
+    spans.push(Span::styled("Tab:cycle x:close", Style::default().fg(theme::TEXT_MUTED)));
 
     let tab_line = Line::from(spans);
     let tab_bar = Paragraph::new(tab_line);
@@ -1215,8 +1185,8 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
     let completed = todo_state.completed_count();
     let total = todo_state.items.len();
     lines.push(Line::from(vec![
-        Span::styled("Todo List ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("{}/{}", completed, total), Style::default().fg(Color::DarkGray)),
+        Span::styled("Todo List ", theme::text_bold()),
+        Span::styled(format!("{}/{}", completed, total), Style::default().fg(theme::TEXT_MUTED)),
     ]));
 
     // Progress bar
@@ -1224,8 +1194,8 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
     let filled = if total > 0 { (completed * progress_width) / total } else { 0 };
     let empty_bar = progress_width.saturating_sub(filled);
     lines.push(Line::from(vec![
-        Span::styled("━".repeat(filled), Style::default().fg(Color::Green)),
-        Span::styled("━".repeat(empty_bar), Style::default().fg(Color::Rgb(60, 60, 60))),
+        Span::styled("━".repeat(filled), Style::default().fg(theme::ACCENT_SUCCESS)),
+        Span::styled("━".repeat(empty_bar), Style::default().fg(theme::PROGRESS_EMPTY)),
     ]));
     lines.push(Line::from(""));
 
@@ -1233,16 +1203,16 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
     if let Some(active) = todo_state.in_progress_item() {
         lines.push(Line::from(Span::styled(
             "In Progress",
-            Style::default().fg(Color::Rgb(86, 156, 214)),
+            theme::todo_in_progress(),
         )));
         lines.push(Line::from(Span::styled(
             format!("  {}", truncate_str(&active.title, (area.width as usize).saturating_sub(4))),
-            Style::default().fg(Color::White),
+            theme::text_primary(),
         )));
         if let Some(ref desc) = active.description {
             lines.push(Line::from(Span::styled(
                 format!("  {}", truncate_str(desc, (area.width as usize).saturating_sub(4))),
-                Style::default().fg(Color::DarkGray),
+                theme::text_muted(),
             )));
         }
         lines.push(Line::from(""));
@@ -1251,15 +1221,15 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
     // Todo items
     for item in &todo_state.items {
         let (icon, icon_style) = match item.status {
-            TodoStatus::Done => ("✓", Style::default().fg(Color::Green)),
-            TodoStatus::InProgress => ("◐", Style::default().fg(Color::Rgb(86, 156, 214))),
-            TodoStatus::Pending => ("○", Style::default().fg(Color::DarkGray)),
+            TodoStatus::Done => ("✓", theme::todo_done()),
+            TodoStatus::InProgress => ("◐", theme::todo_in_progress()),
+            TodoStatus::Pending => ("○", theme::todo_pending()),
         };
 
         let title_style = if item.status == TodoStatus::Done {
-            Style::default().fg(Color::DarkGray).add_modifier(Modifier::CROSSED_OUT)
+            Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::CROSSED_OUT)
         } else {
-            Style::default().fg(Color::White)
+            theme::text_primary()
         };
 
         let title = truncate_str(&item.title, (area.width as usize).saturating_sub(4));
@@ -1273,9 +1243,9 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::LEFT)
-                .border_style(Style::default().fg(Color::DarkGray)),
+                .border_style(theme::border_inactive()),
         )
-        .style(Style::default().bg(Color::Rgb(38, 38, 38))); // Gray background like screenshot
+        .style(Style::default().bg(theme::BG_SECONDARY));
 
     f.render_widget(sidebar, area);
 }

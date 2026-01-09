@@ -1,7 +1,7 @@
-use crate::ui::{App, InputMode};
+use crate::ui::{theme, App, InputMode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Borders, Paragraph},
     Frame,
 };
@@ -28,15 +28,15 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
         LoginStep::Unlock => "Welcome back! Enter your password to unlock:",
     };
     let instruction_widget = Paragraph::new(instructions)
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::TEXT_PRIMARY))
         .alignment(Alignment::Center);
     f.render_widget(instruction_widget, chunks[0]);
 
     // Input field
     let input_style = if app.input_mode == InputMode::Editing {
-        Style::default().fg(Color::Yellow)
+        Style::default().fg(theme::ACCENT_WARNING)
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let display_text = if *login_step == LoginStep::Nsec && !app.input.is_empty() {
@@ -56,9 +56,9 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(if app.input_mode == InputMode::Editing {
-                    Style::default().fg(Color::Yellow)
+                    Style::default().fg(theme::ACCENT_WARNING)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(theme::TEXT_MUTED)
                 })
                 .title(if app.input_mode == InputMode::Editing {
                     "Editing (Esc to cancel, Enter to submit)"
@@ -71,7 +71,7 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
     // Status
     if let Some(ref msg) = app.status_message {
         let status = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(Color::Red))
+            .style(Style::default().fg(theme::ACCENT_ERROR))
             .alignment(Alignment::Center);
         f.render_widget(status, chunks[2]);
     }

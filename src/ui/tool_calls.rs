@@ -1,8 +1,10 @@
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 use serde::{Deserialize, Serialize};
+
+use crate::ui::theme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -171,13 +173,13 @@ pub fn render_tool_call_compact(tool_call: &ToolCall) -> Line<'static> {
         Span::styled(format!("{} ", icon), Style::default()),
         Span::styled(
             tool_call.name.clone(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            theme::tool_name().add_modifier(Modifier::BOLD),
         ),
     ];
 
     if let Some(t) = target {
         spans.push(Span::styled(" ", Style::default()));
-        spans.push(Span::styled(t, Style::default().fg(Color::Magenta)));
+        spans.push(Span::styled(t, theme::tool_target()));
     }
 
     Line::from(spans)
@@ -191,19 +193,19 @@ fn render_tool_call_detailed(tool_call: &ToolCall) -> Vec<Line<'static>> {
 
     lines.push(Line::from(Span::styled(
         format!("┌─ {} ─────────────────────────────────────", tool_call.name),
-        Style::default().fg(Color::Cyan),
+        theme::tool_name(),
     )));
 
     if let Some(target) = extract_target(tool_call) {
         lines.push(Line::from(vec![
-            Span::styled("│ ", Style::default().fg(Color::Cyan)),
-            Span::styled(target, Style::default().fg(Color::Magenta)),
+            Span::styled("│ ", theme::tool_name()),
+            Span::styled(target, theme::tool_target()),
         ]));
     }
 
     lines.push(Line::from(Span::styled(
         "└─────────────────────────────────────────────────",
-        Style::default().fg(Color::Cyan),
+        theme::tool_name(),
     )));
 
     lines
