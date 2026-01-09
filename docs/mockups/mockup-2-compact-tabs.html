@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX TUI - Mockup 2: Compact with Tabs</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #0f0f0f;
+            --bg-alt: #1a1a1a;
+            --fg: #d4d4d4;
+            --fg-dim: #6b6b6b;
+            --fg-dark: #404040;
+            --border: #2a2a2a;
+            --cyan: #56d4dd;
+            --green: #98c379;
+            --yellow: #dcdcaa;
+            --red: #f44747;
+            --purple: #c586c0;
+            --blue: #569cd6;
+            --orange: #ce9178;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+            background: var(--bg);
+            color: var(--fg);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        /* Tab bar with conversation tabs */
+        .tab-bar {
+            display: flex;
+            background: var(--bg-alt);
+            border-bottom: 1px solid var(--border);
+            overflow-x: auto;
+        }
+
+        .tab {
+            padding: 6px 16px;
+            border-right: 1px solid var(--border);
+            cursor: pointer;
+            white-space: nowrap;
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .tab:hover {
+            background: var(--bg);
+        }
+
+        .tab.active {
+            background: var(--bg);
+            border-bottom: 2px solid var(--cyan);
+        }
+
+        .tab-title {
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .tab-badge {
+            font-size: 10px;
+            padding: 1px 4px;
+            border-radius: 2px;
+        }
+
+        .tab-badge.running {
+            background: rgba(86, 180, 214, 0.2);
+            color: var(--blue);
+        }
+
+        .tab-badge.done {
+            background: rgba(152, 195, 121, 0.2);
+            color: var(--green);
+        }
+
+        .tab-close {
+            color: var(--fg-dim);
+            margin-left: 4px;
+        }
+
+        .tab-close:hover {
+            color: var(--red);
+        }
+
+        .new-tab {
+            padding: 6px 12px;
+            color: var(--fg-dim);
+        }
+
+        .new-tab:hover {
+            color: var(--fg);
+            background: var(--bg);
+        }
+
+        /* Title bar with conversation info */
+        .title-bar {
+            display: flex;
+            padding: 4px 8px;
+            background: var(--bg-alt);
+            border-bottom: 1px solid var(--border);
+            gap: 8px;
+            align-items: center;
+            font-size: 11px;
+        }
+
+        .conv-title {
+            color: var(--fg);
+            font-weight: bold;
+        }
+
+        .conv-summary {
+            color: var(--fg-dim);
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .conv-branch {
+            color: var(--green);
+        }
+
+        .conv-stats {
+            color: var(--fg-dim);
+            display: flex;
+            gap: 12px;
+        }
+
+        .conv-stats .tokens { color: var(--yellow); }
+        .conv-stats .cost { color: var(--orange); }
+
+        /* Main content */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Messages */
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px 0;
+        }
+
+        /* Compact message row */
+        .msg {
+            display: flex;
+            padding: 2px 8px;
+            gap: 8px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .msg:hover {
+            background: var(--bg-alt);
+        }
+
+        .msg-gutter {
+            width: 20px;
+            flex-shrink: 0;
+            color: var(--fg-dark);
+            text-align: right;
+            font-size: 10px;
+            padding-top: 2px;
+        }
+
+        .msg-from {
+            width: 100px;
+            flex-shrink: 0;
+            font-weight: bold;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .msg-from.user { color: var(--blue); }
+        .msg-from.agent { color: var(--green); }
+
+        .msg-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .msg-text {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .msg-meta {
+            width: 140px;
+            flex-shrink: 0;
+            text-align: right;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 2px;
+        }
+
+        .msg-time {
+            color: var(--fg-dim);
+            font-size: 10px;
+        }
+
+        .msg-to {
+            color: var(--purple);
+            font-size: 10px;
+        }
+
+        /* Expandable sections */
+        .msg-expand {
+            margin-top: 4px;
+        }
+
+        .expand-toggle {
+            color: var(--fg-dim);
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .expand-toggle:hover {
+            color: var(--fg);
+        }
+
+        .expand-content {
+            display: none;
+            margin-top: 4px;
+            padding: 4px 8px;
+            background: var(--bg-alt);
+            border-left: 2px solid var(--border);
+        }
+
+        .expand-content.visible {
+            display: block;
+        }
+
+        /* LLM metadata row */
+        .llm-row {
+            display: none;
+            font-size: 10px;
+            color: var(--fg-dim);
+            padding: 2px 0;
+            gap: 16px;
+        }
+
+        .llm-row.visible {
+            display: flex;
+        }
+
+        .llm-row .model { color: var(--cyan); }
+        .llm-row .cost { color: var(--orange); }
+
+        /* Todo list inline */
+        .todo-inline {
+            margin-top: 8px;
+            padding: 4px;
+            border: 1px solid var(--border);
+            font-size: 11px;
+        }
+
+        .todo-head {
+            display: flex;
+            justify-content: space-between;
+            color: var(--fg-dim);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 2px;
+            margin-bottom: 4px;
+        }
+
+        .todo-row {
+            display: flex;
+            gap: 4px;
+        }
+
+        .todo-mark { color: var(--fg-dark); }
+        .todo-mark.done { color: var(--green); }
+        .todo-mark.wip { color: var(--blue); }
+        .todo-txt.done { color: var(--fg-dim); text-decoration: line-through; }
+
+        /* Delegated card */
+        .deleg-card {
+            margin-top: 8px;
+            padding: 4px 8px;
+            border: 1px solid var(--border);
+            font-size: 11px;
+            cursor: pointer;
+        }
+
+        .deleg-card:hover {
+            border-color: var(--blue);
+        }
+
+        .deleg-head {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .deleg-name {
+            font-weight: bold;
+        }
+
+        .deleg-status {
+            font-size: 10px;
+        }
+
+        .deleg-status.ok { color: var(--green); }
+        .deleg-status.fail { color: var(--red); }
+        .deleg-status.run { color: var(--blue); }
+
+        .deleg-branch { color: var(--green); font-size: 10px; }
+
+        .deleg-agent {
+            color: var(--fg-dim);
+            font-size: 10px;
+        }
+
+        .deleg-preview {
+            color: var(--fg-dim);
+            margin-top: 2px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Question blocks */
+        .ask-box {
+            margin-top: 8px;
+            border: 1px solid var(--blue);
+            padding: 8px;
+        }
+
+        .ask-title {
+            color: var(--blue);
+            font-weight: bold;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .ask-q {
+            margin-bottom: 8px;
+        }
+
+        .ask-opt {
+            padding: 4px 8px;
+            cursor: pointer;
+            display: flex;
+            gap: 8px;
+        }
+
+        .ask-opt:hover {
+            background: rgba(86, 156, 214, 0.1);
+        }
+
+        .ask-opt.sel {
+            background: rgba(86, 156, 214, 0.15);
+        }
+
+        .ask-mark { color: var(--fg-dark); }
+        .ask-opt.sel .ask-mark { color: var(--blue); }
+
+        .ask-lbl { color: var(--fg); }
+        .ask-rec { color: var(--green); font-size: 10px; margin-left: 4px; }
+        .ask-hint { color: var(--fg-dim); font-size: 10px; margin-left: 24px; }
+
+        .ask-input {
+            display: none;
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 4px;
+            font-family: inherit;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .ask-input.show { display: block; }
+
+        .ask-btn {
+            margin-top: 8px;
+            color: var(--fg-dim);
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .ask-btn:not(.off):hover { color: var(--blue); }
+        .ask-btn.off { cursor: default; }
+
+        /* Thinking */
+        .think-box {
+            margin-top: 4px;
+            border-left: 2px solid var(--yellow);
+            padding-left: 8px;
+        }
+
+        .think-tog {
+            color: var(--fg-dim);
+            cursor: pointer;
+            font-size: 10px;
+        }
+
+        .think-tog:hover { color: var(--fg); }
+
+        .think-body {
+            display: none;
+            color: var(--fg-dim);
+            font-style: italic;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        .think-body.show { display: block; }
+
+        /* Input section */
+        .input-section {
+            border-top: 1px solid var(--border);
+            padding: 4px 8px;
+            background: var(--bg-alt);
+        }
+
+        .input-row1 {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 4px;
+            font-size: 11px;
+        }
+
+        .agent-pick {
+            color: var(--green);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .agent-pick:hover { color: var(--cyan); }
+
+        .agent-menu {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            min-width: 140px;
+            z-index: 50;
+        }
+
+        .agent-menu.show { display: block; }
+
+        .agent-item {
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+
+        .agent-item:hover { background: var(--bg-alt); }
+
+        .nudge-pick {
+            color: var(--fg-dim);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .nudge-pick:hover { color: var(--purple); }
+        .nudge-pick.on { color: var(--purple); }
+
+        .nudge-menu {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            min-width: 200px;
+            z-index: 50;
+        }
+
+        .nudge-menu.show { display: block; }
+
+        .nudge-item {
+            padding: 4px 8px;
+            cursor: pointer;
+            display: flex;
+            gap: 8px;
+        }
+
+        .nudge-item:hover { background: rgba(197, 134, 192, 0.1); }
+        .nudge-item .mark { color: var(--fg-dark); }
+        .nudge-item.on .mark { color: var(--purple); }
+
+        .active-nudges {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .active-nudges:empty { display: none; }
+
+        .nudge-tag {
+            color: var(--purple);
+            font-size: 10px;
+        }
+
+        .nudge-tag-x {
+            cursor: pointer;
+            margin-left: 2px;
+        }
+
+        .input-box {
+            display: flex;
+        }
+
+        .input-field {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 6px 8px;
+            font-family: inherit;
+            font-size: 12px;
+            resize: none;
+            outline: none;
+        }
+
+        .input-field:focus { border-color: var(--blue); }
+
+        /* Status line */
+        .status-line {
+            display: flex;
+            padding: 2px 8px;
+            background: var(--bg-alt);
+            border-top: 1px solid var(--border);
+            font-size: 10px;
+            color: var(--fg-dim);
+        }
+
+        .status-line > span { margin-right: 16px; }
+        .status-ok { color: var(--green); }
+
+        .meta-tog {
+            margin-left: auto;
+            cursor: pointer;
+        }
+
+        .meta-tog:hover { color: var(--fg); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); }
+    </style>
+</head>
+<body>
+    <!-- Tab bar -->
+    <div class="tab-bar">
+        <div class="tab active">
+            <span class="tab-title">PM-WIP</span>
+            <span class="tab-badge running">●</span>
+            <span class="tab-close">×</span>
+        </div>
+        <div class="tab">
+            <span class="tab-title">NDK Exploration</span>
+            <span class="tab-badge done">✓</span>
+            <span class="tab-close">×</span>
+        </div>
+        <div class="tab">
+            <span class="tab-title">Bug Fix #142</span>
+            <span class="tab-close">×</span>
+        </div>
+        <div class="new-tab">[+]</div>
+    </div>
+
+    <!-- Title bar with conversation metadata -->
+    <div class="title-bar">
+        <span class="conv-title">PM-WIP Session</span>
+        <span class="conv-summary">Preparing NDK 3.0 announcement with package analysis</span>
+        <span class="conv-branch">⎇ master</span>
+        <div class="conv-stats">
+            <span class="tokens">15.1K</span>
+            <span class="cost">$0.42</span>
+        </div>
+    </div>
+
+    <!-- Main content -->
+    <div class="main">
+        <div class="messages" id="messages">
+            <!-- Message 1: User -->
+            <div class="msg">
+                <div class="msg-gutter">1</div>
+                <div class="msg-from user">Pablo</div>
+                <div class="msg-content">
+                    <div class="msg-text">@transparent Help me prepare the NDK 3.0 announcement. Focus on packages with significant changes since March.</div>
+                </div>
+                <div class="msg-meta">
+                    <span class="msg-time">10:01</span>
+                    <span class="msg-to">→ @transparent</span>
+                </div>
+            </div>
+
+            <!-- Message 2: Agent with todos + delegated -->
+            <div class="msg">
+                <div class="msg-gutter">2</div>
+                <div class="msg-from agent">transparent</div>
+                <div class="msg-content">
+                    <div class="msg-text">I'll help you prepare the NDK 3.0 announcement. Let me create a plan and start exploring the repository.</div>
+                    <div class="llm-row">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>15,234 in / 847 out</span>
+                        <span class="cost">$0.08</span>
+                    </div>
+
+                    <div class="todo-inline">
+                        <div class="todo-head">
+                            <span>Todo List</span>
+                            <span>1/3</span>
+                        </div>
+                        <div class="todo-row"><span class="todo-mark done">[✓]</span><span class="todo-txt done">Initial exploration: identify packages</span></div>
+                        <div class="todo-row"><span class="todo-mark wip">[◉]</span><span class="todo-txt">Package deep-dives (parallel)</span></div>
+                        <div class="todo-row"><span class="todo-mark">[ ]</span><span class="todo-txt">Synthesize announcement drafts</span></div>
+                    </div>
+
+                    <div class="deleg-card" onclick="alert('Navigate')">
+                        <div class="deleg-head">
+                            <span class="deleg-name">Initial Exploration for NDK 3.0</span>
+                            <span class="deleg-status ok">[Done]</span>
+                            <span class="deleg-branch">⎇ master</span>
+                        </div>
+                        <div class="deleg-agent">🔍 explore-agent • 2m ago</div>
+                        <div class="deleg-preview">Found 12 packages with significant changes: ndk-core, ndk-svelte...</div>
+                    </div>
+                </div>
+                <div class="msg-meta">
+                    <span class="msg-time">10:01</span>
+                    <span class="msg-to">→ Pablo</span>
+                </div>
+            </div>
+
+            <!-- Message 3: Single select question -->
+            <div class="msg">
+                <div class="msg-gutter">3</div>
+                <div class="msg-from agent">transparent</div>
+                <div class="msg-content">
+                    <div class="msg-text">I found several packages. Before I dive deep:</div>
+                    <div class="llm-row">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>16,102 in / 312 out</span>
+                        <span class="cost">$0.10</span>
+                    </div>
+
+                    <div class="ask-box">
+                        <div class="ask-title">? Question</div>
+                        <div class="ask-q">What level of detail should the announcement include?</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,false)">
+                            <span class="ask-mark">( )</span>
+                            <span class="ask-lbl">Brief summary</span>
+                            <span class="ask-rec">(Recommended)</span>
+                        </div>
+                        <div class="ask-hint">2-3 sentences per package</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,false)">
+                            <span class="ask-mark">( )</span>
+                            <span class="ask-lbl">Detailed breakdown</span>
+                        </div>
+                        <div class="ask-hint">Full changelog with migration notes</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,false)">
+                            <span class="ask-mark">( )</span>
+                            <span class="ask-lbl">Technical deep-dive</span>
+                        </div>
+                        <div class="ask-hint">In-depth technical article</div>
+
+                        <div class="ask-opt other" onclick="pickOpt(this,false);showOther(this)">
+                            <span class="ask-mark">( )</span>
+                            <span class="ask-lbl">Other...</span>
+                        </div>
+                        <input class="ask-input" type="text" placeholder="Custom response...">
+
+                        <div class="ask-btn off">[Submit]</div>
+                    </div>
+                </div>
+                <div class="msg-meta">
+                    <span class="msg-time">10:02</span>
+                    <span class="msg-to">→ Pablo</span>
+                </div>
+            </div>
+
+            <!-- Message 4: Multiselect question -->
+            <div class="msg">
+                <div class="msg-gutter">4</div>
+                <div class="msg-from agent">transparent</div>
+                <div class="msg-content">
+                    <div class="msg-text">Which packages should I prioritize?</div>
+                    <div class="llm-row">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>18,456 in / 234 out</span>
+                        <span class="cost">$0.12</span>
+                    </div>
+
+                    <div class="ask-box">
+                        <div class="ask-title">? Multi-select</div>
+                        <div class="ask-q">Select packages to feature prominently:</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,true)">
+                            <span class="ask-mark">[ ]</span>
+                            <span class="ask-lbl">ndk-core</span>
+                        </div>
+                        <div class="ask-hint">Core - major subscription refactor</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,true)">
+                            <span class="ask-mark">[ ]</span>
+                            <span class="ask-lbl">ndk-svelte</span>
+                        </div>
+                        <div class="ask-hint">Svelte bindings - reactive stores overhaul</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,true)">
+                            <span class="ask-mark">[ ]</span>
+                            <span class="ask-lbl">ndk-wallet</span>
+                        </div>
+                        <div class="ask-hint">Wallet - NWC improvements</div>
+
+                        <div class="ask-opt" onclick="pickOpt(this,true)">
+                            <span class="ask-mark">[ ]</span>
+                            <span class="ask-lbl">ndk-mobile</span>
+                        </div>
+                        <div class="ask-hint">Mobile - React Native support</div>
+
+                        <div class="ask-btn off">[Submit Selections]</div>
+                    </div>
+                </div>
+                <div class="msg-meta">
+                    <span class="msg-time">10:03</span>
+                    <span class="msg-to">→ Pablo</span>
+                </div>
+            </div>
+
+            <!-- Message 5: With thinking -->
+            <div class="msg">
+                <div class="msg-gutter">5</div>
+                <div class="msg-from agent">transparent</div>
+                <div class="msg-content">
+                    <div class="think-box">
+                        <div class="think-tog" onclick="togThink(this)">▸ Thinking</div>
+                        <div class="think-body">The exploration found 12 packages. Prioritize by: breaking changes, new features, community impact...</div>
+                    </div>
+                    <div class="msg-text">The exploration is complete:
+
+• ndk-core: Major subscription refactor, new caching
+• ndk-svelte: Reactive stores overhaul, SSR support
+• ndk-wallet: NWC improvements, multi-wallet
+
+Shall I start the deep-dive?</div>
+                    <div class="llm-row">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>18,456 in / 234 out</span>
+                        <span class="cost">$0.12</span>
+                    </div>
+                </div>
+                <div class="msg-meta">
+                    <span class="msg-time">10:04</span>
+                    <span class="msg-to">→ Pablo</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input area -->
+        <div class="input-section">
+            <div class="input-row1">
+                <div class="agent-pick" onclick="togAgentMenu()">
+                    <span id="agentName">@transparent ▾</span>
+                    <div class="agent-menu" id="agentMenu">
+                        <div class="agent-item" onclick="setAgent('transparent')">transparent</div>
+                        <div class="agent-item" onclick="setAgent('explore-agent')">explore-agent</div>
+                        <div class="agent-item" onclick="setAgent('plan-agent')">plan-agent</div>
+                        <div class="agent-item" onclick="setAgent('code-review')">code-review</div>
+                    </div>
+                </div>
+                <div class="nudge-pick" id="nudgeBtn" onclick="togNudgeMenu()">
+                    [+nudge]
+                    <div class="nudge-menu" id="nudgeMenu">
+                        <div class="nudge-item" onclick="togNudge(this,'debug')"><span class="mark">[ ]</span><span>debug</span></div>
+                        <div class="nudge-item" onclick="togNudge(this,'plan')"><span class="mark">[ ]</span><span>plan</span></div>
+                        <div class="nudge-item" onclick="togNudge(this,'expert-review')"><span class="mark">[ ]</span><span>expert-review</span></div>
+                        <div class="nudge-item" onclick="togNudge(this,'why')"><span class="mark">[ ]</span><span>why</span></div>
+                    </div>
+                </div>
+                <div class="active-nudges" id="activeTags"></div>
+            </div>
+            <div class="input-box">
+                <textarea class="input-field" placeholder="> " rows="1"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-line">
+        <span class="status-ok">● connected</span>
+        <span>tenex v0.1</span>
+        <span class="meta-tog" id="metaTog" onclick="togMeta()">[meta:off]</span>
+    </div>
+
+    <script>
+        const nudges = new Set();
+        let metaOn = false;
+
+        function pickOpt(el, multi) {
+            const box = el.closest('.ask-box');
+            const btn = box.querySelector('.ask-btn');
+            if (multi) {
+                el.classList.toggle('sel');
+                el.querySelector('.ask-mark').textContent = el.classList.contains('sel') ? '[✓]' : '[ ]';
+            } else {
+                box.querySelectorAll('.ask-opt').forEach(o => {
+                    o.classList.remove('sel');
+                    o.querySelector('.ask-mark').textContent = '( )';
+                });
+                el.classList.add('sel');
+                el.querySelector('.ask-mark').textContent = '(●)';
+            }
+            btn.classList.toggle('off', !box.querySelector('.ask-opt.sel'));
+        }
+
+        function showOther(el) {
+            const inp = el.closest('.ask-box').querySelector('.ask-input');
+            inp.classList.toggle('show', el.classList.contains('sel'));
+            if (inp.classList.contains('show')) inp.focus();
+        }
+
+        function togThink(el) {
+            const body = el.nextElementSibling;
+            body.classList.toggle('show');
+            el.textContent = body.classList.contains('show') ? '▾ Thinking' : '▸ Thinking';
+        }
+
+        function togAgentMenu() {
+            event.stopPropagation();
+            document.getElementById('agentMenu').classList.toggle('show');
+        }
+
+        function setAgent(name) {
+            event.stopPropagation();
+            document.getElementById('agentName').textContent = '@' + name + ' ▾';
+            document.getElementById('agentMenu').classList.remove('show');
+        }
+
+        function togNudgeMenu() {
+            event.stopPropagation();
+            document.getElementById('nudgeMenu').classList.toggle('show');
+            document.getElementById('nudgeBtn').classList.toggle('on');
+        }
+
+        function togNudge(el, id) {
+            event.stopPropagation();
+            el.classList.toggle('on');
+            el.querySelector('.mark').textContent = el.classList.contains('on') ? '[✓]' : '[ ]';
+            el.classList.contains('on') ? nudges.add(id) : nudges.delete(id);
+            renderTags();
+        }
+
+        function renderTags() {
+            const c = document.getElementById('activeTags');
+            c.innerHTML = '';
+            nudges.forEach(id => {
+                const t = document.createElement('span');
+                t.className = 'nudge-tag';
+                t.innerHTML = '+' + id + ' <span class="nudge-tag-x" onclick="delNudge(\'' + id + '\')">[x]</span>';
+                c.appendChild(t);
+            });
+        }
+
+        function delNudge(id) {
+            nudges.delete(id);
+            document.querySelectorAll('.nudge-item').forEach(el => {
+                if (el.textContent.includes(id)) {
+                    el.classList.remove('on');
+                    el.querySelector('.mark').textContent = '[ ]';
+                }
+            });
+            renderTags();
+        }
+
+        function togMeta() {
+            metaOn = !metaOn;
+            document.getElementById('metaTog').textContent = metaOn ? '[meta:on]' : '[meta:off]';
+            document.querySelectorAll('.llm-row').forEach(r => r.classList.toggle('visible', metaOn));
+        }
+
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.agent-pick')) document.getElementById('agentMenu').classList.remove('show');
+            if (!e.target.closest('.nudge-pick')) {
+                document.getElementById('nudgeMenu').classList.remove('show');
+                document.getElementById('nudgeBtn').classList.remove('on');
+            }
+        });
+    </script>
+</body>
+</html>

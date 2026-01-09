@@ -51,14 +51,6 @@ pub struct OpenTab {
 /// Maximum number of open tabs (matches 1-9 shortcuts)
 pub const MAX_TABS: usize = 9;
 
-/// State for the ask modal (answering multi-question ask events)
-#[derive(Debug, Clone)]
-pub struct AskModalState {
-    pub message_id: String,
-    pub ask_event: AskEvent,
-    pub input_state: AskInputState,
-}
-
 /// Buffer for local streaming content (per conversation)
 #[derive(Default, Clone)]
 pub struct LocalStreamBuffer {
@@ -153,10 +145,7 @@ pub struct App {
     project_draft_storage: RefCell<ProjectDraftStorage>,
     preferences: RefCell<PreferencesStorage>,
 
-    // Ask modal state
-    pub ask_modal_state: Option<AskModalState>,
-
-    /// Unified modal state (will replace individual modal booleans)
+    /// Unified modal state
     pub modal_state: ModalState,
 
     // Lesson viewer state
@@ -199,7 +188,6 @@ impl App {
             command_tx: None,
             data_rx: None,
 
-            project_filter: String::new(),
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
             chat_editor: TextEditor::new(),
@@ -217,7 +205,6 @@ impl App {
             home_panel_focus: HomeTab::Recent,
             selected_inbox_index: 0,
             selected_recent_index: 0,
-            showing_projects_modal: false,
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
@@ -232,7 +219,6 @@ impl App {
             new_thread_agent_index: 0,
             project_draft_storage: RefCell::new(ProjectDraftStorage::new("tenex_data")),
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
-            ask_modal_state: None,
             modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
@@ -323,6 +309,21 @@ impl App {
         if let Some(ref thread) = self.selected_thread {
             self.draft_storage.borrow_mut().delete(&thread.id);
         }
+    }
+
+    /// Check if attachment modal is open
+    pub fn is_attachment_modal_open(&self) -> bool {
+        self.showing_attachment_modal
+    }
+
+    /// Get reference to the attachment modal editor
+    pub fn attachment_modal_editor(&self) -> &TextEditor {
+        &self.attachment_modal_editor
+    }
+
+    /// Get mutable reference to the attachment modal editor
+    pub fn attachment_modal_editor_mut(&mut self) -> &mut TextEditor {
+        &mut self.attachment_modal_editor
     }
 
     /// Open attachment modal with focused attachment's content
@@ -1154,8 +1155,9 @@ impl App {
 
     /// Open ask UI inline (replacing input box)
     pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent) {
+        use crate::ui::modal::AskModalState;
         let input_state = AskInputState::new(ask_event.questions.clone());
-        self.ask_modal_state = Some(AskModalState {
+        self.modal_state = ModalState::AskModal(AskModalState {
             message_id,
             ask_event,
             input_state,
@@ -1165,8 +1167,26 @@ impl App {
 
     /// Close ask UI and return to normal input
     pub fn close_ask_modal(&mut self) {
-        self.ask_modal_state = None;
+        if matches!(self.modal_state, ModalState::AskModal(_)) {
+            self.modal_state = ModalState::None;
+        }
         self.input_mode = InputMode::Editing;
+    }
+
+    /// Get reference to ask modal state if it's open
+    pub fn ask_modal_state(&self) -> Option<&crate::ui::modal::AskModalState> {
+        match &self.modal_state {
+            ModalState::AskModal(state) => Some(state),
+            _ => None,
+        }
+    }
+
+    /// Get mutable reference to ask modal state if it's open
+    pub fn ask_modal_state_mut(&mut self) -> Option<&mut crate::ui::modal::AskModalState> {
+        match &mut self.modal_state {
+            ModalState::AskModal(state) => Some(state),
+            _ => None,
+        }
     }
 
     /// Check for unanswered ask events in current thread

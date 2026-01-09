@@ -526,6 +526,15 @@ Assistant: Here's the architecture diagram:
 - Removed modal overlay approach
 - Commit a7ec696: +428 insertions, -90 deletions
 
+**21:45 UTC:** Todo List Feature Added
+- User requested todo sidebar feature matching web client
+- Created 4 HTML mockups showing different approaches
+- Implemented Option 3: Collapsible right sidebar
+- Toggle with 't' key in Chat view
+- Shows current thread's todos with real-time updates
+- Commit 246b95a: Todo sidebar implementation
+- All 72 tests passing
+
 **PROJECT COMPLETE** ✅
 
 ---

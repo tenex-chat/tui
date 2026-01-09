@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TENEX Question UX Mockup</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0a0e14;
+            color: #b3b1ad;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 13px;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        .header {
+            color: #39c5bb;
+            padding: 8px 12px;
+            border-bottom: 1px solid #1c2128;
+        }
+        .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        .message {
+            margin-bottom: 16px;
+            border-left: 2px solid #3d4752;
+            padding-left: 12px;
+        }
+        .message.agent {
+            border-left-color: #39c5bb;
+        }
+        .message.user {
+            border-left-color: #59c2ff;
+            background: #1a1f29;
+            padding: 12px;
+            margin-left: 0;
+        }
+        .message-author {
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+        .message-author.agent { color: #39c5bb; }
+        .message-author.user { color: #59c2ff; }
+
+        /* Question block - inline with message */
+        .question-block {
+            margin-top: 12px;
+            background: #1a1f29;
+            border: 1px solid #3d4752;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .question-block.unanswered {
+            border-color: #f9ae58;
+            background: #1f2430;
+        }
+        .question-block.answered {
+            opacity: 0.7;
+            border-color: #3d4752;
+        }
+
+        /* Question tabs */
+        .question-tabs {
+            display: flex;
+            background: #0d1117;
+            border-bottom: 1px solid #3d4752;
+        }
+        .question-tab {
+            padding: 8px 16px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            color: #6e7681;
+        }
+        .question-tab:hover {
+            background: #1a1f29;
+        }
+        .question-tab.active {
+            color: #f9ae58;
+            border-bottom-color: #f9ae58;
+            background: #1f2430;
+        }
+        .question-tab.answered {
+            color: #59c2ff;
+        }
+        .question-tab.answered.active {
+            border-bottom-color: #59c2ff;
+        }
+
+        /* Question content */
+        .question-content {
+            padding: 12px;
+        }
+        .question-pane {
+            display: none;
+        }
+        .question-pane.active {
+            display: block;
+        }
+        .question-text {
+            margin-bottom: 12px;
+            color: #e6e1cf;
+        }
+        .options {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .option {
+            padding: 6px 12px;
+            cursor: pointer;
+            border-radius: 2px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .option:hover {
+            background: #2d333b;
+        }
+        .option.selected {
+            background: #39c5bb22;
+            color: #39c5bb;
+        }
+        .option-marker {
+            color: #f9ae58;
+            width: 12px;
+        }
+        .option.selected .option-marker {
+            color: #39c5bb;
+        }
+
+        /* Custom answer input - always last option */
+        .custom-answer {
+            margin-top: 8px;
+            padding: 6px 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .custom-answer-marker {
+            color: #6e7681;
+            width: 12px;
+        }
+        .custom-answer input {
+            flex: 1;
+            background: #0d1117;
+            border: 1px solid #3d4752;
+            color: #e6e1cf;
+            padding: 6px 10px;
+            font-family: inherit;
+            font-size: inherit;
+            border-radius: 2px;
+        }
+        .custom-answer input:focus {
+            outline: none;
+            border-color: #f9ae58;
+        }
+        .custom-answer input::placeholder {
+            color: #6e7681;
+        }
+
+        .answered-value {
+            color: #59c2ff;
+            font-style: italic;
+            padding: 8px 0;
+        }
+
+        /* Footer/Input area */
+        .footer {
+            border-top: 1px solid #1c2128;
+            padding: 8px 12px;
+            background: #0d1117;
+        }
+        .input-area {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .input-area input {
+            flex: 1;
+            background: #1a1f29;
+            border: 1px solid #3d4752;
+            color: #e6e1cf;
+            padding: 8px 12px;
+            font-family: inherit;
+            font-size: inherit;
+        }
+        .hint {
+            color: #6e7681;
+            font-size: 11px;
+            margin-top: 8px;
+        }
+        .hint kbd {
+            background: #2d333b;
+            padding: 2px 6px;
+            border-radius: 2px;
+            color: #39c5bb;
+        }
+
+        /* Tab bar */
+        .tab-bar {
+            display: flex;
+            gap: 12px;
+            padding: 4px 12px;
+            border-top: 1px solid #1c2128;
+            font-size: 11px;
+        }
+        .tab { color: #6e7681; }
+        .tab.active { color: #39c5bb; }
+
+        /* Scenario switcher */
+        .scenario-switcher {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background: #1a1f29;
+            border: 1px solid #3d4752;
+            padding: 12px;
+            border-radius: 4px;
+            z-index: 100;
+        }
+        .scenario-switcher h3 {
+            color: #f9ae58;
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+        .scenario-switcher button {
+            display: block;
+            width: 100%;
+            padding: 6px 12px;
+            margin-bottom: 4px;
+            background: #2d333b;
+            border: none;
+            color: #e6e1cf;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 11px;
+            text-align: left;
+        }
+        .scenario-switcher button:hover {
+            background: #39c5bb33;
+        }
+        .scenario-switcher button.active {
+            background: #39c5bb;
+            color: #0a0e14;
+        }
+
+        /* Multiselect checkboxes */
+        .checkbox {
+            width: 14px;
+            height: 14px;
+            border: 1px solid #6e7681;
+            border-radius: 2px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 4px;
+        }
+        .checkbox.checked {
+            background: #39c5bb;
+            border-color: #39c5bb;
+            color: #0a0e14;
+        }
+    </style>
+</head>
+<body>
+    <div class="scenario-switcher">
+        <h3>DEMO SCENARIOS</h3>
+        <button onclick="showScenario('unanswered')" id="btn-unanswered" class="active">Single Question</button>
+        <button onclick="showScenario('tabs')" id="btn-tabs">Multi-Question Tabs</button>
+        <button onclick="showScenario('multiselect')" id="btn-multiselect">Multiselect Question</button>
+        <button onclick="showScenario('answered')" id="btn-answered">After All Answered</button>
+    </div>
+
+    <div class="header">TENEX - Chat</div>
+
+    <div class="chat-container" id="chat">
+        <!-- Scenario: Single Unanswered -->
+        <div id="scenario-unanswered">
+            <div class="message agent">
+                <div class="message-author agent">Transparent</div>
+                <div class="message-content">
+                    As the Transparent agent in the DDD project, I need to provide the current time and date.
+                </div>
+
+                <div class="question-block unanswered">
+                    <div class="question-content">
+                        <div class="question-text">What is the current time and date?</div>
+                        <div class="options">
+                            <div class="option selected" onclick="selectOption(this)">
+                                <span class="option-marker">></span>
+                                <span>1. 2026-01-08</span>
+                            </div>
+                            <div class="option" onclick="selectOption(this)">
+                                <span class="option-marker"></span>
+                                <span>2. 2025-01-08</span>
+                            </div>
+                            <div class="option" onclick="selectOption(this)">
+                                <span class="option-marker"></span>
+                                <span>3. 2024-01-08</span>
+                            </div>
+                        </div>
+                        <div class="custom-answer">
+                            <span class="custom-answer-marker">4.</span>
+                            <input type="text" placeholder="Or type your own answer...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario: Multiple questions as tabs -->
+        <div id="scenario-tabs" style="display: none;">
+            <div class="message agent">
+                <div class="message-author agent">Transparent</div>
+                <div class="message-content">
+                    I need to configure the project. Please answer these questions.
+                </div>
+
+                <div class="question-block unanswered">
+                    <div class="question-tabs">
+                        <div class="question-tab active" onclick="switchTab(this, 'tab-env')">Environment</div>
+                        <div class="question-tab" onclick="switchTab(this, 'tab-db')">Database</div>
+                        <div class="question-tab" onclick="switchTab(this, 'tab-auth')">Auth Method</div>
+                    </div>
+                    <div class="question-content">
+                        <div class="question-pane active" id="tab-env">
+                            <div class="question-text">Which environment are you targeting?</div>
+                            <div class="options">
+                                <div class="option selected" onclick="selectOption(this)">
+                                    <span class="option-marker">></span>
+                                    <span>1. Development</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>2. Staging</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>3. Production</span>
+                                </div>
+                            </div>
+                            <div class="custom-answer">
+                                <span class="custom-answer-marker">4.</span>
+                                <input type="text" placeholder="Or type your own answer...">
+                            </div>
+                        </div>
+                        <div class="question-pane" id="tab-db">
+                            <div class="question-text">Which database should I use?</div>
+                            <div class="options">
+                                <div class="option selected" onclick="selectOption(this)">
+                                    <span class="option-marker">></span>
+                                    <span>1. PostgreSQL</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>2. MySQL</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>3. SQLite</span>
+                                </div>
+                            </div>
+                            <div class="custom-answer">
+                                <span class="custom-answer-marker">4.</span>
+                                <input type="text" placeholder="Or type your own answer...">
+                            </div>
+                        </div>
+                        <div class="question-pane" id="tab-auth">
+                            <div class="question-text">Which authentication method?</div>
+                            <div class="options">
+                                <div class="option selected" onclick="selectOption(this)">
+                                    <span class="option-marker">></span>
+                                    <span>1. OAuth</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>2. JWT</span>
+                                </div>
+                                <div class="option" onclick="selectOption(this)">
+                                    <span class="option-marker"></span>
+                                    <span>3. Session-based</span>
+                                </div>
+                            </div>
+                            <div class="custom-answer">
+                                <span class="custom-answer-marker">4.</span>
+                                <input type="text" placeholder="Or type your own answer...">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario: Multiselect -->
+        <div id="scenario-multiselect" style="display: none;">
+            <div class="message agent">
+                <div class="message-author agent">Transparent</div>
+                <div class="message-content">
+                    I can set up additional features for your project.
+                </div>
+
+                <div class="question-block unanswered">
+                    <div class="question-content">
+                        <div class="question-text">Which features do you want enabled? (select multiple)</div>
+                        <div class="options">
+                            <div class="option" onclick="toggleMultiselect(this)">
+                                <span class="checkbox checked">✓</span>
+                                <span>1. Logging</span>
+                            </div>
+                            <div class="option" onclick="toggleMultiselect(this)">
+                                <span class="checkbox checked">✓</span>
+                                <span>2. Metrics</span>
+                            </div>
+                            <div class="option" onclick="toggleMultiselect(this)">
+                                <span class="checkbox"></span>
+                                <span>3. Tracing</span>
+                            </div>
+                            <div class="option" onclick="toggleMultiselect(this)">
+                                <span class="checkbox"></span>
+                                <span>4. Rate limiting</span>
+                            </div>
+                        </div>
+                        <div class="custom-answer">
+                            <span class="custom-answer-marker">5.</span>
+                            <input type="text" placeholder="Or add your own (comma-separated)...">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Scenario: All Answered -->
+        <div id="scenario-answered" style="display: none;">
+            <div class="message agent">
+                <div class="message-author agent">Transparent</div>
+                <div class="message-content">
+                    I need to configure the project. Please answer these questions.
+                </div>
+
+                <div class="question-block answered">
+                    <div class="question-tabs">
+                        <div class="question-tab answered active" onclick="switchTab(this, 'ans-env')">Environment ✓</div>
+                        <div class="question-tab answered" onclick="switchTab(this, 'ans-db')">Database ✓</div>
+                        <div class="question-tab answered" onclick="switchTab(this, 'ans-auth')">Auth Method ✓</div>
+                    </div>
+                    <div class="question-content">
+                        <div class="question-pane active" id="ans-env">
+                            <div class="question-text">Which environment are you targeting?</div>
+                            <div class="answered-value">Answered: Production</div>
+                        </div>
+                        <div class="question-pane" id="ans-db">
+                            <div class="question-text">Which database should I use?</div>
+                            <div class="answered-value">Answered: PostgreSQL</div>
+                        </div>
+                        <div class="question-pane" id="ans-auth">
+                            <div class="question-text">Which authentication method?</div>
+                            <div class="answered-value">Answered: JWT</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="message user">
+                <div class="message-author user">Pablo Testing Pubkey</div>
+                <div class="message-content" style="color: #f9ae58;">Environment</div>
+                <div class="message-content">Production</div>
+                <div class="message-content" style="color: #f9ae58; margin-top: 8px;">Database</div>
+                <div class="message-content">PostgreSQL</div>
+                <div class="message-content" style="color: #f9ae58; margin-top: 8px;">Auth Method</div>
+                <div class="message-content">JWT</div>
+            </div>
+
+            <div class="message agent">
+                <div class="message-author agent">Transparent</div>
+                <div class="message-content">
+                    Great! I'll configure the project for Production with PostgreSQL and JWT authentication. Starting implementation now...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer" id="footer-question">
+        <div class="hint">
+            <kbd>Enter</kbd> select · <kbd>↑↓</kbd> navigate · <kbd>Tab</kbd> next question · <kbd>Shift+Tab</kbd> prev · <kbd>Esc</kbd> cancel
+        </div>
+    </div>
+
+    <div class="footer" id="footer-normal" style="display: none;">
+        <div class="input-area">
+            <input type="text" placeholder="Type a message...">
+        </div>
+        <div class="hint">
+            <kbd>Enter</kbd> send · <kbd>Esc</kbd> cancel
+        </div>
+    </div>
+
+    <div class="tab-bar">
+        <span class="tab active">1. DDD | Testing R...</span>
+        <span class="tab">2. DDD | Current T...</span>
+        <span style="margin-left: auto; color: #6e7681;">Tab:cycle x:close</span>
+    </div>
+
+    <script>
+        function showScenario(name) {
+            document.querySelectorAll('[id^="scenario-"]').forEach(el => el.style.display = 'none');
+            document.querySelectorAll('.scenario-switcher button').forEach(btn => btn.classList.remove('active'));
+
+            document.getElementById('scenario-' + name).style.display = 'block';
+            document.getElementById('btn-' + name).classList.add('active');
+
+            if (name === 'answered') {
+                document.getElementById('footer-question').style.display = 'none';
+                document.getElementById('footer-normal').style.display = 'block';
+            } else {
+                document.getElementById('footer-question').style.display = 'block';
+                document.getElementById('footer-normal').style.display = 'none';
+            }
+        }
+
+        function selectOption(el) {
+            const options = el.parentElement.querySelectorAll('.option');
+            options.forEach(opt => {
+                opt.classList.remove('selected');
+                const marker = opt.querySelector('.option-marker');
+                if (marker) marker.textContent = '';
+            });
+            el.classList.add('selected');
+            const marker = el.querySelector('.option-marker');
+            if (marker) marker.textContent = '>';
+        }
+
+        function toggleMultiselect(el) {
+            const checkbox = el.querySelector('.checkbox');
+            if (checkbox.classList.contains('checked')) {
+                checkbox.classList.remove('checked');
+                checkbox.textContent = '';
+            } else {
+                checkbox.classList.add('checked');
+                checkbox.textContent = '✓';
+            }
+        }
+
+        function switchTab(tabEl, paneId) {
+            const block = tabEl.closest('.question-block');
+            block.querySelectorAll('.question-tab').forEach(t => t.classList.remove('active'));
+            block.querySelectorAll('.question-pane').forEach(p => p.classList.remove('active'));
+            tabEl.classList.add('active');
+            document.getElementById(paneId).classList.add('active');
+        }
+    </script>
+</body>
+</html>

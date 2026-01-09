@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX TUI - Mockup 3: Minimal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --bg: #000000;
+            --bg2: #0a0a0a;
+            --fg: #b3b3b3;
+            --dim: #555555;
+            --dark: #333333;
+            --cyan: #00aaaa;
+            --green: #00aa00;
+            --yellow: #aaaa00;
+            --red: #aa0000;
+            --magenta: #aa00aa;
+            --blue: #5555ff;
+        }
+
+        body {
+            font-family: 'Iosevka', 'JetBrains Mono', 'IBM Plex Mono', monospace;
+            background: var(--bg);
+            color: var(--fg);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        /* Top line: conversation info */
+        .topline {
+            display: flex;
+            background: var(--bg2);
+            padding: 2px 8px;
+            border-bottom: 1px solid var(--dark);
+            font-size: 12px;
+        }
+
+        .topline-left {
+            display: flex;
+            gap: 8px;
+        }
+
+        .topline-right {
+            margin-left: auto;
+            display: flex;
+            gap: 16px;
+        }
+
+        .tl-name { color: var(--cyan); font-weight: bold; }
+        .tl-sum { color: var(--dim); }
+        .tl-branch { color: var(--green); }
+        .tl-tokens { color: var(--yellow); }
+        .tl-cost { color: var(--magenta); }
+        .tl-toggle { color: var(--dim); cursor: pointer; }
+        .tl-toggle:hover { color: var(--fg); }
+
+        /* Chat area */
+        .chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        /* Message */
+        .m {
+            border-bottom: 1px solid var(--dark);
+            padding: 4px 0;
+        }
+
+        .m-head {
+            display: flex;
+            padding: 0 8px;
+            font-size: 11px;
+        }
+
+        .m-who {
+            font-weight: bold;
+            min-width: 80px;
+        }
+
+        .m-who.u { color: var(--blue); }
+        .m-who.a { color: var(--green); }
+
+        .m-id { color: var(--dark); margin-left: 8px; }
+
+        .m-right {
+            margin-left: auto;
+            display: flex;
+            gap: 8px;
+        }
+
+        .m-time { color: var(--dim); }
+        .m-to { color: var(--magenta); }
+
+        .m-body {
+            padding: 2px 8px 2px 16px;
+            white-space: pre-wrap;
+        }
+
+        /* LLM meta */
+        .m-meta {
+            display: none;
+            padding: 2px 8px 2px 16px;
+            font-size: 10px;
+            color: var(--dim);
+        }
+
+        .m-meta.on { display: flex; gap: 16px; }
+        .m-meta .mod { color: var(--cyan); }
+        .m-meta .cost { color: var(--magenta); }
+
+        /* Todos */
+        .todos {
+            margin: 4px 16px;
+            border: 1px solid var(--dark);
+            padding: 4px;
+        }
+
+        .todos-head {
+            display: flex;
+            justify-content: space-between;
+            color: var(--dim);
+            font-size: 10px;
+            border-bottom: 1px solid var(--dark);
+            padding-bottom: 2px;
+            margin-bottom: 4px;
+        }
+
+        .todo {
+            display: flex;
+            gap: 4px;
+            font-size: 11px;
+        }
+
+        .todo-m { color: var(--dark); }
+        .todo-m.ok { color: var(--green); }
+        .todo-m.wip { color: var(--cyan); }
+        .todo-t.ok { color: var(--dim); text-decoration: line-through; }
+
+        /* Delegated */
+        .deleg {
+            margin: 4px 16px;
+            border: 1px solid var(--dark);
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+
+        .deleg:hover { border-color: var(--cyan); }
+
+        .deleg-h {
+            display: flex;
+            gap: 8px;
+            font-size: 11px;
+        }
+
+        .deleg-n { color: var(--fg); font-weight: bold; }
+        .deleg-s { font-size: 10px; }
+        .deleg-s.ok { color: var(--green); }
+        .deleg-s.fail { color: var(--red); }
+        .deleg-s.run { color: var(--cyan); }
+        .deleg-b { color: var(--green); font-size: 10px; }
+
+        .deleg-ag { color: var(--dim); font-size: 10px; }
+
+        .deleg-p {
+            color: var(--dim);
+            font-size: 10px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Ask */
+        .ask {
+            margin: 4px 16px;
+            border: 1px solid var(--cyan);
+            padding: 4px 8px;
+        }
+
+        .ask-h { color: var(--cyan); font-size: 11px; font-weight: bold; margin-bottom: 4px; }
+        .ask-q { margin-bottom: 4px; }
+
+        .ask-o {
+            padding: 2px 4px;
+            cursor: pointer;
+            display: flex;
+            gap: 4px;
+            font-size: 11px;
+        }
+
+        .ask-o:hover { background: rgba(0, 170, 170, 0.1); }
+        .ask-o.on { background: rgba(0, 170, 170, 0.15); }
+
+        .ask-m { color: var(--dark); }
+        .ask-o.on .ask-m { color: var(--cyan); }
+        .ask-l { color: var(--fg); }
+        .ask-r { color: var(--green); font-size: 10px; margin-left: 4px; }
+        .ask-d { color: var(--dim); font-size: 10px; margin-left: 16px; }
+
+        .ask-i {
+            display: none;
+            margin: 4px 0;
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--dark);
+            color: var(--fg);
+            padding: 2px 4px;
+            font-family: inherit;
+            font-size: 11px;
+        }
+
+        .ask-i.on { display: block; }
+
+        .ask-btn {
+            margin-top: 4px;
+            color: var(--dim);
+            font-size: 10px;
+            cursor: pointer;
+        }
+
+        .ask-btn:not(.off):hover { color: var(--cyan); }
+        .ask-btn.off { cursor: default; }
+
+        /* Thinking */
+        .think {
+            margin: 4px 16px;
+            border-left: 2px solid var(--yellow);
+            padding-left: 8px;
+        }
+
+        .think-t { color: var(--dim); cursor: pointer; font-size: 10px; }
+        .think-t:hover { color: var(--fg); }
+
+        .think-b {
+            display: none;
+            color: var(--dim);
+            font-style: italic;
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        .think-b.on { display: block; }
+
+        /* Input */
+        .inp {
+            border-top: 1px solid var(--dark);
+            padding: 4px 8px;
+        }
+
+        .inp-row1 {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .inp-agent {
+            color: var(--green);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .inp-agent:hover { color: var(--cyan); }
+
+        .agent-dd {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--dark);
+            min-width: 120px;
+            z-index: 99;
+        }
+
+        .agent-dd.on { display: block; }
+
+        .agent-it { padding: 2px 8px; cursor: pointer; }
+        .agent-it:hover { background: var(--bg2); }
+
+        .inp-nudge {
+            color: var(--dim);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .inp-nudge:hover, .inp-nudge.on { color: var(--magenta); }
+
+        .nudge-dd {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--dark);
+            min-width: 180px;
+            z-index: 99;
+        }
+
+        .nudge-dd.on { display: block; }
+
+        .nudge-it {
+            padding: 2px 8px;
+            cursor: pointer;
+            display: flex;
+            gap: 8px;
+        }
+
+        .nudge-it:hover { background: rgba(170, 0, 170, 0.1); }
+        .nudge-m { color: var(--dark); }
+        .nudge-it.on .nudge-m { color: var(--magenta); }
+
+        .inp-tags { display: flex; gap: 8px; }
+        .inp-tags:empty { display: none; }
+
+        .ntag { color: var(--magenta); font-size: 10px; }
+        .ntag-x { cursor: pointer; }
+
+        .inp-field {
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--dark);
+            color: var(--fg);
+            padding: 4px 8px;
+            font-family: inherit;
+            font-size: 12px;
+            outline: none;
+            resize: none;
+        }
+
+        .inp-field:focus { border-color: var(--cyan); }
+
+        /* Bottom line */
+        .botline {
+            display: flex;
+            background: var(--bg2);
+            padding: 2px 8px;
+            border-top: 1px solid var(--dark);
+            font-size: 10px;
+            color: var(--dim);
+        }
+
+        .botline > span { margin-right: 16px; }
+        .bl-ok { color: var(--green); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--dark); }
+    </style>
+</head>
+<body>
+    <div class="topline">
+        <div class="topline-left">
+            <span class="tl-name">PM-WIP</span>
+            <span class="tl-sum">Preparing NDK 3.0 announcement</span>
+            <span class="tl-branch">⎇master</span>
+        </div>
+        <div class="topline-right">
+            <span class="tl-tokens">15.1K tok</span>
+            <span class="tl-cost">$0.42</span>
+            <span class="tl-toggle" id="metaTog" onclick="togMeta()">[M]</span>
+        </div>
+    </div>
+
+    <div class="chat" id="chat">
+        <!-- 1 -->
+        <div class="m">
+            <div class="m-head">
+                <span class="m-who u">Pablo</span>
+                <span class="m-id">f14ae562</span>
+                <div class="m-right">
+                    <span class="m-time">10:01</span>
+                    <span class="m-to">→@transparent</span>
+                </div>
+            </div>
+            <div class="m-body">@transparent Help me prepare the NDK 3.0 announcement. Focus on packages with significant changes since March.</div>
+        </div>
+
+        <!-- 2 -->
+        <div class="m">
+            <div class="m-head">
+                <span class="m-who a">transparent</span>
+                <span class="m-id">c638c8d1</span>
+                <div class="m-right">
+                    <span class="m-time">10:01</span>
+                    <span class="m-to">→Pablo</span>
+                </div>
+            </div>
+            <div class="m-body">I'll help you prepare the NDK 3.0 announcement. Let me create a plan.</div>
+            <div class="m-meta">
+                <span class="mod">opus-4-5</span>
+                <span>15,234/847</span>
+                <span class="cost">$0.08</span>
+            </div>
+
+            <div class="todos">
+                <div class="todos-head"><span>Todos</span><span>1/3</span></div>
+                <div class="todo"><span class="todo-m ok">[✓]</span><span class="todo-t ok">Initial exploration: identify packages</span></div>
+                <div class="todo"><span class="todo-m wip">[◉]</span><span class="todo-t">Package deep-dives (parallel)</span></div>
+                <div class="todo"><span class="todo-m">[ ]</span><span class="todo-t">Synthesize announcement drafts</span></div>
+            </div>
+
+            <div class="deleg" onclick="alert('nav')">
+                <div class="deleg-h">
+                    <span class="deleg-n">Initial Exploration for NDK 3.0</span>
+                    <span class="deleg-s ok">[Done]</span>
+                    <span class="deleg-b">⎇master</span>
+                </div>
+                <div class="deleg-ag">🔍 explore-agent • 2m ago</div>
+                <div class="deleg-p">Found 12 packages: ndk-core, ndk-svelte, ndk-wallet...</div>
+            </div>
+        </div>
+
+        <!-- 3 -->
+        <div class="m">
+            <div class="m-head">
+                <span class="m-who a">transparent</span>
+                <span class="m-id">9a0cae2c</span>
+                <div class="m-right">
+                    <span class="m-time">10:02</span>
+                    <span class="m-to">→Pablo</span>
+                </div>
+            </div>
+            <div class="m-body">Before I dive deep:</div>
+            <div class="m-meta">
+                <span class="mod">opus-4-5</span>
+                <span>16,102/312</span>
+                <span class="cost">$0.10</span>
+            </div>
+
+            <div class="ask">
+                <div class="ask-h">? Question</div>
+                <div class="ask-q">What level of detail should the announcement include?</div>
+                <div class="ask-o" onclick="pick(this,0)"><span class="ask-m">( )</span><span class="ask-l">Brief summary</span><span class="ask-r">(Rec)</span></div>
+                <div class="ask-d">2-3 sentences per package</div>
+                <div class="ask-o" onclick="pick(this,0)"><span class="ask-m">( )</span><span class="ask-l">Detailed breakdown</span></div>
+                <div class="ask-d">Full changelog with migration notes</div>
+                <div class="ask-o" onclick="pick(this,0)"><span class="ask-m">( )</span><span class="ask-l">Technical deep-dive</span></div>
+                <div class="ask-d">In-depth technical article</div>
+                <div class="ask-o oth" onclick="pick(this,0);togOth(this)"><span class="ask-m">( )</span><span class="ask-l">Other...</span></div>
+                <input class="ask-i" type="text" placeholder="Custom...">
+                <div class="ask-btn off">[Submit]</div>
+            </div>
+        </div>
+
+        <!-- 4 -->
+        <div class="m">
+            <div class="m-head">
+                <span class="m-who a">transparent</span>
+                <span class="m-id">b72ef991</span>
+                <div class="m-right">
+                    <span class="m-time">10:03</span>
+                    <span class="m-to">→Pablo</span>
+                </div>
+            </div>
+            <div class="m-body">Which packages should I prioritize?</div>
+            <div class="m-meta">
+                <span class="mod">opus-4-5</span>
+                <span>18,456/234</span>
+                <span class="cost">$0.12</span>
+            </div>
+
+            <div class="ask">
+                <div class="ask-h">? Multi-select</div>
+                <div class="ask-q">Select packages to feature:</div>
+                <div class="ask-o" onclick="pick(this,1)"><span class="ask-m">[ ]</span><span class="ask-l">ndk-core</span></div>
+                <div class="ask-d">Core - major subscription refactor</div>
+                <div class="ask-o" onclick="pick(this,1)"><span class="ask-m">[ ]</span><span class="ask-l">ndk-svelte</span></div>
+                <div class="ask-d">Svelte bindings - reactive stores</div>
+                <div class="ask-o" onclick="pick(this,1)"><span class="ask-m">[ ]</span><span class="ask-l">ndk-wallet</span></div>
+                <div class="ask-d">Wallet - NWC improvements</div>
+                <div class="ask-o" onclick="pick(this,1)"><span class="ask-m">[ ]</span><span class="ask-l">ndk-mobile</span></div>
+                <div class="ask-d">Mobile - React Native support</div>
+                <div class="ask-btn off">[Submit]</div>
+            </div>
+        </div>
+
+        <!-- 5 -->
+        <div class="m">
+            <div class="m-head">
+                <span class="m-who a">transparent</span>
+                <span class="m-id">caa52ad8</span>
+                <div class="m-right">
+                    <span class="m-time">10:04</span>
+                    <span class="m-to">→Pablo</span>
+                </div>
+            </div>
+            <div class="think">
+                <div class="think-t" onclick="togThink(this)">▸ Thinking</div>
+                <div class="think-b">The exploration found 12 packages. Prioritize by: breaking changes, new features...</div>
+            </div>
+            <div class="m-body">The exploration is complete:
+
+• ndk-core: Major subscription refactor, new caching
+• ndk-svelte: Reactive stores overhaul, SSR support
+• ndk-wallet: NWC improvements, multi-wallet
+
+Shall I start the deep-dive?</div>
+            <div class="m-meta">
+                <span class="mod">opus-4-5</span>
+                <span>18,456/234</span>
+                <span class="cost">$0.12</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="inp">
+        <div class="inp-row1">
+            <div class="inp-agent" onclick="togAgent()">
+                <span id="agName">@transparent ▾</span>
+                <div class="agent-dd" id="agentDD">
+                    <div class="agent-it" onclick="setAg('transparent')">transparent</div>
+                    <div class="agent-it" onclick="setAg('explore-agent')">explore-agent</div>
+                    <div class="agent-it" onclick="setAg('plan-agent')">plan-agent</div>
+                    <div class="agent-it" onclick="setAg('code-review')">code-review</div>
+                </div>
+            </div>
+            <div class="inp-nudge" id="nudgeBtn" onclick="togNudge()">
+                [+nudge]
+                <div class="nudge-dd" id="nudgeDD">
+                    <div class="nudge-it" onclick="setNudge(this,'debug')"><span class="nudge-m">[ ]</span>debug</div>
+                    <div class="nudge-it" onclick="setNudge(this,'plan')"><span class="nudge-m">[ ]</span>plan</div>
+                    <div class="nudge-it" onclick="setNudge(this,'expert')"><span class="nudge-m">[ ]</span>expert-review</div>
+                    <div class="nudge-it" onclick="setNudge(this,'why')"><span class="nudge-m">[ ]</span>why</div>
+                </div>
+            </div>
+            <div class="inp-tags" id="tags"></div>
+        </div>
+        <textarea class="inp-field" placeholder=">" rows="1"></textarea>
+    </div>
+
+    <div class="botline">
+        <span class="bl-ok">●</span>
+        <span>tenex</span>
+        <span style="margin-left:auto;">^p:cmds j/k:nav</span>
+    </div>
+
+    <script>
+        const nudges = new Set();
+        let metaOn = false;
+
+        function pick(el, multi) {
+            const box = el.closest('.ask');
+            const btn = box.querySelector('.ask-btn');
+            if (multi) {
+                el.classList.toggle('on');
+                el.querySelector('.ask-m').textContent = el.classList.contains('on') ? '[✓]' : '[ ]';
+            } else {
+                box.querySelectorAll('.ask-o').forEach(o => { o.classList.remove('on'); o.querySelector('.ask-m').textContent = '( )'; });
+                el.classList.add('on');
+                el.querySelector('.ask-m').textContent = '(●)';
+            }
+            btn.classList.toggle('off', !box.querySelector('.ask-o.on'));
+        }
+
+        function togOth(el) {
+            const inp = el.closest('.ask').querySelector('.ask-i');
+            inp.classList.toggle('on', el.classList.contains('on'));
+            if (inp.classList.contains('on')) inp.focus();
+        }
+
+        function togThink(el) {
+            const b = el.nextElementSibling;
+            b.classList.toggle('on');
+            el.textContent = b.classList.contains('on') ? '▾ Thinking' : '▸ Thinking';
+        }
+
+        function togAgent() {
+            event.stopPropagation();
+            document.getElementById('agentDD').classList.toggle('on');
+        }
+
+        function setAg(name) {
+            event.stopPropagation();
+            document.getElementById('agName').textContent = '@' + name + ' ▾';
+            document.getElementById('agentDD').classList.remove('on');
+        }
+
+        function togNudge() {
+            event.stopPropagation();
+            document.getElementById('nudgeDD').classList.toggle('on');
+            document.getElementById('nudgeBtn').classList.toggle('on');
+        }
+
+        function setNudge(el, id) {
+            event.stopPropagation();
+            el.classList.toggle('on');
+            el.querySelector('.nudge-m').textContent = el.classList.contains('on') ? '[✓]' : '[ ]';
+            el.classList.contains('on') ? nudges.add(id) : nudges.delete(id);
+            renderTags();
+        }
+
+        function renderTags() {
+            const c = document.getElementById('tags');
+            c.innerHTML = '';
+            nudges.forEach(id => {
+                const t = document.createElement('span');
+                t.className = 'ntag';
+                t.innerHTML = '+' + id + ' <span class="ntag-x" onclick="delNudge(\'' + id + '\')">[x]</span>';
+                c.appendChild(t);
+            });
+        }
+
+        function delNudge(id) {
+            nudges.delete(id);
+            document.querySelectorAll('.nudge-it').forEach(el => {
+                if (el.textContent.includes(id)) { el.classList.remove('on'); el.querySelector('.nudge-m').textContent = '[ ]'; }
+            });
+            renderTags();
+        }
+
+        function togMeta() {
+            metaOn = !metaOn;
+            document.getElementById('metaTog').textContent = metaOn ? '[M*]' : '[M]';
+            document.querySelectorAll('.m-meta').forEach(m => m.classList.toggle('on', metaOn));
+        }
+
+        document.addEventListener('click', e => {
+            if (!e.target.closest('.inp-agent')) document.getElementById('agentDD').classList.remove('on');
+            if (!e.target.closest('.inp-nudge')) { document.getElementById('nudgeDD').classList.remove('on'); document.getElementById('nudgeBtn').classList.remove('on'); }
+        });
+    </script>
+</body>
+</html>

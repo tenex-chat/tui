@@ -1,4 +1,5 @@
 use crate::models::{InboxEventType, InboxItem, Thread};
+use crate::ui::modal::ModalState;
 use crate::ui::views::chat::render_tab_bar;
 use crate::ui::{theme, App, HomeTab, NewThreadField};
 use ratatui::{
@@ -109,7 +110,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Projects modal overlay
-    if app.showing_projects_modal {
+    if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         render_projects_modal(f, app, area);
     }
 
@@ -555,16 +556,17 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(title, modal_chunks[0]);
 
     // Filter input
-    let filter_style = if app.project_filter.is_empty() {
+    let filter = app.projects_modal_filter();
+    let filter_style = if filter.is_empty() {
         Style::default().fg(theme::TEXT_MUTED)
     } else {
         Style::default().fg(theme::ACCENT_WARNING)
     };
 
-    let filter_text = if app.project_filter.is_empty() {
-        "Type to filter projects..."
+    let filter_text = if filter.is_empty() {
+        "Type to filter projects...".to_string()
     } else {
-        &app.project_filter
+        filter.to_string()
     };
 
     let filter_input = Paragraph::new(filter_text).style(filter_style).block(
@@ -577,6 +579,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     // Render the project list
     let data_store = app.data_store.borrow();
     let (online_projects, offline_projects) = app.filtered_projects();
+    let selected_index = app.projects_modal_index();
 
     let mut items: Vec<ListItem> = Vec::new();
 
@@ -590,7 +593,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
         ))));
 
         for (idx, project) in online_projects.iter().enumerate() {
-            let is_selected = idx == app.selected_project_index;
+            let is_selected = idx == selected_index;
             let prefix = if is_selected { "  ▶ " } else { "    " };
 
             let owner_name = data_store.get_profile_name(&project.pubkey);
@@ -634,7 +637,7 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
 
         for (idx, project) in offline_projects.iter().enumerate() {
             let offset = online_projects.len();
-            let is_selected = offset + idx == app.selected_project_index;
+            let is_selected = offset + idx == selected_index;
             let prefix = if is_selected { "  ▶ " } else { "    " };
 
             let owner_name = data_store.get_profile_name(&project.pubkey);

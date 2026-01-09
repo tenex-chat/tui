@@ -143,10 +143,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
 
-    // Auto-open ask modal for first unanswered question (if not already open)
-    if app.ask_modal_state.is_none() {
-        if let Some((message_id, ask_event)) = app.has_unanswered_ask_event() {
-            app.open_ask_modal(message_id, ask_event);
+    // Auto-open ask modal for first unanswered question (only when no modal is active)
+    if matches!(app.modal_state, ModalState::None) {
+        if let Some((msg_id, ask_event)) = app.has_unanswered_ask_event() {
+            app.open_ask_modal(msg_id, ask_event);
         }
     }
 
@@ -496,7 +496,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     if msg.ask_event.is_some() && !app.is_ask_answered_by_user(&msg.id) {
                         // Unanswered question - render full inline ask UI
                         // The modal should be auto-opened (handled at start of render)
-                        if let Some(ref modal_state) = app.ask_modal_state {
+                        if let Some(modal_state) = app.ask_modal_state() {
                             if modal_state.message_id == msg.id {
                                 let ask_lines = crate::ui::views::render_inline_ask_lines(
                                     modal_state,
@@ -732,7 +732,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let input_area = chunks[idx];
 
     // Normal chat input - deterministic color border based on user's pubkey
-    let is_input_active = app.input_mode == InputMode::Editing && app.ask_modal_state.is_none();
+    let is_input_active = app.input_mode == InputMode::Editing && !matches!(app.modal_state, ModalState::AskModal(_));
 
     // Get user's deterministic color for the left border
     let user_color = app.data_store.borrow().user_pubkey.as_ref()
@@ -818,7 +818,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Show cursor in input mode (but not when ask modal is active)
     // +1 for top padding line, +3 for "│  " prefix
-    if is_input_active && !app.showing_attachment_modal {
+    if is_input_active && !app.is_attachment_modal_open() {
         let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
         f.set_cursor_position((
             input_area.x + cursor_col as u16 + 3, // +3 for "│  "
@@ -843,7 +843,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Render attachment modal if showing
-    if app.showing_attachment_modal {
+    if app.is_attachment_modal_open() {
         render_attachment_modal(f, app, area);
     }
 
@@ -877,8 +877,11 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
         "Attachment Editor".to_string()
     };
 
+    // Get editor reference
+    let editor = app.attachment_modal_editor();
+
     // Render the modal content
-    let modal = Paragraph::new(app.attachment_modal_editor.text.as_str())
+    let modal = Paragraph::new(editor.text.as_str())
         .style(Style::default().fg(theme::TEXT_PRIMARY))
         .block(
             Block::default()
@@ -891,7 +894,7 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(modal, popup_area);
 
     // Show cursor in the modal
-    let (cursor_row, cursor_col) = app.attachment_modal_editor.cursor_position();
+    let (cursor_row, cursor_col) = editor.cursor_position();
     f.set_cursor_position((
         popup_area.x + cursor_col as u16 + 1,
         popup_area.y + cursor_row as u16 + 1,
@@ -1026,7 +1029,7 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(list, popup_area);
 
     // Render ask modal overlay if open
-    if let Some(ref modal_state) = app.ask_modal_state {
+    if let Some(modal_state) = app.ask_modal_state() {
         use crate::ui::views::render_ask_modal;
 
         // Create centered modal area (90% width, 85% height)

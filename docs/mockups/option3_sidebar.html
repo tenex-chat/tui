@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Option 3: Collapsible Sidebar</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #c0c0c0;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin: 20px;
+        }
+        .terminal {
+            max-width: 1400px;
+            margin: 0 auto;
+            border: 2px solid #3a3a3a;
+            background: #0a0a0a;
+        }
+        .header {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #141414;
+            color: #00d4ff;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+        }
+        .toggle-hint {
+            color: #6c757d;
+            font-weight: normal;
+            font-size: 12px;
+        }
+        .main-area {
+            display: flex;
+        }
+        .chat-area {
+            flex: 1;
+            border-right: 1px solid #3a3a3a;
+        }
+        .sidebar {
+            width: 350px;
+            background: #0d1117;
+            border-left: 1px solid #58a6ff;
+        }
+        .sidebar-header {
+            padding: 8px 10px;
+            background: #161b22;
+            color: #58a6ff;
+            font-weight: bold;
+            border-bottom: 1px solid #3a3a3a;
+        }
+        .sidebar-content {
+            padding: 10px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .messages {
+            padding: 10px;
+            min-height: 400px;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 8px;
+            border-left: 3px solid #3a3a3a;
+        }
+        .message-header {
+            color: #ffa657;
+            margin-bottom: 5px;
+        }
+        .message-time {
+            color: #6c757d;
+            margin-left: 10px;
+        }
+        .todo-item {
+            padding: 6px 0;
+            border-bottom: 1px dashed #2a2a2a;
+        }
+        .todo-item:last-child {
+            border-bottom: none;
+        }
+        .done {
+            color: #3fb950;
+        }
+        .pending {
+            color: #6c757d;
+        }
+        .progress {
+            color: #ffa657;
+        }
+        .todo-title {
+            font-size: 13px;
+        }
+        .input-area {
+            padding: 10px;
+            border-top: 1px solid #3a3a3a;
+            background: #0d1117;
+        }
+        .input-prefix {
+            color: #58a6ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            <span>TENEX - Sample Questions</span>
+            <span class="toggle-hint">[t] toggle todos</span>
+        </div>
+
+        <div class="main-area">
+            <div class="chat-area">
+                <div class="messages">
+                    <div class="message">
+                        <div class="message-header">
+                            @user<span class="message-time">10m ago</span>
+                        </div>
+                        <div>Can you help me with this project?</div>
+                    </div>
+
+                    <div class="message">
+                        <div class="message-header">
+                            @agent-name<span class="message-time">8m ago</span>
+                        </div>
+                        <div>I'll break this into tasks and work through them systematically...</div>
+                    </div>
+
+                    <div class="message">
+                        <div class="message-header">
+                            @agent-name<span class="message-time">5m ago</span>
+                        </div>
+                        <div>Completing initial exploration now...</div>
+                    </div>
+
+                    <div class="message">
+                        <div class="message-header">
+                            @agent-name<span class="message-time">2m ago</span>
+                        </div>
+                        <div>All tasks done! Here's the comprehensive report...</div>
+                    </div>
+                </div>
+
+                <div class="input-area">
+                    <span class="input-prefix">⟩</span> Type message...
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="sidebar-header">
+                    ☑ Todos (3/3 done)
+                </div>
+                <div class="sidebar-content">
+                    <div class="todo-item done">
+                        <div><span class="done">✓</span> <span class="todo-title">Initial exploration</span></div>
+                        <div style="margin-left: 15px; font-size: 11px; color: #8b949e;">capture ideas & landscape</div>
+                    </div>
+
+                    <div class="todo-item done">
+                        <div><span class="done">✓</span> <span class="todo-title">Deep-dive research</span></div>
+                        <div style="margin-left: 15px; font-size: 11px; color: #8b949e;">SDK & pattern analysis</div>
+                    </div>
+
+                    <div class="todo-item done">
+                        <div><span class="done">✓</span> <span class="todo-title">Synthesize report</span></div>
+                        <div style="margin-left: 15px; font-size: 11px; color: #8b949e;">Validate & produce final</div>
+                    </div>
+
+                    <div style="margin-top: 20px; padding-top: 10px; border-top: 1px solid #3a3a3a; color: #6c757d; font-size: 11px;">
+                        [t] hide · [Enter] view all
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; padding: 20px; background: #0d1117; border: 1px solid #3a3a3a; max-width: 1400px; margin-left: auto; margin-right: auto;">
+        <h3 style="color: #58a6ff; margin-top: 0;">Option 3: Collapsible Right Sidebar</h3>
+        <p><strong>Pros:</strong></p>
+        <ul>
+            <li>Always accessible with 't' key toggle</li>
+            <li>Doesn't interrupt chat flow</li>
+            <li>Shows current thread's todos in context</li>
+            <li>Quick reference without scrolling</li>
+        </ul>
+        <p><strong>Cons:</strong></p>
+        <ul>
+            <li>Reduces chat width when shown</li>
+            <li>Only shows current thread (not global)</li>
+            <li>More complex layout management</li>
+        </ul>
+        <p><strong>Best for:</strong> Users who want quick access to todos while staying in conversation context.</p>
+    </div>
+</body>
+</html>

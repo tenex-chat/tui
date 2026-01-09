@@ -6,6 +6,7 @@ pub struct Project {
     pub name: String,
     pub pubkey: String,
     pub participants: Vec<String>,
+    pub created_at: u64,
 }
 
 impl Project {
@@ -51,6 +52,7 @@ impl Project {
             name: display_name,
             pubkey,
             participants,
+            created_at: note.created_at(),
         })
     }
 
@@ -70,6 +72,7 @@ mod tests {
             name: "Project 1".to_string(),
             pubkey: "a".repeat(64),
             participants: vec![],
+            created_at: 0,
         };
 
         assert_eq!(project.a_tag(), format!("31933:{}:proj1", "a".repeat(64)));

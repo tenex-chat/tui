@@ -1,5 +1,5 @@
 use crate::models::AskQuestion;
-use crate::ui::app::AskModalState;
+use crate::ui::modal::AskModalState;
 use crate::ui::ask_input::InputMode;
 use crate::ui::theme;
 use ratatui::{

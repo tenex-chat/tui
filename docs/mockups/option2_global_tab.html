@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Option 2: Global Todos Tab</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #c0c0c0;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin: 20px;
+        }
+        .terminal {
+            max-width: 1200px;
+            margin: 0 auto;
+            border: 2px solid #3a3a3a;
+            background: #0a0a0a;
+        }
+        .header {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #141414;
+            color: #00d4ff;
+            font-weight: bold;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid #3a3a3a;
+            background: #0d1117;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border-right: 1px solid #2a2a2a;
+        }
+        .tab:hover {
+            background: #161b22;
+        }
+        .tab.active {
+            color: #00d4ff;
+            border-bottom: 2px solid #00d4ff;
+            background: #141414;
+        }
+        .tab-count {
+            color: #ffa657;
+            margin-left: 5px;
+        }
+        .content {
+            padding: 10px;
+        }
+        .section {
+            margin-bottom: 20px;
+        }
+        .section-header {
+            color: #58a6ff;
+            font-weight: bold;
+            padding: 8px;
+            background: #0d1117;
+            border-left: 3px solid #58a6ff;
+            margin-bottom: 10px;
+        }
+        .todo-item {
+            padding: 8px;
+            margin-bottom: 10px;
+            border: 1px solid #2a2a2a;
+            border-radius: 4px;
+            background: #0d1117;
+        }
+        .todo-item:hover {
+            background: #161b22;
+            border-color: #3a3a3a;
+        }
+        .todo-meta {
+            color: #6c757d;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+        .project-badge {
+            color: #3fb950;
+        }
+        .agent-badge {
+            color: #ffa657;
+        }
+        .done {
+            color: #3fb950;
+        }
+        .pending {
+            color: #6c757d;
+        }
+        .progress {
+            color: #ffa657;
+        }
+        .todo-title {
+            font-weight: bold;
+        }
+        .todo-desc {
+            color: #8b949e;
+            margin-left: 20px;
+            margin-top: 4px;
+            font-size: 12px;
+        }
+        .footer {
+            padding: 10px;
+            border-top: 1px solid #3a3a3a;
+            background: #0d1117;
+            color: #6c757d;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            TENEX
+        </div>
+
+        <div class="tabs">
+            <div class="tab">Recent</div>
+            <div class="tab">Inbox <span class="tab-count">(17)</span></div>
+            <div class="tab active">Todos <span class="tab-count">(8)</span></div>
+            <div class="tab">Projects</div>
+        </div>
+
+        <div class="content">
+            <div class="section">
+                <div class="section-header">
+                    ● Active Todos (5)
+                </div>
+
+                <div class="todo-item">
+                    <div>
+                        <span class="progress">●</span>
+                        <span class="todo-title">Review implementation plan</span>
+                    </div>
+                    <div class="todo-desc">Check the plan for completeness and identify any gaps...</div>
+                    <div class="todo-meta">
+                        <span class="project-badge">● Backend</span>
+                        <span class="agent-badge">@PM-WIP</span>
+                        <span style="margin-left: 10px;">[i] View conversation</span>
+                    </div>
+                </div>
+
+                <div class="todo-item">
+                    <div>
+                        <span class="pending">○</span>
+                        <span class="todo-title">Write unit tests for new features</span>
+                    </div>
+                    <div class="todo-desc">Create comprehensive test coverage for the delegation system...</div>
+                    <div class="todo-meta">
+                        <span class="project-badge">● Web Svelte</span>
+                        <span class="agent-badge">@Claude Code</span>
+                        <span style="margin-left: 10px;">[i] View conversation</span>
+                    </div>
+                </div>
+
+                <div class="todo-item">
+                    <div>
+                        <span class="pending">○</span>
+                        <span class="todo-title">Update documentation</span>
+                    </div>
+                    <div class="todo-desc">Document the new API endpoints and usage examples...</div>
+                    <div class="todo-meta">
+                        <span class="project-badge">● Backend</span>
+                        <span class="agent-badge">@Documentation Agent</span>
+                        <span style="margin-left: 10px;">[i] View conversation</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    ✓ Completed Todos (3)
+                </div>
+
+                <div class="todo-item">
+                    <div>
+                        <span class="done">✓</span>
+                        <span class="todo-title" style="text-decoration: line-through;">Initial exploration: capture ideas</span>
+                    </div>
+                    <div class="todo-meta">
+                        <span class="project-badge">● DDD</span>
+                        <span class="agent-badge">@Agent1</span>
+                        <span style="margin-left: 10px;">Completed 1h ago</span>
+                    </div>
+                </div>
+
+                <div class="todo-item">
+                    <div>
+                        <span class="done">✓</span>
+                        <span class="todo-title" style="text-decoration: line-through;">Deep-dive: SDK research</span>
+                    </div>
+                    <div class="todo-meta">
+                        <span class="project-badge">● DDD</span>
+                        <span class="agent-badge">@Agent1</span>
+                        <span style="margin-left: 10px;">Completed 45m ago</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            ↑↓ navigate · Enter view thread · f filter by project · s sort · q quit
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; padding: 20px; background: #0d1117; border: 1px solid #3a3a3a; max-width: 1200px; margin-left: auto; margin-right: auto;">
+        <h3 style="color: #58a6ff; margin-top: 0;">Option 2: Global Todos Tab</h3>
+        <p><strong>Pros:</strong></p>
+        <ul>
+            <li>See ALL todos across all projects in one place</li>
+            <li>Filter by project, agent, or status</li>
+            <li>Sort by various criteria</li>
+            <li>Jump to source conversation with Enter</li>
+            <li>Clear overview of what needs attention</li>
+        </ul>
+        <p><strong>Cons:</strong></p>
+        <ul>
+            <li>Requires leaving current conversation</li>
+            <li>Adds another tab to navigate</li>
+            <li>More complex implementation</li>
+        </ul>
+        <p><strong>Best for:</strong> Power users managing multiple concurrent projects who need a bird's-eye view of all work.</p>
+    </div>
+</body>
+</html>

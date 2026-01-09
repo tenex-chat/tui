@@ -1,0 +1,988 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX TUI - Mockup 1</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg: #1a1b26;
+            --fg: #c0caf5;
+            --fg-dim: #565f89;
+            --fg-dark: #414868;
+            --border: #3b4261;
+            --accent-cyan: #7dcfff;
+            --accent-green: #9ece6a;
+            --accent-yellow: #e0af68;
+            --accent-red: #f7768e;
+            --accent-purple: #bb9af7;
+            --accent-blue: #7aa2f7;
+            --accent-orange: #ff9e64;
+        }
+
+        body {
+            font-family: 'JetBrains Mono', 'SF Mono', 'Monaco', 'Menlo', 'Consolas', monospace;
+            background: var(--bg);
+            color: var(--fg);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+
+        /* Header bar */
+        .header {
+            display: flex;
+            padding: 0;
+            background: var(--bg);
+            border-bottom: none;
+        }
+
+        .header-content {
+            display: flex;
+            width: 100%;
+            padding: 4px 8px;
+            gap: 16px;
+        }
+
+        .logo {
+            color: var(--accent-cyan);
+            font-weight: bold;
+        }
+
+        .title {
+            color: var(--fg-dim);
+        }
+
+        .branch {
+            color: var(--accent-green);
+        }
+
+        .meta-info {
+            margin-left: auto;
+            color: var(--fg-dim);
+        }
+
+        .meta-info span {
+            margin-left: 16px;
+        }
+
+        .tokens {
+            color: var(--accent-yellow);
+        }
+
+        .cost {
+            color: var(--accent-orange);
+        }
+
+        /* Main container */
+        .main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Messages area */
+        .messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        /* Message block */
+        .message {
+            margin-bottom: 12px;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sender {
+            font-weight: bold;
+        }
+
+        .sender.user {
+            color: var(--accent-blue);
+        }
+
+        .sender.agent {
+            color: var(--accent-green);
+        }
+
+        .event-badge {
+            color: var(--fg-dark);
+            font-size: 11px;
+        }
+
+        .recipient {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .time {
+            color: var(--fg-dim);
+            font-size: 11px;
+        }
+
+        .recipient-name {
+            color: var(--accent-purple);
+            font-size: 11px;
+        }
+
+        .message-body {
+            margin-top: 4px;
+            padding-left: 4px;
+            border-left: 1px solid var(--border);
+            margin-left: 2px;
+        }
+
+        .message-text {
+            color: var(--fg);
+            white-space: pre-wrap;
+        }
+
+        /* LLM Metadata inline */
+        .llm-meta {
+            display: none;
+            margin-top: 4px;
+            color: var(--fg-dim);
+            font-size: 11px;
+        }
+
+        .llm-meta.visible {
+            display: block;
+        }
+
+        .llm-meta span {
+            margin-right: 12px;
+        }
+
+        .llm-meta .model {
+            color: var(--accent-cyan);
+        }
+
+        .llm-meta .cost {
+            color: var(--accent-orange);
+        }
+
+        /* Todo list */
+        .todo-block {
+            margin-top: 8px;
+            border: 1px solid var(--border);
+            padding: 8px;
+        }
+
+        .todo-header {
+            display: flex;
+            justify-content: space-between;
+            color: var(--fg-dim);
+            margin-bottom: 4px;
+        }
+
+        .todo-item {
+            display: flex;
+            gap: 8px;
+            padding: 2px 0;
+        }
+
+        .todo-check {
+            color: var(--fg-dark);
+        }
+
+        .todo-check.done {
+            color: var(--accent-green);
+        }
+
+        .todo-check.progress {
+            color: var(--accent-blue);
+        }
+
+        .todo-text.done {
+            color: var(--fg-dim);
+            text-decoration: line-through;
+        }
+
+        /* Delegated conversation */
+        .delegated {
+            margin-top: 8px;
+            border: 1px solid var(--border);
+            padding: 8px;
+            cursor: pointer;
+        }
+
+        .delegated:hover {
+            border-color: var(--accent-blue);
+        }
+
+        .delegated-header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .delegated-title {
+            color: var(--fg);
+            font-weight: bold;
+        }
+
+        .status-tag {
+            font-size: 11px;
+            padding: 0 4px;
+        }
+
+        .status-tag.completed {
+            color: var(--accent-green);
+        }
+
+        .status-tag.failed {
+            color: var(--accent-red);
+        }
+
+        .status-tag.running {
+            color: var(--accent-blue);
+        }
+
+        .delegated-agent {
+            color: var(--fg-dim);
+            font-size: 11px;
+            margin-top: 2px;
+        }
+
+        .delegated-preview {
+            color: var(--fg-dim);
+            font-size: 12px;
+            margin-top: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* Ask event / Questions */
+        .ask-block {
+            margin-top: 8px;
+            border: 1px solid var(--accent-blue);
+            padding: 8px;
+        }
+
+        .ask-header {
+            color: var(--accent-blue);
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .ask-question {
+            margin-bottom: 8px;
+        }
+
+        .ask-option {
+            display: flex;
+            gap: 8px;
+            padding: 4px 8px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .ask-option:hover {
+            background: rgba(122, 162, 247, 0.1);
+        }
+
+        .ask-option.selected {
+            background: rgba(122, 162, 247, 0.15);
+            border-color: var(--accent-blue);
+        }
+
+        .ask-radio {
+            color: var(--fg-dark);
+        }
+
+        .ask-option.selected .ask-radio {
+            color: var(--accent-blue);
+        }
+
+        .ask-label {
+            color: var(--fg);
+        }
+
+        .ask-recommended {
+            color: var(--accent-green);
+            font-size: 11px;
+            margin-left: 4px;
+        }
+
+        .ask-desc {
+            color: var(--fg-dim);
+            font-size: 11px;
+            margin-left: 24px;
+            margin-top: -2px;
+        }
+
+        .ask-other-input {
+            display: none;
+            margin-top: 8px;
+            width: 100%;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 4px 8px;
+            font-family: inherit;
+            font-size: 13px;
+        }
+
+        .ask-other-input.visible {
+            display: block;
+        }
+
+        .ask-submit {
+            margin-top: 8px;
+            color: var(--fg-dim);
+            cursor: pointer;
+        }
+
+        .ask-submit:not(.disabled):hover {
+            color: var(--accent-blue);
+        }
+
+        .ask-submit.disabled {
+            cursor: not-allowed;
+        }
+
+        /* Thinking block */
+        .thinking-block {
+            margin-top: 8px;
+            border-left: 2px solid var(--accent-yellow);
+            padding-left: 8px;
+        }
+
+        .thinking-toggle {
+            color: var(--fg-dim);
+            cursor: pointer;
+            font-size: 11px;
+        }
+
+        .thinking-toggle:hover {
+            color: var(--fg);
+        }
+
+        .thinking-content {
+            display: none;
+            margin-top: 4px;
+            color: var(--fg-dim);
+            font-style: italic;
+            font-size: 12px;
+        }
+
+        .thinking-content.visible {
+            display: block;
+        }
+
+        /* Input area */
+        .input-area {
+            border-top: 1px solid var(--border);
+            padding: 8px;
+        }
+
+        .input-toolbar {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 4px;
+            font-size: 12px;
+        }
+
+        .agent-select {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            color: var(--accent-green);
+            position: relative;
+        }
+
+        .agent-select:hover {
+            color: var(--accent-cyan);
+        }
+
+        .agent-dropdown {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            min-width: 160px;
+            z-index: 100;
+        }
+
+        .agent-dropdown.visible {
+            display: block;
+        }
+
+        .agent-item {
+            padding: 4px 8px;
+            cursor: pointer;
+        }
+
+        .agent-item:hover {
+            background: rgba(122, 162, 247, 0.1);
+        }
+
+        .nudge-btn {
+            color: var(--fg-dim);
+            cursor: pointer;
+            position: relative;
+        }
+
+        .nudge-btn:hover {
+            color: var(--accent-purple);
+        }
+
+        .nudge-btn.active {
+            color: var(--accent-purple);
+        }
+
+        .nudge-popup {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            left: 0;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            min-width: 240px;
+            z-index: 100;
+        }
+
+        .nudge-popup.visible {
+            display: block;
+        }
+
+        .nudge-option {
+            padding: 4px 8px;
+            cursor: pointer;
+            display: flex;
+            gap: 8px;
+        }
+
+        .nudge-option:hover {
+            background: rgba(187, 154, 247, 0.1);
+        }
+
+        .nudge-check {
+            color: var(--fg-dark);
+        }
+
+        .nudge-option.checked .nudge-check {
+            color: var(--accent-purple);
+        }
+
+        .nudge-name {
+            color: var(--fg);
+        }
+
+        .nudge-desc {
+            color: var(--fg-dim);
+            font-size: 11px;
+        }
+
+        .active-nudges {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 4px;
+            flex-wrap: wrap;
+        }
+
+        .active-nudges:empty {
+            display: none;
+        }
+
+        .nudge-tag {
+            color: var(--accent-purple);
+            font-size: 11px;
+            display: flex;
+            gap: 4px;
+        }
+
+        .nudge-tag-remove {
+            cursor: pointer;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 8px;
+        }
+
+        .input-field {
+            flex: 1;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            color: var(--fg);
+            padding: 8px;
+            font-family: inherit;
+            font-size: 13px;
+            resize: none;
+            outline: none;
+        }
+
+        .input-field:focus {
+            border-color: var(--accent-blue);
+        }
+
+        /* Status bar */
+        .status-bar {
+            display: flex;
+            padding: 2px 8px;
+            background: var(--bg);
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--fg-dim);
+        }
+
+        .status-bar > span {
+            margin-right: 16px;
+        }
+
+        .status-connected {
+            color: var(--accent-green);
+        }
+
+        /* Toggle for metadata */
+        .meta-toggle {
+            margin-left: auto;
+            cursor: pointer;
+        }
+
+        .meta-toggle:hover {
+            color: var(--fg);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+        }
+
+        /* Box drawing helpers */
+        .box {
+            border: 1px solid var(--border);
+        }
+
+        .box-title {
+            color: var(--fg-dim);
+            padding: 0 4px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header with conversation metadata -->
+    <div class="header">
+        <div class="header-content">
+            <span class="logo">TENEX</span>
+            <span class="title">PM-WIP Session</span>
+            <span class="branch">⎇ master</span>
+            <div class="meta-info">
+                <span class="tokens">15.1K tokens</span>
+                <span class="cost">$0.42</span>
+                <span class="meta-toggle" id="metaToggle">[meta: off]</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main chat area -->
+    <div class="main">
+        <div class="messages" id="messages">
+            <!-- User message -->
+            <div class="message">
+                <div class="message-header">
+                    <span class="sender user">Pablo Fernandez</span>
+                    <span class="event-badge">kind:1 id:f14ae562</span>
+                    <div class="recipient">
+                        <span class="time">10:01 AM</span>
+                        <span class="recipient-name">→ @transparent</span>
+                    </div>
+                </div>
+                <div class="message-body">
+                    <div class="message-text">@transparent Help me prepare the NDK 3.0 announcement. Focus on packages with significant changes since March.</div>
+                </div>
+            </div>
+
+            <!-- Agent message with todos and delegated conv -->
+            <div class="message">
+                <div class="message-header">
+                    <span class="sender agent">transparent</span>
+                    <span class="event-badge">kind:1 id:c638c8d1</span>
+                    <div class="recipient">
+                        <span class="time">10:01 AM</span>
+                        <span class="recipient-name">→ Pablo Fernandez</span>
+                    </div>
+                </div>
+                <div class="message-body">
+                    <div class="message-text">I'll help you prepare the NDK 3.0 announcement. Let me create a plan and start exploring the repository.</div>
+                    <div class="llm-meta">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>15,234 in / 847 out</span>
+                        <span>12% context</span>
+                        <span class="cost">$0.08</span>
+                    </div>
+
+                    <!-- Todo List -->
+                    <div class="todo-block">
+                        <div class="todo-header">
+                            <span>┌─ Todo List ─┐</span>
+                            <span>1/3 done</span>
+                        </div>
+                        <div class="todo-item">
+                            <span class="todo-check done">[✓]</span>
+                            <span class="todo-text done">Initial exploration: identify packages to announce</span>
+                        </div>
+                        <div class="todo-item">
+                            <span class="todo-check progress">[◉]</span>
+                            <span class="todo-text">Package deep-dives (parallel)</span>
+                        </div>
+                        <div class="todo-item">
+                            <span class="todo-check">[ ]</span>
+                            <span class="todo-text">Synthesize announcement drafts</span>
+                        </div>
+                    </div>
+
+                    <!-- Delegated conversation -->
+                    <div class="delegated" onclick="alert('Navigate to conversation')">
+                        <div class="delegated-header">
+                            <span class="delegated-title">Initial Exploration for NDK 3.0 Packages</span>
+                            <span class="status-tag completed">[Completed]</span>
+                            <span class="status-tag" style="color: var(--accent-green);">⎇ master</span>
+                        </div>
+                        <div class="delegated-agent">🔍 Explore Agent • 2 min ago</div>
+                        <div class="delegated-preview">Found 12 packages with significant changes: ndk-core, ndk-svelte, ndk-wallet...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent message with single-select question -->
+            <div class="message">
+                <div class="message-header">
+                    <span class="sender agent">transparent</span>
+                    <span class="event-badge">kind:1 id:9a0cae2c</span>
+                    <div class="recipient">
+                        <span class="time">10:02 AM</span>
+                        <span class="recipient-name">→ Pablo Fernandez</span>
+                    </div>
+                </div>
+                <div class="message-body">
+                    <div class="message-text">I found several packages with significant changes. Before I dive deep, I need to understand the scope:</div>
+                    <div class="llm-meta">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>16,102 in / 312 out</span>
+                        <span class="cost">$0.10</span>
+                    </div>
+
+                    <!-- Single select question -->
+                    <div class="ask-block">
+                        <div class="ask-header">? Question</div>
+                        <div class="ask-question">What level of detail should the announcement include?</div>
+                        <div class="ask-option" onclick="selectOpt(this, false)">
+                            <span class="ask-radio">( )</span>
+                            <div>
+                                <span class="ask-label">Brief summary</span>
+                                <span class="ask-recommended">(Recommended)</span>
+                            </div>
+                        </div>
+                        <div class="ask-desc">2-3 sentences per package, focus on headlines</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, false)">
+                            <span class="ask-radio">( )</span>
+                            <span class="ask-label">Detailed breakdown</span>
+                        </div>
+                        <div class="ask-desc">Full changelog with migration notes and code examples</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, false)">
+                            <span class="ask-radio">( )</span>
+                            <span class="ask-label">Technical deep-dive</span>
+                        </div>
+                        <div class="ask-desc">In-depth technical article for developers</div>
+
+                        <div class="ask-option other-opt" onclick="selectOpt(this, false); toggleOther(this)">
+                            <span class="ask-radio">( )</span>
+                            <span class="ask-label">Other...</span>
+                        </div>
+                        <input type="text" class="ask-other-input" placeholder="Type your custom response...">
+
+                        <div class="ask-submit disabled">[Submit]</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent message with multiselect question -->
+            <div class="message">
+                <div class="message-header">
+                    <span class="sender agent">transparent</span>
+                    <span class="event-badge">kind:1 id:b72ef991</span>
+                    <div class="recipient">
+                        <span class="time">10:03 AM</span>
+                        <span class="recipient-name">→ Pablo Fernandez</span>
+                    </div>
+                </div>
+                <div class="message-body">
+                    <div class="message-text">One more thing - which packages should I prioritize?</div>
+                    <div class="llm-meta">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>18,456 in / 234 out</span>
+                        <span class="cost">$0.12</span>
+                    </div>
+
+                    <!-- Multiselect question -->
+                    <div class="ask-block">
+                        <div class="ask-header">? Multi-select (select all that apply)</div>
+                        <div class="ask-question">Which packages should be featured prominently?</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, true)">
+                            <span class="ask-radio">[ ]</span>
+                            <span class="ask-label">ndk-core</span>
+                        </div>
+                        <div class="ask-desc">Core functionality - major subscription refactor</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, true)">
+                            <span class="ask-radio">[ ]</span>
+                            <span class="ask-label">ndk-svelte</span>
+                        </div>
+                        <div class="ask-desc">Svelte bindings - reactive stores overhaul</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, true)">
+                            <span class="ask-radio">[ ]</span>
+                            <span class="ask-label">ndk-wallet</span>
+                        </div>
+                        <div class="ask-desc">Wallet support - NWC improvements</div>
+
+                        <div class="ask-option" onclick="selectOpt(this, true)">
+                            <span class="ask-radio">[ ]</span>
+                            <span class="ask-label">ndk-mobile</span>
+                        </div>
+                        <div class="ask-desc">Mobile bindings - React Native support</div>
+
+                        <div class="ask-submit disabled">[Submit Selections]</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Agent message with thinking -->
+            <div class="message">
+                <div class="message-header">
+                    <span class="sender agent">transparent</span>
+                    <span class="event-badge">kind:1 id:caa52ad8</span>
+                    <div class="recipient">
+                        <span class="time">10:04 AM</span>
+                        <span class="recipient-name">→ Pablo Fernandez</span>
+                    </div>
+                </div>
+                <div class="message-body">
+                    <div class="thinking-block">
+                        <div class="thinking-toggle" onclick="toggleThinking(this)">▸ Thinking</div>
+                        <div class="thinking-content">The exploration agent found 12 packages. I should prioritize based on: breaking changes, new features, and community impact...</div>
+                    </div>
+                    <div class="message-text" style="margin-top: 8px;">The exploration is complete. Here's what I found:
+
+• ndk-core: Major subscription refactor, new caching system
+• ndk-svelte: Reactive stores overhaul, SSR support
+• ndk-wallet: NWC improvements, multi-wallet support
+
+Shall I start the deep-dive on these packages?</div>
+                    <div class="llm-meta">
+                        <span class="model">claude-opus-4-5</span>
+                        <span>18,456 in / 234 out</span>
+                        <span class="cost">$0.12</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input area -->
+        <div class="input-area">
+            <div class="input-toolbar">
+                <div class="agent-select" onclick="toggleAgentDropdown()">
+                    <span id="selectedAgent">@transparent</span>
+                    <span>▾</span>
+                    <div class="agent-dropdown" id="agentDropdown">
+                        <div class="agent-item" onclick="selectAgent('transparent')">transparent</div>
+                        <div class="agent-item" onclick="selectAgent('explore-agent')">explore-agent</div>
+                        <div class="agent-item" onclick="selectAgent('plan-agent')">plan-agent</div>
+                        <div class="agent-item" onclick="selectAgent('code-review')">code-review</div>
+                    </div>
+                </div>
+                <div class="nudge-btn" id="nudgeBtn" onclick="toggleNudgePopup()">
+                    [+nudge]
+                    <div class="nudge-popup" id="nudgePopup">
+                        <div class="nudge-option" onclick="toggleNudge(this, 'debug')">
+                            <span class="nudge-check">[ ]</span>
+                            <div>
+                                <div class="nudge-name">debug</div>
+                                <div class="nudge-desc">Debug an agent response</div>
+                            </div>
+                        </div>
+                        <div class="nudge-option" onclick="toggleNudge(this, 'plan')">
+                            <span class="nudge-check">[ ]</span>
+                            <div>
+                                <div class="nudge-name">plan</div>
+                                <div class="nudge-desc">Create a detailed plan first</div>
+                            </div>
+                        </div>
+                        <div class="nudge-option" onclick="toggleNudge(this, 'expert-review')">
+                            <span class="nudge-check">[ ]</span>
+                            <div>
+                                <div class="nudge-name">expert-review</div>
+                                <div class="nudge-desc">Review from expert perspective</div>
+                            </div>
+                        </div>
+                        <div class="nudge-option" onclick="toggleNudge(this, 'why')">
+                            <span class="nudge-check">[ ]</span>
+                            <div>
+                                <div class="nudge-name">why</div>
+                                <div class="nudge-desc">Five Whys root cause analysis</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="active-nudges" id="activeNudges"></div>
+            <div class="input-row">
+                <textarea class="input-field" placeholder="> Type your message..." rows="1"></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status-bar">
+        <span class="status-connected">● Connected</span>
+        <span>tenex v0.1.0</span>
+        <span style="margin-left: auto;">Tab:cycle x:close</span>
+    </div>
+
+    <script>
+        const activeNudges = new Set();
+        let metaVisible = false;
+
+        function selectOpt(el, isMulti) {
+            const block = el.closest('.ask-block');
+            const submit = block.querySelector('.ask-submit');
+
+            if (isMulti) {
+                el.classList.toggle('selected');
+                const radio = el.querySelector('.ask-radio');
+                radio.textContent = el.classList.contains('selected') ? '[✓]' : '[ ]';
+            } else {
+                block.querySelectorAll('.ask-option').forEach(opt => {
+                    opt.classList.remove('selected');
+                    opt.querySelector('.ask-radio').textContent = '( )';
+                });
+                el.classList.add('selected');
+                el.querySelector('.ask-radio').textContent = '(●)';
+            }
+
+            const hasSelection = block.querySelector('.ask-option.selected');
+            submit.classList.toggle('disabled', !hasSelection);
+        }
+
+        function toggleOther(el) {
+            const block = el.closest('.ask-block');
+            const input = block.querySelector('.ask-other-input');
+            input.classList.toggle('visible', el.classList.contains('selected'));
+            if (input.classList.contains('visible')) input.focus();
+        }
+
+        function toggleThinking(el) {
+            const content = el.nextElementSibling;
+            content.classList.toggle('visible');
+            el.textContent = content.classList.contains('visible') ? '▾ Thinking' : '▸ Thinking';
+        }
+
+        function toggleAgentDropdown() {
+            event.stopPropagation();
+            document.getElementById('agentDropdown').classList.toggle('visible');
+        }
+
+        function selectAgent(name) {
+            event.stopPropagation();
+            document.getElementById('selectedAgent').textContent = '@' + name;
+            document.getElementById('agentDropdown').classList.remove('visible');
+        }
+
+        function toggleNudgePopup() {
+            event.stopPropagation();
+            document.getElementById('nudgePopup').classList.toggle('visible');
+            document.getElementById('nudgeBtn').classList.toggle('active');
+        }
+
+        function toggleNudge(el, id) {
+            event.stopPropagation();
+            el.classList.toggle('checked');
+            const check = el.querySelector('.nudge-check');
+
+            if (el.classList.contains('checked')) {
+                check.textContent = '[✓]';
+                activeNudges.add(id);
+            } else {
+                check.textContent = '[ ]';
+                activeNudges.delete(id);
+            }
+
+            updateNudgeTags();
+        }
+
+        function updateNudgeTags() {
+            const container = document.getElementById('activeNudges');
+            container.innerHTML = '';
+            activeNudges.forEach(id => {
+                const tag = document.createElement('span');
+                tag.className = 'nudge-tag';
+                tag.innerHTML = `+${id} <span class="nudge-tag-remove" onclick="removeNudge('${id}')">[x]</span>`;
+                container.appendChild(tag);
+            });
+        }
+
+        function removeNudge(id) {
+            activeNudges.delete(id);
+            document.querySelectorAll('.nudge-option').forEach(opt => {
+                if (opt.textContent.includes(id)) {
+                    opt.classList.remove('checked');
+                    opt.querySelector('.nudge-check').textContent = '[ ]';
+                }
+            });
+            updateNudgeTags();
+        }
+
+        document.getElementById('metaToggle').addEventListener('click', function() {
+            metaVisible = !metaVisible;
+            this.textContent = metaVisible ? '[meta: on]' : '[meta: off]';
+            document.querySelectorAll('.llm-meta').forEach(m => {
+                m.classList.toggle('visible', metaVisible);
+            });
+        });
+
+        document.addEventListener('click', function(e) {
+            if (!e.target.closest('.agent-select')) {
+                document.getElementById('agentDropdown').classList.remove('visible');
+            }
+            if (!e.target.closest('.nudge-btn')) {
+                document.getElementById('nudgePopup').classList.remove('visible');
+                document.getElementById('nudgeBtn').classList.remove('active');
+            }
+        });
+    </script>
+</body>
+</html>

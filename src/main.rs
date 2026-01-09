@@ -10,7 +10,7 @@ use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyM
 use futures::StreamExt;
 use ratatui::{
     layout::{Constraint, Layout},
-    style::{Color, Style},
+    style::Style,
     widgets::{Block, Paragraph},
     Frame,
 };
@@ -225,9 +225,9 @@ async fn run_app(
                         Event::Paste(text) => {
                             // Handle paste event - only in Chat view with editing mode
                             if app.view == View::Chat && app.input_mode == InputMode::Editing {
-                                if app.showing_attachment_modal {
+                                if let Some(editor) = app.attachment_modal_editor_mut() {
                                     // Paste into attachment modal
-                                    app.attachment_modal_editor.handle_paste(&text);
+                                    editor.handle_paste(&text);
                                 } else {
                                     // Check if pasted text is an image file path (drag & drop)
                                     if let Some(keys) = app.keys.clone() {
@@ -424,13 +424,13 @@ fn handle_key(
     let code = key.code;
 
     // Handle attachment modal when open
-    if app.showing_attachment_modal {
+    if app.is_attachment_modal_open() {
         handle_attachment_modal_key(app, key);
         return Ok(());
     }
 
     // Handle ask modal when open
-    if app.ask_modal_state.is_some() {
+    if matches!(app.modal_state, ModalState::AskModal(_)) {
         handle_ask_modal_key(app, key);
         return Ok(());
     }
@@ -864,13 +864,13 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
     // Handle projects modal when showing (using ModalState)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
-        // Get item count BEFORE mutably borrowing modal_state
-        let item_count = ui::views::selectable_project_count(app);
+        // Get projects BEFORE mutably borrowing modal_state
+        let (online_projects, offline_projects) = app.filtered_projects();
+        let all_projects: Vec<_> = online_projects.into_iter().chain(offline_projects).collect();
+        let item_count = all_projects.len();
 
         if let ModalState::ProjectsModal { ref mut selector } = app.modal_state {
-            match handle_selector_key(selector, key, item_count, |idx| {
-                ui::views::get_project_at_index(app, idx).map(|(p, _)| p)
-            }) {
+            match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
                 SelectorAction::Selected(project) => {
                     let a_tag = project.a_tag();
                     app.selected_project = Some(project);
@@ -1345,7 +1345,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key events for the attachment modal
+/// Handle key events for the ask modal
 fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
     use crate::ui::ask_input::InputMode as AskInputMode;
 
@@ -1353,7 +1353,7 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
     let modifiers = key.modifiers;
 
     // Extract modal_state to avoid borrow issues
-    let modal_state = match &mut app.ask_modal_state {
+    let modal_state = match app.ask_modal_state_mut() {
         Some(state) => state,
         None => return,
     };
@@ -1432,9 +1432,14 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
 }
 
 fn submit_ask_response(app: &mut App) {
-    let modal_state = match app.ask_modal_state.take() {
-        Some(state) => state,
-        None => return,
+    // Extract the ask modal state
+    let modal_state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::AskModal(state) => state,
+        other => {
+            // Restore the state if it wasn't an ask modal
+            app.modal_state = other;
+            return;
+        }
     };
 
     let response_text = modal_state.input_state.format_response();
@@ -1478,44 +1483,66 @@ fn handle_attachment_modal_key(app: &mut App, key: KeyEvent) {
         }
         // Enter = newline in modal
         KeyCode::Enter => {
-            app.attachment_modal_editor.insert_newline();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.insert_newline();
+            }
         }
         // Ctrl+A = move to beginning of line
         KeyCode::Char('a') if has_ctrl => {
-            app.attachment_modal_editor.move_to_line_start();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_to_line_start();
+            }
         }
         // Ctrl+E = move to end of line
         KeyCode::Char('e') if has_ctrl => {
-            app.attachment_modal_editor.move_to_line_end();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_to_line_end();
+            }
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
-            app.attachment_modal_editor.kill_to_line_end();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.kill_to_line_end();
+            }
         }
         // Alt+Left = word left
         KeyCode::Left if has_alt => {
-            app.attachment_modal_editor.move_word_left();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_word_left();
+            }
         }
         // Alt+Right = word right
         KeyCode::Right if has_alt => {
-            app.attachment_modal_editor.move_word_right();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_word_right();
+            }
         }
         // Basic navigation
         KeyCode::Left => {
-            app.attachment_modal_editor.move_left();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_left();
+            }
         }
         KeyCode::Right => {
-            app.attachment_modal_editor.move_right();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.move_right();
+            }
         }
         KeyCode::Backspace => {
-            app.attachment_modal_editor.delete_char_before();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.delete_char_before();
+            }
         }
         KeyCode::Delete => {
-            app.attachment_modal_editor.delete_char_at();
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.delete_char_at();
+            }
         }
         // Regular character input
         KeyCode::Char(c) => {
-            app.attachment_modal_editor.insert_char(c);
+            if let Some(editor) = app.attachment_modal_editor_mut() {
+                editor.insert_char(c);
+            }
         }
         _ => {}
     }

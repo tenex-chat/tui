@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Option 4: Compact Badge with Expand</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #c0c0c0;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin: 20px;
+        }
+        .terminal {
+            max-width: 1200px;
+            margin: 0 auto;
+            border: 2px solid #3a3a3a;
+            background: #0a0a0a;
+        }
+        .header {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #141414;
+            color: #00d4ff;
+            font-weight: bold;
+        }
+        .messages {
+            padding: 10px;
+            min-height: 500px;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 8px;
+            border-left: 3px solid #3a3a3a;
+        }
+        .message-header {
+            color: #ffa657;
+            margin-bottom: 5px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .message-time {
+            color: #6c757d;
+        }
+        .todo-badge {
+            color: #58a6ff;
+            font-size: 12px;
+            padding: 2px 8px;
+            border: 1px solid #58a6ff;
+            border-radius: 3px;
+            background: #0d1117;
+        }
+        .todo-badge:hover {
+            background: #161b22;
+        }
+        .hint {
+            color: #6c757d;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        .todo-expanded {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #58a6ff;
+            border-radius: 4px;
+            background: #0d1117;
+        }
+        .todo-item {
+            padding: 4px 0;
+        }
+        .done {
+            color: #3fb950;
+        }
+        .pending {
+            color: #6c757d;
+        }
+        .input-area {
+            padding: 10px;
+            border-top: 1px solid #3a3a3a;
+            background: #0d1117;
+        }
+        .input-prefix {
+            color: #58a6ff;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            TENEX - Sample Questions
+        </div>
+
+        <div class="messages">
+            <div class="message">
+                <div class="message-header">
+                    <span>@agent-name <span class="message-time">8m ago</span></span>
+                    <span class="todo-badge">[3 todos: 3✓]</span>
+                </div>
+                <div>I'll work through these tasks...</div>
+                <div class="hint">[Press 't' to view todos]</div>
+            </div>
+
+            <div class="message">
+                <div class="message-header">
+                    <span>@agent-name <span class="message-time">5m ago</span></span>
+                    <span class="todo-badge">[3 todos: 2✓ 1●]</span>
+                </div>
+                <div>Working on the second task now...</div>
+
+                <div class="todo-expanded">
+                    <div style="color: #58a6ff; margin-bottom: 8px; font-weight: bold;">
+                        ☑ Todos (2/3 done)
+                    </div>
+                    <div class="todo-item">
+                        <span class="done">✓</span> Initial exploration: capture ideas
+                    </div>
+                    <div class="todo-item">
+                        <span class="done">✓</span> Deep-dive: SDK research
+                    </div>
+                    <div class="todo-item">
+                        <span class="pending">○</span> Synthesize findings
+                    </div>
+                    <div style="margin-top: 8px; font-size: 11px; color: #6c757d;">
+                        [Press 't' to hide]
+                    </div>
+                </div>
+            </div>
+
+            <div class="message">
+                <div class="message-header">
+                    <span>@agent-name <span class="message-time">2m ago</span></span>
+                    <span class="todo-badge">[3 todos: 3✓]</span>
+                </div>
+                <div>All tasks completed! Here's the final report...</div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <span class="input-prefix">⟩</span> Type message...
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; padding: 20px; background: #0d1117; border: 1px solid #3a3a3a; max-width: 1200px; margin-left: auto; margin-right: auto;">
+        <h3 style="color: #58a6ff; margin-top: 0;">Option 4: Compact Badge with On-Demand Expansion</h3>
+        <p><strong>Pros:</strong></p>
+        <ul>
+            <li>Minimal visual footprint when collapsed</li>
+            <li>Quick status at a glance (2✓ 1●)</li>
+            <li>Expandable when you need details</li>
+            <li>Stays in message context</li>
+            <li>Historical reference - can see todo progress over time</li>
+        </ul>
+        <p><strong>Cons:</strong></p>
+        <ul>
+            <li>Requires manual toggle to see details</li>
+            <li>Only shows in messages that have todos</li>
+            <li>No global aggregation</li>
+        </ul>
+        <p><strong>Best for:</strong> Users who want lightweight todo tracking that doesn't clutter the interface.</p>
+    </div>
+</body>
+</html>

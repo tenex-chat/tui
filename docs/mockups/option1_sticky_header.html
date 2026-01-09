@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Option 1: Sticky Todo Header</title>
+    <style>
+        body {
+            background: #1a1a1a;
+            color: #c0c0c0;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            font-size: 14px;
+            line-height: 1.4;
+            margin: 20px;
+        }
+        .terminal {
+            max-width: 1200px;
+            margin: 0 auto;
+            border: 2px solid #3a3a3a;
+            background: #0a0a0a;
+        }
+        .header {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #141414;
+            color: #00d4ff;
+            font-weight: bold;
+        }
+        .todo-header {
+            padding: 8px 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #0d1117;
+            cursor: pointer;
+            user-select: none;
+        }
+        .todo-header:hover {
+            background: #161b22;
+        }
+        .todo-count {
+            color: #58a6ff;
+            float: right;
+        }
+        .todo-list {
+            padding: 10px;
+            border-bottom: 1px solid #3a3a3a;
+            background: #0d1117;
+        }
+        .todo-item {
+            padding: 6px 0;
+            border-bottom: 1px dashed #2a2a2a;
+        }
+        .todo-item:last-child {
+            border-bottom: none;
+        }
+        .todo-checkbox {
+            color: #3fb950;
+            margin-right: 8px;
+        }
+        .todo-pending {
+            color: #6c757d;
+        }
+        .todo-progress {
+            color: #ffa657;
+        }
+        .todo-title {
+            font-weight: bold;
+        }
+        .todo-desc {
+            color: #8b949e;
+            margin-left: 20px;
+            font-size: 12px;
+        }
+        .messages {
+            padding: 10px;
+            min-height: 400px;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        .message {
+            margin-bottom: 15px;
+            padding: 8px;
+            border-left: 3px solid #3a3a3a;
+        }
+        .message-header {
+            color: #ffa657;
+            margin-bottom: 5px;
+        }
+        .message-time {
+            color: #6c757d;
+            margin-left: 10px;
+        }
+        .input-area {
+            padding: 10px;
+            border-top: 1px solid #3a3a3a;
+            background: #0d1117;
+        }
+        .input-prefix {
+            color: #58a6ff;
+        }
+        .collapsed {
+            display: none;
+        }
+        .expand-icon {
+            color: #58a6ff;
+            margin-left: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="terminal">
+        <div class="header">
+            TENEX - Sample Questions
+        </div>
+
+        <div class="todo-header" onclick="toggleTodos()">
+            ☑ Todo List <span class="expand-icon" id="expandIcon">▼</span>
+            <span class="todo-count">3/3 done</span>
+        </div>
+
+        <div class="todo-list" id="todoList">
+            <div class="todo-item">
+                <span class="todo-checkbox">✓</span>
+                <span class="todo-title">Initial exploration: capture ideas & landscape</span>
+                <div class="todo-desc">Write initial report capturing the "magical model" concept, list variations (simple, large-context-window, ultrathink), pros/cons, open questions, risks, and next steps.</div>
+            </div>
+
+            <div class="todo-item">
+                <span class="todo-checkbox">✓</span>
+                <span class="todo-title">Deep-dive: SDK & pattern research</span>
+                <div class="todo-desc">Collect and summarize relevant AI SDK capabilities (OpenAI, Anthropic, Vertex, Hugging Face, LangChain, LlamaIndex) that enable dynamic model routing.</div>
+            </div>
+
+            <div class="todo-item">
+                <span class="todo-checkbox">✓</span>
+                <span class="todo-title">Double-check & synthesize report</span>
+                <div class="todo-desc">Validate the combined findings, incorporate good ideas into the project report, and produce final recommendations.</div>
+            </div>
+        </div>
+
+        <div class="messages">
+            <div class="message">
+                <div class="message-header">
+                    @agent-name<span class="message-time">5m ago</span>
+                </div>
+                <div>I'll complete these tasks in sequence. Let me start with the initial exploration...</div>
+            </div>
+
+            <div class="message">
+                <div class="message-header">
+                    @user<span class="message-time">3m ago</span>
+                </div>
+                <div>Sounds good! Keep me posted on your progress.</div>
+            </div>
+
+            <div class="message">
+                <div class="message-header">
+                    @agent-name<span class="message-time">2m ago</span>
+                </div>
+                <div>All tasks completed! I've gathered comprehensive research on dynamic model routing patterns...</div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <span class="input-prefix">⟩</span> Type message...
+        </div>
+    </div>
+
+    <script>
+        function toggleTodos() {
+            const todoList = document.getElementById('todoList');
+            const icon = document.getElementById('expandIcon');
+            if (todoList.classList.contains('collapsed')) {
+                todoList.classList.remove('collapsed');
+                icon.textContent = '▼';
+            } else {
+                todoList.classList.add('collapsed');
+                icon.textContent = '▶';
+            }
+        }
+    </script>
+
+    <div style="margin-top: 20px; padding: 20px; background: #0d1117; border: 1px solid #3a3a3a; max-width: 1200px; margin-left: auto; margin-right: auto;">
+        <h3 style="color: #58a6ff; margin-top: 0;">Option 1: Sticky Header</h3>
+        <p><strong>Pros:</strong></p>
+        <ul>
+            <li>Always visible - progress tracked at a glance</li>
+            <li>Collapsible to save space (click header to toggle)</li>
+            <li>Contextual to current conversation</li>
+            <li>Clean, unobtrusive when collapsed</li>
+        </ul>
+        <p><strong>Cons:</strong></p>
+        <ul>
+            <li>Takes vertical space when expanded</li>
+            <li>Only shows current thread's todos</li>
+        </ul>
+        <p><strong>Best for:</strong> Users who want constant visibility of task progress without leaving the conversation.</p>
+    </div>
+</body>
+</html>
