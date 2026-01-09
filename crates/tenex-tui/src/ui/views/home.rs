@@ -1,6 +1,12 @@
 use crate::models::{InboxEventType, InboxItem, Thread};
+use crate::ui::components::{
+    modal_area, render_modal_background, render_modal_header, render_modal_items,
+    render_modal_search, render_modal_sections, render_tab_bar, ModalItem, ModalSection, ModalSize,
+};
 use crate::ui::modal::ModalState;
-use crate::ui::views::chat::render_tab_bar;
+use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
+use crate::ui::views::home_helpers::build_thread_hierarchy;
+pub use crate::ui::views::home_helpers::HierarchicalThread;
 use crate::ui::{theme, App, HomeTab, NewThreadField};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -9,168 +15,6 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
-use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Hierarchical thread item with depth for nesting display
-#[derive(Clone)]
-pub struct HierarchicalThread {
-    pub thread: Thread,
-    pub a_tag: String,
-    pub depth: usize,
-    pub has_children: bool,
-    pub child_count: usize,
-    pub is_collapsed: bool,
-}
-
-/// Build hierarchical thread list from flat list with delegation relationships
-fn build_thread_hierarchy(
-    threads: &[(Thread, String)],
-    collapsed_ids: &HashSet<String>,
-) -> Vec<HierarchicalThread> {
-    // Map from child ID -> parent ID (based on delegation tag)
-    let mut child_to_parent: HashMap<&str, &str> = HashMap::new();
-    // Map from parent ID -> array of child threads (thread, a_tag)
-    let mut parent_to_children: HashMap<&str, Vec<(&Thread, &String)>> = HashMap::new();
-    // Set of threads that are children (have a parent)
-    let mut child_ids: HashSet<&str> = HashSet::new();
-
-    // Build the mappings
-    for (thread, a_tag) in threads {
-        if let Some(ref parent_id) = thread.parent_conversation_id {
-            child_to_parent.insert(&thread.id, parent_id);
-            child_ids.insert(&thread.id);
-            parent_to_children
-                .entry(parent_id.as_str())
-                .or_default()
-                .push((thread, a_tag));
-        }
-    }
-
-    // Sort children by most recent activity (same as parent sorting)
-    for children in parent_to_children.values_mut() {
-        children.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
-    }
-
-    // Count all descendants (recursive) for a thread
-    fn count_descendants(
-        thread_id: &str,
-        parent_to_children: &HashMap<&str, Vec<(&Thread, &String)>>,
-    ) -> usize {
-        let children = parent_to_children.get(thread_id);
-        match children {
-            None => 0,
-            Some(children) => {
-                let mut count = children.len();
-                for (child, _) in children {
-                    count += count_descendants(&child.id, parent_to_children);
-                }
-                count
-            }
-        }
-    }
-
-    // Build flattened hierarchical list with depth information
-    let mut result: Vec<HierarchicalThread> = Vec::new();
-
-    fn add_thread_with_children(
-        thread: &Thread,
-        a_tag: &String,
-        depth: usize,
-        collapsed_ids: &HashSet<String>,
-        parent_to_children: &HashMap<&str, Vec<(&Thread, &String)>>,
-        result: &mut Vec<HierarchicalThread>,
-    ) {
-        let children = parent_to_children.get(thread.id.as_str());
-        let has_children = children.map(|c| !c.is_empty()).unwrap_or(false);
-        let child_count = count_descendants(&thread.id, parent_to_children);
-        let is_collapsed = collapsed_ids.contains(&thread.id);
-
-        result.push(HierarchicalThread {
-            thread: thread.clone(),
-            a_tag: a_tag.clone(),
-            depth,
-            has_children,
-            child_count,
-            is_collapsed,
-        });
-
-        // Only add children if this thread is not collapsed
-        if !is_collapsed {
-            if let Some(children) = children {
-                for (child, child_a_tag) in children {
-                    add_thread_with_children(
-                        child,
-                        child_a_tag,
-                        depth + 1,
-                        collapsed_ids,
-                        parent_to_children,
-                        result,
-                    );
-                }
-            }
-        }
-    }
-
-    // Start with root threads (those that have no parent in our list)
-    let root_threads: Vec<(&Thread, &String)> = threads
-        .iter()
-        .filter(|(t, _)| !child_ids.contains(t.id.as_str()))
-        .map(|(t, a)| (t, a))
-        .collect();
-
-    for (thread, a_tag) in root_threads {
-        add_thread_with_children(
-            thread,
-            a_tag,
-            0,
-            collapsed_ids,
-            &parent_to_children,
-            &mut result,
-        );
-    }
-
-    result
-}
-
-/// Map status label to Unicode symbol
-fn status_label_to_symbol(label: &str) -> &'static str {
-    match label.to_lowercase().as_str() {
-        "in progress" | "in-progress" | "working" | "active" => "🔧",
-        "blocked" | "waiting" | "paused" => "🚧",
-        "done" | "complete" | "completed" | "finished" => "✅",
-        "reviewing" | "review" | "in review" => "👀",
-        "testing" | "in testing" => "🧪",
-        "planning" | "draft" | "design" => "📝",
-        "urgent" | "critical" | "high priority" => "🔥",
-        "bug" | "issue" | "error" => "🐛",
-        "enhancement" | "feature" | "new" => "✨",
-        "question" | "help needed" => "❓",
-        _ => "📌",
-    }
-}
-
-/// Format a timestamp as relative time (e.g., "2m ago", "1h ago")
-fn format_relative_time(timestamp: u64) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(timestamp);
-
-    if diff < 60 {
-        "just now".to_string()
-    } else if diff < 3600 {
-        format!("{}m ago", diff / 60)
-    } else if diff < 86400 {
-        format!("{}h ago", diff / 3600)
-    } else if diff < 604800 {
-        format!("{}d ago", diff / 86400)
-    } else {
-        format!("{}w ago", diff / 604800)
-    }
-}
 
 pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Fill entire area with app background (pure black)
@@ -309,8 +153,11 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
         return;
     }
 
+    // Get q-tag relationships for fallback parent-child detection
+    let q_tag_relationships = app.data_store.borrow().get_q_tag_relationships();
+
     // Build hierarchical thread list
-    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads);
+    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships);
 
     let items: Vec<ListItem> = hierarchy
         .iter()
@@ -341,7 +188,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 /// Get the hierarchical thread list (used for navigation and selection)
 pub fn get_hierarchical_threads(app: &App) -> Vec<HierarchicalThread> {
     let recent = app.recent_threads();
-    build_thread_hierarchy(&recent, &app.collapsed_threads)
+    let q_tag_relationships = app.data_store.borrow().get_q_tag_relationships();
+    build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships)
 }
 
 fn render_conversation_card(
@@ -361,23 +209,40 @@ fn render_conversation_card(
     let indent = "  ".repeat(depth);
 
     // Single borrow to extract all needed data
-    let (project_name, author_name, preview, timestamp) = {
+    let (project_name, author_name, author_pubkey, preview, timestamp) = {
         let store = app.data_store.borrow();
         let project_name = store.get_project_name(a_tag);
 
         // Get last message info without cloning the entire vector
         let messages = store.get_messages(&thread.id);
-        let (author_name, preview, timestamp) = if let Some(msg) = messages.last() {
+        let (author_name, author_pubkey, preview, timestamp) = if let Some(msg) = messages.last() {
             let name = store.get_profile_name(&msg.pubkey);
             let preview: String = msg.content.chars().take(80).collect();
             let preview = preview.replace('\n', " ");
-            (name, preview, msg.created_at)
+            (name, msg.pubkey.clone(), preview, msg.created_at)
         } else {
-            ("".to_string(), "No messages yet".to_string(), thread.last_activity)
+            ("".to_string(), thread.pubkey.clone(), "No messages yet".to_string(), thread.last_activity)
         };
 
-        (project_name, author_name, preview, timestamp)
+        (project_name, author_name, author_pubkey, preview, timestamp)
     };
+
+    // Get avatar color and initial for the author
+    let avatar_color = theme::user_color(&author_pubkey);
+    let avatar_initial = author_name
+        .chars()
+        .next()
+        .or_else(|| author_pubkey.chars().next())
+        .unwrap_or('?')
+        .to_uppercase()
+        .next()
+        .unwrap_or('?');
+
+    // Helper to create avatar spans - colored background with initial centered
+    let avatar_bg_style = Style::default().bg(avatar_color).fg(
+        if theme::is_light_color(avatar_color) { ratatui::style::Color::Black } else { ratatui::style::Color::White }
+    );
+    let avatar_plain_style = Style::default().bg(avatar_color);
 
     let time_str = format_relative_time(timestamp);
 
@@ -406,8 +271,10 @@ fn render_conversation_card(
     };
 
     if is_compact {
-        // COMPACT MODE: Single line for nested threads
-        let mut line_spans = vec![
+        // COMPACT MODE: 2 lines for nested threads (with smaller avatar)
+        // Line 1: Avatar with initial + content
+        let mut line1_spans = vec![
+            Span::styled(format!("{} ", avatar_initial), avatar_bg_style.add_modifier(Modifier::BOLD)),
             Span::styled(indent.clone(), Style::default()),
             Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(border_char, border_style),
@@ -416,37 +283,38 @@ fn render_conversation_card(
         // Add status indicator if present
         if let Some(ref status_label) = thread.status_label {
             let symbol = status_label_to_symbol(status_label);
-            line_spans.push(Span::styled(
+            line1_spans.push(Span::styled(
                 format!("{} ", symbol),
                 Style::default().fg(theme::ACCENT_WARNING),
             ));
         }
 
         // Title (truncated more for compact view)
-        line_spans.push(Span::styled(
-            truncate_string(&thread.title, 40),
+        line1_spans.push(Span::styled(
+            truncate_with_ellipsis(&thread.title, 40),
             title_style,
         ));
 
         // Collapsed indicator showing child count
         if is_collapsed && child_count > 0 {
-            line_spans.push(Span::styled(
+            line1_spans.push(Span::styled(
                 format!("  +{}", child_count),
                 Style::default().fg(theme::TEXT_MUTED),
             ));
         }
 
         // Time
-        line_spans.push(Span::styled("  ", Style::default()));
-        line_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        line1_spans.push(Span::styled("  ", Style::default()));
+        line1_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
 
-        // Spacing line with border
+        // Spacing line with avatar continuation
         let spacing_spans = vec![
+            Span::styled("  ", avatar_plain_style),
             Span::styled(indent.clone(), Style::default()),
             Span::styled("  ", Style::default()),  // Space for collapse indicator
             Span::styled(border_char, border_style),
         ];
-        let lines = vec![Line::from(line_spans), Line::from(spacing_spans)];
+        let lines = vec![Line::from(line1_spans), Line::from(spacing_spans)];
 
         let item = ListItem::new(lines);
         if is_selected {
@@ -455,10 +323,11 @@ fn render_conversation_card(
             item
         }
     } else {
-        // FULL MODE: For root threads
+        // FULL MODE: For root threads (4-5 lines with avatar column)
 
-        // Line 1: Collapse indicator + Status label (if present) + Title + time
+        // Line 1: Avatar top + Collapse indicator + Status label (if present) + Title + time
         let mut line1_spans = vec![
+            Span::styled("  ", avatar_plain_style),  // Avatar row 1 (solid color)
             Span::styled(indent.clone(), Style::default()),
         ];
 
@@ -478,7 +347,7 @@ fn render_conversation_card(
         }
 
         line1_spans.push(Span::styled(
-            truncate_string(&thread.title, 60),
+            truncate_with_ellipsis(&thread.title, 60),
             title_style,
         ));
 
@@ -487,8 +356,9 @@ fn render_conversation_card(
         line1_spans.push(Span::styled(time_padding, Style::default()));
         line1_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
 
-        // Line 2: Project + agent + nested count
+        // Line 2: Avatar with initial + Project + agent + nested count
         let mut line2_spans = vec![
+            Span::styled(format!("{} ", avatar_initial), avatar_bg_style.add_modifier(Modifier::BOLD)),  // Avatar row 2 (initial)
             Span::styled(indent.clone(), Style::default()),
             Span::styled("  ", Style::default()),  // Space for collapse indicator
             Span::styled(border_char, border_style),
@@ -506,13 +376,14 @@ fn render_conversation_card(
             ));
         }
 
-        // Line 3: Preview
+        // Line 3: Avatar continuation + Preview
         let line3_spans = vec![
+            Span::styled("  ", avatar_plain_style),  // Avatar row 3 (solid color)
             Span::styled(indent.clone(), Style::default()),
             Span::styled("  ", Style::default()),  // Space for collapse indicator
             Span::styled(border_char, border_style),
             Span::styled(
-                truncate_string(&preview, 70),
+                truncate_with_ellipsis(&preview, 70),
                 Style::default().fg(theme::TEXT_MUTED),
             ),
         ];
@@ -524,27 +395,37 @@ fn render_conversation_card(
             Line::from(line3_spans),
         ];
 
-        // Line 4: Current activity (if present)
+        // Line 4: Current activity (if present) OR spacing
         if let Some(ref activity) = thread.status_current_activity {
             let activity_spans = vec![
+                Span::styled("  ", avatar_plain_style),  // Avatar row 4 (solid color)
                 Span::styled(indent.clone(), Style::default()),
                 Span::styled("  ", Style::default()),  // Space for collapse indicator
                 Span::styled(border_char, border_style),
                 Span::styled("⟳ ", Style::default().fg(theme::ACCENT_PRIMARY)),
                 Span::styled(
-                    truncate_string(activity, 70),
+                    truncate_with_ellipsis(activity, 70),
                     Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM),
                 ),
             ];
             lines.push(Line::from(activity_spans));
-        }
 
-        // Final line: Spacing line with border
-        lines.push(Line::from(vec![
-            Span::styled(indent.clone(), Style::default()),
-            Span::styled("  ", Style::default()),  // Space for collapse indicator
-            Span::styled(border_char, border_style),
-        ]));
+            // Final line: Avatar bottom + Spacing line with border
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default()),  // No avatar on line 5
+                Span::styled(indent.clone(), Style::default()),
+                Span::styled("  ", Style::default()),  // Space for collapse indicator
+                Span::styled(border_char, border_style),
+            ]));
+        } else {
+            // Final line: Avatar bottom + Spacing line with border
+            lines.push(Line::from(vec![
+                Span::styled("  ", avatar_plain_style),  // Avatar row 4 (solid color)
+                Span::styled(indent.clone(), Style::default()),
+                Span::styled("  ", Style::default()),  // Space for collapse indicator
+                Span::styled(border_char, border_style),
+            ]));
+        }
 
         let item = ListItem::new(lines);
         if is_selected {
@@ -627,7 +508,7 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     let line1_spans = vec![
         Span::styled(border_char, border_style),
         unread_indicator,
-        Span::styled(truncate_string(&item.title, 55), title_style),
+        Span::styled(truncate_with_ellipsis(&item.title, 55), title_style),
         Span::styled("  ", Style::default()),
         Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
     ];
@@ -694,7 +575,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
         let checkbox = if is_visible { "■ " } else { "□ " };
         let focus_indicator = if is_focused { "▶ " } else { "  " };
-        let name = truncate_string(&project.name, 20); // Fits wider sidebar
+        let name = truncate_with_ellipsis(&project.name, 20); // Fits wider sidebar
 
         let checkbox_style = if is_focused {
             Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -740,7 +621,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
         let checkbox = if is_visible { "■ " } else { "□ " };
         let focus_indicator = if is_focused { "▶ " } else { "  " };
-        let name = truncate_string(&project.name, 20); // Fits wider sidebar
+        let name = truncate_with_ellipsis(&project.name, 20); // Fits wider sidebar
 
         let checkbox_style = if is_focused {
             Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -839,14 +720,6 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(help, area);
 }
 
-fn truncate_string(s: &str, max_len: usize) -> String {
-    if s.chars().count() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", s.chars().take(max_len - 3).collect::<String>())
-    }
-}
-
 /// Get the actual project at the given selection index
 /// Returns (project, is_online)
 pub fn get_project_at_index(app: &App, index: usize) -> Option<(crate::models::Project, bool)> {
@@ -867,159 +740,97 @@ pub fn selectable_project_count(app: &App) -> usize {
 }
 
 fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
-    // Center the modal
-    let popup_width = 60.min(area.width.saturating_sub(4));
-    let popup_height = (area.height as f32 * 0.7) as u16;
-    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    // Clear the background
-    f.render_widget(Clear, popup_area);
-
-    // Modal layout: title + filter + content + hints
-    let modal_chunks = Layout::vertical([
-        Constraint::Length(1), // Title
-        Constraint::Length(3), // Filter input
-        Constraint::Min(0),    // Content
-        Constraint::Length(1), // Hints
-    ])
-    .split(popup_area);
-
-    // Title bar
-    let title = Paragraph::new("Switch Project")
-        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
-        .block(
-            Block::default()
-                .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-        );
-    f.render_widget(title, modal_chunks[0]);
-
-    // Filter input
-    let filter = app.projects_modal_filter();
-    let filter_style = if filter.is_empty() {
-        Style::default().fg(theme::TEXT_MUTED)
-    } else {
-        Style::default().fg(theme::ACCENT_WARNING)
+    let size = ModalSize {
+        max_width: 65,
+        height_percent: 0.7,
     };
 
-    let filter_text = if filter.is_empty() {
-        "Type to filter projects...".to_string()
-    } else {
-        filter.to_string()
-    };
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
 
-    let filter_input = Paragraph::new(filter_text).style(filter_style).block(
-        Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    // Add vertical padding
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(3), // Leave room for hints
     );
-    f.render_widget(filter_input, modal_chunks[1]);
 
-    // Render the project list
+    // Render header
+    let remaining = render_modal_header(f, inner_area, "Switch Project", "esc");
+
+    // Render search
+    let filter = app.projects_modal_filter();
+    let remaining = render_modal_search(f, remaining, filter, "Search projects...");
+
+    // Build sections
     let data_store = app.data_store.borrow();
     let (online_projects, offline_projects) = app.filtered_projects();
     let selected_index = app.projects_modal_index();
 
-    let mut items: Vec<ListItem> = Vec::new();
+    let mut sections = Vec::new();
 
-    // Online projects section
+    // Online section
     if !online_projects.is_empty() {
-        items.push(ListItem::new(Line::from(Span::styled(
-            format!("● ONLINE ({})", online_projects.len()),
-            Style::default()
-                .fg(theme::ACCENT_SUCCESS)
-                .add_modifier(Modifier::BOLD),
-        ))));
+        let online_items: Vec<ModalItem> = online_projects
+            .iter()
+            .enumerate()
+            .map(|(idx, project)| {
+                let is_selected = idx == selected_index;
+                let owner_name = data_store.get_profile_name(&project.pubkey);
+                let agent_count = data_store
+                    .get_project_status(&project.a_tag())
+                    .map(|s| s.agents.len())
+                    .unwrap_or(0);
 
-        for (idx, project) in online_projects.iter().enumerate() {
-            let is_selected = idx == selected_index;
-            let prefix = if is_selected { "  ▶ " } else { "    " };
+                ModalItem::new(&project.name)
+                    .with_shortcut(format!("{} agents · {}", agent_count, owner_name))
+                    .selected(is_selected)
+            })
+            .collect();
 
-            let owner_name = data_store.get_profile_name(&project.pubkey);
-            let agent_count = data_store
-                .get_project_status(&project.a_tag())
-                .map(|s| s.agents.len())
-                .unwrap_or(0);
-
-            let style = if is_selected {
-                Style::default()
-                    .fg(theme::ACCENT_SUCCESS)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::TEXT_PRIMARY)
-            };
-
-            let content = vec![
-                Line::from(Span::styled(format!("{}{}", prefix, project.name), style)),
-                Line::from(Span::styled(
-                    format!("      {} agent(s) · {}", agent_count, owner_name),
-                    Style::default().fg(theme::TEXT_MUTED),
-                )),
-            ];
-
-            items.push(ListItem::new(content));
-        }
+        sections.push(
+            ModalSection::new(format!("Online ({})", online_projects.len()))
+                .with_items(online_items),
+        );
     }
 
-    // Offline projects section (always shown)
+    // Offline section
     if !offline_projects.is_empty() {
-        if !online_projects.is_empty() {
-            items.push(ListItem::new(Line::from("")));
-        }
+        let offline_items: Vec<ModalItem> = offline_projects
+            .iter()
+            .enumerate()
+            .map(|(idx, project)| {
+                let offset = online_projects.len();
+                let is_selected = offset + idx == selected_index;
+                let owner_name = data_store.get_profile_name(&project.pubkey);
 
-        items.push(ListItem::new(Line::from(Span::styled(
-            format!("○ OFFLINE ({})", offline_projects.len()),
-            Style::default()
-                .fg(theme::TEXT_MUTED)
-                .add_modifier(Modifier::BOLD),
-        ))));
+                ModalItem::new(&project.name)
+                    .with_shortcut(owner_name)
+                    .selected(is_selected)
+            })
+            .collect();
 
-        for (idx, project) in offline_projects.iter().enumerate() {
-            let offset = online_projects.len();
-            let is_selected = offset + idx == selected_index;
-            let prefix = if is_selected { "  ▶ " } else { "    " };
-
-            let owner_name = data_store.get_profile_name(&project.pubkey);
-
-            let style = if is_selected {
-                Style::default()
-                    .fg(theme::ACCENT_WARNING)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(theme::TEXT_MUTED)
-            };
-
-            let content = vec![
-                Line::from(Span::styled(format!("{}{}", prefix, project.name), style)),
-                Line::from(Span::styled(
-                    format!("      {}", owner_name),
-                    Style::default().fg(theme::TEXT_MUTED),
-                )),
-            ];
-
-            items.push(ListItem::new(content));
-        }
+        sections.push(
+            ModalSection::new(format!("Offline ({})", offline_projects.len()))
+                .with_items(offline_items),
+        );
     }
     drop(data_store);
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-    );
-    f.render_widget(list, modal_chunks[2]);
+    // Render sections
+    render_modal_sections(f, remaining, &sections);
 
-    // Hints
-    let hints = Paragraph::new("↑↓ navigate · Enter select · Tab expand · Esc close")
-        .style(Style::default().fg(theme::TEXT_MUTED))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-        );
-    f.render_widget(hints, modal_chunks[3]);
+    // Render hints at the bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
 }
 
 fn render_new_thread_modal(f: &mut Frame, app: &App, area: Rect) {
@@ -1281,99 +1092,78 @@ fn render_new_thread_content_field(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the tab modal (Alt+/) showing all open tabs
 pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
-    // Calculate modal dimensions
+    // Calculate modal dimensions - dynamic based on tab count
     let tab_count = app.open_tabs.len();
-    let popup_width = 60.min(area.width.saturating_sub(4));
-    // +3 for header, footer, and dashboard row
-    let popup_height = (tab_count as u16 + 4).min(area.height.saturating_sub(4)).max(5);
-    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    let content_height = (tab_count + 2) as u16; // +2 for header spacing
+    let total_height = content_height + 4; // +4 for padding and hints
+    let height_percent = (total_height as f32 / area.height as f32).min(0.7);
 
-    // Clear the background
-    f.render_widget(Clear, popup_area);
+    let size = ModalSize {
+        max_width: 70,
+        height_percent,
+    };
 
-    // Modal layout: header + content + hints
-    let modal_chunks = Layout::vertical([
-        Constraint::Length(1), // Title
-        Constraint::Min(0),    // Content
-        Constraint::Length(1), // Hints
-    ])
-    .split(popup_area);
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
 
-    // Title bar
-    let title = Paragraph::new(" Open Tabs")
-        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
-        .block(
-            Block::default()
-                .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-        );
-    f.render_widget(title, modal_chunks[0]);
+    // Add vertical padding
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(2),
+    );
 
-    // Build tab list
+    // Render header with title and hint
+    let remaining = render_modal_header(f, inner_area, "Open Tabs", "esc");
+
+    // Build items list
     let data_store = app.data_store.borrow();
-    let mut items: Vec<ListItem> = Vec::new();
+    let items: Vec<ModalItem> = app
+        .open_tabs
+        .iter()
+        .enumerate()
+        .map(|(i, tab)| {
+            let is_selected = i == app.tab_modal_index;
+            let is_active = i == app.active_tab_index;
 
-    // Dashboard row (always first)
-    let dashboard_style = Style::default().fg(theme::TEXT_PRIMARY);
-    items.push(ListItem::new(Line::from(vec![
-        Span::styled("  0. ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Dashboard", dashboard_style),
-    ])));
+            let project_name = data_store.get_project_name(&tab.project_a_tag);
+            let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
 
-    // Tab rows
-    for (i, tab) in app.open_tabs.iter().enumerate() {
-        let is_selected = i == app.tab_modal_index;
-        let is_active = i == app.active_tab_index;
+            let active_marker = if is_active { "● " } else { "  " };
+            let text = format!("{}{} · {}", active_marker, project_name, title_display);
 
-        // Get project name
-        let project_name = data_store.get_project_name(&tab.project_a_tag);
-
-        // Build the line
-        let prefix = if is_selected { ">" } else { " " };
-        let active_marker = if is_active { "*" } else { " " };
-
-        let line_style = if is_selected {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-        } else if tab.has_unread {
-            Style::default().fg(theme::ACCENT_WARNING)
-        } else {
-            Style::default().fg(theme::TEXT_PRIMARY)
-        };
-
-        let title_display = truncate_string(&tab.thread_title, 35);
-
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(format!("{}{} {}. ", prefix, active_marker, i + 1),
-                Style::default().fg(if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED })),
-            Span::styled(format!("{} ", project_name),
-                Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled("| ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(title_display, line_style),
-            if tab.has_unread {
-                Span::styled(" [unread]", Style::default().fg(theme::ACCENT_WARNING))
-            } else {
-                Span::raw("")
-            },
-        ])));
-    }
+            ModalItem::new(text)
+                .with_shortcut(format!("{}", i + 1))
+                .selected(is_selected)
+        })
+        .collect();
     drop(data_store);
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-    );
-    f.render_widget(list, modal_chunks[1]);
+    // Render the items
+    render_modal_items(f, remaining, &items);
 
-    // Hints
-    let hints = Paragraph::new("Up/Down select | Enter switch | x close tab | 0-9 jump | Esc cancel")
-        .style(Style::default().fg(theme::TEXT_MUTED))
-        .block(
-            Block::default()
-                .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
-        );
-    f.render_widget(hints, modal_chunks[2]);
+    // Render hints at the bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · enter switch · x close · 0-9 jump")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+
+/// Check if a color is light (for text contrast calculation)
+fn is_light_color(color: ratatui::style::Color) -> bool {
+    match color {
+        ratatui::style::Color::Rgb(r, g, b) => {
+            // Simple luminance calculation
+            let luminance = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
+            luminance > 0.5
+        }
+        // For non-RGB colors, assume dark
+        _ => false,
+    }
 }

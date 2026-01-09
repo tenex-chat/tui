@@ -35,6 +35,9 @@ pub struct Message {
     pub is_reasoning: bool,
     /// Ask event data if this message contains an ask
     pub ask_event: Option<AskEvent>,
+    /// Q-tags pointing to delegated conversation IDs
+    /// When an agent delegates work, the delegation message has q-tags pointing to child conversations
+    pub q_tags: Vec<String>,
 }
 
 impl Message {
@@ -57,11 +60,20 @@ impl Message {
         let mut thread_id: Option<String> = None;
         let mut reply_to: Option<String> = None;
         let mut is_reasoning = false;
+        let mut q_tags: Vec<String> = Vec::new();
 
         // Parse e-tags per NIP-10
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
             match tag_name {
+                Some("q") => {
+                    // Q-tags point to delegated conversation IDs
+                    if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
+                        q_tags.push(conv_id.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        q_tags.push(hex::encode(id_bytes));
+                    }
+                }
                 Some("e") => {
                     // Extract event ID
                     let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -118,6 +130,7 @@ impl Message {
             reply_to,
             is_reasoning,
             ask_event,
+            q_tags,
         })
     }
 
@@ -133,15 +146,23 @@ impl Message {
         let content = note.content().to_string();
         let created_at = note.created_at();
 
-        // Verify it's a thread (has a-tag, no e-tags)
+        // Verify it's a thread (has a-tag, no e-tags) and collect q-tags
         let mut has_a_tag = false;
         let mut has_e_tag = false;
+        let mut q_tags: Vec<String> = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
             match tag_name {
                 Some("a") => has_a_tag = true,
                 Some("e") => has_e_tag = true,
+                Some("q") => {
+                    if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
+                        q_tags.push(conv_id.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        q_tags.push(hex::encode(id_bytes));
+                    }
+                }
                 _ => {}
             }
         }
@@ -162,6 +183,7 @@ impl Message {
             reply_to: None,
             is_reasoning: false,
             ask_event,
+            q_tags,
         })
     }
 
@@ -478,6 +500,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         assert!(msg.has_images());
 
@@ -490,6 +513,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         assert!(!no_images.has_images());
     }
@@ -505,6 +529,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
@@ -521,6 +546,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
@@ -537,6 +563,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         let urls = msg.extract_image_urls();
         assert!(urls.is_empty());
@@ -553,6 +580,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);

@@ -547,6 +547,11 @@ impl AppDataStore {
             })
     }
 
+    /// Get profile picture URL for a pubkey
+    pub fn get_profile_picture(&self, pubkey: &str) -> Option<String> {
+        crate::store::get_profile_picture(&self.ndb, pubkey)
+    }
+
     /// Get project name for an a_tag
     pub fn get_project_name(&self, a_tag: &str) -> String {
         self.projects
@@ -569,6 +574,26 @@ impl AppDataStore {
         all_threads.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
         all_threads.truncate(limit);
         all_threads
+    }
+
+    /// Get parent-child relationships from q-tags in messages.
+    /// Returns a HashMap where key is parent thread ID and value is list of child conversation IDs.
+    /// This is used as a fallback when the delegation tag is not present on child conversations.
+    pub fn get_q_tag_relationships(&self) -> HashMap<String, Vec<String>> {
+        let mut relationships: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (thread_id, messages) in &self.messages_by_thread {
+            for message in messages {
+                for child_conv_id in &message.q_tags {
+                    relationships
+                        .entry(thread_id.clone())
+                        .or_default()
+                        .push(child_conv_id.clone());
+                }
+            }
+        }
+
+        relationships
     }
 
     // ===== Inbox Methods =====

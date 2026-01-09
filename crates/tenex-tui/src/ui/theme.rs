@@ -301,3 +301,79 @@ pub fn streaming_indicator() -> Style {
 pub fn typing_indicator() -> Style {
     Style::default().fg(TEXT_DIM).add_modifier(Modifier::ITALIC)
 }
+
+// -----------------------------------------------------------------------------
+// Modal Styles - Consistent command palette / popup modal styling
+// -----------------------------------------------------------------------------
+
+/// Modal background - slightly elevated from pure black
+pub const BG_MODAL: Color = Color::Rgb(24, 24, 24);
+
+/// Modal title style
+pub fn modal_title() -> Style {
+    Style::default()
+        .fg(TEXT_PRIMARY)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Modal hint text (e.g., "esc" in corner)
+pub fn modal_hint() -> Style {
+    Style::default().fg(TEXT_MUTED)
+}
+
+/// Modal search input placeholder
+pub fn modal_search_placeholder() -> Style {
+    Style::default().fg(TEXT_DIM)
+}
+
+/// Modal search input active text
+pub fn modal_search_active() -> Style {
+    Style::default().fg(ACCENT_WARNING)
+}
+
+/// Modal section header (grouped items)
+pub fn modal_section_header() -> Style {
+    Style::default()
+        .fg(ACCENT_WARNING)
+        .add_modifier(Modifier::ITALIC)
+}
+
+/// Modal item normal state
+pub fn modal_item() -> Style {
+    Style::default().fg(TEXT_PRIMARY)
+}
+
+/// Modal item selected state - accent background with contrasting text
+pub fn modal_item_selected() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(ACCENT_WARNING)
+        .add_modifier(Modifier::BOLD)
+}
+
+/// Modal item shortcut/hint text (right-aligned)
+pub fn modal_item_shortcut() -> Style {
+    Style::default().fg(TEXT_MUTED)
+}
+
+/// Modal item shortcut when selected
+pub fn modal_item_shortcut_selected() -> Style {
+    Style::default()
+        .fg(Color::Black)
+        .bg(ACCENT_WARNING)
+}
+
+/// Check if a color is light (for text contrast)
+/// Returns true if the color is light enough to need dark text on top
+pub fn is_light_color(color: Color) -> bool {
+    match color {
+        Color::Rgb(r, g, b) => {
+            // Simple luminance calculation
+            let luminance = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
+            luminance > 0.5
+        }
+        Color::White | Color::LightRed | Color::LightGreen | Color::LightYellow
+        | Color::LightBlue | Color::LightMagenta | Color::LightCyan | Color::Gray => true,
+        _ => false,
+    }
+}

@@ -4,6 +4,7 @@ use ratatui::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::theme;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,19 +144,13 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
 
     // For bash commands, show the command
     if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
-        let truncated: String = cmd.chars().take(40).collect();
-        if cmd.len() > 40 {
-            return Some(format!("{}...", truncated));
-        }
+        let truncated = truncate_with_ellipsis(cmd, 40);
         return Some(truncated);
     }
 
     // For search/grep, show the pattern
     if let Some(pattern) = params.get("pattern").and_then(|v| v.as_str()) {
-        let truncated: String = pattern.chars().take(30).collect();
-        if pattern.len() > 30 {
-            return Some(format!("\"{}...\"", truncated));
-        }
+        let truncated = truncate_with_ellipsis(pattern, 30);
         return Some(format!("\"{}\"", truncated));
     }
 

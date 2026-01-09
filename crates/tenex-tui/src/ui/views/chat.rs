@@ -1,136 +1,23 @@
 use crate::models::Message;
+use crate::ui::components::{
+    modal_area, render_modal_background, render_modal_header, render_modal_items,
+    render_modal_search, render_tab_bar, render_todo_sidebar, ModalItem, ModalSize,
+};
 use crate::ui::markdown::render_markdown;
 use crate::ui::theme;
-use crate::ui::todo::{aggregate_todo_state, TodoState, TodoStatus};
-use crate::ui::tool_calls::{parse_message_content, MessageContent, tool_icon, extract_target};
+use crate::ui::todo::aggregate_todo_state;
+use crate::ui::tool_calls::{extract_target, parse_message_content, tool_icon, MessageContent};
+use crate::ui::views::chat_grouping::{group_messages, DisplayItem};
 use crate::ui::{App, InputMode, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
 };
 use std::collections::HashMap;
 use tracing::info_span;
-
-/// Check if a message looks like a short action/status message
-fn is_action_message(content: &str) -> bool {
-    let trimmed = content.trim();
-
-    // Must be short (under 100 chars) and single line
-    if trimmed.len() > 100 || trimmed.contains('\n') {
-        return false;
-    }
-
-    // Common action patterns
-    let action_patterns = [
-        "Sending", "Executing", "Delegating", "Running", "Calling",
-        "Reading", "Writing", "Editing", "Creating", "Deleting",
-        "Searching", "Finding", "Checking", "Validating", "Processing",
-        "Fetching", "Loading", "Saving", "Updating", "Installing",
-        "Building", "Compiling", "Testing", "Deploying",
-        "There is an existing", "Already", "Successfully", "Failed to",
-        "Starting", "Finishing", "Completed", "Done",
-    ];
-
-    for pattern in action_patterns {
-        if trimmed.starts_with(pattern) {
-            return true;
-        }
-    }
-
-    // Also detect messages that look like tool operations (short with specific verbs)
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() <= 6 {
-        if let Some(first) = words.first() {
-            // Check for -ing verbs
-            if first.ends_with("ing") && first.len() > 4 {
-                return true;
-            }
-        }
-    }
-
-    false
-}
-
-/// Grouped display item - either a single message or a collapsed group
-enum DisplayItem<'a> {
-    SingleMessage(&'a Message),
-    ActionGroup {
-        messages: Vec<&'a Message>,
-        pubkey: String,
-    },
-}
-
-/// Group consecutive action messages from the same author
-fn group_messages<'a>(messages: &[&'a Message], user_pubkey: Option<&str>) -> Vec<DisplayItem<'a>> {
-    let mut result = Vec::new();
-    let mut current_group: Vec<&'a Message> = Vec::new();
-    let mut group_pubkey: Option<String> = None;
-
-    for msg in messages {
-        let is_user = user_pubkey.map(|pk| pk == msg.pubkey.as_str()).unwrap_or(false);
-        let is_action = !is_user && is_action_message(&msg.content);
-
-        if is_action {
-            // Check if we can add to current group
-            if let Some(ref pk) = group_pubkey {
-                if pk == &msg.pubkey {
-                    current_group.push(msg);
-                    continue;
-                }
-            }
-
-            // Flush existing group if any
-            if !current_group.is_empty() {
-                if current_group.len() == 1 {
-                    result.push(DisplayItem::SingleMessage(current_group[0]));
-                } else {
-                    result.push(DisplayItem::ActionGroup {
-                        messages: current_group.clone(),
-                        pubkey: group_pubkey.clone().unwrap(),
-                    });
-                }
-                current_group.clear();
-            }
-
-            // Start new group
-            group_pubkey = Some(msg.pubkey.clone());
-            current_group.push(msg);
-        } else {
-            // Flush any existing group
-            if !current_group.is_empty() {
-                if current_group.len() == 1 {
-                    result.push(DisplayItem::SingleMessage(current_group[0]));
-                } else {
-                    result.push(DisplayItem::ActionGroup {
-                        messages: current_group.clone(),
-                        pubkey: group_pubkey.clone().unwrap(),
-                    });
-                }
-                current_group.clear();
-                group_pubkey = None;
-            }
-
-            result.push(DisplayItem::SingleMessage(msg));
-        }
-    }
-
-    // Flush final group
-    if !current_group.is_empty() {
-        if current_group.len() == 1 {
-            result.push(DisplayItem::SingleMessage(current_group[0]));
-        } else {
-            result.push(DisplayItem::ActionGroup {
-                messages: current_group,
-                pubkey: group_pubkey.unwrap(),
-            });
-        }
-    }
-
-    result
-}
 
 pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
@@ -376,20 +263,15 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         // Group consecutive action messages
         let grouped = group_messages(&display_messages, user_pubkey.as_deref());
 
-        let mut prev_pubkey: Option<&str> = None;
-
         for (group_idx, item) in grouped.iter().enumerate() {
             match item {
-                DisplayItem::ActionGroup { messages: action_msgs, pubkey } => {
+                DisplayItem::ActionGroup { messages: action_msgs, pubkey, is_consecutive, has_next_consecutive } => {
                     // Render collapsed action group
                     let indicator_color = theme::user_color(pubkey);
                     let author = profile_cache.get(pubkey).cloned().unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
 
-                    // Show header if author changed
-                    let show_header = prev_pubkey != Some(pubkey.as_str());
-                    prev_pubkey = Some(pubkey.as_str());
-
-                    if show_header {
+                    // Show header only if not consecutive (first in a sequence from this author)
+                    if !is_consecutive {
                         messages_text.push(Line::from(vec![
                             Span::styled("│ ", Style::default().fg(indicator_color)),
                             Span::styled(
@@ -399,7 +281,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         ]));
                     }
 
-                    // Collapsed summary line
+                    // Collapsed summary line with dot indicator if consecutive
                     let count = action_msgs.len();
                     let first_action: String = action_msgs.first()
                         .map(|m| m.content.trim().chars().take(30).collect())
@@ -408,8 +290,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         .map(|m| m.content.trim().chars().take(30).collect())
                         .unwrap_or_default();
 
+                    // Use dot indicator for consecutive messages, regular indicator otherwise
+                    let indicator = if *is_consecutive { "· " } else { "│ " };
                     messages_text.push(Line::from(vec![
-                        Span::styled("│ ", Style::default().fg(indicator_color)),
+                        Span::styled(indicator, Style::default().fg(indicator_color)),
                         Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED)),
                         Span::styled(
                             format!("{} actions", count),
@@ -427,10 +311,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         ),
                     ]));
 
-                    messages_text.push(Line::from(""));
+                    // Only add blank line if no next consecutive (end of author group)
+                    if !has_next_consecutive {
+                        messages_text.push(Line::from(""));
+                    }
                 }
 
-                DisplayItem::SingleMessage(msg) => {
+                DisplayItem::SingleMessage { message: msg, is_consecutive, has_next_consecutive } => {
                     let _msg_span = info_span!("render_message", index = group_idx).entered();
 
                     // Check if this message is selected (for navigation)
@@ -442,7 +329,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     // === OPENCODE-STYLE CARD ===
                     // - Left indicator line (deterministic color from pubkey)
                     // - Full-width shaded background
-                    // - Author on first line, content below
+                    // - Author on first line (only for first in consecutive group), content below
 
                     let indicator_color = theme::user_color(&msg.pubkey);
                     let card_bg = theme::BG_CARD;
@@ -457,15 +344,27 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         }
                     };
 
-                    // First line: indicator + author (padded to full width)
-                    let author_len = 2 + author.len(); // "│ " + author
-                    let mut author_spans = vec![
-                        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                        Span::styled(" ", Style::default().bg(bg)),
-                        Span::styled(author.clone(), Style::default().fg(indicator_color).add_modifier(Modifier::BOLD).bg(bg)),
-                    ];
-                    pad_line(&mut author_spans, author_len);
-                    messages_text.push(Line::from(author_spans));
+                    // First line: author header OR dot indicator for consecutive messages
+                    if *is_consecutive {
+                        // Consecutive message: show dot indicator instead of full author
+                        let dot_len = 2; // "· "
+                        let mut dot_spans = vec![
+                            Span::styled("·", Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled(" ", Style::default().bg(bg)),
+                        ];
+                        pad_line(&mut dot_spans, dot_len);
+                        messages_text.push(Line::from(dot_spans));
+                    } else {
+                        // First in sequence: show full author header
+                        let author_len = 2 + author.len(); // "│ " + author
+                        let mut author_spans = vec![
+                            Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled(" ", Style::default().bg(bg)),
+                            Span::styled(author.clone(), Style::default().fg(indicator_color).add_modifier(Modifier::BOLD).bg(bg)),
+                        ];
+                        pad_line(&mut author_spans, author_len);
+                        messages_text.push(Line::from(author_spans));
+                    }
 
                     // Content with markdown
                     let parsed = parse_message_content(&msg.content);
@@ -548,10 +447,10 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         }
                     }
 
-                    prev_pubkey = Some(msg.pubkey.as_str());
-
-                    // Empty line after card
-                    messages_text.push(Line::from(""));
+                    // Only add empty line if no next consecutive (end of author group)
+                    if !has_next_consecutive {
+                        messages_text.push(Line::from(""));
+                    }
                 }
             }
         }
@@ -936,65 +835,71 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     let selector_index = app.agent_selector_index();
     let selector_filter = app.agent_selector_filter();
 
-    // Calculate popup size and position (centered)
-    let popup_width = 40.min(area.width.saturating_sub(4));
+    // Calculate dynamic height based on content
     let item_count = agents.len().max(1);
-    let popup_height = (item_count as u16 + 2).min(area.height.saturating_sub(4));
-    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let content_height = (item_count as u16 + 6).min(20); // +6 for header, search, hints
+    let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    let size = ModalSize {
+        max_width: 55,
+        height_percent,
+    };
 
-    // Clear the area behind the popup
-    f.render_widget(Clear, popup_area);
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
 
-    // Build list items
-    let items: Vec<ListItem> = if agents.is_empty() {
+    // Add vertical padding
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(3),
+    );
+
+    // Render header
+    let remaining = render_modal_header(f, inner_area, "Select Agent", "esc");
+
+    // Render search
+    let remaining = render_modal_search(f, remaining, selector_filter, "Search agents...");
+
+    // Build items
+    let items: Vec<ModalItem> = if agents.is_empty() {
         let msg = if all_agents.is_empty() {
-            "No agents available (project offline?)"
+            "No agents available"
         } else {
             "No matching agents"
         };
-        vec![ListItem::new(msg).style(Style::default().fg(theme::TEXT_MUTED))]
+        vec![ModalItem::new(msg)]
     } else {
         agents
             .iter()
             .enumerate()
             .map(|(i, agent)| {
-                let style = if i == selector_index {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(theme::ACCENT_PRIMARY)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                };
-
                 let model_info = agent
                     .model
                     .as_ref()
-                    .map(|m| format!(" ({})", m))
-                    .unwrap_or_default();
+                    .map(|m| m.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
 
-                ListItem::new(format!("{}{}", agent.name, model_info)).style(style)
+                ModalItem::new(&agent.name)
+                    .with_shortcut(model_info)
+                    .selected(i == selector_index)
             })
             .collect()
     };
 
-    let title = if selector_filter.is_empty() {
-        "Select Agent (type to filter)".to_string()
-    } else {
-        format!("Select Agent: {}", selector_filter)
-    };
+    render_modal_items(f, remaining, &items);
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-            .title(title),
+    // Render hints at bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
     );
-
-    f.render_widget(list, popup_area);
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc cancel")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
 }
 
 fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
@@ -1003,59 +908,55 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     let selector_index = app.branch_selector_index();
     let selector_filter = app.branch_selector_filter();
 
-    // Calculate popup size and position (centered)
-    let popup_width = 40.min(area.width.saturating_sub(4));
+    // Calculate dynamic height based on content
     let item_count = branches.len().max(1);
-    let popup_height = (item_count as u16 + 2).min(area.height.saturating_sub(4));
-    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let content_height = (item_count as u16 + 6).min(20);
+    let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+    let size = ModalSize {
+        max_width: 55,
+        height_percent,
+    };
 
-    // Clear the area behind the popup
-    f.render_widget(Clear, popup_area);
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
 
-    // Build list items
-    let items: Vec<ListItem> = if branches.is_empty() {
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(3),
+    );
+
+    let remaining = render_modal_header(f, inner_area, "Select Branch", "esc");
+    let remaining = render_modal_search(f, remaining, selector_filter, "Search branches...");
+
+    let items: Vec<ModalItem> = if branches.is_empty() {
         let msg = if all_branches.is_empty() {
-            "No branches available (project offline?)"
+            "No branches available"
         } else {
             "No matching branches"
         };
-        vec![ListItem::new(msg).style(Style::default().fg(theme::TEXT_MUTED))]
+        vec![ModalItem::new(msg)]
     } else {
         branches
             .iter()
             .enumerate()
-            .map(|(i, branch)| {
-                let style = if i == selector_index {
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(theme::ACCENT_SUCCESS)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                };
-
-                ListItem::new(branch.clone()).style(style)
-            })
+            .map(|(i, branch)| ModalItem::new(branch).selected(i == selector_index))
             .collect()
     };
 
-    let title = if selector_filter.is_empty() {
-        "Select Branch (type to filter)".to_string()
-    } else {
-        format!("Select Branch: {}", selector_filter)
-    };
+    render_modal_items(f, remaining, &items);
 
-    let list = List::new(items).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::ACCENT_SUCCESS))
-            .title(title),
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
     );
-
-    f.render_widget(list, popup_area);
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc cancel")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
 
     // Render ask modal overlay if open
     if let Some(modal_state) = app.ask_modal_state() {
@@ -1069,162 +970,5 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
         let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
 
         render_ask_modal(f, modal_state, modal_area);
-    }
-}
-
-pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
-    let mut spans: Vec<Span> = Vec::new();
-
-    // Borrow data_store once for all project name lookups
-    let data_store = app.data_store.borrow();
-
-    for (i, tab) in app.open_tabs.iter().enumerate() {
-        let is_active = i == app.active_tab_index;
-
-        // Tab number with period separator
-        let num_style = if is_active {
-            Style::default().fg(theme::ACCENT_PRIMARY)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-        spans.push(Span::styled(format!("{}. ", i + 1), num_style));
-
-        // Unread indicator (moved before project name)
-        if tab.has_unread && !is_active {
-            spans.push(Span::styled("● ", Style::default().fg(theme::ACCENT_ERROR)));
-        } else {
-            spans.push(Span::raw("● "));
-        }
-
-        // Project name (truncated to 8 chars max)
-        let project_name = data_store.get_project_name(&tab.project_a_tag);
-        let max_project_len = 8;
-        let project_display: String = if project_name.len() > max_project_len {
-            project_name.chars().take(max_project_len).collect()
-        } else {
-            project_name
-        };
-
-        let project_style = if is_active {
-            Style::default().fg(theme::ACCENT_SUCCESS)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-        spans.push(Span::styled(project_display, project_style));
-        spans.push(Span::raw(" | "));
-
-        // Tab title (truncated to fit remaining space)
-        let max_title_len = 12;
-        let title: String = if tab.thread_title.len() > max_title_len {
-            format!("{}...", &tab.thread_title[..max_title_len - 3])
-        } else {
-            tab.thread_title.clone()
-        };
-
-        let title_style = if is_active {
-            theme::tab_active()
-        } else if tab.has_unread {
-            theme::tab_unread()
-        } else {
-            theme::tab_inactive()
-        };
-        spans.push(Span::styled(title, title_style));
-
-        // Separator between tabs
-        if i < app.open_tabs.len() - 1 {
-            spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
-        }
-    }
-
-    // Add hint at the end
-    spans.push(Span::styled("  ", Style::default()));
-    spans.push(Span::styled("Tab:cycle x:close", Style::default().fg(theme::TEXT_MUTED)));
-
-    let tab_line = Line::from(spans);
-    let tab_bar = Paragraph::new(tab_line);
-    f.render_widget(tab_bar, area);
-}
-
-/// Render the todo sidebar on the right side of the chat
-fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Header with count
-    let completed = todo_state.completed_count();
-    let total = todo_state.items.len();
-    lines.push(Line::from(vec![
-        Span::styled("Todo List ", theme::text_bold()),
-        Span::styled(format!("{}/{}", completed, total), Style::default().fg(theme::TEXT_MUTED)),
-    ]));
-
-    // Progress bar
-    let progress_width = (area.width as usize).saturating_sub(4);
-    let filled = if total > 0 { (completed * progress_width) / total } else { 0 };
-    let empty_bar = progress_width.saturating_sub(filled);
-    lines.push(Line::from(vec![
-        Span::styled("━".repeat(filled), Style::default().fg(theme::ACCENT_SUCCESS)),
-        Span::styled("━".repeat(empty_bar), Style::default().fg(theme::PROGRESS_EMPTY)),
-    ]));
-    lines.push(Line::from(""));
-
-    // Active task highlight
-    if let Some(active) = todo_state.in_progress_item() {
-        lines.push(Line::from(Span::styled(
-            "In Progress",
-            theme::todo_in_progress(),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", truncate_str(&active.title, (area.width as usize).saturating_sub(4))),
-            theme::text_primary(),
-        )));
-        if let Some(ref desc) = active.description {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", truncate_str(desc, (area.width as usize).saturating_sub(4))),
-                theme::text_muted(),
-            )));
-        }
-        lines.push(Line::from(""));
-    }
-
-    // Todo items
-    for item in &todo_state.items {
-        let (icon, icon_style) = match item.status {
-            TodoStatus::Done => ("✓", theme::todo_done()),
-            TodoStatus::InProgress => ("◐", theme::todo_in_progress()),
-            TodoStatus::Pending => ("○", theme::todo_pending()),
-        };
-
-        let title_style = if item.status == TodoStatus::Done {
-            Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::CROSSED_OUT)
-        } else {
-            theme::text_primary()
-        };
-
-        let title = truncate_str(&item.title, (area.width as usize).saturating_sub(4));
-        lines.push(Line::from(vec![
-            Span::styled(format!("{} ", icon), icon_style),
-            Span::styled(title, title_style),
-        ]));
-    }
-
-    let sidebar = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(theme::border_inactive()),
-        )
-        .style(Style::default().bg(theme::BG_SIDEBAR));
-
-    f.render_widget(sidebar, area);
-}
-
-/// Truncate a string to fit within max_width characters
-fn truncate_str(s: &str, max_width: usize) -> String {
-    if s.len() <= max_width {
-        s.to_string()
-    } else if max_width > 3 {
-        format!("{}...", &s[..max_width - 3])
-    } else {
-        s.chars().take(max_width).collect()
     }
 }

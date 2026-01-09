@@ -155,6 +155,101 @@ If you need a new color:
 - **Consistent hierarchy**: Primary text is brightest, secondary is muted, hints are dim
 - **User distinction**: Users get consistent colors, but from a muted palette
 
+## Modal Component
+
+All modals should use the centralized modal component from `crate::ui::components`. This ensures consistent styling across all modal dialogs.
+
+### Required Import
+
+```rust
+use crate::ui::components::{
+    modal_area, render_modal_background, render_modal_header, render_modal_items,
+    render_modal_search, render_modal_sections, ModalItem, ModalSection, ModalSize,
+};
+```
+
+### Modal Structure
+
+Modals follow this visual structure:
+
+1. **No outer border** - Modals have a dark background (`BG_MODAL`) without visible borders
+2. **Header** - Title on left, hint (e.g., "esc") on right
+3. **Search** (optional) - First letter highlighted in accent color
+4. **Sections** - Grouped items with italic orange headers
+5. **Items** - Text with right-aligned shortcuts, selected item has accent background
+6. **Hints** - Keyboard hints at the bottom
+
+### Basic Usage
+
+```rust
+fn render_my_modal(f: &mut Frame, app: &App, area: Rect) {
+    let size = ModalSize {
+        max_width: 70,
+        height_percent: 0.7,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(3),
+    );
+
+    // Header with title and hint
+    let remaining = render_modal_header(f, inner_area, "Modal Title", "esc");
+
+    // Optional: Search input
+    let remaining = render_modal_search(f, remaining, &filter, "Search...");
+
+    // Build items
+    let items: Vec<ModalItem> = data.iter().enumerate().map(|(i, item)| {
+        ModalItem::new(&item.name)
+            .with_shortcut("ctrl+x")
+            .selected(i == selected_index)
+    }).collect();
+
+    render_modal_items(f, remaining, &items);
+
+    // Render hints at bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("hint text").style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+```
+
+### With Sections
+
+```rust
+let sections = vec![
+    ModalSection::new("Online (3)").with_items(online_items),
+    ModalSection::new("Offline (5)").with_items(offline_items),
+];
+render_modal_sections(f, remaining, &sections);
+```
+
+### Modal Style Functions
+
+```rust
+// Modal-specific theme functions
+theme::modal_title()           // Bold primary text
+theme::modal_hint()            // Muted hint text
+theme::modal_search_placeholder()
+theme::modal_search_active()
+theme::modal_section_header()  // Italic orange for section headers
+theme::modal_item()            // Normal item text
+theme::modal_item_selected()   // Selected: black text on orange background
+theme::modal_item_shortcut()   // Muted shortcut text
+theme::modal_item_shortcut_selected()
+```
+
 ## Pre-commit Validation
 
 This repository has a pre-commit hook that validates style guideline compliance. Commits will be blocked if:

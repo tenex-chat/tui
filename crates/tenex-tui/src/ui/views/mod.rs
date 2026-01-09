@@ -1,5 +1,7 @@
 pub mod ask_modal;
+mod chat_grouping;
 pub mod chat;
+mod home_helpers;
 pub mod home;
 pub mod inline_ask;
 pub mod lesson_viewer;

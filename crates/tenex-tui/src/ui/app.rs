@@ -2,6 +2,7 @@ use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStora
 use crate::nostr::DataChange;
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
+use crate::ui::avatars::AvatarCache;
 use crate::ui::modal::ModalState;
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
@@ -168,6 +169,9 @@ pub struct App {
 
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
+
+    /// Avatar cache for profile pictures
+    pub avatar_cache: RefCell<AvatarCache>,
 }
 
 impl App {
@@ -236,6 +240,7 @@ impl App {
             show_llm_metadata: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
+            avatar_cache: RefCell::new(AvatarCache::new()),
         }
     }
 

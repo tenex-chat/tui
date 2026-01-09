@@ -211,6 +211,33 @@ pub fn get_profile_name(ndb: &Ndb, pubkey: &str) -> String {
     format!("{}...", &pubkey[..8.min(pubkey.len())])
 }
 
+/// Get profile picture URL for a pubkey
+pub fn get_profile_picture(ndb: &Ndb, pubkey: &str) -> Option<String> {
+    let pubkey_bytes = match hex::decode(pubkey) {
+        Ok(bytes) if bytes.len() == 32 => {
+            let mut arr = [0u8; 32];
+            arr.copy_from_slice(&bytes);
+            arr
+        }
+        _ => return None,
+    };
+
+    let txn = Transaction::new(ndb).ok()?;
+
+    if let Ok(profile) = ndb.get_profile_by_pubkey(&txn, &pubkey_bytes) {
+        let record = profile.record();
+        if let Some(profile_data) = record.profile() {
+            if let Some(picture) = profile_data.picture() {
+                if !picture.is_empty() {
+                    return Some(picture.to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
 /// Get project status for a project
 pub fn get_project_status(ndb: &Ndb, project_a_tag: &str) -> Option<ProjectStatus> {
     let txn = Transaction::new(ndb).ok()?;

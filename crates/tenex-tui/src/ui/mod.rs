@@ -1,5 +1,8 @@
 pub mod app;
 pub mod ask_input;
+pub mod avatars;
+pub mod components;
+pub mod format;
 pub mod markdown;
 pub mod modal;
 pub mod selector;

@@ -315,10 +315,16 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         return;
     }
 
+    // Chrome height varies by view
+    let (header_height, footer_height) = match app.view {
+        View::Chat => (3, 2), // More padding for chat chrome
+        _ => (1, 1),
+    };
+
     let chunks = Layout::vertical([
-        Constraint::Length(1),
+        Constraint::Length(header_height),
         Constraint::Min(0),
-        Constraint::Length(1),
+        Constraint::Length(footer_height),
     ])
     .split(f.area());
 
@@ -326,15 +332,25 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     let chrome_color = if app.pending_quit { ui::theme::ACCENT_ERROR } else { ui::theme::ACCENT_PRIMARY };
 
     // Header
-    let title = match app.view {
-        View::Login => "TENEX - Login",
-        View::Home => "TENEX - Home", // Won't reach here
-        View::Chat => "TENEX - Chat",
-        View::LessonViewer => "TENEX - Lesson",
+    let title: String = match app.view {
+        View::Login => "TENEX - Login".to_string(),
+        View::Home => "TENEX - Home".to_string(), // Won't reach here
+        View::Chat => app.selected_thread.as_ref()
+            .map(|t| t.title.clone())
+            .unwrap_or_else(|| "Chat".to_string()),
+        View::LessonViewer => "TENEX - Lesson".to_string(),
     };
-    let header = Paragraph::new(title)
-        .style(Style::default().fg(chrome_color));
-    f.render_widget(header, chunks[0]);
+
+    // For chat view, center the title with padding
+    if app.view == View::Chat {
+        let header = Paragraph::new(format!("\n  {}", title))
+            .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
+        f.render_widget(header, chunks[0]);
+    } else {
+        let header = Paragraph::new(title)
+            .style(Style::default().fg(chrome_color));
+        f.render_widget(header, chunks[0]);
+    }
 
     // Main content
     match app.view {
@@ -361,7 +377,14 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         };
         (text, Style::default().fg(ui::theme::TEXT_MUTED))
     };
-    let footer = Paragraph::new(footer_text)
+
+    // For chat view, add padding to footer
+    let formatted_footer = if app.view == View::Chat {
+        format!("  {}", footer_text)
+    } else {
+        footer_text
+    };
+    let footer = Paragraph::new(formatted_footer)
         .style(footer_style);
     f.render_widget(footer, chunks[2]);
 }

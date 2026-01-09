@@ -39,3 +39,5 @@ clap = { version = "4", features = ["derive"] }
 dirs = "5"
 tempfile = "3"
 eframe = "0.29"
+image = "0.25"
+ratatui-image = "4"
