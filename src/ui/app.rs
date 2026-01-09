@@ -2,6 +2,8 @@ use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStora
 use crate::nostr::{DataChange, NostrCommand};
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
+use crate::ui::modal::ModalState;
+use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -76,7 +78,6 @@ pub struct App {
     pub db: Arc<Database>,
     pub keys: Option<Keys>,
 
-    pub selected_project_index: usize,
     pub selected_project: Option<Project>,
     pub selected_thread: Option<Thread>,
     pub selected_agent: Option<ProjectAgent>,
@@ -87,18 +88,10 @@ pub struct App {
     pub status_message: Option<String>,
 
     pub creating_thread: bool,
-    pub showing_agent_selector: bool,
-    pub agent_selector_index: usize,
-    pub showing_branch_selector: bool,
-    pub branch_selector_index: usize,
     pub selected_branch: Option<String>,
-    pub selector_filter: String,
 
     pub command_tx: Option<Sender<NostrCommand>>,
     pub data_rx: Option<Receiver<DataChange>>,
-
-    /// Filter text for projects view (type to filter)
-    pub project_filter: String,
 
     /// Whether user pressed Ctrl+C once (pending quit confirmation)
     pub pending_quit: bool,
@@ -129,12 +122,17 @@ pub struct App {
     pub open_tabs: Vec<OpenTab>,
     /// Index of the active tab
     pub active_tab_index: usize,
+    /// Tab visit history for Alt+Tab cycling (most recent last)
+    pub tab_history: Vec<usize>,
+    /// Whether the tab modal is showing
+    pub showing_tab_modal: bool,
+    /// Selected index in tab modal
+    pub tab_modal_index: usize,
 
     // Home view state
     pub home_panel_focus: HomeTab,
     pub selected_inbox_index: usize,
     pub selected_recent_index: usize,
-    pub showing_projects_modal: bool,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
     /// Selected index in sidebar project list
@@ -157,6 +155,9 @@ pub struct App {
 
     // Ask modal state
     pub ask_modal_state: Option<AskModalState>,
+
+    /// Unified modal state (will replace individual modal booleans)
+    pub modal_state: ModalState,
 
     // Lesson viewer state
     pub viewing_lesson_id: Option<String>,
@@ -184,7 +185,6 @@ impl App {
             db: Arc::new(db),
             keys: None,
 
-            selected_project_index: 0,
             selected_project: None,
             selected_thread: None,
             selected_agent: None,
@@ -194,17 +194,11 @@ impl App {
             status_message: None,
 
             creating_thread: false,
-            showing_agent_selector: false,
-            agent_selector_index: 0,
-            showing_branch_selector: false,
-            branch_selector_index: 0,
             selected_branch: None,
-            selector_filter: String::new(),
 
             command_tx: None,
             data_rx: None,
 
-            project_filter: String::new(),
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
             chat_editor: TextEditor::new(),
@@ -216,6 +210,9 @@ impl App {
             selected_message_index: 0,
             open_tabs: Vec::new(),
             active_tab_index: 0,
+            tab_history: Vec::new(),
+            showing_tab_modal: false,
+            tab_modal_index: 0,
             home_panel_focus: HomeTab::Recent,
             selected_inbox_index: 0,
             selected_recent_index: 0,
@@ -235,6 +232,7 @@ impl App {
             project_draft_storage: RefCell::new(ProjectDraftStorage::new("tenex_data")),
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
             ask_modal_state: None,
+            modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
             local_stream_buffers: HashMap::new(),
@@ -391,23 +389,6 @@ impl App {
 
         for change in changes {
             match change {
-                DataChange::StreamingDelta {
-                    pubkey,
-                    message_id,
-                    thread_id,
-                    sequence,
-                    created_at,
-                    delta,
-                } => {
-                    self.data_store.borrow_mut().handle_streaming_delta(
-                        pubkey,
-                        message_id,
-                        thread_id,
-                        sequence,
-                        created_at,
-                        delta,
-                    );
-                }
                 DataChange::LocalStreamChunk {
                     agent_pubkey,
                     conversation_id,
@@ -514,30 +495,97 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Get agents filtered by selector_filter
+    /// Get agents filtered by current filter (from ModalState or empty)
     pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
-        let filter = self.selector_filter.to_lowercase();
+        let filter = match &self.modal_state {
+            ModalState::AgentSelector { selector } => selector.filter.to_lowercase(),
+            _ => String::new(),
+        };
         self.available_agents()
             .into_iter()
             .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
             .collect()
     }
 
-    /// Get branches filtered by selector_filter
+    /// Get agent selector index (from ModalState)
+    pub fn agent_selector_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::AgentSelector { selector } => selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get agent selector filter (from ModalState)
+    pub fn agent_selector_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::AgentSelector { selector } => &selector.filter,
+            _ => "",
+        }
+    }
+
+    /// Open the agent selector modal
+    pub fn open_agent_selector(&mut self) {
+        self.modal_state = ModalState::AgentSelector {
+            selector: SelectorState::new(),
+        };
+    }
+
+    /// Close the agent selector modal
+    pub fn close_agent_selector(&mut self) {
+        if matches!(self.modal_state, ModalState::AgentSelector { .. }) {
+            self.modal_state = ModalState::None;
+        }
+    }
+
+    /// Get branches filtered by current filter (from ModalState)
     pub fn filtered_branches(&self) -> Vec<String> {
-        let filter = self.selector_filter.to_lowercase();
+        let filter = match &self.modal_state {
+            ModalState::BranchSelector { selector } => selector.filter.to_lowercase(),
+            _ => String::new(),
+        };
         self.available_branches()
             .into_iter()
             .filter(|b| filter.is_empty() || b.to_lowercase().contains(&filter))
             .collect()
     }
 
-    /// Select branch by index from filtered branches
+    /// Get branch selector index (from ModalState or legacy)
+    pub fn branch_selector_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::BranchSelector { selector } => selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get branch selector filter (from ModalState)
+    pub fn branch_selector_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::BranchSelector { selector } => &selector.filter,
+            _ => "",
+        }
+    }
+
+    /// Open the branch selector modal
+    pub fn open_branch_selector(&mut self) {
+        self.modal_state = ModalState::BranchSelector {
+            selector: SelectorState::new(),
+        };
+    }
+
+    /// Close the branch selector modal
+    pub fn close_branch_selector(&mut self) {
+        if matches!(self.modal_state, ModalState::BranchSelector { .. }) {
+            self.modal_state = ModalState::None;
+        }
+    }
+
+    /// Select branch by index from filtered branches and close modal
     pub fn select_branch_by_index(&mut self, index: usize) {
         let filtered = self.filtered_branches();
         if let Some(branch) = filtered.get(index) {
             self.selected_branch = Some(branch.clone());
         }
+        self.close_branch_selector();
     }
 
     /// Select agent by index from filtered agents
@@ -593,7 +641,9 @@ impl App {
             return;
         }
 
-        self.open_tabs.remove(self.active_tab_index);
+        let removed_index = self.active_tab_index;
+        self.open_tabs.remove(removed_index);
+        self.cleanup_tab_history(removed_index);
 
         if self.open_tabs.is_empty() {
             // No more tabs - go back to home view
@@ -621,6 +671,9 @@ impl App {
         // Save current draft before switching
         self.save_chat_draft();
 
+        // Track history for Alt+Tab cycling
+        self.push_tab_history(index);
+
         self.active_tab_index = index;
 
         // Extract data we need before mutating
@@ -643,6 +696,117 @@ impl App {
             self.selected_message_index = 0;
             self.subthread_root = None;
             self.subthread_root_message = None;
+        }
+    }
+
+    /// Push a tab index to history, removing any existing entry for that index
+    fn push_tab_history(&mut self, index: usize) {
+        // Remove existing entry if present
+        self.tab_history.retain(|&i| i != index);
+        // Add to end (most recent)
+        self.tab_history.push(index);
+        // Keep history bounded (max 20 entries)
+        if self.tab_history.len() > 20 {
+            self.tab_history.remove(0);
+        }
+    }
+
+    /// Cycle to next tab in history (Alt+Tab behavior)
+    pub fn cycle_tab_history_forward(&mut self) {
+        if self.tab_history.len() < 2 {
+            // Not enough history, just cycle to next tab
+            self.next_tab();
+            return;
+        }
+
+        // Get the second-to-last entry (the previously viewed tab)
+        let history_len = self.tab_history.len();
+        if history_len >= 2 {
+            let prev_index = self.tab_history[history_len - 2];
+            if prev_index < self.open_tabs.len() {
+                self.switch_to_tab(prev_index);
+            }
+        }
+    }
+
+    /// Cycle to previous tab in history (Alt+Shift+Tab behavior)
+    pub fn cycle_tab_history_backward(&mut self) {
+        if self.tab_history.len() < 2 {
+            // Not enough history, just cycle to prev tab
+            self.prev_tab();
+            return;
+        }
+
+        // Move the current tab to the front of history and switch to what was second-to-last
+        // This rotates through history in reverse order
+        if let Some(current) = self.tab_history.pop() {
+            self.tab_history.insert(0, current);
+            if let Some(&next) = self.tab_history.last() {
+                if next < self.open_tabs.len() {
+                    self.active_tab_index = next;
+                    // Re-push to mark as most recent
+                    if let Some(idx) = self.tab_history.pop() {
+                        self.push_tab_history(idx);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Clean up tab history when a tab is closed (adjust indices)
+    fn cleanup_tab_history(&mut self, removed_index: usize) {
+        // Remove the closed tab from history
+        self.tab_history.retain(|&i| i != removed_index);
+        // Adjust indices for tabs that shifted down
+        for idx in self.tab_history.iter_mut() {
+            if *idx > removed_index {
+                *idx -= 1;
+            }
+        }
+    }
+
+    /// Open tab modal
+    pub fn open_tab_modal(&mut self) {
+        self.showing_tab_modal = true;
+        self.tab_modal_index = self.active_tab_index;
+    }
+
+    /// Close tab modal
+    pub fn close_tab_modal(&mut self) {
+        self.showing_tab_modal = false;
+    }
+
+    /// Close tab at specific index (for tab modal)
+    pub fn close_tab_at(&mut self, index: usize) {
+        if index >= self.open_tabs.len() {
+            return;
+        }
+
+        self.open_tabs.remove(index);
+        self.cleanup_tab_history(index);
+
+        if self.open_tabs.is_empty() {
+            // No more tabs - go back to home view
+            self.save_chat_draft();
+            self.chat_editor.clear();
+            self.selected_thread = None;
+            self.view = View::Home;
+            self.active_tab_index = 0;
+        } else {
+            // Adjust active tab index if needed
+            if self.active_tab_index >= self.open_tabs.len() {
+                self.active_tab_index = self.open_tabs.len() - 1;
+            } else if self.active_tab_index > index {
+                self.active_tab_index -= 1;
+            }
+            // Adjust modal index if needed
+            if self.tab_modal_index >= self.open_tabs.len() {
+                self.tab_modal_index = self.open_tabs.len() - 1;
+            }
+            // If the closed tab was the active one, switch to the new active tab
+            if index == self.active_tab_index {
+                self.switch_to_tab(self.active_tab_index);
+            }
         }
     }
 

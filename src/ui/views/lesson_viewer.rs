@@ -1,9 +1,9 @@
 use crate::models::Lesson;
 use crate::ui::markdown::render_markdown;
-use crate::ui::App;
+use crate::ui::{theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
     Frame,
@@ -36,20 +36,20 @@ fn render_header(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
     let author_name = app.data_store.borrow().get_profile_name(&lesson.pubkey);
 
     let mut title_line = vec![
-        Span::styled("📚 ", Style::default().fg(Color::Yellow)),
-        Span::styled(&lesson.title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+        Span::styled("📚 ", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(&lesson.title, Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
     ];
 
     if let Some(ref category) = lesson.category {
-        title_line.push(Span::styled(" | ", Style::default().fg(Color::DarkGray)));
-        title_line.push(Span::styled(category, Style::default().fg(Color::Magenta)));
+        title_line.push(Span::styled(" | ", Style::default().fg(theme::TEXT_MUTED)));
+        title_line.push(Span::styled(category, Style::default().fg(theme::ACCENT_SPECIAL)));
     }
 
     let meta_line = vec![
-        Span::styled("by ", Style::default().fg(Color::DarkGray)),
-        Span::styled(&author_name, Style::default().fg(Color::Green)),
-        Span::styled(" • ", Style::default().fg(Color::DarkGray)),
-        Span::styled(lesson.reading_time(), Style::default().fg(Color::Blue)),
+        Span::styled("by ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(&author_name, Style::default().fg(theme::ACCENT_SUCCESS)),
+        Span::styled(" • ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(lesson.reading_time(), Style::default().fg(theme::ACCENT_PRIMARY)),
     ];
 
     let header = Paragraph::new(vec![
@@ -59,7 +59,7 @@ fn render_header(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Cyan))
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
     );
 
     f.render_widget(header, area);
@@ -93,11 +93,11 @@ fn render_content(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
     let mut section_header_spans = vec![
         Span::styled(
             format!("{}. ", current_section + 1),
-            Style::default().fg(Color::Yellow)
+            Style::default().fg(theme::ACCENT_WARNING)
         ),
         Span::styled(
             *section_name,
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
         ),
     ];
 
@@ -110,7 +110,7 @@ fn render_content(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
         };
         section_header_spans.push(Span::styled(
             format!(" ({}%)", scroll_percent),
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         ));
     }
 
@@ -126,7 +126,7 @@ fn render_content(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
         );
 
     f.render_widget(content, area);
@@ -145,9 +145,9 @@ fn render_footer(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
         }
 
         let style = if i == current_section {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
         } else {
-            Style::default().fg(Color::DarkGray)
+            Style::default().fg(theme::TEXT_MUTED)
         };
 
         section_spans.push(Span::styled(format!("{}", i + 1), style));
@@ -159,22 +159,22 @@ fn render_footer(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
     }
 
     let mut help_spans = vec![
-        Span::styled("Sections: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("Sections: ", Style::default().fg(theme::TEXT_MUTED)),
     ];
     help_spans.extend(section_spans);
     help_spans.extend(vec![
-        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
-        Span::styled("j/k", Style::default().fg(Color::Yellow)),
-        Span::styled(" scroll | ", Style::default().fg(Color::DarkGray)),
-        Span::styled("Esc", Style::default().fg(Color::Yellow)),
-        Span::styled(" back", Style::default().fg(Color::DarkGray)),
+        Span::styled(" | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("j/k", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" scroll | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
     ]);
 
     let footer = Paragraph::new(vec![Line::from(help_spans)])
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan))
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
         );
 
     f.render_widget(footer, area);

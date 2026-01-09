@@ -1,6 +1,7 @@
 use crate::models::AskQuestion;
 use crate::ui::app::AskModalState;
 use crate::ui::ask_input::InputMode;
+use crate::ui::theme;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -19,7 +20,7 @@ pub fn render_ask_modal(f: &mut Frame, modal_state: &AskModalState, area: Rect) 
     let block = Block::default()
         .title(title_text)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
         .style(Style::default().bg(Color::Black));
 
     let inner = block.inner(area);
@@ -69,11 +70,11 @@ fn render_context_and_progress(f: &mut Frame, modal_state: &AskModalState, area:
     };
 
     let header = Line::from(vec![
-        Span::styled(progress_text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(progress_text, Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
     ]);
 
     let context = Paragraph::new(context_text)
-        .style(Style::default().fg(Color::Gray))
+        .style(Style::default().fg(theme::TEXT_MUTED))
         .wrap(Wrap { trim: true });
 
     let layout = Layout::default()
@@ -117,7 +118,7 @@ fn render_single_select(
         .split(area);
 
     let question_widget = Paragraph::new(vec![
-        Line::from(Span::styled(title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(title, Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(Span::raw(question)),
     ])
@@ -130,8 +131,8 @@ fn render_single_select(
         let cursor_pos = input_state.custom_cursor + " Custom answer: ".len();
 
         let input_widget = Paragraph::new(custom_text)
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
+            .style(Style::default().fg(theme::ACCENT_WARNING))
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::ACCENT_SUCCESS)));
 
         f.render_widget(input_widget, layout[1]);
         f.set_cursor_position((
@@ -140,7 +141,7 @@ fn render_single_select(
         ));
     } else if suggestions.is_empty() {
         let help = Paragraph::new(" Press 'c' to enter custom answer ")
-            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
+            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC))
             .alignment(Alignment::Center);
         f.render_widget(help, layout[1]);
     } else {
@@ -155,7 +156,7 @@ fn render_single_select(
                 };
 
                 let style = if i == input_state.selected_option_index {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -191,7 +192,7 @@ fn render_multi_select(
         .split(area);
 
     let question_widget = Paragraph::new(vec![
-        Line::from(Span::styled(title, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(title, Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))),
         Line::from(""),
         Line::from(Span::raw(question)),
     ])
@@ -204,8 +205,8 @@ fn render_multi_select(
         let cursor_pos = input_state.custom_cursor + " Custom answer: ".len();
 
         let input_widget = Paragraph::new(custom_text)
-            .style(Style::default().fg(Color::Yellow))
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::Green)));
+            .style(Style::default().fg(theme::ACCENT_WARNING))
+            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::ACCENT_SUCCESS)));
 
         f.render_widget(input_widget, layout[1]);
         f.set_cursor_position((
@@ -214,7 +215,7 @@ fn render_multi_select(
         ));
     } else if options.is_empty() {
         let help = Paragraph::new(" Press 'c' to enter custom answer ")
-            .style(Style::default().fg(Color::Gray).add_modifier(Modifier::ITALIC))
+            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC))
             .alignment(Alignment::Center);
         f.render_widget(help, layout[1]);
     } else {
@@ -229,7 +230,7 @@ fn render_multi_select(
                 let marker = if is_selected { "> " } else { "  " };
 
                 let style = if is_selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -262,11 +263,11 @@ fn render_question_indicator(f: &mut Frame, input_state: &crate::ui::ask_input::
         };
 
         let style = if i < input_state.answers.len() {
-            Style::default().fg(Color::Green)
+            Style::default().fg(theme::ACCENT_SUCCESS)
         } else if i == input_state.current_question_index {
-            Style::default().fg(Color::Cyan)
+            Style::default().fg(theme::ACCENT_PRIMARY)
         } else {
-            Style::default().fg(Color::Gray)
+            Style::default().fg(theme::TEXT_MUTED)
         };
 
         indicators.push(Span::styled(marker, style));
@@ -282,42 +283,42 @@ fn render_question_indicator(f: &mut Frame, input_state: &crate::ui::ask_input::
 fn render_help_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputState, area: Rect) {
     let help_text = if input_state.mode == InputMode::CustomInput {
         vec![
-            Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
             Span::raw(" submit  "),
-            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
             Span::raw(" cancel"),
         ]
     } else {
         let nav_help = if input_state.is_multi_select() {
             vec![
-                Span::styled("↑↓/jk", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("↑↓/jk", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
                 Span::raw(" navigate  "),
-                Span::styled("Space", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Space", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::raw(" toggle  "),
-                Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::raw(" confirm  "),
             ]
         } else {
             vec![
-                Span::styled("↑↓/jk", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled("↑↓/jk", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
                 Span::raw(" navigate  "),
-                Span::styled("Enter", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
                 Span::raw(" select  "),
             ]
         };
 
         let mut all_help = nav_help;
         all_help.extend(vec![
-            Span::styled("c", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled("c", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
             Span::raw(" custom  "),
-            Span::styled("Esc", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
             Span::raw(" cancel"),
         ]);
         all_help
     };
 
     let help_paragraph = Paragraph::new(Line::from(help_text))
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)))
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::BORDER_INACTIVE)))
         .alignment(Alignment::Center);
 
     f.render_widget(help_paragraph, area);

@@ -5,7 +5,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph},
+    widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -50,6 +50,10 @@ fn format_relative_time(timestamp: u64) -> String {
 }
 
 pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
+    // Fill entire area with app background (pure black)
+    let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
+    f.render_widget(bg_block, area);
+
     let has_tabs = !app.open_tabs.is_empty();
 
     // Layout: Header tabs | Main area | Help bar | Optional tab bar
@@ -73,21 +77,28 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Render tab header
     render_tab_header(f, app, chunks[0]);
 
-    // Split main area into sidebar and content
+    // Split main area into content and sidebar (sidebar on RIGHT)
     let main_chunks = Layout::horizontal([
-        Constraint::Length(20), // Sidebar (fixed width)
         Constraint::Min(0),     // Content
+        Constraint::Length(20), // Sidebar (fixed width, on RIGHT)
     ])
     .split(chunks[1]);
 
-    // Render sidebar
-    render_project_sidebar(f, app, main_chunks[0]);
-
-    // Render content based on active tab
+    // Render content based on active tab (with left padding)
+    let content_area = main_chunks[0];
+    let padded_content = Rect::new(
+        content_area.x + 2, // 2-char left padding
+        content_area.y,
+        content_area.width.saturating_sub(2),
+        content_area.height,
+    );
     match app.home_panel_focus {
-        HomeTab::Recent => render_recent_with_feed(f, app, main_chunks[1]),
-        HomeTab::Inbox => render_inbox_cards(f, app, main_chunks[1]),
+        HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
+        HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
     }
+
+    // Render sidebar on the right
+    render_project_sidebar(f, app, main_chunks[1]);
 
     // Single consolidated help bar
     render_help_bar(f, app, chunks[2]);
@@ -105,6 +116,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // New thread modal overlay
     if app.showing_new_thread_modal {
         render_new_thread_modal(f, app, area);
+    }
+
+    // Tab modal overlay (Alt+/)
+    if app.showing_tab_modal {
+        render_tab_modal(f, app, area);
     }
 }
 
@@ -162,13 +178,10 @@ fn render_recent_with_feed(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let recent = app.recent_threads();
-    let border_color = if is_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
-    let title_color = if is_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
 
     if recent.is_empty() {
         let empty = Paragraph::new("No recent conversations")
-            .style(Style::default().fg(theme::TEXT_MUTED))
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(border_color)));
+            .style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty, area);
         return;
     }
@@ -182,17 +195,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(border_color))
-                .title(Span::styled(
-                    "Recent Conversations",
-                    Style::default().fg(title_color),
-                )),
-        )
-        .highlight_style(Style::default());
+    // No block/border - just the list directly
+    let list = List::new(items).highlight_style(Style::default());
 
     let mut state = ListState::default();
     state.select(Some(app.selected_recent_index));
@@ -206,7 +210,7 @@ fn render_conversation_card(
     is_selected: bool,
 ) -> ListItem<'static> {
     // Single borrow to extract all needed data
-    let (project_name, author_name, preview, timestamp, is_streaming) = {
+    let (project_name, author_name, preview, timestamp) = {
         let store = app.data_store.borrow();
         let project_name = store.get_project_name(a_tag);
 
@@ -221,20 +225,15 @@ fn render_conversation_card(
             ("".to_string(), "No messages yet".to_string(), thread.last_activity)
         };
 
-        let is_streaming = !store.streaming_with_content_for_thread(&thread.id).is_empty();
-
-        (project_name, author_name, preview, timestamp, is_streaming)
+        (project_name, author_name, preview, timestamp)
     };
 
     let time_str = format_relative_time(timestamp);
 
-    // Card styling
-    let border_char = if is_selected { "│ " } else { "  " };
-    let border_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
+    // Card styling - left border color is deterministic based on project a_tag
+    let project_indicator_color = theme::project_color(a_tag);
+    let border_char = "│ ";
+    let border_style = Style::default().fg(project_indicator_color);
 
     let title_style = if is_selected {
         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -282,15 +281,6 @@ fn render_conversation_card(
         ),
     ];
 
-    // Add streaming badge if active
-    if is_streaming {
-        line3_spans.push(Span::styled("  ", Style::default()));
-        line3_spans.push(Span::styled(
-            "● Streaming",
-            Style::default().fg(theme::ACCENT_WARNING),
-        ));
-    }
-
     // Build lines list
     let mut lines = vec![
         Line::from(line1_spans),
@@ -328,16 +318,13 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     if inbox_items.is_empty() {
         let empty_lines = vec![
             Line::from(""),
-            Line::from(Span::styled("📭", Style::default().fg(theme::TEXT_MUTED))),
-            Line::from(""),
             Line::from(Span::styled(
                 "No notifications",
                 Style::default().fg(theme::TEXT_MUTED),
             )),
         ];
         let empty = Paragraph::new(empty_lines)
-            .alignment(ratatui::layout::Alignment::Center)
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::TEXT_MUTED)));
+            .alignment(ratatui::layout::Alignment::Center);
         f.render_widget(empty, area);
         return;
     }
@@ -351,14 +338,8 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::TEXT_MUTED))
-                .title(Span::styled("Inbox", Style::default().fg(theme::TEXT_MUTED))),
-        )
-        .highlight_style(Style::default());
+    // No block/border - just the list directly
+    let list = List::new(items).highlight_style(Style::default());
 
     let mut state = ListState::default();
     state.select(Some(app.selected_inbox_index));
@@ -379,13 +360,10 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
         InboxEventType::ThreadReply => "Thread reply",
     };
 
-    // Card styling
-    let border_char = if is_selected { "│ " } else { "  " };
-    let border_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
+    // Card styling - left border color is deterministic based on project a_tag
+    let project_indicator_color = theme::project_color(&item.project_a_tag);
+    let border_char = "│ ";
+    let border_style = Style::default().fg(project_indicator_color);
 
     let title_style = if is_selected {
         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -477,12 +455,11 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         ])));
     }
 
-    let border_color = if app.sidebar_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED };
-
     let list = List::new(items)
         .block(Block::default()
-            .borders(Borders::RIGHT)
-            .border_style(Style::default().fg(border_color)));
+            .borders(Borders::NONE)
+            .padding(Padding::new(2, 2, 1, 1))) // left, right, top, bottom
+        .style(Style::default().bg(theme::BG_SIDEBAR));
 
     // Calculate selected index (accounting for headers)
     let selected_index = if app.sidebar_focused {
@@ -508,11 +485,11 @@ fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = if app.sidebar_focused {
-        "←→ focus · ↑↓ navigate · Space toggle · Tab switch · q quit"
+        "← back · ↑↓ navigate · Space toggle · Tab switch · q quit"
     } else {
         match app.home_panel_focus {
-            HomeTab::Recent => "←→ focus · ↑↓ navigate · Enter open · n new · Tab switch · q quit",
-            HomeTab::Inbox => "←→ focus · ↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
+            HomeTab::Recent => "→ projects · ↑↓ navigate · Enter open · n new · Tab switch · q quit",
+            HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
         }
     };
 
@@ -956,4 +933,103 @@ fn render_new_thread_content_field(f: &mut Frame, app: &App, area: Rect) {
             f.set_cursor_position((cursor_x, cursor_y));
         }
     }
+}
+
+/// Render the tab modal (Alt+/) showing all open tabs
+pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
+    // Calculate modal dimensions
+    let tab_count = app.open_tabs.len();
+    let popup_width = 60.min(area.width.saturating_sub(4));
+    // +3 for header, footer, and dashboard row
+    let popup_height = (tab_count as u16 + 4).min(area.height.saturating_sub(4)).max(5);
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+    // Clear the background
+    f.render_widget(Clear, popup_area);
+
+    // Modal layout: header + content + hints
+    let modal_chunks = Layout::vertical([
+        Constraint::Length(1), // Title
+        Constraint::Min(0),    // Content
+        Constraint::Length(1), // Hints
+    ])
+    .split(popup_area);
+
+    // Title bar
+    let title = Paragraph::new(" Open Tabs")
+        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
+        .block(
+            Block::default()
+                .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+        );
+    f.render_widget(title, modal_chunks[0]);
+
+    // Build tab list
+    let data_store = app.data_store.borrow();
+    let mut items: Vec<ListItem> = Vec::new();
+
+    // Dashboard row (always first)
+    let dashboard_style = Style::default().fg(theme::TEXT_PRIMARY);
+    items.push(ListItem::new(Line::from(vec![
+        Span::styled("  0. ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Dashboard", dashboard_style),
+    ])));
+
+    // Tab rows
+    for (i, tab) in app.open_tabs.iter().enumerate() {
+        let is_selected = i == app.tab_modal_index;
+        let is_active = i == app.active_tab_index;
+
+        // Get project name
+        let project_name = data_store.get_project_name(&tab.project_a_tag);
+
+        // Build the line
+        let prefix = if is_selected { ">" } else { " " };
+        let active_marker = if is_active { "*" } else { " " };
+
+        let line_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else if tab.has_unread {
+            Style::default().fg(theme::ACCENT_WARNING)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let title_display = truncate_string(&tab.thread_title, 35);
+
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(format!("{}{} {}. ", prefix, active_marker, i + 1),
+                Style::default().fg(if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED })),
+            Span::styled(format!("{} ", project_name),
+                Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled("| ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(title_display, line_style),
+            if tab.has_unread {
+                Span::styled(" [unread]", Style::default().fg(theme::ACCENT_WARNING))
+            } else {
+                Span::raw("")
+            },
+        ])));
+    }
+    drop(data_store);
+
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    );
+    f.render_widget(list, modal_chunks[1]);
+
+    // Hints
+    let hints = Paragraph::new("Up/Down select | Enter switch | x close tab | 0-9 jump | Esc cancel")
+        .style(Style::default().fg(theme::TEXT_MUTED))
+        .block(
+            Block::default()
+                .borders(Borders::BOTTOM | Borders::LEFT | Borders::RIGHT)
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+        );
+    f.render_widget(hints, modal_chunks[2]);
 }

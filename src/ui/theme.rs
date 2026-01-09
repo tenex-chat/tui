@@ -7,17 +7,23 @@ use ratatui::style::{Color, Modifier, Style};
 // COLOR PALETTE - Muted, sophisticated colors inspired by modern terminal UIs
 // =============================================================================
 
-/// Very dark background for cards/messages
-pub const BG_CARD: Color = Color::Rgb(30, 30, 30);
+/// App background - pure black for contrast
+pub const BG_APP: Color = Color::Rgb(0, 0, 0);
 
-/// Slightly lighter background for selected items
-pub const BG_SELECTED: Color = Color::Rgb(45, 45, 45);
+/// Card/message background - very subtle lift from black
+pub const BG_CARD: Color = Color::Rgb(18, 18, 18);
 
-/// Dark background for sidebars/secondary areas
-pub const BG_SECONDARY: Color = Color::Rgb(38, 38, 38);
+/// Selected item background - subtle highlight (like bg-neutral-800)
+pub const BG_SELECTED: Color = Color::Rgb(32, 32, 32);
+
+/// Sidebar background - slightly visible against black (like bg-neutral-900)
+pub const BG_SIDEBAR: Color = Color::Rgb(23, 23, 23);
+
+/// Dark background for secondary areas
+pub const BG_SECONDARY: Color = Color::Rgb(23, 23, 23);
 
 /// Input field background
-pub const BG_INPUT: Color = Color::Rgb(30, 30, 30);
+pub const BG_INPUT: Color = Color::Rgb(18, 18, 18);
 
 // -----------------------------------------------------------------------------
 // Text Colors
@@ -83,6 +89,12 @@ pub const USER_PALETTE: [Color; 8] = [
 /// Get a deterministic color for a user based on their pubkey
 pub fn user_color(pubkey: &str) -> Color {
     let hash: usize = pubkey.bytes().map(|b| b as usize).sum();
+    USER_PALETTE[hash % USER_PALETTE.len()]
+}
+
+/// Get a deterministic color for a project based on its a-tag
+pub fn project_color(a_tag: &str) -> Color {
+    let hash: usize = a_tag.bytes().map(|b| b as usize).sum();
     USER_PALETTE[hash % USER_PALETTE.len()]
 }
 

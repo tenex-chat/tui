@@ -14,7 +14,6 @@ use ratatui::{
 use std::collections::HashMap;
 use tracing::info_span;
 
-/// Streaming content for display
 /// Check if a message looks like a short action/status message
 fn is_action_message(content: &str) -> bool {
     let trimmed = content.trim();
@@ -834,7 +833,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Render agent selector popup if showing
-    if app.showing_agent_selector {
+    if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
         render_agent_selector(f, app, area);
     }
 
@@ -902,6 +901,8 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
 fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     let agents = app.filtered_agents();
     let all_agents = app.available_agents();
+    let selector_index = app.agent_selector_index();
+    let selector_filter = app.agent_selector_filter();
 
     // Calculate popup size and position (centered)
     let popup_width = 40.min(area.width.saturating_sub(4));
@@ -928,7 +929,7 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, agent)| {
-                let style = if i == app.agent_selector_index {
+                let style = if i == selector_index {
                     Style::default()
                         .fg(Color::Black)
                         .bg(theme::ACCENT_PRIMARY)
@@ -948,10 +949,10 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let title = if app.selector_filter.is_empty() {
+    let title = if selector_filter.is_empty() {
         "Select Agent (type to filter)".to_string()
     } else {
-        format!("Select Agent: {}", app.selector_filter)
+        format!("Select Agent: {}", selector_filter)
     };
 
     let list = List::new(items).block(

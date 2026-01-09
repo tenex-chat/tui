@@ -34,10 +34,42 @@ Style::default().fg(theme::TEXT_MUTED)
 theme::BG_CARD
 ```
 
+## Layout Rules
+
+1. **Sidebars go on the RIGHT**, not left
+2. **Sidebars should have `BG_SIDEBAR` background** (subtle gray, not black)
+3. **App background is pure black** (`BG_APP` = #000000)
+4. **NO full borders around sections** - Don't use `Borders::ALL` on content sections
+5. **LEFT border indicators only** - Items that belong to something (project, user) get a left border with deterministic color
+6. **Spacing from edges** - Content needs 2+ character padding from screen edges
+7. **Selection color is subtle** - Use `BG_SELECTED` which is very dim gray, not bright
+
+## Deterministic Colors
+
+Items use deterministic colors for visual grouping - same entity = same color consistently:
+
+- **Project items**: Use `theme::project_color(a_tag)` for left border indicator
+- **User items**: Use `theme::user_color(pubkey)` for left border indicator
+
+This creates visual grouping where all items belonging to the same project share the same left border color, making it easy to scan and identify related items.
+
+```rust
+// Project-owned item (task, event, etc)
+let border_color = theme::project_color(&a_tag);
+Block::default().borders(Borders::LEFT).border_style(Style::default().fg(border_color))
+
+// User-owned item (message, profile, etc)
+let border_color = theme::user_color(&pubkey);
+Block::default().borders(Borders::LEFT).border_style(Style::default().fg(border_color))
+```
+
 ## Color Mapping Reference
 
 | Semantic Purpose | Theme Constant | Approximate Color |
 |-----------------|----------------|-------------------|
+| App background | `BG_APP` | Pure black (#000000) |
+| Sidebar background | `BG_SIDEBAR` | Very dark gray (#171717) |
+| Selected item background | `BG_SELECTED` | Subtle gray (#202020) - barely visible |
 | Primary text | `TEXT_PRIMARY` | Off-white |
 | Secondary/muted text | `TEXT_MUTED` | Gray |
 | Hints, placeholders | `TEXT_DIM` | Dark gray |
@@ -47,11 +79,12 @@ theme::BG_CARD
 | Errors, urgent | `ACCENT_ERROR` | Muted red |
 | Special (agents, images) | `ACCENT_SPECIAL` | Muted purple |
 | Card backgrounds | `BG_CARD` | Very dark gray |
-| Selected item background | `BG_SELECTED` | Slightly lighter dark |
 | Secondary areas | `BG_SECONDARY` | Dark gray |
 | Input backgrounds | `BG_INPUT` | Very dark gray |
 | Active borders | `BORDER_ACTIVE` | Medium gray |
 | Inactive borders | `BORDER_INACTIVE` | Dark gray |
+
+**Note on `BG_SELECTED`**: This should be VERY subtle - a barely visible highlight that indicates selection without being visually jarring. The goal is to show which item is selected without drawing attention away from the content itself.
 
 ## User Colors
 
