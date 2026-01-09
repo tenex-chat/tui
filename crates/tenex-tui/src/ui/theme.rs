@@ -16,8 +16,8 @@ pub const BG_CARD: Color = Color::Rgb(18, 18, 18);
 /// Selected item background - subtle highlight (like bg-neutral-800)
 pub const BG_SELECTED: Color = Color::Rgb(32, 32, 32);
 
-/// Sidebar background - slightly visible against black (like bg-neutral-900)
-pub const BG_SIDEBAR: Color = Color::Rgb(23, 23, 23);
+/// Sidebar background - very dark, almost black
+pub const BG_SIDEBAR: Color = Color::Rgb(12, 12, 12);
 
 /// Dark background for secondary areas
 pub const BG_SECONDARY: Color = Color::Rgb(23, 23, 23);

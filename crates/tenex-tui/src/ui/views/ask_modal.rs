@@ -226,7 +226,7 @@ fn render_multi_select(
                 let is_selected = i == input_state.selected_option_index;
                 let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
-                let checkbox = if is_checked { "[x]" } else { "[ ]" };
+                let checkbox = if is_checked { "■" } else { "□" };
                 let marker = if is_selected { "> " } else { "  " };
 
                 let style = if is_selected {

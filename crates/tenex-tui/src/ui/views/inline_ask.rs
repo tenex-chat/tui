@@ -157,7 +157,7 @@ pub fn render_inline_ask_lines(
                     let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
                     let marker = if is_selected { "❯" } else { " " };
-                    let checkbox = if is_checked { "[✓]" } else { "[ ]" };
+                    let checkbox = if is_checked { "■" } else { "□" };
                     let style = if is_selected {
                         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)
                     } else {
@@ -435,7 +435,7 @@ fn render_multi_select(
                 let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
                 let marker = if is_selected { "❯ " } else { "  " };
-                let checkbox = if is_checked { "[✓] " } else { "[ ] " };
+                let checkbox = if is_checked { "■ " } else { "□ " };
 
                 let style = if is_selected {
                     Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)

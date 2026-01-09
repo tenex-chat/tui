@@ -203,16 +203,16 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Split main area into content and sidebar (sidebar on RIGHT)
     let main_chunks = Layout::horizontal([
         Constraint::Min(0),     // Content
-        Constraint::Length(20), // Sidebar (fixed width, on RIGHT)
+        Constraint::Length(42), // Sidebar (fixed width, on RIGHT)
     ])
     .split(chunks[1]);
 
-    // Render content based on active tab (with left padding)
+    // Render content based on active tab (with left and right padding)
     let content_area = main_chunks[0];
     let padded_content = Rect::new(
         content_area.x + 2, // 2-char left padding
         content_area.y,
-        content_area.width.saturating_sub(2),
+        content_area.width.saturating_sub(4), // 2 left + 2 right padding (gap before sidebar)
         content_area.height,
     );
     match app.home_panel_focus {
@@ -440,7 +440,13 @@ fn render_conversation_card(
         line_spans.push(Span::styled("  ", Style::default()));
         line_spans.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
 
-        let lines = vec![Line::from(line_spans), Line::from("")];
+        // Spacing line with border
+        let spacing_spans = vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),  // Space for collapse indicator
+            Span::styled(border_char, border_style),
+        ];
+        let lines = vec![Line::from(line_spans), Line::from(spacing_spans)];
 
         let item = ListItem::new(lines);
         if is_selected {
@@ -533,8 +539,12 @@ fn render_conversation_card(
             lines.push(Line::from(activity_spans));
         }
 
-        // Final line: Empty line for spacing
-        lines.push(Line::from(vec![Span::raw("")]));
+        // Final line: Spacing line with border
+        lines.push(Line::from(vec![
+            Span::styled(indent.clone(), Style::default()),
+            Span::styled("  ", Style::default()),  // Space for collapse indicator
+            Span::styled(border_char, border_style),
+        ]));
 
         let item = ListItem::new(lines);
         if is_selected {
@@ -632,8 +642,8 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
         Span::styled(author_name, Style::default().fg(theme::ACCENT_SPECIAL)),
     ];
 
-    // Line 3: Empty for spacing
-    let line3_spans = vec![Span::raw("")];
+    // Line 3: Spacing line with border
+    let line3_spans = vec![Span::styled(border_char, border_style)];
 
     ListItem::new(vec![
         Line::from(line1_spans),
@@ -661,6 +671,13 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
     let mut items: Vec<ListItem> = Vec::new();
 
+    // Calculate which item index is selected (0-based, not accounting for headers)
+    let selected_project_index = if app.sidebar_focused {
+        Some(app.sidebar_project_index)
+    } else {
+        None
+    };
+
     // Online section header
     if !online_projects.is_empty() {
         items.push(ListItem::new(Line::from(vec![
@@ -670,15 +687,40 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Online projects - now empty = none (inverted)
-    for project in &online_projects {
+    for (i, project) in online_projects.iter().enumerate() {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
-        let checkbox = if is_visible { "[✓] " } else { "[ ] " };
-        let name = truncate_string(&project.name, 14);
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(checkbox, Style::default().fg(theme::ACCENT_PRIMARY)),
-            Span::raw(name),
-        ])));
+        let is_focused = selected_project_index == Some(i);
+
+        let checkbox = if is_visible { "■ " } else { "□ " };
+        let focus_indicator = if is_focused { "▶ " } else { "  " };
+        let name = truncate_string(&project.name, 20); // Fits wider sidebar
+
+        let checkbox_style = if is_focused {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::ACCENT_PRIMARY)
+        };
+
+        let name_style = if is_focused {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let item = ListItem::new(Line::from(vec![
+            Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(checkbox, checkbox_style),
+            Span::styled(name, name_style),
+        ]));
+
+        let item = if is_focused {
+            item.style(Style::default().bg(theme::BG_SELECTED))
+        } else {
+            item
+        };
+
+        items.push(item);
     }
 
     // Offline section header
@@ -690,43 +732,50 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Offline projects - now empty = none (inverted)
-    for project in &offline_projects {
+    let online_count = online_projects.len();
+    for (i, project) in offline_projects.iter().enumerate() {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
-        let checkbox = if is_visible { "[✓] " } else { "[ ] " };
-        let name = truncate_string(&project.name, 14);
-        items.push(ListItem::new(Line::from(vec![
-            Span::styled(checkbox, Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(name, Style::default().fg(theme::TEXT_MUTED)),
-        ])));
+        let is_focused = selected_project_index == Some(online_count + i);
+
+        let checkbox = if is_visible { "■ " } else { "□ " };
+        let focus_indicator = if is_focused { "▶ " } else { "  " };
+        let name = truncate_string(&project.name, 20); // Fits wider sidebar
+
+        let checkbox_style = if is_focused {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        let name_style = if is_focused {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        let item = ListItem::new(Line::from(vec![
+            Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(checkbox, checkbox_style),
+            Span::styled(name, name_style),
+        ]));
+
+        let item = if is_focused {
+            item.style(Style::default().bg(theme::BG_SELECTED))
+        } else {
+            item
+        };
+
+        items.push(item);
     }
 
     let list = List::new(items)
         .block(Block::default()
             .borders(Borders::NONE)
-            .padding(Padding::new(2, 2, 1, 0))) // left, right, top, bottom
+            .padding(Padding::new(2, 2, 1, 0))) // Reduced left padding to fit indicator
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
-    // Calculate selected index (accounting for headers)
-    let selected_index = if app.sidebar_focused {
-        let mut idx = app.sidebar_project_index;
-        // Add 1 for online header if we have online projects
-        if !online_projects.is_empty() {
-            idx += 1;
-        }
-        // If we're past online projects, add 1 for offline header
-        if idx > online_projects.len() && !offline_projects.is_empty() {
-            idx += 1;
-        }
-        Some(idx)
-    } else {
-        None
-    };
-
-    let mut state = ListState::default();
-    state.select(selected_index);
-
-    f.render_stateful_widget(list, area, &mut state);
+    f.render_widget(list, area);
 }
 
 /// Render the filters section below projects
@@ -740,7 +789,7 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
     )));
 
     // "Only by me" filter
-    let only_by_me_checkbox = if app.only_by_me { "[✓]" } else { "[ ]" };
+    let only_by_me_checkbox = if app.only_by_me { "■" } else { "□" };
     let only_by_me_style = if app.only_by_me {
         Style::default().fg(theme::ACCENT_PRIMARY)
     } else {
@@ -770,7 +819,7 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
     let filter_widget = Paragraph::new(lines)
         .block(Block::default()
             .borders(Borders::NONE)
-            .padding(Padding::new(2, 2, 0, 1))) // left, right, top, bottom
+            .padding(Padding::new(4, 4, 0, 1))) // left, right, top, bottom
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(filter_widget, area);
