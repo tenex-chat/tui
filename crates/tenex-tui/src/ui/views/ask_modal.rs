@@ -1,6 +1,7 @@
 use crate::models::AskQuestion;
 use crate::ui::modal::AskModalState;
 use crate::ui::ask_input::InputMode;
+use crate::ui::card;
 use crate::ui::theme;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -150,9 +151,9 @@ fn render_single_select(
             .enumerate()
             .map(|(i, suggestion)| {
                 let marker = if i == input_state.selected_option_index {
-                    "> "
+                    card::COLLAPSE_CLOSED
                 } else {
-                    "  "
+                    card::SPACER
                 };
 
                 let style = if i == input_state.selected_option_index {
@@ -226,8 +227,8 @@ fn render_multi_select(
                 let is_selected = i == input_state.selected_option_index;
                 let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
-                let checkbox = if is_checked { "■" } else { "□" };
-                let marker = if is_selected { "> " } else { "  " };
+                let checkbox = if is_checked { card::CHECKBOX_ON } else { card::CHECKBOX_OFF };
+                let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
 
                 let style = if is_selected {
                     Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -255,11 +256,11 @@ fn render_question_indicator(f: &mut Frame, input_state: &crate::ui::ask_input::
     let mut indicators = Vec::new();
     for (i, _) in input_state.questions.iter().enumerate() {
         let marker = if i < input_state.answers.len() {
-            "●"
+            card::BULLET_GLYPH
         } else if i == input_state.current_question_index {
-            "◉"
+            card::BULLET_ACTIVE
         } else {
-            "○"
+            card::HOLLOW_BULLET_GLYPH
         };
 
         let style = if i < input_state.answers.len() {

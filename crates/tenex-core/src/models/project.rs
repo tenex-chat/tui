@@ -6,6 +6,7 @@ pub struct Project {
     pub name: String,
     pub pubkey: String,
     pub participants: Vec<String>,
+    pub agent_ids: Vec<String>,  // Agent definition event IDs (kind 4199)
     pub created_at: u64,
 }
 
@@ -21,6 +22,7 @@ impl Project {
         let mut title: Option<String> = None;
         let mut name: Option<String> = None;
         let mut participants = Vec::new();
+        let mut agent_ids = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -39,6 +41,11 @@ impl Project {
                         participants.push(p.to_string());
                     }
                 }
+                Some("agent") => {
+                    if let Some(agent_id) = tag.get(1).and_then(|t| t.variant().str()) {
+                        agent_ids.push(agent_id.to_string());
+                    }
+                }
                 _ => {}
             }
         }
@@ -52,6 +59,7 @@ impl Project {
             name: display_name,
             pubkey,
             participants,
+            agent_ids,
             created_at: note.created_at(),
         })
     }
@@ -72,6 +80,7 @@ mod tests {
             name: "Project 1".to_string(),
             pubkey: "a".repeat(64),
             participants: vec![],
+            agent_ids: vec![],
             created_at: 0,
         };
 

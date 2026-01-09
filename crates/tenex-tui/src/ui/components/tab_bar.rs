@@ -1,3 +1,4 @@
+use crate::ui::card;
 use crate::ui::format::{truncate_plain, truncate_with_ellipsis};
 use crate::ui::{theme, App};
 use ratatui::{
@@ -27,9 +28,9 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
         // Unread indicator (moved before project name)
         if tab.has_unread && !is_active {
-            spans.push(Span::styled("● ", Style::default().fg(theme::ACCENT_ERROR)));
+            spans.push(Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_ERROR)));
         } else {
-            spans.push(Span::raw("● "));
+            spans.push(Span::raw(card::BULLET));
         }
 
         // Project name (truncated to 8 chars max)

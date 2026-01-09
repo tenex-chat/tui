@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, Thread};
+use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -25,6 +25,9 @@ pub struct AppDataStore {
 
     // Agent lessons - kind:4129 events
     pub lessons: HashMap<String, Lesson>,  // keyed by lesson id
+
+    // Agent definitions - kind:4199 events
+    pub agent_definitions: HashMap<String, AgentDefinition>,  // keyed by id
 }
 
 impl AppDataStore {
@@ -41,6 +44,7 @@ impl AppDataStore {
             user_pubkey: None,
             agent_chatter: Vec::new(),
             lessons: HashMap::new(),
+            agent_definitions: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -231,6 +235,7 @@ impl AppDataStore {
             24010 => self.handle_status_event(note),
             513 => self.handle_metadata_event(note),
             4129 => self.handle_lesson_event(note),
+            4199 => self.handle_agent_definition_event(note),
             _ => {}
         }
     }
@@ -668,5 +673,22 @@ impl AppDataStore {
         self.lessons.get(lesson_id)
     }
 
-    // Streaming methods removed.
+    // ===== Agent Definition Methods =====
+
+    fn handle_agent_definition_event(&mut self, note: &Note) {
+        if let Some(agent_def) = AgentDefinition::from_note(note) {
+            self.agent_definitions.insert(agent_def.id.clone(), agent_def);
+        }
+    }
+
+    /// Get all agent definitions, sorted by created_at descending (most recent first)
+    pub fn get_agent_definitions(&self) -> Vec<&AgentDefinition> {
+        let mut defs: Vec<_> = self.agent_definitions.values().collect();
+        defs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        defs
+    }
+
+    pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
+        self.agent_definitions.get(id)
+    }
 }

@@ -121,9 +121,9 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
     // Todo items
     for item in &todo_state.items {
         let (icon, icon_style) = match item.status {
-            TodoStatus::Done => ("✓", theme::todo_done()),
-            TodoStatus::InProgress => ("◐", theme::todo_in_progress()),
-            TodoStatus::Pending => (card::HOLLOW_BULLET_GLYPH, theme::todo_pending()),
+            TodoStatus::Done => (card::TODO_DONE_GLYPH, theme::todo_done()),
+            TodoStatus::InProgress => (card::TODO_IN_PROGRESS_GLYPH, theme::todo_in_progress()),
+            TodoStatus::Pending => (card::TODO_PENDING_GLYPH, theme::todo_pending()),
         };
 
         let title_style = if item.status == TodoStatus::Done {

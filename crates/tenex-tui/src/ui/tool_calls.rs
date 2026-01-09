@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
 };
 use serde::{Deserialize, Serialize};
@@ -110,25 +110,52 @@ pub fn parse_message_content(content: &str) -> MessageContent {
     }
 }
 
-/// Get icon for a tool call based on its name
+/// Get icon for a tool call based on its name (Unicode symbols for consistent width)
 pub fn tool_icon(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "edit" | "str_replace_editor" => "✏️",
-        "write" | "file_write" => "📝",
-        "read" | "file_read" => "📖",
-        "bash" | "execute_bash" | "shell" => "⚡",
-        "glob" | "find" => "🔍",
-        "grep" | "search" => "🔎",
-        "task" | "agent" => "🤖",
-        "web_search" | "websearch" => "🌐",
-        "todowrite" | "todo" => "📋",
-        _ => "⚙️",
+        "edit" | "str_replace_editor" => "✎",
+        "write" | "file_write" => "✎",
+        "read" | "file_read" => "◉",
+        "bash" | "execute_bash" | "shell" => "$",
+        "glob" | "find" => "◎",
+        "grep" | "search" => "◎",
+        "task" | "agent" => "▶",
+        "web_search" | "websearch" => "◎",
+        "todowrite" | "todo" => "☐",
+        _ => "⚙",
+    }
+}
+
+/// Get semantic verb for a tool (e.g., "Reading", "Writing")
+pub fn tool_verb(name: &str) -> &'static str {
+    match name.to_lowercase().as_str() {
+        "read" | "file_read" => "Reading",
+        "write" | "file_write" => "Writing",
+        "edit" | "str_replace_editor" => "Editing",
+        "bash" | "execute_bash" | "shell" => "", // uses $ prefix instead
+        "glob" | "find" => "Searching",
+        "grep" | "search" => "Searching",
+        "task" | "agent" => "",
+        "web_search" | "websearch" => "Searching",
+        "todowrite" | "todo" => "",
+        _ => "Executing",
     }
 }
 
 /// Extract a meaningful target/file from tool parameters
 pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
     let params = &tool_call.parameters;
+    let name = tool_call.name.to_lowercase();
+
+    // For bash, prefer description over command (like Svelte)
+    if matches!(name.as_str(), "bash" | "execute_bash" | "shell") {
+        if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
+            return Some(desc.to_string());
+        }
+        if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
+            return Some(truncate_with_ellipsis(cmd, 50));
+        }
+    }
 
     // Try common parameter names for file paths
     for key in ["file_path", "path", "filePath", "file", "target"] {
@@ -136,16 +163,10 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
             // Shorten long paths - show last 2 components
             let parts: Vec<&str> = val.split('/').collect();
             if parts.len() > 2 {
-                return Some(format!(".../{}", parts[parts.len()-2..].join("/")));
+                return Some(format!(".../{}", parts[parts.len() - 2..].join("/")));
             }
             return Some(val.to_string());
         }
-    }
-
-    // For bash commands, show the command
-    if let Some(cmd) = params.get("command").and_then(|v| v.as_str()) {
-        let truncated = truncate_with_ellipsis(cmd, 40);
-        return Some(truncated);
     }
 
     // For search/grep, show the pattern
@@ -154,7 +175,75 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
         return Some(format!("\"{}\"", truncated));
     }
 
+    // Query for web search
+    if let Some(query) = params.get("query").and_then(|v| v.as_str()) {
+        return Some(format!("\"{}\"", truncate_with_ellipsis(query, 30)));
+    }
+
     None
+}
+
+/// Render a tool call line with tool-specific formatting (like Svelte renderers)
+/// Tool calls render without background, in muted text color
+pub fn render_tool_line(
+    tool_call: &ToolCall,
+    indicator_color: Color,
+) -> Line<'static> {
+    let name = tool_call.name.to_lowercase();
+    let target = extract_target(tool_call).unwrap_or_default();
+
+    let display_text = match name.as_str() {
+        // Bash: "$ command" or "$ description"
+        "bash" | "execute_bash" | "shell" => format!("$ {}", target),
+
+        // TodoWrite: collapsed count
+        "todowrite" | "todo" => {
+            let count = tool_call
+                .parameters
+                .get("todos")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0);
+            format!("▸ {} tasks", count)
+        }
+
+        // File operations: "Reading path" / "Writing path" / "Editing path"
+        "read" | "file_read" => format!("Reading {}", target),
+        "write" | "file_write" => format!("Writing {}", target),
+        "edit" | "str_replace_editor" => format!("Editing {}", target),
+
+        // Search: "Searching "pattern""
+        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" => {
+            format!("Searching {}", target)
+        }
+
+        // Task/Agent: show description
+        "task" | "agent" => {
+            let desc = tool_call
+                .parameters
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("agent");
+            format!("▶ {}", truncate_with_ellipsis(desc, 40))
+        }
+
+        // Default: verb + target or just tool name
+        _ => {
+            let verb = tool_verb(&tool_call.name);
+            if verb.is_empty() {
+                format!("{} {}", tool_call.name, target)
+            } else {
+                format!("{} {}", verb, target)
+            }
+        }
+    };
+
+    // No background, muted text color
+    Line::from(vec![
+        Span::styled("│", Style::default().fg(indicator_color)),
+        Span::raw("  "),
+        Span::styled(display_text, Style::default().fg(theme::TEXT_MUTED)),
+    ])
 }
 
 /// Render a single tool call as a compact single line

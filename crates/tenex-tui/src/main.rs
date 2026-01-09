@@ -25,7 +25,7 @@ use tenex_core::runtime::CoreRuntime;
 
 use ui::views::login::{render_login, LoginStep};
 use ui::views::home::get_hierarchical_threads;
-use ui::{App, HomeTab, InputMode, ModalState, NewThreadField, View};
+use ui::{App, HomeTab, InputMode, ModalState, View};
 use ui::selector::{handle_selector_key, SelectorAction};
 
 #[tokio::main]
@@ -339,6 +339,7 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
             .map(|t| t.title.clone())
             .unwrap_or_else(|| "Chat".to_string()),
         View::LessonViewer => "TENEX - Lesson".to_string(),
+        View::AgentBrowser => "TENEX - Agent Definitions".to_string(),
     };
 
     // For chat view, center the title with padding
@@ -364,6 +365,7 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
                 }
             }
         }
+        View::AgentBrowser => ui::views::render_agent_browser(f, app, chunks[1]),
     }
 
     // Footer - show quit warning if pending, otherwise normal hints
@@ -412,6 +414,12 @@ fn handle_key(
     // Handle tab modal when open
     if app.showing_tab_modal {
         handle_tab_modal_key(app, key);
+        return Ok(());
+    }
+
+    // Handle search modal when open
+    if app.showing_search_modal {
+        handle_search_modal_key(app, key);
         return Ok(());
     }
 
@@ -599,6 +607,14 @@ fn handle_key(
                     app.scroll_down(3);
                 } else if c == 'k' && app.view == View::LessonViewer {
                     app.scroll_up(3);
+                } else if c == 'j' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+                    app.scroll_down(3);
+                } else if c == 'k' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+                    app.scroll_up(3);
+                } else if app.view == View::AgentBrowser && !app.agent_browser_in_detail && c != 'q' {
+                    // In list mode, add characters to search filter (but not 'q' for quit)
+                    app.agent_browser_filter.push(c);
+                    app.agent_browser_index = 0; // Reset selection when filter changes
                 } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
                     // Navigate to section 1-5
                     let section_index = (c as usize) - ('1' as usize);
@@ -612,6 +628,12 @@ fn handle_key(
                     }
                 }
             }
+            KeyCode::Backspace => {
+                if app.view == View::AgentBrowser && !app.agent_browser_in_detail {
+                    app.agent_browser_filter.pop();
+                    app.agent_browser_index = 0;
+                }
+            }
             KeyCode::Up => match app.view {
                 View::Chat => {
                     if app.selected_message_index > 0 {
@@ -621,11 +643,28 @@ fn handle_key(
                 View::LessonViewer => {
                     app.scroll_up(3);
                 }
+                View::AgentBrowser => {
+                    if app.agent_browser_in_detail {
+                        app.scroll_up(3);
+                    } else if app.agent_browser_index > 0 {
+                        app.agent_browser_index -= 1;
+                    }
+                }
                 _ => {}
             },
             KeyCode::Down => match app.view {
                 View::LessonViewer => {
                     app.scroll_down(3);
+                }
+                View::AgentBrowser => {
+                    if app.agent_browser_in_detail {
+                        app.scroll_down(3);
+                    } else {
+                        let count = app.filtered_agent_definitions().len();
+                        if app.agent_browser_index < count.saturating_sub(1) {
+                            app.agent_browser_index += 1;
+                        }
+                    }
                 }
                 View::Chat => {
                     // Get display message count for bounds checking
@@ -692,6 +731,16 @@ fn handle_key(
                         }
                     }
                 }
+                View::AgentBrowser => {
+                    if !app.agent_browser_in_detail {
+                        let agents = app.filtered_agent_definitions();
+                        if let Some(agent) = agents.get(app.agent_browser_index) {
+                            app.viewing_agent_id = Some(agent.id.clone());
+                            app.agent_browser_in_detail = true;
+                            app.scroll_offset = 0;
+                        }
+                    }
+                }
                 _ => {}
             },
             KeyCode::Esc => match app.view {
@@ -712,6 +761,19 @@ fn handle_key(
                     app.viewing_lesson_id = None;
                     app.lesson_viewer_section = 0;
                     app.scroll_offset = 0;
+                }
+                View::AgentBrowser => {
+                    if app.agent_browser_in_detail {
+                        // Exit detail view and return to list
+                        app.agent_browser_in_detail = false;
+                        app.viewing_agent_id = None;
+                        app.scroll_offset = 0;
+                    } else {
+                        // Exit browser and go back to home
+                        app.view = View::Home;
+                        app.agent_browser_filter.clear();
+                        app.agent_browser_index = 0;
+                    }
                 }
                 _ => {}
             },
@@ -839,12 +901,13 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
     // Handle projects modal when showing (using ModalState)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
-        // Get projects BEFORE mutably borrowing modal_state
+        // Get projects and for_new_thread flag BEFORE mutably borrowing modal_state
         let (online_projects, offline_projects) = app.filtered_projects();
         let all_projects: Vec<_> = online_projects.into_iter().chain(offline_projects).collect();
         let item_count = all_projects.len();
+        let for_new_thread = matches!(app.modal_state, ModalState::ProjectsModal { for_new_thread: true, .. });
 
-        if let ModalState::ProjectsModal { ref mut selector } = app.modal_state {
+        if let ModalState::ProjectsModal { ref mut selector, .. } = app.modal_state {
             match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
                 SelectorAction::Selected(project) => {
                     let a_tag = project.a_tag();
@@ -852,7 +915,8 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
                     // Auto-select PM agent and default branch from status
                     if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
-                        if app.selected_agent.is_none() {
+                        // Always select PM agent for new threads
+                        if for_new_thread || app.selected_agent.is_none() {
                             if let Some(pm) = status.pm_agent() {
                                 app.selected_agent = Some(pm.clone());
                             }
@@ -862,10 +926,20 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
 
-                    // Set filter to show only this project
-                    app.visible_projects.clear();
-                    app.visible_projects.insert(a_tag);
                     app.modal_state = ModalState::None;
+
+                    if for_new_thread {
+                        // Navigate to chat view to create new thread
+                        app.selected_thread = None;
+                        app.creating_thread = true;
+                        app.view = View::Chat;
+                        app.input_mode = InputMode::Editing;
+                        app.chat_editor.clear();
+                    } else {
+                        // Set filter to show only this project (existing behavior)
+                        app.visible_projects.clear();
+                        app.visible_projects.insert(a_tag);
+                    }
                 }
                 SelectorAction::Cancelled => {
                     app.modal_state = ModalState::None;
@@ -876,136 +950,27 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Handle new thread modal when showing
-    if app.showing_new_thread_modal {
-        match code {
-            KeyCode::Esc => {
-                app.close_new_thread_modal();
-            }
-            KeyCode::Tab => {
-                app.new_thread_modal_next_field();
-            }
-            KeyCode::Enter => {
-                match app.new_thread_modal_focus {
-                    NewThreadField::Project => {
-                        let projects = app.new_thread_filtered_projects();
-                        if let Some(project) = projects.get(app.new_thread_project_index).cloned() {
-                            app.new_thread_select_project(project);
-                        }
-                    }
-                    NewThreadField::Agent => {
-                        let agents = app.new_thread_filtered_agents();
-                        if let Some(agent) = agents.get(app.new_thread_agent_index).cloned() {
-                            app.new_thread_select_agent(agent);
-                        }
-                    }
-                    NewThreadField::Content => {
-                        // Submit if valid
-                        if app.can_submit_new_thread() {
-                            if let (Some(ref core_handle), Some(ref project), Some(ref agent)) = (
-                                &app.core_handle,
-                                &app.new_thread_selected_project,
-                                &app.new_thread_selected_agent,
-                            ) {
-                                let content = app.new_thread_editor.build_full_content();
-                                let project_a_tag = project.a_tag();
-                                let agent_pubkey = Some(agent.pubkey.clone());
-
-                                // Publish the thread (kind:1)
-                                if let Err(e) = core_handle.send(NostrCommand::PublishThread {
-                                    project_a_tag: project_a_tag.clone(),
-                                    title: content.lines().next().unwrap_or("New Thread").to_string(),
-                                    content: content.clone(),
-                                    agent_pubkey,
-                                    branch: None,
-                                }) {
-                                    app.set_status(&format!("Failed to publish thread: {}", e));
-                                } else {
-                                    app.set_last_project(&project_a_tag);
-                                    app.delete_project_draft(&project_a_tag);
-                                    app.close_new_thread_modal();
-                                    app.set_status("Thread created");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            KeyCode::Up => {
-                match app.new_thread_modal_focus {
-                    NewThreadField::Project => {
-                        if app.new_thread_project_index > 0 {
-                            app.new_thread_project_index -= 1;
-                        }
-                    }
-                    NewThreadField::Agent => {
-                        if app.new_thread_agent_index > 0 {
-                            app.new_thread_agent_index -= 1;
-                        }
-                    }
-                    NewThreadField::Content => {}
-                }
-            }
-            KeyCode::Down => {
-                match app.new_thread_modal_focus {
-                    NewThreadField::Project => {
-                        let max = app.new_thread_filtered_projects().len().saturating_sub(1);
-                        if app.new_thread_project_index < max {
-                            app.new_thread_project_index += 1;
-                        }
-                    }
-                    NewThreadField::Agent => {
-                        let max = app.new_thread_filtered_agents().len().saturating_sub(1);
-                        if app.new_thread_agent_index < max {
-                            app.new_thread_agent_index += 1;
-                        }
-                    }
-                    NewThreadField::Content => {}
-                }
-            }
-            KeyCode::Char(c) => {
-                match app.new_thread_modal_focus {
-                    NewThreadField::Project => {
-                        app.new_thread_project_filter.push(c);
-                        app.new_thread_project_index = 0;
-                    }
-                    NewThreadField::Agent => {
-                        app.new_thread_agent_filter.push(c);
-                        app.new_thread_agent_index = 0;
-                    }
-                    NewThreadField::Content => {
-                        app.new_thread_editor.insert_char(c);
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                match app.new_thread_modal_focus {
-                    NewThreadField::Project => {
-                        app.new_thread_project_filter.pop();
-                        app.new_thread_project_index = 0;
-                    }
-                    NewThreadField::Agent => {
-                        app.new_thread_agent_filter.pop();
-                        app.new_thread_agent_index = 0;
-                    }
-                    NewThreadField::Content => {
-                        app.new_thread_editor.delete_char_before();
-                    }
-                }
-            }
-            _ => {}
-        }
+    // Handle project settings modal when showing
+    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+        handle_project_settings_key(app, key);
         return Ok(());
     }
 
     // Normal Home view navigation
     match code {
         KeyCode::Char('q') => app.quit(),
+        KeyCode::Char('/') => {
+            // Open search modal
+            app.showing_search_modal = true;
+            app.search_filter.clear();
+            app.search_index = 0;
+        }
         KeyCode::Char('p') => {
-            app.open_projects_modal();
+            app.open_projects_modal(false);
         }
         KeyCode::Char('n') => {
-            app.open_new_thread_modal();
+            // Open projects modal - selecting a project navigates to chat to create new thread
+            app.open_projects_modal(true);
         }
         KeyCode::Char('m') => {
             // Toggle "only by me" filter
@@ -1014,6 +979,10 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('f') => {
             // Cycle through time filter options
             app.cycle_time_filter();
+        }
+        KeyCode::Char('A') => {
+            // Open agent browser
+            app.open_agent_browser();
         }
         KeyCode::Tab => {
             // Switch between tabs (forward)
@@ -1101,6 +1070,20 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.save_selected_projects();
             }
         }
+        KeyCode::Char('s') if app.sidebar_focused => {
+            // Open project settings for focused project
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                let a_tag = project.a_tag();
+                let project_name = project.name.clone();
+                let agent_ids = project.agent_ids.clone();
+
+                app.modal_state = ui::modal::ModalState::ProjectSettings(
+                    ui::modal::ProjectSettingsState::new(a_tag, project_name, agent_ids)
+                );
+            }
+        }
         KeyCode::Enter => {
             if app.sidebar_focused {
                 // Toggle project visibility (same as space)
@@ -1183,6 +1166,126 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     Ok(())
 }
 
+/// Handle key events for the project settings modal
+fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
+    use ui::views::{available_agent_count, get_agent_id_at_index};
+
+    let code = key.code;
+
+    // Extract state to avoid borrow issues
+    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::ProjectSettings(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    if state.in_add_mode {
+        // Add agent mode
+        match code {
+            KeyCode::Esc => {
+                state.in_add_mode = false;
+                state.add_filter.clear();
+                state.add_index = 0;
+            }
+            KeyCode::Up => {
+                if state.add_index > 0 {
+                    state.add_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count = available_agent_count(app, &state);
+                if state.add_index + 1 < count {
+                    state.add_index += 1;
+                }
+            }
+            KeyCode::Enter => {
+                if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
+                    state.add_agent(agent_id);
+                    state.in_add_mode = false;
+                    state.add_filter.clear();
+                    state.add_index = 0;
+                }
+            }
+            KeyCode::Char(c) => {
+                state.add_filter.push(c);
+                state.add_index = 0;
+            }
+            KeyCode::Backspace => {
+                state.add_filter.pop();
+                state.add_index = 0;
+            }
+            _ => {}
+        }
+    } else {
+        // Main settings mode
+        match code {
+            KeyCode::Esc => {
+                // Close modal without saving
+                app.modal_state = ModalState::None;
+                return;
+            }
+            KeyCode::Up => {
+                if state.selector_index > 0 {
+                    state.selector_index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                let count = state.pending_agent_ids.len();
+                if state.selector_index + 1 < count {
+                    state.selector_index += 1;
+                }
+            }
+            KeyCode::Char('a') => {
+                state.in_add_mode = true;
+                state.add_filter.clear();
+                state.add_index = 0;
+            }
+            KeyCode::Char('d') => {
+                if !state.pending_agent_ids.is_empty() {
+                    state.remove_agent(state.selector_index);
+                    // Adjust index if needed
+                    if state.selector_index >= state.pending_agent_ids.len() && state.selector_index > 0 {
+                        state.selector_index -= 1;
+                    }
+                }
+            }
+            KeyCode::Char('p') => {
+                if !state.pending_agent_ids.is_empty() && state.selector_index > 0 {
+                    state.set_pm(state.selector_index);
+                    state.selector_index = 0; // Move selection to new PM position
+                }
+            }
+            KeyCode::Enter => {
+                if state.has_changes() {
+                    // Publish the changes
+                    let project_a_tag = state.project_a_tag.clone();
+                    let agent_ids = state.pending_agent_ids.clone();
+
+                    if let Some(ref core_handle) = app.core_handle {
+                        if let Err(e) = core_handle.send(NostrCommand::UpdateProjectAgents {
+                            project_a_tag,
+                            agent_ids,
+                        }) {
+                            app.set_status(&format!("Failed to update agents: {}", e));
+                        } else {
+                            app.set_status("Project agents updated");
+                        }
+                    }
+
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Restore the state
+    app.modal_state = ModalState::ProjectSettings(state);
+}
+
 /// Handle key events for the chat editor (rich text editing)
 fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
@@ -1196,37 +1299,59 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.chat_editor.insert_newline();
             app.save_chat_draft();
         }
-        // Enter = send message
+        // Enter = send message or create new thread
         KeyCode::Enter => {
             let content = app.chat_editor.submit();
             if !content.is_empty() {
-                if let (Some(ref core_handle), Some(ref thread), Some(ref project)) =
-                    (&app.core_handle, &app.selected_thread, &app.selected_project)
+                if let (Some(ref core_handle), Some(ref project)) =
+                    (&app.core_handle, &app.selected_project)
                 {
-                    let thread_id = thread.id.clone();
                     let project_a_tag = project.a_tag();
                     let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
                     let branch = app.selected_branch.clone();
-                    // NIP-22: lowercase "e" tag references the parent message
-                    // When in subthread, reply to the subthread root
-                    // When in main view, reply to the thread root (or first message)
-                    let reply_to = if let Some(ref root_id) = app.subthread_root {
-                        Some(root_id.clone())
-                    } else {
-                        Some(thread_id.clone())
-                    };
 
-                    if let Err(e) = core_handle.send(NostrCommand::PublishMessage {
-                        thread_id,
-                        project_a_tag,
-                        content,
-                        agent_pubkey,
-                        reply_to,
-                        branch,
-                    }) {
-                        app.set_status(&format!("Failed to publish message: {}", e));
+                    if let Some(ref thread) = app.selected_thread {
+                        // Reply to existing thread
+                        let thread_id = thread.id.clone();
+                        // NIP-22: lowercase "e" tag references the parent message
+                        // When in subthread, reply to the subthread root
+                        // When in main view, reply to the thread root (or first message)
+                        let reply_to = if let Some(ref root_id) = app.subthread_root {
+                            Some(root_id.clone())
+                        } else {
+                            Some(thread_id.clone())
+                        };
+
+                        if let Err(e) = core_handle.send(NostrCommand::PublishMessage {
+                            thread_id,
+                            project_a_tag,
+                            content,
+                            agent_pubkey,
+                            reply_to,
+                            branch,
+                        }) {
+                            app.set_status(&format!("Failed to publish message: {}", e));
+                        } else {
+                            app.delete_chat_draft();
+                        }
                     } else {
-                        app.delete_chat_draft();
+                        // Create new thread (kind:1)
+                        let title = content.lines().next().unwrap_or("New Thread").to_string();
+                        if let Err(e) = core_handle.send(NostrCommand::PublishThread {
+                            project_a_tag: project_a_tag.clone(),
+                            title,
+                            content,
+                            agent_pubkey,
+                            branch,
+                        }) {
+                            app.set_status(&format!("Failed to create thread: {}", e));
+                        } else {
+                            app.creating_thread = false;
+                            app.set_status("Thread created");
+                            // Navigate back to home - the new thread will appear there
+                            app.view = View::Home;
+                            app.input_mode = InputMode::Normal;
+                        }
                     }
                 }
             }
@@ -1580,6 +1705,54 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
                 app.switch_to_tab(tab_index);
                 app.view = View::Chat;
             }
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events for the search modal (/)
+fn handle_search_modal_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+
+    match code {
+        // Escape closes the modal
+        KeyCode::Esc => {
+            app.showing_search_modal = false;
+            app.search_filter.clear();
+            app.search_index = 0;
+        }
+        // Up arrow moves selection up
+        KeyCode::Up => {
+            if app.search_index > 0 {
+                app.search_index -= 1;
+            }
+        }
+        // Down arrow moves selection down
+        KeyCode::Down => {
+            let count = app.search_results().len();
+            if app.search_index + 1 < count {
+                app.search_index += 1;
+            }
+        }
+        // Enter opens the selected thread
+        KeyCode::Enter => {
+            let results = app.search_results();
+            if let Some(result) = results.get(app.search_index).cloned() {
+                app.showing_search_modal = false;
+                app.search_filter.clear();
+                app.search_index = 0;
+                app.open_thread_from_home(&result.thread, &result.project_a_tag);
+            }
+        }
+        // Character input appends to filter
+        KeyCode::Char(c) => {
+            app.search_filter.push(c);
+            app.search_index = 0;
+        }
+        // Backspace removes last character from filter
+        KeyCode::Backspace => {
+            app.search_filter.pop();
+            app.search_index = 0;
         }
         _ => {}
     }

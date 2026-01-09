@@ -21,7 +21,3 @@ futures.workspace = true
 pulldown-cmark.workspace = true
 arboard.workspace = true
 png.workspace = true
-image.workspace = true
-ratatui-image.workspace = true
-reqwest.workspace = true
-dirs.workspace = true

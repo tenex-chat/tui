@@ -4,7 +4,7 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::ui::theme;
+use crate::ui::{card, theme};
 
 #[derive(Debug, Clone)]
 struct StyleStack {
@@ -64,9 +64,9 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     list_level += 1;
                 }
                 Tag::Item => {
-                    let indent = "  ".repeat(list_level.saturating_sub(1));
+                    let indent = card::INDENT_UNIT.repeat(list_level.saturating_sub(1));
                     current_line.push(Span::styled(
-                        format!("{}• ", indent).to_string(),
+                        format!("{}{}", indent, card::LIST_BULLET),
                         Style::default().fg(theme::TEXT_MUTED),
                     ));
                 }

@@ -1,8 +1,7 @@
-use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectDraft, ProjectDraftStorage, ProjectStatus, Thread, TimeFilter};
+use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
 use crate::nostr::DataChange;
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
-use crate::ui::avatars::AvatarCache;
 use crate::ui::modal::ModalState;
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
@@ -20,6 +19,7 @@ pub enum View {
     Home,
     Chat,
     LessonViewer,
+    AgentBrowser,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,13 +32,6 @@ pub enum InputMode {
 pub enum HomeTab {
     Recent,
     Inbox,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum NewThreadField {
-    Content,
-    Project,
-    Agent,
 }
 
 /// An open tab representing a thread
@@ -138,17 +131,6 @@ pub struct App {
     /// Filter by time since last activity
     pub time_filter: Option<TimeFilter>,
 
-    // New thread modal state
-    pub showing_new_thread_modal: bool,
-    pub new_thread_modal_focus: NewThreadField,
-    pub new_thread_project_filter: String,
-    pub new_thread_agent_filter: String,
-    pub new_thread_selected_project: Option<Project>,
-    pub new_thread_selected_agent: Option<ProjectAgent>,
-    pub new_thread_editor: TextEditor,
-    pub new_thread_project_index: usize,
-    pub new_thread_agent_index: usize,
-    project_draft_storage: RefCell<ProjectDraftStorage>,
     preferences: RefCell<PreferencesStorage>,
 
     /// Unified modal state
@@ -157,6 +139,17 @@ pub struct App {
     // Lesson viewer state
     pub viewing_lesson_id: Option<String>,
     pub lesson_viewer_section: usize,
+
+    // Agent browser state
+    pub agent_browser_index: usize,
+    pub agent_browser_filter: String,
+    pub agent_browser_in_detail: bool,
+    pub viewing_agent_id: Option<String>,
+
+    // Search modal state
+    pub showing_search_modal: bool,
+    pub search_filter: String,
+    pub search_index: usize,
 
     /// Local streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
@@ -169,13 +162,13 @@ pub struct App {
 
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
-
-    /// Avatar cache for profile pictures
-    pub avatar_cache: RefCell<AvatarCache>,
 }
 
 impl App {
-    pub fn new(db: Arc<Database>, data_store: Rc<RefCell<AppDataStore>>) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        data_store: Rc<RefCell<AppDataStore>>,
+    ) -> Self {
         Self {
             running: true,
             view: View::Login,
@@ -222,25 +215,21 @@ impl App {
             visible_projects: HashSet::new(),
             only_by_me: false,
             time_filter: None,
-            showing_new_thread_modal: false,
-            new_thread_modal_focus: NewThreadField::Content,
-            new_thread_project_filter: String::new(),
-            new_thread_agent_filter: String::new(),
-            new_thread_selected_project: None,
-            new_thread_selected_agent: None,
-            new_thread_editor: TextEditor::new(),
-            new_thread_project_index: 0,
-            new_thread_agent_index: 0,
-            project_draft_storage: RefCell::new(ProjectDraftStorage::new("tenex_data")),
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
             modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
+            agent_browser_index: 0,
+            agent_browser_filter: String::new(),
+            agent_browser_in_detail: false,
+            viewing_agent_id: None,
+            showing_search_modal: false,
+            search_filter: String::new(),
+            search_index: 0,
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
-            avatar_cache: RefCell::new(AvatarCache::new()),
         }
     }
 
@@ -401,16 +390,18 @@ impl App {
     }
 
     /// Open the projects modal
-    pub fn open_projects_modal(&mut self) {
+    /// If `for_new_thread` is true, selecting a project navigates to chat view
+    pub fn open_projects_modal(&mut self, for_new_thread: bool) {
         self.modal_state = ModalState::ProjectsModal {
             selector: SelectorState::new(),
+            for_new_thread,
         };
     }
 
     /// Get projects modal index (from ModalState)
     pub fn projects_modal_index(&self) -> usize {
         match &self.modal_state {
-            ModalState::ProjectsModal { selector } => selector.index,
+            ModalState::ProjectsModal { selector, .. } => selector.index,
             _ => 0,
         }
     }
@@ -418,7 +409,7 @@ impl App {
     /// Get projects modal filter (from ModalState)
     pub fn projects_modal_filter(&self) -> &str {
         match &self.modal_state {
-            ModalState::ProjectsModal { selector } => &selector.filter,
+            ModalState::ProjectsModal { selector, .. } => &selector.filter,
             _ => "",
         }
     }
@@ -986,194 +977,6 @@ impl App {
         }
     }
 
-    // ===== New Thread Modal Methods =====
-
-    /// Open the new thread modal
-    pub fn open_new_thread_modal(&mut self) {
-        self.showing_new_thread_modal = true;
-        self.new_thread_modal_focus = NewThreadField::Content;
-        self.new_thread_project_filter.clear();
-        self.new_thread_agent_filter.clear();
-        self.new_thread_project_index = 0;
-        self.new_thread_agent_index = 0;
-
-        // Try to load last used project
-        let last_project_a_tag = self.preferences.borrow().last_project().map(|s| s.to_string());
-
-        if let Some(ref a_tag) = last_project_a_tag {
-            let project = self.data_store.borrow().get_projects()
-                .iter()
-                .find(|p| p.a_tag() == *a_tag)
-                .cloned();
-
-            if let Some(project) = project {
-                self.new_thread_selected_project = Some(project.clone());
-                // Auto-select first agent if available
-                if let Some(status) = self.data_store.borrow().get_project_status(&project.a_tag()) {
-                    self.new_thread_selected_agent = status.agents.first().cloned();
-                }
-                // Load project draft
-                self.restore_project_draft(&project.a_tag());
-            }
-        }
-
-        // If no last project, try to select first online project
-        if self.new_thread_selected_project.is_none() {
-            let (online, _) = self.filtered_projects();
-            if let Some(project) = online.first() {
-                self.new_thread_selected_project = Some(project.clone());
-                if let Some(status) = self.data_store.borrow().get_project_status(&project.a_tag()) {
-                    self.new_thread_selected_agent = status.agents.first().cloned();
-                }
-            }
-        }
-
-        self.input_mode = InputMode::Editing;
-    }
-
-    /// Close the new thread modal, saving draft
-    pub fn close_new_thread_modal(&mut self) {
-        self.save_project_draft();
-        self.showing_new_thread_modal = false;
-        self.new_thread_editor.clear();
-        self.new_thread_selected_project = None;
-        self.new_thread_selected_agent = None;
-        self.input_mode = InputMode::Normal;
-    }
-
-    /// Save project draft for the current modal state
-    fn save_project_draft(&self) {
-        if let Some(ref project) = self.new_thread_selected_project {
-            let draft = ProjectDraft {
-                project_a_tag: project.a_tag(),
-                text: self.new_thread_editor.build_full_content(),
-                selected_agent_pubkey: self.new_thread_selected_agent.as_ref().map(|a| a.pubkey.clone()),
-                last_modified: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-            };
-            self.project_draft_storage.borrow_mut().save(draft);
-        }
-    }
-
-    /// Restore project draft into the modal editor
-    fn restore_project_draft(&mut self, project_a_tag: &str) {
-        if let Some(draft) = self.project_draft_storage.borrow().load(project_a_tag) {
-            self.new_thread_editor.text = draft.text;
-            self.new_thread_editor.cursor = self.new_thread_editor.text.len();
-            if let Some(agent_pubkey) = draft.selected_agent_pubkey {
-                if let Some(status) = self.data_store.borrow().get_project_status(project_a_tag) {
-                    self.new_thread_selected_agent = status
-                        .agents
-                        .iter()
-                        .find(|a| a.pubkey == agent_pubkey)
-                        .cloned();
-                }
-            }
-        }
-    }
-
-    /// Delete project draft (after sending)
-    pub fn delete_project_draft(&self, project_a_tag: &str) {
-        self.project_draft_storage.borrow_mut().delete(project_a_tag);
-    }
-
-    /// Set last used project preference
-    pub fn set_last_project(&self, project_a_tag: &str) {
-        self.preferences.borrow_mut().set_last_project(project_a_tag);
-    }
-
-    /// Cycle to next field in new thread modal
-    pub fn new_thread_modal_next_field(&mut self) {
-        // Save draft when switching away from project
-        if self.new_thread_modal_focus == NewThreadField::Project {
-            self.save_project_draft();
-        }
-
-        self.new_thread_modal_focus = match self.new_thread_modal_focus {
-            NewThreadField::Content => NewThreadField::Project,
-            NewThreadField::Project => NewThreadField::Agent,
-            NewThreadField::Agent => NewThreadField::Content,
-        };
-
-        // Clear filter when entering a selector
-        match self.new_thread_modal_focus {
-            NewThreadField::Project => self.new_thread_project_filter.clear(),
-            NewThreadField::Agent => self.new_thread_agent_filter.clear(),
-            NewThreadField::Content => {}
-        }
-    }
-
-    /// Get filtered projects for the new thread modal
-    pub fn new_thread_filtered_projects(&self) -> Vec<Project> {
-        let filter = self.new_thread_project_filter.to_lowercase();
-        let store = self.data_store.borrow();
-        let projects = store.get_projects();
-
-        projects
-            .iter()
-            .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
-            .filter(|p| store.is_project_online(&p.a_tag()))
-            .cloned()
-            .collect()
-    }
-
-    /// Get filtered agents for the new thread modal
-    pub fn new_thread_filtered_agents(&self) -> Vec<ProjectAgent> {
-        let filter = self.new_thread_agent_filter.to_lowercase();
-        self.new_thread_selected_project
-            .as_ref()
-            .and_then(|p| {
-                self.data_store
-                    .borrow()
-                    .get_project_status(&p.a_tag())
-                    .map(|s| {
-                        s.agents
-                            .iter()
-                            .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
-                            .cloned()
-                            .collect()
-                    })
-            })
-            .unwrap_or_default()
-    }
-
-    /// Select a project in the new thread modal
-    pub fn new_thread_select_project(&mut self, project: Project) {
-        // Save draft for old project
-        self.save_project_draft();
-
-        let a_tag = project.a_tag();
-        self.new_thread_selected_project = Some(project);
-        self.new_thread_selected_agent = None;
-
-        // Auto-select first agent
-        if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
-            self.new_thread_selected_agent = status.agents.first().cloned();
-        }
-
-        // Load draft for new project
-        self.restore_project_draft(&a_tag);
-
-        // Move to next field
-        self.new_thread_modal_focus = NewThreadField::Agent;
-        self.new_thread_agent_filter.clear();
-    }
-
-    /// Select an agent in the new thread modal
-    pub fn new_thread_select_agent(&mut self, agent: ProjectAgent) {
-        self.new_thread_selected_agent = Some(agent);
-        self.new_thread_modal_focus = NewThreadField::Content;
-    }
-
-    /// Check if the new thread modal can submit
-    pub fn can_submit_new_thread(&self) -> bool {
-        self.new_thread_selected_project.is_some()
-            && self.new_thread_selected_agent.is_some()
-            && !self.new_thread_editor.text.trim().is_empty()
-    }
-
     /// Get all image URLs from messages in the current thread
     pub fn get_image_urls_from_thread(&self) -> Vec<String> {
         let messages = self.messages();
@@ -1400,4 +1203,161 @@ impl App {
         self.time_filter = TimeFilter::cycle_next(self.time_filter);
         self.preferences.borrow_mut().set_time_filter(self.time_filter);
     }
+
+    // ===== Agent Browser Methods =====
+
+    /// Open the agent browser view
+    pub fn open_agent_browser(&mut self) {
+        self.agent_browser_index = 0;
+        self.agent_browser_filter.clear();
+        self.agent_browser_in_detail = false;
+        self.viewing_agent_id = None;
+        self.scroll_offset = 0;
+        self.view = View::AgentBrowser;
+        self.input_mode = InputMode::Normal;
+    }
+
+    /// Get filtered agent definitions for the browser
+    pub fn filtered_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
+        let filter = self.agent_browser_filter.to_lowercase();
+        self.data_store.borrow()
+            .get_agent_definitions()
+            .into_iter()
+            .filter(|d| {
+                filter.is_empty() ||
+                d.name.to_lowercase().contains(&filter) ||
+                d.description.to_lowercase().contains(&filter) ||
+                d.role.to_lowercase().contains(&filter)
+            })
+            .cloned()
+            .collect()
+    }
+
+    // ===== Search Methods =====
+
+    /// Get search results based on current search_filter
+    /// Searches thread titles, thread content, and message content
+    /// Respects visible_projects filter
+    pub fn search_results(&self) -> Vec<SearchResult> {
+        if self.search_filter.trim().is_empty() {
+            return vec![];
+        }
+
+        let filter = self.search_filter.to_lowercase();
+        let store = self.data_store.borrow();
+        let mut results = Vec::new();
+
+        // Search threads (title and content match)
+        for project in store.get_projects() {
+            let a_tag = project.a_tag();
+
+            // Skip projects not in visible_projects
+            if !self.visible_projects.is_empty() && !self.visible_projects.contains(&a_tag) {
+                continue;
+            }
+
+            let project_name = project.name.clone();
+
+            for thread in store.get_threads(&a_tag) {
+                // Check if thread title, content, or ID matches
+                let title_matches = thread.title.to_lowercase().contains(&filter);
+                let content_matches = thread.content.to_lowercase().contains(&filter);
+                let id_matches = thread.id.to_lowercase().contains(&filter);
+
+                if title_matches || content_matches || id_matches {
+                    let (match_type, excerpt) = if id_matches {
+                        (SearchMatchType::ConversationId, Some(format!("ID: {}", thread.id)))
+                    } else if title_matches {
+                        (SearchMatchType::Thread, None)
+                    } else {
+                        (SearchMatchType::Thread, Some(Self::extract_excerpt(&thread.content, &filter)))
+                    };
+
+                    results.push(SearchResult {
+                        thread: thread.clone(),
+                        project_a_tag: a_tag.clone(),
+                        project_name: project_name.clone(),
+                        match_type,
+                        excerpt,
+                    });
+                    continue;
+                }
+
+                // Search messages within this thread (limit per thread for performance)
+                let messages = store.get_messages(&thread.id);
+                for message in messages.iter().take(100) {
+                    if message.content.to_lowercase().contains(&filter) {
+                        let excerpt = Self::extract_excerpt(&message.content, &filter);
+                        results.push(SearchResult {
+                            thread: thread.clone(),
+                            project_a_tag: a_tag.clone(),
+                            project_name: project_name.clone(),
+                            match_type: SearchMatchType::Message {
+                                message_id: message.id.clone()
+                            },
+                            excerpt: Some(excerpt),
+                        });
+
+                        // Only include first message match per thread
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Sort by last activity (most recent first)
+        results.sort_by(|a, b| b.thread.last_activity.cmp(&a.thread.last_activity));
+
+        // Cap total results
+        results.truncate(50);
+
+        results
+    }
+
+    /// Extract a short excerpt around the first match of the filter
+    fn extract_excerpt(content: &str, filter: &str) -> String {
+        let content_lower = content.to_lowercase();
+        if let Some(pos) = content_lower.find(filter) {
+            // Get some context around the match
+            let start = pos.saturating_sub(20);
+            let end = (pos + filter.len() + 40).min(content.len());
+
+            // Find safe UTF-8 boundaries
+            let safe_start = (start..pos).rev()
+                .find(|&i| content.is_char_boundary(i))
+                .unwrap_or(start);
+            let safe_end = (end..content.len())
+                .find(|&i| content.is_char_boundary(i))
+                .unwrap_or(content.len());
+
+            let excerpt = &content[safe_start..safe_end];
+            let excerpt = excerpt.replace('\n', " ");
+
+            if safe_start > 0 {
+                format!("...{}", excerpt.trim())
+            } else {
+                excerpt.trim().to_string()
+            }
+        } else {
+            // Fallback: just take first 60 chars
+            content.chars().take(60).collect::<String>().replace('\n', " ")
+        }
+    }
+}
+
+/// A search result - can match thread title/content or message content
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub thread: Thread,
+    pub project_a_tag: String,
+    pub project_name: String,
+    pub match_type: SearchMatchType,
+    pub excerpt: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum SearchMatchType {
+    Thread,
+    ConversationId,
+    Message { message_id: String },
 }

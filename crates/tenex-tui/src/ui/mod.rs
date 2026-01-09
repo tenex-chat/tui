@@ -1,6 +1,6 @@
 pub mod app;
 pub mod ask_input;
-pub mod avatars;
+pub mod card;
 pub mod components;
 pub mod format;
 pub mod markdown;
@@ -13,6 +13,6 @@ pub mod todo;
 pub mod tool_calls;
 pub mod views;
 
-pub use app::{App, HomeTab, InputMode, NewThreadField, View};
+pub use app::{App, HomeTab, InputMode, View};
 pub use modal::ModalState;
 pub use terminal::{init as init_terminal, restore as restore_terminal, Tui};

@@ -1,6 +1,7 @@
 use crate::models::AskQuestion;
 use crate::ui::modal::AskModalState;
 use crate::ui::ask_input::InputMode;
+use crate::ui::card;
 use crate::ui::theme;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -112,14 +113,14 @@ pub fn render_inline_ask_lines(
                 // Render options
                 for (i, suggestion) in suggestions.iter().enumerate() {
                     let is_selected = i == input_state.selected_option_index;
-                    let marker = if is_selected { "❯" } else { " " };
+                    let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
                     let style = if is_selected {
                         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)
                     } else {
                         Style::default().fg(theme::TEXT_PRIMARY).bg(bg)
                     };
 
-                    let option_text = format!("{} {}. {}", marker, i + 1, suggestion);
+                    let option_text = format!("{}{}. {}", marker, i + 1, suggestion);
                     let mut opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
@@ -133,14 +134,15 @@ pub fn render_inline_ask_lines(
                 // Custom input option at the end
                 let custom_idx = suggestions.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
-                let custom_marker = if is_custom_selected { "❯" } else { " " };
+                let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
                 let custom_style = if is_custom_selected {
                     Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)
                 } else {
                     Style::default().fg(theme::TEXT_MUTED).bg(bg)
                 };
 
-                let custom_option_text = format!("{} {}. Or type your own answer...", custom_marker, custom_idx + 1);
+                let custom_option_text =
+                    format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
                 let mut custom_opt_spans: Vec<Span<'static>> = vec![
                     Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                     Span::styled(" ", Style::default().bg(bg)),
@@ -156,15 +158,15 @@ pub fn render_inline_ask_lines(
                     let is_selected = i == input_state.selected_option_index;
                     let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
-                    let marker = if is_selected { "❯" } else { " " };
-                    let checkbox = if is_checked { "■" } else { "□" };
+                    let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+                    let checkbox = if is_checked { card::CHECKBOX_ON } else { card::CHECKBOX_OFF };
                     let style = if is_selected {
                         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)
                     } else {
                         Style::default().fg(theme::TEXT_PRIMARY).bg(bg)
                     };
 
-                    let option_text = format!("{} {}. {} {}", marker, i + 1, checkbox, option);
+                    let option_text = format!("{}{}. {} {}", marker, i + 1, checkbox, option);
                     let mut opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
@@ -178,14 +180,15 @@ pub fn render_inline_ask_lines(
                 // Custom input option
                 let custom_idx = options.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
-                let custom_marker = if is_custom_selected { "❯" } else { " " };
+                let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
                 let custom_style = if is_custom_selected {
                     Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)
                 } else {
                     Style::default().fg(theme::TEXT_MUTED).bg(bg)
                 };
 
-                let custom_option_text = format!("{} {}. Or type your own answer...", custom_marker, custom_idx + 1);
+                let custom_option_text =
+                    format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
                 let mut custom_opt_spans: Vec<Span<'static>> = vec![
                     Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                     Span::styled(" ", Style::default().bg(bg)),
@@ -349,7 +352,7 @@ fn render_single_select(
             .enumerate()
             .map(|(i, suggestion)| {
                 let is_selected = i == input_state.selected_option_index;
-                let marker = if is_selected { "❯ " } else { "  " };
+                let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
 
                 let style = if is_selected {
                     Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -368,7 +371,7 @@ fn render_single_select(
         // Add "Or type your own answer..." option at the end
         let custom_idx = suggestions.len();
         let is_custom_selected = custom_idx == input_state.selected_option_index;
-        let custom_marker = if is_custom_selected { "❯ " } else { "  " };
+        let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
         let custom_style = if is_custom_selected {
             Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
         } else {
@@ -434,8 +437,8 @@ fn render_multi_select(
                 let is_selected = i == input_state.selected_option_index;
                 let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
-                let marker = if is_selected { "❯ " } else { "  " };
-                let checkbox = if is_checked { "■ " } else { "□ " };
+                let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+                let checkbox = if is_checked { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
 
                 let style = if is_selected {
                     Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -455,7 +458,7 @@ fn render_multi_select(
         // Add "Or type your own answer..." option
         let custom_idx = options.len();
         let is_custom_selected = custom_idx == input_state.selected_option_index;
-        let custom_marker = if is_custom_selected { "❯ " } else { "  " };
+        let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
         let custom_style = if is_custom_selected {
             Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
         } else {

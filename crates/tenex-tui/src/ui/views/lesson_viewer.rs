@@ -1,6 +1,6 @@
 use crate::models::Lesson;
 use crate::ui::markdown::render_markdown;
-use crate::ui::{theme, App};
+use crate::ui::{card, theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -48,7 +48,7 @@ fn render_header(f: &mut Frame, app: &App, lesson: &Lesson, area: Rect) {
     let meta_line = vec![
         Span::styled("by ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(&author_name, Style::default().fg(theme::ACCENT_SUCCESS)),
-        Span::styled(" • ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(card::META_SEPARATOR, Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(lesson.reading_time(), Style::default().fg(theme::ACCENT_PRIMARY)),
     ];
 

@@ -43,6 +43,10 @@ pub enum NostrCommand {
         project_a_tag: String,
         project_pubkey: Option<String>,
     },
+    UpdateProjectAgents {
+        project_a_tag: String,
+        agent_ids: Vec<String>,
+    },
     Shutdown,
 }
 
@@ -151,6 +155,12 @@ impl NostrWorker {
                         info!("Worker: Booting project {}", project_a_tag);
                         if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag, project_pubkey)) {
                             error!("Failed to boot project: {}", e);
+                        }
+                    }
+                    NostrCommand::UpdateProjectAgents { project_a_tag, agent_ids } => {
+                        info!("Worker: Updating project agents for {}", project_a_tag);
+                        if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids)) {
+                            error!("Failed to update project agents: {}", e);
                         }
                     }
                     NostrCommand::Shutdown => {
@@ -344,6 +354,20 @@ impl NostrWorker {
             // UI gets notified via SubscriptionStream when events are ready
         } else {
             info!("No 24010 events found during sync");
+        }
+
+        // Fetch agent definitions (kind 4199)
+        let agent_filter = Filter::new().kind(Kind::Custom(4199));
+        info!("Fetching agent definitions (kind 4199)");
+
+        let agent_events = client
+            .fetch_events(vec![agent_filter], std::time::Duration::from_secs(10))
+            .await?;
+
+        let agent_events_vec: Vec<Event> = agent_events.into_iter().collect();
+        info!("Fetched {} agent definition events", agent_events_vec.len());
+        if !agent_events_vec.is_empty() {
+            ingest_events(&self.ndb, &agent_events_vec, Some(RELAY_URL))?;
         }
 
         // Get projects from nostrdb to subscribe to their content
@@ -594,6 +618,61 @@ impl NostrWorker {
             Ok(Ok(output)) => info!("Sent boot request: {}", output.id()),
             Ok(Err(e)) => error!("Failed to send boot request to relay: {}", e),
             Err(_) => error!("Timeout sending boot request to relay"),
+        }
+
+        Ok(())
+    }
+
+    async fn handle_update_project_agents(&self, project_a_tag: String, agent_ids: Vec<String>) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Get the existing project from nostrdb
+        let projects = crate::store::get_projects(&self.ndb)?;
+        let project = projects
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .ok_or_else(|| anyhow::anyhow!("Project not found: {}", project_a_tag))?;
+
+        // Build the updated project event (kind 31933, NIP-33 replaceable)
+        let mut event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec![project.id.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![project.name.clone()],
+            ));
+
+        // Add participant p-tags
+        for participant in &project.participants {
+            if let Ok(pk) = PublicKey::parse(participant) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
+
+        // Add agent tags (first agent is PM)
+        for agent_id in &agent_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
+                vec![agent_id.clone()],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Updated project agents: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send project update to relay: {}", e),
+            Err(_) => error!("Timeout sending project update to relay (saved locally)"),
         }
 
         Ok(())

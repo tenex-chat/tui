@@ -209,6 +209,7 @@ mod tests {
             reply_to: None,
             is_reasoning: false,
             ask_event: None,
+            q_tags: vec![],
         }
     }
 
