@@ -1052,97 +1052,129 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             // Switch between tabs (forward)
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Recent => HomeTab::Inbox,
-                HomeTab::Inbox => HomeTab::Projects,
-                HomeTab::Projects => HomeTab::Recent,
+                HomeTab::Inbox => HomeTab::Recent,
             };
         }
         KeyCode::BackTab if has_shift => {
             // Shift+Tab switches tabs (backward)
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Projects,
+                HomeTab::Recent => HomeTab::Inbox,
                 HomeTab::Inbox => HomeTab::Recent,
-                HomeTab::Projects => HomeTab::Inbox,
             };
         }
+        KeyCode::Left => {
+            // Move focus to sidebar
+            app.sidebar_focused = true;
+        }
+        KeyCode::Right => {
+            // Move focus to content area
+            app.sidebar_focused = false;
+        }
         KeyCode::Up => {
-            match app.home_panel_focus {
-                HomeTab::Inbox => {
-                    if app.selected_inbox_index > 0 {
-                        app.selected_inbox_index -= 1;
-                    }
+            if app.sidebar_focused {
+                // Navigate sidebar projects
+                if app.sidebar_project_index > 0 {
+                    app.sidebar_project_index -= 1;
                 }
-                HomeTab::Recent => {
-                    if app.selected_recent_index > 0 {
-                        app.selected_recent_index -= 1;
+            } else {
+                // Navigate content
+                match app.home_panel_focus {
+                    HomeTab::Inbox => {
+                        if app.selected_inbox_index > 0 {
+                            app.selected_inbox_index -= 1;
+                        }
                     }
-                }
-                HomeTab::Projects => {
-                    if app.sidebar_project_index > 0 {
-                        app.sidebar_project_index -= 1;
+                    HomeTab::Recent => {
+                        if app.selected_recent_index > 0 {
+                            app.selected_recent_index -= 1;
+                        }
                     }
                 }
             }
         }
         KeyCode::Down => {
-            match app.home_panel_focus {
-                HomeTab::Inbox => {
-                    let max = app.inbox_items().len().saturating_sub(1);
-                    if app.selected_inbox_index < max {
-                        app.selected_inbox_index += 1;
-                    }
+            if app.sidebar_focused {
+                // Navigate sidebar projects
+                let (online, offline) = app.filtered_projects();
+                let max = (online.len() + offline.len()).saturating_sub(1);
+                if app.sidebar_project_index < max {
+                    app.sidebar_project_index += 1;
                 }
-                HomeTab::Recent => {
-                    let max = app.recent_threads().len().saturating_sub(1);
-                    if app.selected_recent_index < max {
-                        app.selected_recent_index += 1;
+            } else {
+                // Navigate content
+                match app.home_panel_focus {
+                    HomeTab::Inbox => {
+                        let max = app.inbox_items().len().saturating_sub(1);
+                        if app.selected_inbox_index < max {
+                            app.selected_inbox_index += 1;
+                        }
                     }
-                }
-                HomeTab::Projects => {
-                    let (online, offline) = app.filtered_projects();
-                    let max = (online.len() + offline.len()).saturating_sub(1);
-                    if app.sidebar_project_index < max {
-                        app.sidebar_project_index += 1;
+                    HomeTab::Recent => {
+                        let max = app.recent_threads().len().saturating_sub(1);
+                        if app.selected_recent_index < max {
+                            app.selected_recent_index += 1;
+                        }
                     }
                 }
             }
         }
+        KeyCode::Char(' ') if app.sidebar_focused => {
+            // Toggle project visibility in sidebar
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                let a_tag = project.a_tag();
+                if app.visible_projects.contains(&a_tag) {
+                    app.visible_projects.remove(&a_tag);
+                } else {
+                    app.visible_projects.insert(a_tag);
+                }
+            }
+        }
         KeyCode::Enter => {
-            match app.home_panel_focus {
-                HomeTab::Inbox => {
-                    let items = app.inbox_items();
-                    if let Some(item) = items.get(app.selected_inbox_index) {
-                        // Mark as read
-                        let item_id = item.id.clone();
-                        app.data_store.borrow_mut().mark_inbox_read(&item_id);
+            if app.sidebar_focused {
+                // Toggle project visibility (same as space)
+                let (online, offline) = app.filtered_projects();
+                let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+                if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                    let a_tag = project.a_tag();
+                    if app.visible_projects.contains(&a_tag) {
+                        app.visible_projects.remove(&a_tag);
+                    } else {
+                        app.visible_projects.insert(a_tag);
+                    }
+                }
+            } else {
+                // Open selected item
+                match app.home_panel_focus {
+                    HomeTab::Inbox => {
+                        let items = app.inbox_items();
+                        if let Some(item) = items.get(app.selected_inbox_index) {
+                            // Mark as read
+                            let item_id = item.id.clone();
+                            app.data_store.borrow_mut().mark_inbox_read(&item_id);
 
-                        // Navigate to thread if available
-                        if let Some(ref thread_id) = item.thread_id {
-                            let project_a_tag = item.project_a_tag.clone();
+                            // Navigate to thread if available
+                            if let Some(ref thread_id) = item.thread_id {
+                                let project_a_tag = item.project_a_tag.clone();
 
-                            // Find the thread
-                            let thread = app.data_store.borrow().get_threads(&project_a_tag)
-                                .iter()
-                                .find(|t| t.id == *thread_id)
-                                .cloned();
+                                // Find the thread
+                                let thread = app.data_store.borrow().get_threads(&project_a_tag)
+                                    .iter()
+                                    .find(|t| t.id == *thread_id)
+                                    .cloned();
 
-                            if let Some(thread) = thread {
-                                app.open_thread_from_home(&thread, &project_a_tag);
+                                if let Some(thread) = thread {
+                                    app.open_thread_from_home(&thread, &project_a_tag);
+                                }
                             }
                         }
                     }
-                }
-                HomeTab::Recent => {
-                    let recent = app.recent_threads();
-                    if let Some((thread, a_tag)) = recent.get(app.selected_recent_index).cloned() {
-                        app.open_thread_from_home(&thread, &a_tag);
-                    }
-                }
-                HomeTab::Projects => {
-                    let (online, offline) = app.filtered_projects();
-                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-                    if let Some(project) = all_projects.get(app.sidebar_project_index) {
-                        app.selected_project = Some((*project).clone());
-                        app.view = View::Chat;
+                    HomeTab::Recent => {
+                        let recent = app.recent_threads();
+                        if let Some((thread, a_tag)) = recent.get(app.selected_recent_index).cloned() {
+                            app.open_thread_from_home(&thread, &a_tag);
+                        }
                     }
                 }
             }

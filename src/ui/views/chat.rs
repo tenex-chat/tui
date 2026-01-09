@@ -202,44 +202,12 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
 
-    // Check if we should show inline ask UI instead of normal input
-    let should_show_ask_ui = if app.input_mode == InputMode::Editing {
-        // Only auto-activate ask UI if in editing mode AND there's an unanswered ask
-        if let Some((message_id, ask_event)) = app.has_unanswered_ask_event() {
-            // Auto-activate ask UI if not already active
-            if app.ask_modal_state.is_none() {
-                app.open_ask_modal(message_id, ask_event);
-            }
-            true
-        } else {
-            false
-        }
-    } else {
-        // Ask modal is already active (user manually opened it)
-        app.ask_modal_state.is_some()
-    };
+    // Calculate dynamic input height - always normal input now (ask UI is inline with messages)
+    let input_lines = app.chat_editor.line_count().max(1);
+    let input_height = (input_lines as u16 + 2).clamp(3, 10); // +2 for borders
 
-    // Calculate dynamic input height based on what we're showing
-    let input_height = if should_show_ask_ui {
-        // Ask UI height: tab bar (1) + question header (2) + options + custom (n+1) + help (3)
-        // Calculate based on current question's option count
-        let option_count = app.ask_modal_state.as_ref()
-            .and_then(|state| state.input_state.current_question())
-            .map(|q| match q {
-                crate::models::AskQuestion::SingleSelect { suggestions, .. } => suggestions.len() + 1, // +1 for custom
-                crate::models::AskQuestion::MultiSelect { options, .. } => options.len() + 1, // +1 for custom
-            })
-            .unwrap_or(3);
-        // tab(1) + header(2) + options(n) + help(3) = 6 + n, min 9, max 15
-        (6 + option_count).clamp(9, 15) as u16
-    } else {
-        // Normal input: dynamic based on line count (min 3, max 10)
-        let input_lines = app.chat_editor.line_count().max(1);
-        (input_lines as u16 + 2).clamp(3, 10) // +2 for borders
-    };
-
-    // Check if we have attachments (paste or image) - only relevant for normal input
-    let has_attachments = !should_show_ask_ui && (!app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty());
+    // Check if we have attachments (paste or image)
+    let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
     let has_status = app.status_message.is_some();
 
     // Check if we have tabs to show
@@ -582,22 +550,42 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                         messages_text.push(Line::from(line_spans));
                     }
 
-                    // Ask event indicator
-                    if let Some(ref ask) = msg.ask_event {
-                        let question_count = ask.questions.len();
-                        let indicator_text = if question_count == 1 {
-                            "❓ Question - Press 'i' to answer".to_string()
+                    // Ask event - render inline UI if active, otherwise show indicator
+                    if msg.ask_event.is_some() {
+                        // Check if this message has an active ask modal
+                        let is_active_ask = app.ask_modal_state.as_ref()
+                            .map(|state| state.message_id == msg.id)
+                            .unwrap_or(false);
+
+                        if is_active_ask {
+                            // Render full inline ask UI
+                            if let Some(ref modal_state) = app.ask_modal_state {
+                                let ask_lines = crate::ui::views::render_inline_ask_lines(
+                                    modal_state,
+                                    indicator_color,
+                                    bg,
+                                    content_width,
+                                );
+                                messages_text.extend(ask_lines);
+                            }
                         } else {
-                            format!("❓ {} Questions - Press 'i' to answer", question_count)
-                        };
-                        let ask_len = 2 + indicator_text.len();
-                        let mut ask_spans = vec![
-                            Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled(" ", Style::default().bg(bg)),
-                            Span::styled(indicator_text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(bg)),
-                        ];
-                        pad_line(&mut ask_spans, ask_len);
-                        messages_text.push(Line::from(ask_spans));
+                            // Show indicator for unanswered question
+                            let ask = msg.ask_event.as_ref().unwrap();
+                            let question_count = ask.questions.len();
+                            let indicator_text = if question_count == 1 {
+                                "❓ Question - Press 'i' to answer".to_string()
+                            } else {
+                                format!("❓ {} Questions - Press 'i' to answer", question_count)
+                            };
+                            let ask_len = 2 + indicator_text.len();
+                            let mut ask_spans = vec![
+                                Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(" ", Style::default().bg(bg)),
+                                Span::styled(indicator_text, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD).bg(bg)),
+                            ];
+                            pad_line(&mut ask_spans, ask_len);
+                            messages_text.push(Line::from(ask_spans));
+                        }
                     }
 
                     // Tool calls
@@ -860,93 +848,85 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         idx += 1;
     }
 
-    // Input area - show either ask UI or normal chat input
+    // Input area - always show normal chat input (ask UI is inline with messages now)
     let input_area = chunks[idx];
 
-    if should_show_ask_ui {
-        // Render inline ask UI (replacing input box)
-        if let Some(ref modal_state) = app.ask_modal_state {
-            use crate::ui::views::render_inline_ask_ui;
-            render_inline_ask_ui(f, modal_state, input_area);
-        }
+    // Normal chat input - deterministic color border based on user's pubkey
+    let is_input_active = app.input_mode == InputMode::Editing && app.ask_modal_state.is_none();
+
+    // Get user's deterministic color for the left border
+    let user_color = app.data_store.borrow().user_pubkey.as_ref()
+        .map(|pk| color_from_pubkey(pk))
+        .unwrap_or(Color::Rgb(86, 156, 214)); // Fallback to blue
+
+    let input_indicator_color = if is_input_active {
+        user_color
     } else {
-        // Normal chat input - deterministic color border based on user's pubkey
-        let is_active = app.input_mode == InputMode::Editing;
+        Color::Rgb(60, 60, 60) // Dim when inactive or ask modal is active
+    };
+    let text_color = if is_input_active {
+        Color::White
+    } else {
+        Color::DarkGray
+    };
+    let input_bg = Color::Rgb(30, 30, 30);
 
-        // Get user's deterministic color for the left border
-        let user_color = app.data_store.borrow().user_pubkey.as_ref()
-            .map(|pk| color_from_pubkey(pk))
-            .unwrap_or(Color::Rgb(86, 156, 214)); // Fallback to blue
+    // Build input lines with left indicator and padding
+    let input_text = app.chat_editor.text.as_str();
+    let mut input_lines: Vec<Line> = Vec::new();
+    let input_content_width = input_area.width.saturating_sub(3) as usize; // -3 for "│ " and padding
 
-        let indicator_color = if is_active {
-            user_color
-        } else {
-            Color::Rgb(60, 60, 60) // Dim when inactive
-        };
-        let text_color = if is_active {
-            Color::White
-        } else {
-            Color::DarkGray
-        };
-        let input_bg = Color::Rgb(30, 30, 30);
-
-        // Build input lines with left indicator and padding
-        let input_text = app.chat_editor.text.as_str();
-        let mut input_lines: Vec<Line> = Vec::new();
-        let content_width = input_area.width.saturating_sub(3) as usize; // -3 for "│ " and padding
-
-        if input_text.is_empty() {
-            // Placeholder text when empty
-            let placeholder = if is_active { "Type your message..." } else { "" };
-            let pad = content_width.saturating_sub(placeholder.len());
+    if input_text.is_empty() {
+        // Placeholder text when empty
+        let placeholder = if is_input_active { "Type your message..." } else { "" };
+        let pad = input_content_width.saturating_sub(placeholder.len());
+        input_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+            Span::styled(" ", Style::default().bg(input_bg)),
+            Span::styled(placeholder, Style::default().fg(Color::DarkGray).bg(input_bg)),
+            Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
+        ]));
+    } else {
+        // Render each line of input with indicator
+        for line in input_text.lines() {
+            let pad = input_content_width.saturating_sub(line.len());
             input_lines.push(Line::from(vec![
-                Span::styled("│", Style::default().fg(indicator_color).bg(input_bg)),
+                Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
                 Span::styled(" ", Style::default().bg(input_bg)),
-                Span::styled(placeholder, Style::default().fg(Color::DarkGray).bg(input_bg)),
+                Span::styled(line.to_string(), Style::default().fg(text_color).bg(input_bg)),
                 Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
             ]));
-        } else {
-            // Render each line of input with indicator
-            for line in input_text.lines() {
-                let pad = content_width.saturating_sub(line.len());
-                input_lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(indicator_color).bg(input_bg)),
-                    Span::styled(" ", Style::default().bg(input_bg)),
-                    Span::styled(line.to_string(), Style::default().fg(text_color).bg(input_bg)),
-                    Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
-                ]));
-            }
-            // Handle case where input ends with newline
-            if input_text.ends_with('\n') || input_lines.is_empty() {
-                input_lines.push(Line::from(vec![
-                    Span::styled("│", Style::default().fg(indicator_color).bg(input_bg)),
-                    Span::styled(" ", Style::default().bg(input_bg)),
-                    Span::styled(" ".repeat(content_width), Style::default().bg(input_bg)),
-                ]));
-            }
         }
-
-        // Pad to fill the input area height with gray background
-        while input_lines.len() < input_area.height as usize {
+        // Handle case where input ends with newline
+        if input_text.ends_with('\n') || input_lines.is_empty() {
             input_lines.push(Line::from(vec![
-                Span::styled("│", Style::default().fg(indicator_color).bg(input_bg)),
+                Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
                 Span::styled(" ", Style::default().bg(input_bg)),
-                Span::styled(" ".repeat(content_width), Style::default().bg(input_bg)),
+                Span::styled(" ".repeat(input_content_width), Style::default().bg(input_bg)),
             ]));
         }
+    }
 
-        let input = Paragraph::new(input_lines)
-            .style(Style::default().bg(input_bg));
-        f.render_widget(input, input_area);
+    // Pad to fill the input area height with gray background
+    while input_lines.len() < input_area.height as usize {
+        input_lines.push(Line::from(vec![
+            Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+            Span::styled(" ", Style::default().bg(input_bg)),
+            Span::styled(" ".repeat(input_content_width), Style::default().bg(input_bg)),
+        ]));
+    }
 
-        // Show cursor in input mode
-        if is_active && !app.showing_attachment_modal {
-            let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
-            f.set_cursor_position((
-                input_area.x + cursor_col as u16 + 2, // +2 for "│ "
-                input_area.y + cursor_row as u16,
-            ));
-        }
+    let input = Paragraph::new(input_lines)
+        .style(Style::default().bg(input_bg));
+    f.render_widget(input, input_area);
+
+    // Show cursor in input mode (but not when ask modal is active)
+    if is_input_active && !app.showing_attachment_modal {
+        let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
+        f.set_cursor_position((
+            input_area.x + cursor_col as u16 + 2, // +2 for "│ "
+            input_area.y + cursor_row as u16,
+        ));
     }
     idx += 1;
 
