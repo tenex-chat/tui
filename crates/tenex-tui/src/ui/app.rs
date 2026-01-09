@@ -13,6 +13,26 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use tenex_core::runtime::CoreHandle;
 
+/// Fuzzy match: all chars in pattern must appear in target in order (case-insensitive)
+pub fn fuzzy_matches(target: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    let target_lower = target.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+    let mut pattern_chars = pattern_lower.chars().peekable();
+
+    for c in target_lower.chars() {
+        if pattern_chars.peek() == Some(&c) {
+            pattern_chars.next();
+            if pattern_chars.peek().is_none() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -162,6 +182,10 @@ pub struct App {
 
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
+
+    /// When creating a new thread, stores (project_a_tag, user_pubkey, created_after_timestamp)
+    /// The timestamp ensures we find the newly created thread, not an existing one
+    pub pending_new_thread: Option<(String, String, u64)>,
 }
 
 impl App {
@@ -230,6 +254,7 @@ impl App {
             show_llm_metadata: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
+            pending_new_thread: None,
         }
     }
 
@@ -372,13 +397,13 @@ impl App {
 
     /// Get filtered projects based on current filter (from ModalState)
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
-        let filter = self.projects_modal_filter().to_lowercase();
+        let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
 
         let matching: Vec<&Project> = projects
             .iter()
-            .filter(|p| filter.is_empty() || p.name.to_lowercase().contains(&filter))
+            .filter(|p| fuzzy_matches(&p.name, filter))
             .collect();
 
         // Separate into online and offline
@@ -539,12 +564,12 @@ impl App {
     /// Get agents filtered by current filter (from ModalState or empty)
     pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
         let filter = match &self.modal_state {
-            ModalState::AgentSelector { selector } => selector.filter.to_lowercase(),
-            _ => String::new(),
+            ModalState::AgentSelector { selector } => &selector.filter,
+            _ => "",
         };
         self.available_agents()
             .into_iter()
-            .filter(|a| filter.is_empty() || a.name.to_lowercase().contains(&filter))
+            .filter(|a| fuzzy_matches(&a.name, filter))
             .collect()
     }
 
@@ -581,12 +606,12 @@ impl App {
     /// Get branches filtered by current filter (from ModalState)
     pub fn filtered_branches(&self) -> Vec<String> {
         let filter = match &self.modal_state {
-            ModalState::BranchSelector { selector } => selector.filter.to_lowercase(),
-            _ => String::new(),
+            ModalState::BranchSelector { selector } => &selector.filter,
+            _ => "",
         };
         self.available_branches()
             .into_iter()
-            .filter(|b| filter.is_empty() || b.to_lowercase().contains(&filter))
+            .filter(|b| fuzzy_matches(b, filter))
             .collect()
     }
 
@@ -634,6 +659,151 @@ impl App {
         let filtered = self.filtered_agents();
         if let Some(project_agent) = filtered.get(index) {
             self.selected_agent = Some(project_agent.clone());
+        }
+    }
+
+    /// Open the message actions modal for the currently selected message
+    pub fn open_message_actions_modal(&mut self) {
+        use crate::store::get_trace_context;
+
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+
+        // Get display messages based on current view (subthread or main)
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages
+                .iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages
+                .iter()
+                .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == thread_id)
+                .collect()
+        };
+
+        if let Some(msg) = display_messages.get(self.selected_message_index) {
+            let message_id = msg.id.clone();
+            // Check if trace context exists for this message
+            let has_trace = get_trace_context(&self.db.ndb, &message_id).is_some();
+
+            self.modal_state = ModalState::MessageActions {
+                message_id,
+                selected_index: 0,
+                has_trace,
+            };
+        }
+    }
+
+    /// Execute a message action
+    pub fn execute_message_action(
+        &mut self,
+        message_id: &str,
+        action: crate::ui::modal::MessageAction,
+    ) {
+        use crate::store::{get_raw_event_json, get_trace_context};
+        use crate::ui::modal::MessageAction;
+
+        match action {
+            MessageAction::CopyRawEvent => {
+                if let Some(json) = get_raw_event_json(&self.db.ndb, message_id) {
+                    self.copy_to_clipboard(&json);
+                    self.set_status("Raw event copied to clipboard");
+                } else {
+                    self.set_status("Failed to get raw event");
+                }
+                self.modal_state = ModalState::None;
+            }
+            MessageAction::ViewRawEvent => {
+                if let Some(json) = get_raw_event_json(&self.db.ndb, message_id) {
+                    // Pretty print the JSON
+                    let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                        serde_json::to_string_pretty(&value).unwrap_or(json)
+                    } else {
+                        json
+                    };
+
+                    self.modal_state = ModalState::ViewRawEvent {
+                        message_id: message_id.to_string(),
+                        json: pretty_json,
+                        scroll_offset: 0,
+                    };
+                } else {
+                    self.set_status("Failed to get raw event");
+                    self.modal_state = ModalState::None;
+                }
+            }
+            MessageAction::OpenTrace => {
+                if let Some(trace_info) = get_trace_context(&self.db.ndb, message_id) {
+                    let url = format!(
+                        "http://localhost:16686/trace/{}?uiFind={}",
+                        trace_info.trace_id, trace_info.span_id
+                    );
+                    self.open_url(&url);
+                    self.set_status("Opening trace in browser...");
+                } else {
+                    self.set_status("No trace context found for this message");
+                }
+                self.modal_state = ModalState::None;
+            }
+            MessageAction::SendAgain => {
+                // Get the original message content
+                let messages = self.messages();
+                if let Some(msg) = messages.iter().find(|m| m.id == message_id) {
+                    let content = msg.content.clone();
+
+                    // Create a new thread with the same content
+                    if let (Some(ref core_handle), Some(ref project)) =
+                        (&self.core_handle, &self.selected_project)
+                    {
+                        use crate::nostr::NostrCommand;
+
+                        let title = content.lines().next().unwrap_or("New Thread").to_string();
+                        let project_a_tag = project.a_tag();
+                        let agent_pubkey = self.selected_agent.as_ref().map(|a| a.pubkey.clone());
+                        let branch = self.selected_branch.clone();
+
+                        if let Err(e) = core_handle.send(NostrCommand::PublishThread {
+                            project_a_tag,
+                            title,
+                            content,
+                            agent_pubkey,
+                            branch,
+                        }) {
+                            self.set_status(&format!("Failed to create thread: {}", e));
+                        } else {
+                            self.set_status("Creating new conversation...");
+                        }
+                    }
+                }
+                self.modal_state = ModalState::None;
+            }
+        }
+    }
+
+    /// Copy text to clipboard
+    fn copy_to_clipboard(&self, text: &str) {
+        use arboard::Clipboard;
+        if let Ok(mut clipboard) = Clipboard::new() {
+            let _ = clipboard.set_text(text);
+        }
+    }
+
+    /// Open a URL in the default browser
+    fn open_url(&self, url: &str) {
+        #[cfg(target_os = "macos")]
+        {
+            let _ = std::process::Command::new("open").arg(url).spawn();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let _ = std::process::Command::new("xdg-open").arg(url).spawn();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/c", "start", url])
+                .spawn();
         }
     }
 
@@ -1069,7 +1239,8 @@ impl App {
     /// Returns the first unanswered ask event found (not answered by current user)
     pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
         let messages = self.messages();
-        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str())?;
+        let thread = self.selected_thread.as_ref()?;
+        let thread_id = thread.id.as_str();
 
         // Get current user's pubkey - if no user, can't answer questions
         let user_pubkey = self.data_store.borrow().user_pubkey.clone()?;
@@ -1085,7 +1256,17 @@ impl App {
             }
         }
 
-        // Find first ask event that hasn't been replied to by current user
+        // First check the thread root itself (if not in subthread view)
+        if self.subthread_root.is_none() {
+            if let Some(ref ask_event) = thread.ask_event {
+                // Check if the thread has been replied to by current user
+                if !replied_to_by_user.contains(thread_id) {
+                    return Some((thread.id.clone(), ask_event.clone()));
+                }
+            }
+        }
+
+        // Then check messages
         let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
             messages.iter()
                 .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
@@ -1219,15 +1400,14 @@ impl App {
 
     /// Get filtered agent definitions for the browser
     pub fn filtered_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
-        let filter = self.agent_browser_filter.to_lowercase();
+        let filter = &self.agent_browser_filter;
         self.data_store.borrow()
             .get_agent_definitions()
             .into_iter()
             .filter(|d| {
-                filter.is_empty() ||
-                d.name.to_lowercase().contains(&filter) ||
-                d.description.to_lowercase().contains(&filter) ||
-                d.role.to_lowercase().contains(&filter)
+                fuzzy_matches(&d.name, filter) ||
+                fuzzy_matches(&d.description, filter) ||
+                fuzzy_matches(&d.role, filter)
             })
             .cloned()
             .collect()

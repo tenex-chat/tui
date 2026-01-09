@@ -169,16 +169,18 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     // Helper to calculate card height
     // Full mode: 3 lines (title+project+status, summary+author+time, spacing) + optional activity
     // Compact mode: 2 lines (title, spacing)
-    let calc_card_height = |item: &HierarchicalThread| -> u16 {
+    // Selected items add 2 lines for half-block borders (top + bottom)
+    let calc_card_height = |item: &HierarchicalThread, is_selected: bool| -> u16 {
         let is_compact = item.depth > 0;
         let has_activity = item.thread.status_current_activity.is_some();
-        if is_compact {
+        let base = if is_compact {
             2
         } else if has_activity {
             4 // title row, summary row, activity row, spacing
         } else {
             3 // title row, summary row, spacing
-        }
+        };
+        if is_selected { base + 2 } else { base }
     };
 
     // Calculate scroll offset to keep selected item visible
@@ -189,7 +191,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let mut height_before_selected: u16 = 0;
     let mut selected_height: u16 = 0;
     for (i, item) in hierarchy.iter().enumerate() {
-        let h = calc_card_height(item);
+        let item_is_selected = is_focused && i == selected_idx;
+        let h = calc_card_height(item, item_is_selected);
         if i < selected_idx {
             height_before_selected += h;
         } else if i == selected_idx {
@@ -209,7 +212,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 
     for (i, item) in hierarchy.iter().enumerate() {
         let is_selected = is_focused && i == selected_idx;
-        let h = calc_card_height(item);
+        let h = calc_card_height(item, is_selected);
 
         // Skip items completely above visible area
         if y_offset + (h as i32) <= 0 {
@@ -318,14 +321,18 @@ fn render_card_content(
         ""
     };
 
+    // All items reserve the same space for collapse indicator to keep titles aligned
+    // COLLAPSE_CLOSED/OPEN are 2 chars ("▶ " / "▼ "), so use that as the standard width
+    let collapse_col_width = card::COLLAPSE_CLOSED.chars().count();
     let collapse_len = collapse_indicator.chars().count();
+    let collapse_padding = collapse_col_width.saturating_sub(collapse_len);
 
     let mut lines: Vec<Line> = Vec::new();
 
     // Calculate column widths for table layout (used by both compact and full mode)
     let total_width = area.width as usize;
     let fixed_cols_width = middle_col_width + right_col_width + 2; // +2 for spacing
-    let main_col_width = total_width.saturating_sub(fixed_cols_width + indent_len + collapse_len);
+    let main_col_width = total_width.saturating_sub(fixed_cols_width + indent_len + collapse_col_width);
 
     // Status text (for right column)
     let status_text = thread.status_label.as_ref()
@@ -356,9 +363,17 @@ fn render_card_content(
         let status_len = status_truncated.chars().count();
         let status_padding = right_col_width.saturating_sub(status_len);
 
-        let mut line1 = vec![
-            Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)),
-        ];
+        let mut line1 = Vec::new();
+        // Add indent for nested items
+        if !indent.is_empty() {
+            line1.push(Span::styled(indent.clone(), Style::default()));
+        }
+        if !collapse_indicator.is_empty() {
+            line1.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+        }
+        if collapse_padding > 0 {
+            line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
+        }
         line1.push(Span::styled(title_truncated, title_style));
         if !nested_suffix.is_empty() {
             line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
@@ -379,14 +394,17 @@ fn render_card_content(
         let time_len = time_str.chars().count();
         let time_padding = right_col_width.saturating_sub(time_len);
 
-        let line2 = vec![
-            Span::styled(" ".repeat(collapse_len), Style::default()),
-            Span::styled(" ".repeat(main_col_width), Style::default()),
-            Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)),
-            Span::styled(" ".repeat(author_padding), Style::default()),
-            Span::styled(" ".repeat(time_padding), Style::default()),
-            Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
-        ];
+        let mut line2 = Vec::new();
+        // Add indent for nested items
+        if !indent.is_empty() {
+            line2.push(Span::styled(indent.clone(), Style::default()));
+        }
+        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+        line2.push(Span::styled(" ".repeat(main_col_width), Style::default()));
+        line2.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
+        line2.push(Span::styled(" ".repeat(author_padding), Style::default()));
+        line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
+        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
         lines.push(Line::from(line2));
     } else {
         // FULL MODE: Table-like layout (3 lines + optional activity + spacing)
@@ -416,8 +434,15 @@ fn render_card_content(
         let status_padding = right_col_width.saturating_sub(status_len);
 
         let mut line1 = Vec::new();
+        // Add indent for nested items
+        if !indent.is_empty() {
+            line1.push(Span::styled(indent.clone(), Style::default()));
+        }
         if !collapse_indicator.is_empty() {
             line1.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+        }
+        if collapse_padding > 0 {
+            line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
         if !nested_suffix.is_empty() {
@@ -446,36 +471,67 @@ fn render_card_content(
         let time_len = time_str.chars().count();
         let time_padding = right_col_width.saturating_sub(time_len);
 
-        let line2 = vec![
-            Span::styled(" ".repeat(collapse_len), Style::default()), // Align with collapse indicator
-            Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(" ".repeat(preview_padding), Style::default()),
-            Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)),
-            Span::styled(" ".repeat(author_padding), Style::default()),
-            Span::styled(" ".repeat(time_padding), Style::default()),
-            Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
-        ];
+        let mut line2 = Vec::new();
+        // Add indent for nested items
+        if !indent.is_empty() {
+            line2.push(Span::styled(indent.clone(), Style::default()));
+        }
+        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
+        line2.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
+        line2.push(Span::styled(" ".repeat(preview_padding), Style::default()));
+        line2.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
+        line2.push(Span::styled(" ".repeat(author_padding), Style::default()));
+        line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
+        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
         lines.push(Line::from(line2));
 
         // Line 3: Activity (if present)
         if let Some(ref activity) = thread.status_current_activity {
-            lines.push(Line::from(vec![
-                Span::styled(" ".repeat(collapse_len), Style::default()),
-                Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)),
-                Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)),
-            ]));
+            let mut line3 = Vec::new();
+            // Add indent for nested items
+            if !indent.is_empty() {
+                line3.push(Span::styled(indent.clone(), Style::default()));
+            }
+            line3.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+            line3.push(Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)));
+            line3.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            lines.push(Line::from(line3));
         }
         // Spacing line
         lines.push(Line::from(""));
     }
 
-    let mut style = Style::default();
     if is_selected {
-        style = style.bg(theme::BG_SELECTED);
-    }
+        // For selected cards, render half-block borders separately from content
+        // This creates the visual effect of half-line padding
+        let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄
+        let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER.horizontal_top.repeat(area.width as usize); // ▀
 
-    let paragraph = Paragraph::new(lines).style(style);
-    f.render_widget(paragraph, area);
+        // Top half-block line (fg=selection color, no bg - creates "growing down" effect)
+        let top_area = Rect::new(area.x, area.y, area.width, 1);
+        let top_line = Paragraph::new(Line::from(Span::styled(
+            half_block_top,
+            Style::default().fg(theme::BG_SELECTED),
+        )));
+        f.render_widget(top_line, top_area);
+
+        // Content area (with selection background)
+        let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
+        let content = Paragraph::new(lines).style(Style::default().bg(theme::BG_SELECTED));
+        f.render_widget(content, content_area);
+
+        // Bottom half-block line (fg=selection color, no bg - creates "growing up" effect)
+        let bottom_y = area.y + area.height.saturating_sub(1);
+        let bottom_area = Rect::new(area.x, bottom_y, area.width, 1);
+        let bottom_line = Paragraph::new(Line::from(Span::styled(
+            half_block_bottom,
+            Style::default().fg(theme::BG_SELECTED),
+        )));
+        f.render_widget(bottom_line, bottom_area);
+    } else {
+        let paragraph = Paragraph::new(lines);
+        f.render_widget(paragraph, area);
+    }
 }
 
 fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {

@@ -1,10 +1,11 @@
+use crate::ui::app::fuzzy_matches;
 use crate::ui::components::{
     modal_area, render_modal_background, render_modal_header, render_modal_search, ModalSize,
 };
 use crate::ui::modal::ProjectSettingsState;
 use crate::ui::{theme, App};
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -199,7 +200,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     let remaining = render_modal_search(f, remaining, &state.add_filter, "Search agents...");
 
     // Get available agents (exclude already added)
-    let filter_lower = state.add_filter.to_lowercase();
+    let filter = &state.add_filter;
     let available_agents: Vec<_> = app
         .data_store
         .borrow()
@@ -207,10 +208,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
-            filter_lower.is_empty()
-                || a.name.to_lowercase().contains(&filter_lower)
-                || a.description.to_lowercase().contains(&filter_lower)
-                || a.role.to_lowercase().contains(&filter_lower)
+            fuzzy_matches(&a.name, filter)
+                || fuzzy_matches(&a.description, filter)
+                || fuzzy_matches(&a.role, filter)
         })
         .cloned()
         .collect();
@@ -332,34 +332,32 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
 
 /// Get count of available agents for add mode (for bounds checking)
 pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
-    let filter_lower = state.add_filter.to_lowercase();
+    let filter = &state.add_filter;
     app.data_store
         .borrow()
         .get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
-            filter_lower.is_empty()
-                || a.name.to_lowercase().contains(&filter_lower)
-                || a.description.to_lowercase().contains(&filter_lower)
-                || a.role.to_lowercase().contains(&filter_lower)
+            fuzzy_matches(&a.name, filter)
+                || fuzzy_matches(&a.description, filter)
+                || fuzzy_matches(&a.role, filter)
         })
         .count()
 }
 
 /// Get the agent ID at the given index in add mode
 pub fn get_agent_id_at_index(app: &App, state: &ProjectSettingsState, index: usize) -> Option<String> {
-    let filter_lower = state.add_filter.to_lowercase();
+    let filter = &state.add_filter;
     app.data_store
         .borrow()
         .get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
-            filter_lower.is_empty()
-                || a.name.to_lowercase().contains(&filter_lower)
-                || a.description.to_lowercase().contains(&filter_lower)
-                || a.role.to_lowercase().contains(&filter_lower)
+            fuzzy_matches(&a.name, filter)
+                || fuzzy_matches(&a.description, filter)
+                || fuzzy_matches(&a.role, filter)
         })
         .nth(index)
         .map(|a| a.id.clone())
