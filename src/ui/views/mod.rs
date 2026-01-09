@@ -4,11 +4,9 @@ pub mod home;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
-pub mod threads;
 
 pub use ask_modal::render_ask_modal;
 pub use chat::render_chat;
 pub use home::{get_project_at_index, render_home, selectable_project_count};
-pub use inline_ask::render_inline_ask_ui;
+pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
-pub use threads::render_threads;

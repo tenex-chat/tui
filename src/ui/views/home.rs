@@ -52,11 +52,11 @@ fn format_relative_time(timestamp: u64) -> String {
 pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     let has_tabs = !app.open_tabs.is_empty();
 
-    // Layout: Header tabs | Content | Help bar | Optional tab bar
+    // Layout: Header tabs | Main area | Help bar | Optional tab bar
     let chunks = if has_tabs {
         Layout::vertical([
             Constraint::Length(2), // Tab header
-            Constraint::Min(0),    // Content
+            Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Help bar
             Constraint::Length(1), // Open tabs bar
         ])
@@ -64,7 +64,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     } else {
         Layout::vertical([
             Constraint::Length(2), // Tab header
-            Constraint::Min(0),    // Content
+            Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Help bar
         ])
         .split(area)
@@ -73,15 +73,20 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Render tab header
     render_tab_header(f, app, chunks[0]);
 
+    // Split main area into sidebar and content
+    let main_chunks = Layout::horizontal([
+        Constraint::Length(20), // Sidebar (fixed width)
+        Constraint::Min(0),     // Content
+    ])
+    .split(chunks[1]);
+
+    // Render sidebar
+    render_project_sidebar(f, app, main_chunks[0]);
+
     // Render content based on active tab
     match app.home_panel_focus {
-        HomeTab::Recent => render_recent_with_feed(f, app, chunks[1]),
-        HomeTab::Inbox => render_inbox_cards(f, app, chunks[1]),
-        HomeTab::Projects => {
-            // Projects panel (placeholder)
-            let projects_msg = Paragraph::new("Projects panel (placeholder)");
-            f.render_widget(projects_msg, chunks[1]);
-        }
+        HomeTab::Recent => render_recent_with_feed(f, app, main_chunks[1]),
+        HomeTab::Inbox => render_inbox_cards(f, app, main_chunks[1]),
     }
 
     // Single consolidated help bar
@@ -92,7 +97,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         render_tab_bar(f, app, chunks[3]);
     }
 
-    // Projects modal overlay (only when 'p' pressed, not when on Projects tab)
+    // Projects modal overlay
     if app.showing_projects_modal {
         render_projects_modal(f, app, area);
     }
@@ -426,154 +431,89 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     ])
 }
 
-fn render_projects_cards(f: &mut Frame, app: &App, area: Rect) {
+/// Render the project sidebar with checkboxes for filtering
+fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     let (online_projects, offline_projects) = app.filtered_projects();
-    let data_store = app.data_store.borrow();
 
     let mut items: Vec<ListItem> = Vec::new();
 
-    // Online projects section header
+    // Online section header
     if !online_projects.is_empty() {
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("  ", Style::default()),
             Span::styled("● ", Style::default().fg(Color::Green)),
-            Span::styled(
-                format!("ONLINE ({})", online_projects.len()),
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled("Online", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         ])));
-
-        for (idx, project) in online_projects.iter().enumerate() {
-            let is_selected = idx == app.selected_project_index;
-            let item = render_project_card(&data_store, project, is_selected, true);
-            items.push(item);
-        }
     }
 
-    // Offline projects section (always shown)
-    if !offline_projects.is_empty() {
-        if !online_projects.is_empty() {
-            items.push(ListItem::new(Line::from("")));
-        }
-
+    // Online projects
+    for project in &online_projects {
+        let a_tag = project.a_tag();
+        let is_visible = app.visible_projects.is_empty() || app.visible_projects.contains(&a_tag);
+        let checkbox = if is_visible { "[✓] " } else { "[ ] " };
+        let name = truncate_string(&project.name, 14);
         items.push(ListItem::new(Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled("○ ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                format!("OFFLINE ({})", offline_projects.len()),
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::BOLD),
-            ),
+            Span::styled(checkbox, Style::default().fg(Color::Cyan)),
+            Span::raw(name),
         ])));
-
-        let offset = online_projects.len();
-        for (idx, project) in offline_projects.iter().enumerate() {
-            let is_selected = offset + idx == app.selected_project_index;
-            let item = render_project_card(&data_store, project, is_selected, false);
-            items.push(item);
-        }
     }
 
-    drop(data_store);
-
-    if items.is_empty() {
-        let empty = Paragraph::new("No projects found")
-            .style(Style::default().fg(Color::DarkGray))
-            .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
-        f.render_widget(empty, area);
-        return;
+    // Offline section header
+    if !offline_projects.is_empty() {
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled("○ ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Offline", Style::default().fg(Color::DarkGray)),
+        ])));
     }
+
+    // Offline projects
+    for project in &offline_projects {
+        let a_tag = project.a_tag();
+        let is_visible = app.visible_projects.is_empty() || app.visible_projects.contains(&a_tag);
+        let checkbox = if is_visible { "[✓] " } else { "[ ] " };
+        let name = truncate_string(&project.name, 14);
+        items.push(ListItem::new(Line::from(vec![
+            Span::styled(checkbox, Style::default().fg(Color::DarkGray)),
+            Span::styled(name, Style::default().fg(Color::DarkGray)),
+        ])));
+    }
+
+    let border_color = if app.sidebar_focused { Color::Cyan } else { Color::DarkGray };
 
     let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(Span::styled("Projects", Style::default().fg(Color::DarkGray))),
-        )
-        .highlight_style(Style::default());
+        .block(Block::default()
+            .borders(Borders::RIGHT)
+            .border_style(Style::default().fg(border_color)));
 
-    // Calculate list index from selected_project_index (accounting for headers/separators)
-    let list_index = if app.selected_project_index < online_projects.len() {
-        // Online project: skip online header
-        1 + app.selected_project_index
+    // Calculate selected index (accounting for headers)
+    let selected_index = if app.sidebar_focused {
+        let mut idx = app.sidebar_project_index;
+        // Add 1 for online header if we have online projects
+        if !online_projects.is_empty() {
+            idx += 1;
+        }
+        // If we're past online projects, add 1 for offline header
+        if idx > online_projects.len() && !offline_projects.is_empty() {
+            idx += 1;
+        }
+        Some(idx)
     } else {
-        // Offline project
-        let base = if online_projects.is_empty() {
-            1 // Just offline header
-        } else {
-            1 + online_projects.len() + 1 + 1 // Online header + projects + separator + offline header
-        };
-        base + (app.selected_project_index - online_projects.len())
+        None
     };
 
     let mut state = ListState::default();
-    state.select(Some(list_index));
+    state.select(selected_index);
+
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_project_card(
-    data_store: &crate::store::AppDataStore,
-    project: &crate::models::Project,
-    is_selected: bool,
-    is_online: bool,
-) -> ListItem<'static> {
-    let owner_name = data_store.get_profile_name(&project.pubkey);
-    let agent_count = data_store
-        .get_project_status(&project.a_tag())
-        .map(|s| s.agents.len())
-        .unwrap_or(0);
-
-    // Card styling
-    let border_char = if is_selected { "│ " } else { "  " };
-    let border_style = if is_selected {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    let title_style = if is_selected {
-        Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
-    } else if is_online {
-        Style::default().fg(Color::White)
-    } else {
-        Style::default().fg(Color::DarkGray)
-    };
-
-    // Line 1: Project name
-    let line1_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(project.name.clone(), title_style),
-    ];
-
-    // Line 2: Agent count + owner
-    let agent_str = if is_online {
-        format!("{} agent(s)", agent_count)
-    } else {
-        "offline".to_string()
-    };
-
-    let line2_spans = vec![
-        Span::styled(border_char, border_style),
-        Span::styled(agent_str, Style::default().fg(if is_online { Color::Green } else { Color::DarkGray })),
-        Span::styled(" · ", Style::default().fg(Color::DarkGray)),
-        Span::styled(owner_name, Style::default().fg(Color::Magenta)),
-    ];
-
-    // Line 3: Empty for spacing
-    let line3_spans = vec![Span::raw("")];
-
-    ListItem::new(vec![
-        Line::from(line1_spans),
-        Line::from(line2_spans),
-        Line::from(line3_spans),
-    ])
-}
-
 fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
-    let hints = match app.home_panel_focus {
-        HomeTab::Recent => "↑↓ navigate · Enter open · n new · Tab switch · q quit",
-        HomeTab::Inbox => "↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
-        HomeTab::Projects => "↑↓ navigate · Enter select · Tab switch · n new thread · q quit",
+    let hints = if app.sidebar_focused {
+        "←→ focus · ↑↓ navigate · Space toggle · Tab switch · q quit"
+    } else {
+        match app.home_panel_focus {
+            HomeTab::Recent => "←→ focus · ↑↓ navigate · Enter open · n new · Tab switch · q quit",
+            HomeTab::Inbox => "←→ focus · ↑↓ navigate · Enter open · r mark read · Tab switch · q quit",
+        }
     };
 
     let help = Paragraph::new(hints).style(Style::default().fg(Color::DarkGray));

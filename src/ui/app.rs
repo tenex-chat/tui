@@ -28,7 +28,6 @@ pub enum InputMode {
 pub enum HomeTab {
     Recent,
     Inbox,
-    Projects,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -252,13 +251,6 @@ impl App {
     /// Get project status for selected project
     pub fn get_selected_project_status(&self) -> Option<ProjectStatus> {
         self.selected_project.as_ref().and_then(|p| self.get_project_status(p))
-    }
-
-    /// Get threads for the currently selected project
-    pub fn threads(&self) -> Vec<Thread> {
-        self.selected_project.as_ref()
-            .map(|p| self.data_store.borrow().get_threads(&p.a_tag()).to_vec())
-            .unwrap_or_default()
     }
 
     /// Get messages for the currently selected thread
@@ -509,15 +501,6 @@ impl App {
                     .map(|s| s.agents.clone())
             })
             .unwrap_or_default()
-    }
-
-    /// Select agent by index from available agents
-    pub fn select_agent_by_index(&mut self, index: usize) {
-        if let Some(status) = self.get_selected_project_status() {
-            if let Some(agent) = status.agents.get(index) {
-                self.selected_agent = Some(agent.clone());
-            }
-        }
     }
 
     /// Get available branches from project status (from data store)
@@ -999,20 +982,26 @@ impl App {
     }
 
     /// Check for unanswered ask events in current thread
-    /// Returns the first unanswered ask event found
+    /// Returns the first unanswered ask event found (not answered by current user)
     pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
         let messages = self.messages();
         let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str())?;
 
-        // Get all message IDs that have replies
-        let mut replied_to: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        // Get current user's pubkey - if no user, can't answer questions
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone()?;
+
+        // Get all message IDs that have been replied to BY THE CURRENT USER
+        let mut replied_to_by_user: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for msg in &messages {
-            if let Some(ref reply_to) = msg.reply_to {
-                replied_to.insert(reply_to.as_str());
+            // Only count replies from the current user
+            if msg.pubkey == user_pubkey {
+                if let Some(ref reply_to) = msg.reply_to {
+                    replied_to_by_user.insert(reply_to.as_str());
+                }
             }
         }
 
-        // Find first ask event that hasn't been replied to
+        // Find first ask event that hasn't been replied to by current user
         let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
             messages.iter()
                 .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
@@ -1025,8 +1014,8 @@ impl App {
 
         for msg in display_messages {
             if let Some(ref ask_event) = msg.ask_event {
-                // Check if this message has been replied to
-                if !replied_to.contains(msg.id.as_str()) {
+                // Check if this message has been replied to by current user
+                if !replied_to_by_user.contains(msg.id.as_str()) {
                     return Some((msg.id.clone(), ask_event.clone()));
                 }
             }

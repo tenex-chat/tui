@@ -597,6 +597,10 @@ fn handle_key(
                 app.quit();
             }
             KeyCode::Char('i') => {
+                // Check if there's an unanswered ask event to focus
+                if let Some((message_id, ask_event)) = app.has_unanswered_ask_event() {
+                    app.open_ask_modal(message_id, ask_event);
+                }
                 app.input_mode = InputMode::Editing;
             }
             KeyCode::Char('r') => {
