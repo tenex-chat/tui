@@ -6,7 +6,6 @@ pub mod message;
 pub mod project;
 pub mod project_draft;
 pub mod project_status;
-pub mod streaming;
 pub mod thread;
 
 pub use conversation_metadata::ConversationMetadata;
@@ -17,5 +16,4 @@ pub use message::{AskEvent, AskQuestion, Message};
 pub use project::Project;
 pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage};
 pub use project_status::{ProjectAgent, ProjectStatus};
-pub use streaming::StreamingSession;
 pub use thread::Thread;

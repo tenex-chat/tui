@@ -10,7 +10,8 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
     let filter = Filter::new().kinds([31933]).build();
     let results = ndb.query(&txn, &[filter], 1000)?;
 
-    let mut projects: Vec<Project> = results
+    // Collect all projects
+    let all_projects: Vec<Project> = results
         .iter()
         .filter_map(|r| {
             let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
@@ -18,8 +19,24 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
         })
         .collect();
 
+    // Deduplicate by a_tag, keeping only the newest (highest created_at)
+    let mut projects_by_atag: HashMap<String, Project> = HashMap::new();
+    for project in all_projects {
+        let a_tag = project.a_tag();
+        match projects_by_atag.get(&a_tag) {
+            Some(existing) if existing.created_at >= project.created_at => {
+                // Keep existing (newer or equal)
+            }
+            _ => {
+                projects_by_atag.insert(a_tag, project);
+            }
+        }
+    }
+
+    let mut projects: Vec<Project> = projects_by_atag.into_values().collect();
+
     // Sort by created_at descending (newest first)
-    projects.sort_by(|a, b| b.id.cmp(&a.id));
+    projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(projects)
 }
@@ -341,7 +358,7 @@ mod tests {
         }
 
         // nostrdb's e-tag query filtering may not work with hex IDs, so we fetch all
-        // kind-1111 and filter in get_messages_for_thread. Test that the actual function works.
+        // kind-1 and filter in get_messages_for_thread. Test that the actual function works.
         // First, let's manually verify filtering works since get_messages_for_thread uses e-tag filter
         let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 1000).unwrap();

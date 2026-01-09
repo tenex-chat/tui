@@ -199,6 +199,7 @@ impl App {
             command_tx: None,
             data_rx: None,
 
+            project_filter: String::new(),
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
             chat_editor: TextEditor::new(),
@@ -354,9 +355,9 @@ impl App {
         self.showing_attachment_modal = false;
     }
 
-    /// Get filtered projects based on current filter
+    /// Get filtered projects based on current filter (from ModalState)
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
-        let filter = self.project_filter.to_lowercase();
+        let filter = self.projects_modal_filter().to_lowercase();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
 
@@ -373,12 +374,35 @@ impl App {
         (online.into_iter().cloned().collect(), offline.into_iter().cloned().collect())
     }
 
+    /// Open the projects modal
+    pub fn open_projects_modal(&mut self) {
+        self.modal_state = ModalState::ProjectsModal {
+            selector: SelectorState::new(),
+        };
+    }
+
+    /// Get projects modal index (from ModalState)
+    pub fn projects_modal_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::ProjectsModal { selector } => selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get projects modal filter (from ModalState)
+    pub fn projects_modal_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::ProjectsModal { selector } => &selector.filter,
+            _ => "",
+        }
+    }
+
     pub fn set_channels(&mut self, command_tx: Sender<NostrCommand>, data_rx: Receiver<DataChange>) {
         self.command_tx = Some(command_tx);
         self.data_rx = Some(data_rx);
     }
 
-    /// Process streaming deltas from the worker channel.
+    /// Process local streaming chunks from the worker channel.
     /// All other updates are handled via nostrdb SubscriptionStream in main.rs.
     pub fn check_for_data_updates(&mut self) -> anyhow::Result<()> {
         // Collect all pending changes first to avoid borrow conflicts

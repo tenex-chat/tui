@@ -85,7 +85,7 @@ pub async fn run_daemon() -> Result<()> {
 
     // Set up channels for NostrWorker
     let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
-    let (data_tx, data_rx) = mpsc::channel::<DataChange>();
+    let (data_tx, _data_rx) = mpsc::channel::<DataChange>();
 
     // Start NostrWorker thread
     let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx);
@@ -115,7 +115,6 @@ pub async fn run_daemon() -> Result<()> {
                     std_stream,
                     &data_store,
                     &command_tx,
-                    &data_rx,
                     &db,
                     start_time,
                     keys.is_some(),
@@ -208,7 +207,6 @@ fn handle_connection(
     stream: UnixStream,
     data_store: &Rc<RefCell<AppDataStore>>,
     command_tx: &mpsc::Sender<NostrCommand>,
-    data_rx: &mpsc::Receiver<DataChange>,
     db: &Database,
     start_time: Instant,
     logged_in: bool,
@@ -216,21 +214,6 @@ fn handle_connection(
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
     let mut line = String::new();
-
-    // Process any pending data updates
-    while let Ok(DataChange::StreamingDelta {
-        pubkey,
-        message_id,
-        thread_id,
-        sequence,
-        created_at,
-        delta,
-    }) = data_rx.try_recv()
-    {
-        data_store.borrow_mut().handle_streaming_delta(
-            pubkey, message_id, thread_id, sequence, created_at, delta,
-        );
-    }
 
     while reader.read_line(&mut line)? > 0 {
         let request: Request = match serde_json::from_str(&line) {

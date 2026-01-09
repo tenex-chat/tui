@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, StreamingSession, Thread};
+use crate::models::{AgentChatter, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -15,18 +15,12 @@ pub struct AppDataStore {
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
     pub profiles: HashMap<String, String>,                  // pubkey -> display name
 
-    // Streaming state - keyed by pubkey (one active stream per agent)
-    streaming_sessions: HashMap<String, StreamingSession>,
-    // Track finalized responses to ignore late-arriving chunks
-    // Format: "pubkey:message_id"
-    finalized_responses: HashSet<String>,
-
     // Inbox - events that p-tag the current user
     pub inbox_items: Vec<InboxItem>,
     inbox_read_ids: HashSet<String>,
     pub user_pubkey: Option<String>,
 
-    // Agent chatter feed - kind:1111 events a-tagging our projects
+    // Agent chatter feed - kind:1 events a-tagging our projects
     pub agent_chatter: Vec<AgentChatter>,
 
     // Agent lessons - kind:4129 events
@@ -42,8 +36,6 @@ impl AppDataStore {
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
-            streaming_sessions: HashMap::new(),
-            finalized_responses: HashSet::new(),
             inbox_items: Vec::new(),
             inbox_read_ids: HashSet::new(),
             user_pubkey: None,
@@ -319,15 +311,6 @@ impl AppDataStore {
             let pubkey = message.pubkey.clone();
             let message_id = message.id.clone();
 
-            // Finalize streaming: mark this response as complete and clear the session
-            // Extract the 'e' tag (message being replied to) for finalization key
-            if let Some(reply_to) = Self::extract_lowercase_e_tag(note) {
-                let finalization_key = format!("{}:{}", pubkey, reply_to);
-                self.finalized_responses.insert(finalization_key);
-            }
-            // Clear any streaming session for this agent
-            self.streaming_sessions.remove(&pubkey);
-
             // Check if message a-tags one of our projects for agent chatter feed
             if let Some(a_tag) = Self::extract_project_a_tag(note) {
                 if self.projects.iter().any(|p| p.a_tag() == a_tag) {
@@ -384,7 +367,7 @@ impl AppDataStore {
             if tag.count() >= 2 {
                 let tag_name = tag.get(0).and_then(|t| t.variant().str());
                 if tag_name == Some("p") {
-                    // Try string first, then id bytes (same pattern as E-tag handling)
+                    // Try string first, then id bytes (same pattern as e-tag handling)
                     let pk = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
                     } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
@@ -505,23 +488,6 @@ impl AppDataStore {
         None
     }
 
-    /// Extract lowercase 'e' tag (NIP-22: message being replied to)
-    fn extract_lowercase_e_tag(note: &Note) -> Option<String> {
-        for tag in note.tags() {
-            if tag.count() >= 2 {
-                let tag_name = tag.get(0).and_then(|t| t.variant().str());
-                if tag_name == Some("e") {
-                    // Try string first, then id bytes
-                    if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
-                        return Some(s.to_string());
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        return Some(hex::encode(id_bytes));
-                    }
-                }
-            }
-        }
-        None
-    }
 
     fn extract_profile_name(&self, note: &Note) -> Option<String> {
         let txn = Transaction::new(&self.ndb).ok()?;
@@ -634,11 +600,6 @@ impl AppDataStore {
 
     // ===== Agent Chatter Methods =====
 
-    /// Get agent chatter feed items (most recent first)
-    pub fn get_agent_chatter(&self) -> &[AgentChatter] {
-        &self.agent_chatter
-    }
-
     /// Add an agent chatter item, maintaining sort order and limiting to 100 items
     pub fn add_agent_chatter(&mut self, item: AgentChatter) {
         // Deduplicate by id
@@ -682,55 +643,5 @@ impl AppDataStore {
         self.lessons.get(lesson_id)
     }
 
-    // ===== Streaming Methods =====
-
-    /// Handle an incoming streaming delta (kind 21111)
-    /// Returns true if the delta was processed, false if it was rejected (late chunk)
-    pub fn handle_streaming_delta(
-        &mut self,
-        pubkey: String,
-        message_id: String,
-        thread_id: String,
-        sequence: Option<u32>,
-        created_at: u64,
-        delta: String,
-    ) -> bool {
-        // Check if this is a late chunk (response already finalized)
-        let finalization_key = format!("{}:{}", pubkey, message_id);
-        if self.finalized_responses.contains(&finalization_key) {
-            return false;
-        }
-
-        // Get or create streaming session for this agent
-        if let Some(session) = self.streaming_sessions.get_mut(&pubkey) {
-            session.add_delta(sequence, &delta, created_at);
-        } else {
-            let mut session = StreamingSession::new(
-                pubkey.clone(),
-                thread_id,
-                created_at,
-            );
-            session.add_delta(sequence, &delta, created_at);
-            self.streaming_sessions.insert(pubkey, session);
-        }
-
-        true
-    }
-
-    /// Get typing indicators for a thread (streaming sessions with empty content)
-    pub fn typing_indicators_for_thread(&self, thread_id: &str) -> Vec<&str> {
-        self.streaming_sessions
-            .values()
-            .filter(|session| session.thread_id == thread_id && !session.has_content())
-            .map(|session| session.pubkey.as_str())
-            .collect()
-    }
-
-    /// Get streaming sessions with content for a thread (for display)
-    pub fn streaming_with_content_for_thread(&self, thread_id: &str) -> Vec<&StreamingSession> {
-        self.streaming_sessions
-            .values()
-            .filter(|session| session.thread_id == thread_id && session.has_content())
-            .collect()
-    }
+    // Streaming methods removed.
 }

@@ -436,36 +436,6 @@ mod tests {
     }
 
     #[test]
-    fn test_message_rejects_wrong_kind() {
-        let dir = tempdir().unwrap();
-        let db = Database::new(dir.path()).unwrap();
-        let keys = Keys::generate();
-        let thread_id = "a".repeat(64);
-
-        let event = EventBuilder::new(Kind::Custom(1111), "Old kind:1111")
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("E")),
-                vec![thread_id],
-            ))
-            .sign_with_keys(&keys)
-            .unwrap();
-
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
-
-        // Wait for async processing
-        let filter = Filter::new().kinds([1111]).build();
-        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
-
-        let txn = Transaction::new(&db.ndb).unwrap();
-        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
-        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
-
-        let message = Message::from_note(&note);
-        assert!(message.is_none(), "Should reject kind:1111 (deprecated)");
-    }
-
-    #[test]
     fn test_from_thread_note_creates_message() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();

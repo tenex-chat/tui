@@ -441,48 +441,30 @@ fn handle_key(
         return Ok(());
     }
 
-    // Handle agent selector when open
-    if app.showing_agent_selector {
-        match code {
-            KeyCode::Up => {
-                if app.agent_selector_index > 0 {
-                    app.agent_selector_index -= 1;
-                }
-            }
-            KeyCode::Down => {
-                let max = app.filtered_agents().len().saturating_sub(1);
-                if app.agent_selector_index < max {
-                    app.agent_selector_index += 1;
-                }
-            }
-            KeyCode::Enter => {
-                let filtered = app.filtered_agents();
-                if let Some(agent) = filtered.get(app.agent_selector_index) {
+    // Handle agent selector when open (using ModalState)
+    if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
+        // Get agents BEFORE mutably borrowing modal_state
+        let agents = app.filtered_agents();
+        let item_count = agents.len();
+
+        if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
+            match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
+                SelectorAction::Selected(agent) => {
                     let agent_name = agent.name.clone();
-                    app.select_filtered_agent_by_index(app.agent_selector_index);
+                    app.selected_agent = Some(agent);
                     // Insert @agent_name into chat editor
                     let mention = format!("@{} ", agent_name);
                     for c in mention.chars() {
                         app.chat_editor.insert_char(c);
                     }
                     app.save_chat_draft();
+                    app.modal_state = ModalState::None;
                 }
-                app.showing_agent_selector = false;
-                app.selector_filter.clear();
+                SelectorAction::Cancelled => {
+                    app.modal_state = ModalState::None;
+                }
+                SelectorAction::Continue => {}
             }
-            KeyCode::Esc => {
-                app.showing_agent_selector = false;
-                app.selector_filter.clear();
-            }
-            KeyCode::Backspace => {
-                app.selector_filter.pop();
-                app.agent_selector_index = 0;
-            }
-            KeyCode::Char(c) => {
-                app.selector_filter.push(c);
-                app.agent_selector_index = 0;
-            }
-            _ => {}
         }
         return Ok(());
     }
@@ -632,11 +614,9 @@ fn handle_key(
             KeyCode::Char(c) => {
                 if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
                     // 'a' opens agent selector
-                    app.showing_agent_selector = true;
-                    app.agent_selector_index = 0;
+                    app.open_agent_selector();
                 } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
-                    app.showing_agent_selector = true;
-                    app.agent_selector_index = 0;
+                    app.open_agent_selector();
                 } else if c == 't' && app.view == View::Chat {
                     // 't' toggles todo sidebar
                     app.todo_sidebar_visible = !app.todo_sidebar_visible;
@@ -882,16 +862,16 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let modifiers = key.modifiers;
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
-    // Handle projects modal when showing
-    if app.showing_projects_modal {
-        match code {
-            KeyCode::Esc => {
-                app.showing_projects_modal = false;
-                app.project_filter.clear();
-            }
-            KeyCode::Enter => {
-                // Select project and filter to show only its threads
-                if let Some((project, _)) = ui::views::get_project_at_index(app, app.selected_project_index) {
+    // Handle projects modal when showing (using ModalState)
+    if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
+        // Get item count BEFORE mutably borrowing modal_state
+        let item_count = ui::views::selectable_project_count(app);
+
+        if let ModalState::ProjectsModal { ref mut selector } = app.modal_state {
+            match handle_selector_key(selector, key, item_count, |idx| {
+                ui::views::get_project_at_index(app, idx).map(|(p, _)| p)
+            }) {
+                SelectorAction::Selected(project) => {
                     let a_tag = project.a_tag();
                     app.selected_project = Some(project);
 
@@ -910,28 +890,13 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     // Set filter to show only this project
                     app.visible_projects.clear();
                     app.visible_projects.insert(a_tag);
-                    app.project_filter.clear();
-                    app.showing_projects_modal = false;
+                    app.modal_state = ModalState::None;
                 }
-            }
-            KeyCode::Up if app.selected_project_index > 0 => {
-                app.selected_project_index -= 1;
-            }
-            KeyCode::Down => {
-                let max = ui::views::selectable_project_count(app).saturating_sub(1);
-                if app.selected_project_index < max {
-                    app.selected_project_index += 1;
+                SelectorAction::Cancelled => {
+                    app.modal_state = ModalState::None;
                 }
+                SelectorAction::Continue => {}
             }
-            KeyCode::Char(c) => {
-                app.project_filter.push(c);
-                app.selected_project_index = 0;
-            }
-            KeyCode::Backspace => {
-                app.project_filter.pop();
-                app.selected_project_index = 0;
-            }
-            _ => {}
         }
         return Ok(());
     }
@@ -1062,9 +1027,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     match code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char('p') => {
-            app.showing_projects_modal = true;
-            app.project_filter.clear();
-            app.selected_project_index = 0;
+            app.open_projects_modal();
         }
         KeyCode::Char('n') => {
             app.open_new_thread_modal();
@@ -1308,9 +1271,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         }
         // @ = open agent selector
         KeyCode::Char('@') => {
-            app.showing_agent_selector = true;
-            app.agent_selector_index = 0;
-            app.selector_filter.clear();
+            app.open_agent_selector();
         }
         // % = open branch selector
         KeyCode::Char('%') => {

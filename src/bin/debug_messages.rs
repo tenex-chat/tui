@@ -30,7 +30,7 @@ fn main() -> Result<()> {
                 if tag_name == Some("a") {
                     has_a_tag = true;
                 }
-                if matches!(tag_name, Some("e") | Some("E")) {
+                if matches!(tag_name, Some("e")) {
                     has_e_tag = true;
                 }
             }
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
             let mut has_e_tag = false;
             for tag in note.tags() {
                 let tag_name = tag.get(0).and_then(|t| t.variant().str());
-                if matches!(tag_name, Some("e") | Some("E")) {
+                if matches!(tag_name, Some("e")) {
                     has_e_tag = true;
                     break;
                 }
@@ -78,14 +78,14 @@ fn main() -> Result<()> {
     }
     println!("Checking first 100 of kind:1 messages with e-tag\n");
 
-    // Show what E tags look like
+    // Show what e-tags look like
     let mut e_tag_examples = 0;
     for note in all_messages.iter().take(100) {
         for tag in note.tags() {
             if tag.count() >= 2 {
                 if let Some(first) = tag.get(0) {
                     let first_str = first.str().unwrap_or("<not-str>");
-                    if first_str == "E" || first_str == "e" {
+                        if first_str == "e" {
                         e_tag_examples += 1;
                         if e_tag_examples <= 5 {
                             if let Some(second) = tag.get(1) {
@@ -96,7 +96,7 @@ fn main() -> Result<()> {
                                 } else {
                                     "unknown".to_string()
                                 };
-                                println!("E-tag example {}: tag[0]='{}' tag[1]={}", e_tag_examples, first_str, val);
+                                    println!("e-tag example {}: tag[0]='{}' tag[1]={}", e_tag_examples, first_str, val);
                             }
                         }
                     }
@@ -105,7 +105,7 @@ fn main() -> Result<()> {
         }
     }
 
-    println!("\nTotal E/e tags found: {}", e_tag_examples);
+    println!("\nTotal e-tags found: {}", e_tag_examples);
 
     // Collect all unique thread IDs from messages
     println!("\n--- Unique thread references in messages ---");
@@ -113,7 +113,7 @@ fn main() -> Result<()> {
     for note in all_messages.iter().take(100) {
         for tag in note.tags() {
             if tag.count() >= 2 {
-                let is_e_tag = matches!(tag.get(0).and_then(|s| s.str()), Some("E") | Some("e"));
+                    let is_e_tag = matches!(tag.get(0).and_then(|s| s.str()), Some("e"));
                 if is_e_tag {
                     if let Some(tag_elem) = tag.get(1) {
                         let tag_value = if let Some(s) = tag_elem.str() {

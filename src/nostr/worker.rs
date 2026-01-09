@@ -47,20 +47,8 @@ pub enum NostrCommand {
 }
 
 /// Data changes that require the worker channel (not handled by SubscriptionStream).
-/// Only streaming deltas need ordered channel processing.
 #[derive(Debug, Clone)]
 pub enum DataChange {
-    /// Streaming delta (kind 21111) - for real-time typing updates
-    /// These need ordered processing via channel, not SubscriptionStream
-    /// NIP-10: Uses lowercase 'e' tags with "root" and "reply" markers (consistent with kind:1)
-    StreamingDelta {
-        pubkey: String,
-        message_id: String,   // from 'e' tag with "reply" marker - message being replied to
-        thread_id: String,    // from 'e' tag with "root" marker - thread root
-        sequence: Option<u32>,
-        created_at: u64,
-        delta: String,
-    },
     /// Chunk from local streaming socket (not from Nostr)
     LocalStreamChunk {
         agent_pubkey: String,
@@ -219,11 +207,6 @@ impl NostrWorker {
         let all_status_filter = Filter::new()
             .kind(Kind::Custom(24010));
 
-        // Streaming deltas (kind 21111) - p-tagged to user
-        let streaming_filter = Filter::new()
-            .kind(Kind::Custom(21111))
-            .pubkey(pubkey);
-
         // Conversation metadata (kind 513) - provides titles and summaries for threads
         let metadata_filter = Filter::new().kind(Kind::Custom(513));
 
@@ -240,7 +223,6 @@ impl NostrWorker {
                     agent_filter,
                     status_filter,
                     all_status_filter,
-                    streaming_filter,
                     metadata_filter,
                     lesson_filter,
                 ],
@@ -258,7 +240,6 @@ impl NostrWorker {
     fn spawn_notification_handler(&self) {
         let client = self.client.as_ref().unwrap().clone();
         let ndb = self.ndb.clone();
-        let data_tx = self.data_tx.clone();
         let rt_handle = self.rt_handle.as_ref().unwrap().clone();
 
         rt_handle.spawn(async move {
@@ -269,9 +250,7 @@ impl NostrWorker {
                     if let RelayPoolNotification::Event { relay_url, event, .. } = notification {
                         debug!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url);
 
-                        if let Err(e) =
-                            Self::handle_incoming_event(&ndb, &data_tx, *event, relay_url.as_str())
-                        {
+                        if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
                             error!("Failed to handle event: {}", e);
                         }
                     }
@@ -282,7 +261,6 @@ impl NostrWorker {
 
     fn handle_incoming_event(
         ndb: &Ndb,
-        data_tx: &Sender<DataChange>,
         event: Event,
         relay_url: &str,
     ) -> Result<()> {
@@ -290,75 +268,7 @@ impl NostrWorker {
         // UI gets notified via nostrdb SubscriptionStream when events are ready
         ingest_events(ndb, &[event.clone()], Some(relay_url))?;
 
-        // Only streaming deltas need channel processing (ordered delivery)
-        // All other events are handled via SubscriptionStream
-        if event.kind.as_u16() == 21111 {
-            // Parse e-tags per NIP-10 (consistent with kind:1 messages)
-            let (thread_id, message_id) = Self::parse_streaming_delta_tags(&event);
-
-            // Both thread_id (root) and message_id (reply) are required
-            if let (Some(thread_id), Some(message_id)) = (thread_id, message_id) {
-                let pubkey = event.pubkey.to_hex();
-                let sequence = Self::get_sequence_tag(&event);
-                let created_at = event.created_at.as_u64();
-                let delta = event.content.to_string();
-
-                data_tx.send(DataChange::StreamingDelta {
-                    pubkey,
-                    message_id,
-                    thread_id,
-                    sequence,
-                    created_at,
-                    delta,
-                })?;
-            }
-        }
-
         Ok(())
-    }
-
-    /// Parse streaming delta tags per NIP-10 (consistent with kind:1 messages)
-    /// Returns (thread_id, message_id) from e-tags with "root" and "reply" markers
-    ///
-    /// NIP-10: ["e", <event-id>, <relay-url>, <marker>]
-    /// - "root" marker = thread root reference (required)
-    /// - "reply" marker = message being replied to (required)
-    fn parse_streaming_delta_tags(event: &Event) -> (Option<String>, Option<String>) {
-        let mut thread_id: Option<String> = None;
-        let mut message_id: Option<String> = None;
-
-        for tag in event.tags.iter() {
-            let tag_slice = tag.as_slice();
-            if tag_slice.first().map(|s| s == "e").unwrap_or(false) {
-                // Get event ID (second element)
-                let event_id = tag_slice.get(1).map(|s| s.to_string());
-
-                // Check marker (fourth element)
-                let marker = tag_slice.get(3).map(|s| s.as_str());
-
-                match (marker, event_id) {
-                    (Some("root"), Some(id)) => {
-                        thread_id = Some(id);
-                    }
-                    (Some("reply"), Some(id)) => {
-                        message_id = Some(id);
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        (thread_id, message_id)
-    }
-
-    /// Get sequence number from "sequence" tag
-    fn get_sequence_tag(event: &Event) -> Option<u32> {
-        event
-            .tags
-            .iter()
-            .find(|t| t.as_slice().first().map(|s| s == "sequence").unwrap_or(false))
-            .and_then(|t| t.as_slice().get(1))
-            .and_then(|s| s.parse().ok())
     }
 
     async fn handle_sync(&mut self) -> Result<()> {
@@ -713,135 +623,5 @@ mod tests {
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     }
 
-    #[test]
-    fn test_parse_streaming_delta_tags_with_root_and_reply() {
-        use nostr_sdk::Tag;
-
-        let thread_id = "thread123";
-        let message_id = "message456";
-
-        let tags = vec![
-            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
-            Tag::parse(vec!["e", message_id, "", "reply"]).unwrap(),
-            Tag::parse(vec!["sequence", "1"]).unwrap(),
-        ];
-
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::new(
-            nostr_sdk::Kind::Custom(21111),
-            "delta content",
-        )
-        .tags(tags)
-        .sign_with_keys(&keys)
-        .unwrap();
-
-        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
-
-        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
-        assert_eq!(parsed_message_id, Some(message_id.to_string()));
-    }
-
-    #[test]
-    fn test_parse_streaming_delta_tags_missing_root() {
-        use nostr_sdk::Tag;
-
-        let message_id = "message456";
-
-        let tags = vec![
-            Tag::parse(vec!["e", message_id, "", "reply"]).unwrap(),
-        ];
-
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::new(
-            nostr_sdk::Kind::Custom(21111),
-            "delta content",
-        )
-        .tags(tags)
-        .sign_with_keys(&keys)
-        .unwrap();
-
-        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
-
-        assert_eq!(parsed_thread_id, None);
-        assert_eq!(parsed_message_id, Some(message_id.to_string()));
-    }
-
-    #[test]
-    fn test_parse_streaming_delta_tags_missing_reply() {
-        use nostr_sdk::Tag;
-
-        let thread_id = "thread123";
-
-        let tags = vec![
-            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
-        ];
-
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::new(
-            nostr_sdk::Kind::Custom(21111),
-            "delta content",
-        )
-        .tags(tags)
-        .sign_with_keys(&keys)
-        .unwrap();
-
-        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
-
-        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
-        assert_eq!(parsed_message_id, None);
-    }
-
-    #[test]
-    fn test_parse_streaming_delta_tags_no_markers() {
-        use nostr_sdk::Tag;
-
-        let event_id = "event789";
-
-        let tags = vec![
-            Tag::parse(vec!["e", event_id]).unwrap(),
-        ];
-
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::new(
-            nostr_sdk::Kind::Custom(21111),
-            "delta content",
-        )
-        .tags(tags)
-        .sign_with_keys(&keys)
-        .unwrap();
-
-        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
-
-        // Without markers, both should be None (strict NIP-10 parsing)
-        assert_eq!(parsed_thread_id, None);
-        assert_eq!(parsed_message_id, None);
-    }
-
-    #[test]
-    fn test_parse_streaming_delta_tags_ignores_uppercase_e() {
-        use nostr_sdk::Tag;
-
-        let thread_id = "thread123";
-        let old_style_id = "old_uppercase_id";
-
-        let tags = vec![
-            Tag::parse(vec!["e", thread_id, "", "root"]).unwrap(),
-            Tag::parse(vec!["E", old_style_id]).unwrap(),
-        ];
-
-        let keys = nostr_sdk::Keys::generate();
-        let event = nostr_sdk::EventBuilder::new(
-            nostr_sdk::Kind::Custom(21111),
-            "delta content",
-        )
-        .tags(tags)
-        .sign_with_keys(&keys)
-        .unwrap();
-
-        let (parsed_thread_id, parsed_message_id) = NostrWorker::parse_streaming_delta_tags(&event);
-
-        // Should parse the lowercase 'e' with root marker, ignore uppercase 'E'
-        assert_eq!(parsed_thread_id, Some(thread_id.to_string()));
-        assert_eq!(parsed_message_id, None);
-    }
+    // Streaming delta parsing tests removed.
 }
