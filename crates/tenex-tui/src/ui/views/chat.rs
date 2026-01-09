@@ -1,7 +1,8 @@
 use crate::models::Message;
 use crate::ui::components::{
     modal_area, render_modal_background, render_modal_header, render_modal_items,
-    render_modal_search, render_tab_bar, render_todo_sidebar, ModalItem, ModalSize,
+    render_modal_overlay, render_modal_search, render_tab_bar, render_todo_sidebar, ModalItem,
+    ModalSize,
 };
 use crate::ui::markdown::render_markdown;
 use crate::ui::theme;
@@ -830,6 +831,9 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
+    // Dim the background
+    render_modal_overlay(f, area);
+
     let agents = app.filtered_agents();
     let all_agents = app.available_agents();
     let selector_index = app.agent_selector_index();
@@ -903,6 +907,9 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
+    // Dim the background
+    render_modal_overlay(f, area);
+
     let branches = app.filtered_branches();
     let all_branches = app.available_branches();
     let selector_index = app.branch_selector_index();

@@ -309,6 +309,9 @@ pub fn typing_indicator() -> Style {
 /// Modal background - slightly elevated from pure black
 pub const BG_MODAL: Color = Color::Rgb(24, 24, 24);
 
+/// Modal overlay - dims the background behind modals
+pub const BG_MODAL_OVERLAY: Color = Color::Rgb(0, 0, 0);
+
 /// Modal title style
 pub fn modal_title() -> Style {
     Style::default()

@@ -1,7 +1,8 @@
 use crate::models::{InboxEventType, InboxItem, Thread};
 use crate::ui::components::{
     modal_area, render_modal_background, render_modal_header, render_modal_items,
-    render_modal_search, render_modal_sections, render_tab_bar, ModalItem, ModalSection, ModalSize,
+    render_modal_overlay, render_modal_search, render_modal_sections, render_tab_bar, ModalItem,
+    ModalSection, ModalSize,
 };
 use crate::ui::modal::ModalState;
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
@@ -15,6 +16,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph},
     Frame,
 };
+use ratatui_image::{StatefulImage, Resize};
 
 pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Fill entire area with app background (pure black)
@@ -159,30 +161,65 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     // Build hierarchical thread list
     let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships);
 
-    let items: Vec<ListItem> = hierarchy
-        .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            let is_selected = is_focused && i == app.selected_recent_index;
-            render_conversation_card(
-                app,
-                &item.thread,
-                &item.a_tag,
-                is_selected,
-                item.depth,
-                item.has_children,
-                item.child_count,
-                item.is_collapsed,
-            )
-        })
-        .collect();
+    // Calculate card heights and render manually to support avatar images
+    let mut y_offset: u16 = 0;
+    let avatar_width: u16 = 3; // 2 chars + 1 space
 
-    // No block/border - just the list directly
-    let list = List::new(items).highlight_style(Style::default());
+    for (i, item) in hierarchy.iter().enumerate() {
+        let is_selected = is_focused && i == app.selected_recent_index;
+        let is_compact = item.depth > 0;
+        let has_activity = item.thread.status_current_activity.is_some();
 
-    let mut state = ListState::default();
-    state.select(Some(app.selected_recent_index));
-    f.render_stateful_widget(list, area, &mut state);
+        // Calculate card height
+        let card_height: u16 = if is_compact {
+            2 // Compact: 1 content + 1 spacing
+        } else if has_activity {
+            5 // Full with activity: title + project + preview + activity + spacing
+        } else {
+            4 // Full: title + project + preview + spacing
+        };
+
+        // Skip if card would be outside visible area
+        if y_offset >= area.height {
+            break;
+        }
+
+        let visible_height = card_height.min(area.height.saturating_sub(y_offset));
+        let card_area = Rect::new(area.x, area.y + y_offset, area.width, visible_height);
+
+        // Split into avatar area and content area
+        let avatar_area = Rect::new(
+            card_area.x,
+            card_area.y,
+            avatar_width.min(card_area.width),
+            visible_height,
+        );
+        let content_area = Rect::new(
+            card_area.x + avatar_width,
+            card_area.y,
+            card_area.width.saturating_sub(avatar_width),
+            visible_height,
+        );
+
+        // Render avatar (image or fallback)
+        render_card_avatar(f, app, &item.thread, avatar_area);
+
+        // Render card content
+        render_card_content(
+            f,
+            app,
+            &item.thread,
+            &item.a_tag,
+            is_selected,
+            item.depth,
+            item.has_children,
+            item.child_count,
+            item.is_collapsed,
+            content_area,
+        );
+
+        y_offset += card_height;
+    }
 }
 
 /// Get the hierarchical thread list (used for navigation and selection)
@@ -740,6 +777,9 @@ pub fn selectable_project_count(app: &App) -> usize {
 }
 
 fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
+    // Dim the background
+    render_modal_overlay(f, area);
+
     let size = ModalSize {
         max_width: 65,
         height_percent: 0.7,
@@ -1092,6 +1132,9 @@ fn render_new_thread_content_field(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the tab modal (Alt+/) showing all open tabs
 pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
+    // Dim the background
+    render_modal_overlay(f, area);
+
     // Calculate modal dimensions - dynamic based on tab count
     let tab_count = app.open_tabs.len();
     let content_height = (tab_count + 2) as u16; // +2 for header spacing

@@ -33,6 +33,12 @@ pub fn modal_area(terminal_area: Rect, size: &ModalSize) -> Rect {
     Rect::new(popup_x, popup_y, popup_width, popup_height)
 }
 
+/// Render dimmed overlay over the entire terminal area
+pub fn render_modal_overlay(f: &mut Frame, terminal_area: Rect) {
+    let overlay = Block::default().style(Style::default().bg(theme::BG_MODAL_OVERLAY));
+    f.render_widget(overlay, terminal_area);
+}
+
 /// Render the modal background (clears area and fills with modal bg color)
 pub fn render_modal_background(f: &mut Frame, area: Rect) {
     f.render_widget(Clear, area);
