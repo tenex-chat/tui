@@ -182,7 +182,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let keys = Keys::generate();
 
-        let event = EventBuilder::new(Kind::Custom(11), "Old kind:11")
+        let event = EventBuilder::new(Kind::Custom(9999), "Wrong kind")
             .tag(Tag::custom(
                 TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                 vec!["31933:pubkey:proj1".to_string()],
@@ -193,7 +193,7 @@ mod tests {
         ingest_events(&db.ndb, &[event.clone()], None).unwrap();
 
         // Wait for async processing
-        let filter = Filter::new().kinds([11]).build();
+        let filter = Filter::new().kinds([9999]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
@@ -202,6 +202,6 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let thread = Thread::from_note(&note);
-        assert!(thread.is_none(), "Should reject kind:11 (deprecated)");
+        assert!(thread.is_none(), "Should reject non-kind:1 notes");
     }
 }

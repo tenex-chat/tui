@@ -3,7 +3,7 @@ use crate::ui::markdown::render_markdown;
 use crate::ui::theme;
 use crate::ui::todo::{aggregate_todo_state, TodoState, TodoStatus};
 use crate::ui::tool_calls::{parse_message_content, MessageContent, tool_icon, extract_target};
-use crate::ui::{App, InputMode};
+use crate::ui::{App, InputMode, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Color, Modifier, Style},
@@ -15,11 +15,6 @@ use std::collections::HashMap;
 use tracing::info_span;
 
 /// Streaming content for display
-struct StreamingContent {
-    agent_name: String,
-    content: String,
-}
-
 /// Check if a message looks like a short action/status message
 fn is_action_message(content: &str) -> bool {
     let trimmed = content.trim();
@@ -138,45 +133,11 @@ fn group_messages<'a>(messages: &[&'a Message], user_pubkey: Option<&str>) -> Ve
     result
 }
 
-/// Get streaming sessions with content for the current thread
-fn get_streaming_content(app: &App) -> Vec<StreamingContent> {
-    let thread = match app.selected_thread.as_ref() {
-        Some(t) => t,
-        None => return Vec::new(),
-    };
-
-    let data_store = app.data_store.borrow();
-    let sessions = data_store.streaming_with_content_for_thread(&thread.id);
-
-    sessions
-        .into_iter()
-        .map(|session| {
-            let agent_name = data_store.get_profile_name(&session.pubkey);
-            StreamingContent {
-                agent_name,
-                content: session.content().to_string(),
-            }
-        })
-        .collect()
-}
-
-/// Get typing indicators (agents streaming but no content yet)
-fn get_typing_indicators(app: &App) -> Vec<String> {
-    let thread = match app.selected_thread.as_ref() {
-        Some(t) => t,
-        None => return Vec::new(),
-    };
-
-    let data_store = app.data_store.borrow();
-    let pubkeys = data_store.typing_indicators_for_thread(&thread.id);
-
-    pubkeys
-        .into_iter()
-        .map(|pubkey| data_store.get_profile_name(pubkey))
-        .collect()
-}
-
 pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
+    // Fill entire area with app background (pure black)
+    let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
+    f.render_widget(bg_block, area);
+
     let all_messages = app.messages();
     let _render_span = info_span!("render_chat", message_count = all_messages.len()).entered();
 
@@ -191,8 +152,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Calculate dynamic input height - always normal input now (ask UI is inline with messages)
+    // +3 = 1 for padding top, 1 for context line at bottom
     let input_lines = app.chat_editor.line_count().max(1);
-    let input_height = (input_lines as u16 + 2).clamp(3, 10); // +2 for borders
+    let input_height = (input_lines as u16 + 3).clamp(4, 12);
 
     // Check if we have attachments (paste or image)
     let has_attachments = !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty();
@@ -202,58 +164,51 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let has_tabs = !app.open_tabs.is_empty();
 
     // Build layout based on whether we have attachments, status, and tabs
+    // Context line is now INSIDE the input card, not separate
     let chunks = match (has_attachments, has_status, has_tabs) {
         (true, true, true) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
-            Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(1),     // Tab bar
         ]).split(area),
         (true, true, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
-            Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
         ]).split(area),
         (true, false, true) => Layout::vertical([
             Constraint::Min(0),        // Messages
-            Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(1),     // Tab bar
         ]).split(area),
         (true, false, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
-            Constraint::Length(1),     // Context line
             Constraint::Length(1),     // Attachments line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
         ]).split(area),
         (false, true, true) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
-            Constraint::Length(1),     // Context line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(1),     // Tab bar
         ]).split(area),
         (false, true, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
             Constraint::Length(1),     // Status line
-            Constraint::Length(1),     // Context line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
         ]).split(area),
         (false, false, true) => Layout::vertical([
             Constraint::Min(0),        // Messages
-            Constraint::Length(1),     // Context line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(1),     // Tab bar
         ]).split(area),
         (false, false, false) => Layout::vertical([
             Constraint::Min(0),        // Messages
-            Constraint::Length(1),     // Context line
-            Constraint::Length(input_height), // Input
+            Constraint::Length(input_height), // Input (includes context)
         ]).split(area),
     };
 
@@ -268,8 +223,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         (chunks[0], None)
     };
 
-    // Add horizontal padding to messages area
-    let h_padding: u16 = 2;
+    // Add horizontal padding to messages area for breathing room
+    let h_padding: u16 = 3;
     let messages_area = Rect {
         x: messages_area_raw.x + h_padding,
         y: messages_area_raw.y,
@@ -317,7 +272,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let padding = "   ";
     let content_width = messages_area.width.saturating_sub(2) as usize;
 
-    // Render the thread itself (kind:11) as the first message - same style as all other messages
+    // Render the thread itself (kind:1) as the first message - same style as all other messages
     if !app.in_subthread() {
         if let Some(ref thread) = app.selected_thread {
             if !thread.content.trim().is_empty() {
@@ -603,40 +558,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         }
     }
 
-    // Check for streaming content (agents actively streaming with content)
-    let streaming_sessions = {
-        let _span = info_span!("get_streaming_content").entered();
-        get_streaming_content(app)
-    };
-    for streaming in &streaming_sessions {
-        messages_text.push(Line::from(Span::styled(
-            format!("{}{} (streaming...):", padding, streaming.agent_name),
-            theme::streaming_indicator(),
-        )));
-
-        let markdown_lines = render_markdown(&streaming.content);
-        for line in markdown_lines {
-            let mut padded_spans = vec![Span::raw(padding)];
-            padded_spans.extend(line.spans);
-            messages_text.push(Line::from(padded_spans));
-        }
-
-        messages_text.push(Line::from(""));
-    }
-
-    // Check for typing indicators (agents streaming but no content yet)
-    let typing_agents = {
-        let _span = info_span!("get_typing_indicators").entered();
-        get_typing_indicators(app)
-    };
-    for agent_name in &typing_agents {
-        messages_text.push(Line::from(Span::styled(
-            format!("{}{} is typing...", padding, agent_name),
-            theme::typing_indicator(),
-        )));
-        messages_text.push(Line::from(""));
-    }
-
     // Check for local streaming content (from Unix socket, not Nostr)
     // Clone the buffer to avoid borrowing app across the mutation below
     if let Some(buffer) = app.local_streaming_content().cloned() {
@@ -750,7 +671,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         idx += 1;
     }
 
-    // Context line showing selected agent and branch
+    // Agent/branch display (will be rendered inside input card)
     let agent_display = app
         .selected_agent
         .as_ref()
@@ -762,16 +683,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         .as_ref()
         .map(|b| format!(" on %{}", b))
         .unwrap_or_default();
-
-    let context_line = Line::from(vec![
-        Span::raw(padding),
-        Span::styled("→ @", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(agent_display, Style::default().fg(theme::ACCENT_PRIMARY)),
-        Span::styled(branch_display, Style::default().fg(theme::ACCENT_SUCCESS)),
-    ]);
-    let context = Paragraph::new(context_line);
-    f.render_widget(context, chunks[idx]);
-    idx += 1;
 
     // Attachments line (if any)
     if has_attachments {
@@ -841,10 +752,16 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    // Build input lines with left indicator and padding
+    // Build input card with padding and context line at bottom
     let input_text = app.chat_editor.text.as_str();
     let mut input_lines: Vec<Line> = Vec::new();
-    let input_content_width = input_area.width.saturating_sub(3) as usize; // -3 for "│ " and padding
+    let input_content_width = input_area.width.saturating_sub(5) as usize; // -5 for "│  " left and "  " right padding
+
+    // Top padding line
+    input_lines.push(Line::from(vec![
+        Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+        Span::styled(" ".repeat(input_area.width.saturating_sub(1) as usize), Style::default().bg(input_bg)),
+    ]));
 
     if input_text.is_empty() {
         // Placeholder text when empty
@@ -852,50 +769,61 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         let pad = input_content_width.saturating_sub(placeholder.len());
         input_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-            Span::styled(" ", Style::default().bg(input_bg)),
+            Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
             Span::styled(placeholder, Style::default().fg(theme::TEXT_DIM).bg(input_bg)),
-            Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
+            Span::styled(" ".repeat(pad + 2), Style::default().bg(input_bg)), // +2 right padding
         ]));
     } else {
-        // Render each line of input with indicator
+        // Render each line of input with padding
         for line in input_text.lines() {
             let pad = input_content_width.saturating_sub(line.len());
             input_lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-                Span::styled(" ", Style::default().bg(input_bg)),
+                Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
                 Span::styled(line.to_string(), Style::default().fg(text_color).bg(input_bg)),
-                Span::styled(" ".repeat(pad), Style::default().bg(input_bg)),
+                Span::styled(" ".repeat(pad + 2), Style::default().bg(input_bg)), // +2 right padding
             ]));
         }
         // Handle case where input ends with newline
-        if input_text.ends_with('\n') || input_lines.is_empty() {
+        if input_text.ends_with('\n') || input_lines.len() == 1 {
             input_lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-                Span::styled(" ", Style::default().bg(input_bg)),
-                Span::styled(" ".repeat(input_content_width), Style::default().bg(input_bg)),
+                Span::styled(" ".repeat(input_area.width.saturating_sub(1) as usize), Style::default().bg(input_bg)),
             ]));
         }
     }
 
-    // Pad to fill the input area height with gray background
-    while input_lines.len() < input_area.height as usize {
+    // Reserve last line for context - pad middle lines to fill space
+    let target_height = input_area.height.saturating_sub(1) as usize; // -1 for context line
+    while input_lines.len() < target_height {
         input_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-            Span::styled(" ", Style::default().bg(input_bg)),
-            Span::styled(" ".repeat(input_content_width), Style::default().bg(input_bg)),
+            Span::styled(" ".repeat(input_area.width.saturating_sub(1) as usize), Style::default().bg(input_bg)),
         ]));
     }
+
+    // Context line at bottom: @agent on %branch
+    let context_str = format!("@{}{}", agent_display, branch_display);
+    let context_pad = input_area.width.saturating_sub(context_str.len() as u16 + 4) as usize; // +4 for "│  " and " "
+    input_lines.push(Line::from(vec![
+        Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+        Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
+        Span::styled(format!("@{}", agent_display), Style::default().fg(theme::ACCENT_PRIMARY).bg(input_bg)),
+        Span::styled(branch_display.clone(), Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg)),
+        Span::styled(" ".repeat(context_pad), Style::default().bg(input_bg)),
+    ]));
 
     let input = Paragraph::new(input_lines)
         .style(Style::default().bg(input_bg));
     f.render_widget(input, input_area);
 
     // Show cursor in input mode (but not when ask modal is active)
+    // +1 for top padding line, +3 for "│  " prefix
     if is_input_active && !app.showing_attachment_modal {
         let (cursor_row, cursor_col) = app.chat_editor.cursor_position();
         f.set_cursor_position((
-            input_area.x + cursor_col as u16 + 2, // +2 for "│ "
-            input_area.y + cursor_row as u16,
+            input_area.x + cursor_col as u16 + 3, // +3 for "│  "
+            input_area.y + cursor_row as u16 + 1, // +1 for top padding
         ));
     }
     idx += 1;
@@ -911,13 +839,18 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Render branch selector popup if showing
-    if app.showing_branch_selector {
+    if matches!(app.modal_state, ModalState::BranchSelector { .. }) {
         render_branch_selector(f, app, area);
     }
 
     // Render attachment modal if showing
     if app.showing_attachment_modal {
         render_attachment_modal(f, app, area);
+    }
+
+    // Render tab modal if showing (Alt+/)
+    if app.showing_tab_modal {
+        super::home::render_tab_modal(f, app, area);
     }
 }
 
@@ -1034,6 +967,8 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
 fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     let branches = app.filtered_branches();
     let all_branches = app.available_branches();
+    let selector_index = app.branch_selector_index();
+    let selector_filter = app.branch_selector_filter();
 
     // Calculate popup size and position (centered)
     let popup_width = 40.min(area.width.saturating_sub(4));
@@ -1060,7 +995,7 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
             .iter()
             .enumerate()
             .map(|(i, branch)| {
-                let style = if i == app.branch_selector_index {
+                let style = if i == selector_index {
                     Style::default()
                         .fg(Color::Black)
                         .bg(theme::ACCENT_SUCCESS)
@@ -1074,10 +1009,10 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let title = if app.selector_filter.is_empty() {
+    let title = if selector_filter.is_empty() {
         "Select Branch (type to filter)".to_string()
     } else {
-        format!("Select Branch: {}", app.selector_filter)
+        format!("Select Branch: {}", selector_filter)
     };
 
     let list = List::new(items).block(
@@ -1245,7 +1180,7 @@ fn render_todo_sidebar(f: &mut Frame, todo_state: &TodoState, area: Rect) {
                 .borders(Borders::LEFT)
                 .border_style(theme::border_inactive()),
         )
-        .style(Style::default().bg(theme::BG_SECONDARY));
+        .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
 }

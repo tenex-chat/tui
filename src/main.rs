@@ -11,7 +11,7 @@ use futures::StreamExt;
 use ratatui::{
     layout::{Constraint, Layout},
     style::{Color, Style},
-    widgets::Paragraph,
+    widgets::{Block, Paragraph},
     Frame,
 };
 use std::cell::RefCell;
@@ -26,7 +26,8 @@ use std::sync::mpsc;
 use store::AppDataStore;
 
 use ui::views::login::{render_login, LoginStep};
-use ui::{App, HomeTab, InputMode, NewThreadField, View};
+use ui::{App, HomeTab, InputMode, ModalState, NewThreadField, View};
+use ui::selector::{handle_selector_key, SelectorAction};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -156,10 +157,9 @@ async fn run_app(
     // - 0: Profiles
     // - 4199: Agent definitions
     // - 24010: Project status
-    // - 21111: Streaming deltas
     // - 513: Conversation metadata
     let ndb_filter = FilterBuilder::new()
-        .kinds([31933, 1, 0, 4199, 24010, 21111, 513])
+        .kinds([31933, 1, 0, 4199, 24010, 513])
         .build();
     let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
     let mut ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
@@ -314,28 +314,10 @@ fn handle_ndb_notes(
 
             // Handle UI-specific updates (auto-select agent/branch, scroll, streaming)
             match kind {
-                1111 => {
-                    // Message - check which thread it belongs to
-                    let mut message_thread_id: Option<String> = None;
+                1 => {
+                    if let Some(message) = models::Message::from_note(&note) {
+                        let thread_id = message.thread_id;
 
-                    for tag in note.tags() {
-                        if tag.count() >= 2 {
-                            let tag_name = tag.get(0).and_then(|t| t.variant().str());
-                            if tag_name == Some("E") {
-                                // Try string first, then id bytes
-                                message_thread_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
-                                    Some(s.to_string())
-                                } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                                    Some(hex::encode(id_bytes))
-                                } else {
-                                    None
-                                };
-                                break;
-                            }
-                        }
-                    }
-
-                    if let Some(thread_id) = message_thread_id {
                         // Mark tab as unread if it's not the active one
                         app.mark_tab_unread(&thread_id);
 
@@ -372,6 +354,10 @@ fn handle_ndb_notes(
 }
 
 fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
+    // Fill entire frame with app background (pure black)
+    let bg_block = Block::default().style(Style::default().bg(ui::theme::BG_APP));
+    f.render_widget(bg_block, f.area());
+
     // Home view has its own chrome - give it full area
     if app.view == View::Home {
         ui::views::render_home(f, app, f.area());
@@ -386,7 +372,7 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     .split(f.area());
 
     // Determine chrome color based on pending_quit state
-    let chrome_color = if app.pending_quit { Color::Red } else { Color::Cyan };
+    let chrome_color = if app.pending_quit { ui::theme::ACCENT_ERROR } else { ui::theme::ACCENT_PRIMARY };
 
     // Header
     let title = match app.view {
@@ -415,14 +401,14 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
 
     // Footer - show quit warning if pending, otherwise normal hints
     let (footer_text, footer_style) = if app.pending_quit {
-        ("⚠ Press Ctrl+C again to quit".to_string(), Style::default().fg(Color::Red))
+        ("⚠ Press Ctrl+C again to quit".to_string(), Style::default().fg(ui::theme::ACCENT_ERROR))
     } else {
         let text = match (&app.view, &app.input_mode) {
             (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
             (_, InputMode::Normal) => "Press 'q' to quit".to_string(),
             _ => String::new(), // Chat/Threads editing has its own input box
         };
-        (text, Style::default().fg(Color::DarkGray))
+        (text, Style::default().fg(ui::theme::TEXT_MUTED))
     };
     let footer = Paragraph::new(footer_text)
         .style(footer_style);
@@ -449,8 +435,11 @@ fn handle_key(
         return Ok(());
     }
 
-    // Ctrl+R is no longer needed - ask UI auto-shows when there's an unanswered ask event
-    // Users just press 'i' to enter editing mode and the ask UI will appear automatically
+    // Handle tab modal when open
+    if app.showing_tab_modal {
+        handle_tab_modal_key(app, key);
+        return Ok(());
+    }
 
     // Handle agent selector when open
     if app.showing_agent_selector {
@@ -498,40 +487,73 @@ fn handle_key(
         return Ok(());
     }
 
-    // Handle branch selector when open
-    if app.showing_branch_selector {
-        match code {
-            KeyCode::Up => {
-                if app.branch_selector_index > 0 {
-                    app.branch_selector_index -= 1;
+    // Handle branch selector when open (using ModalState)
+    if matches!(app.modal_state, ModalState::BranchSelector { .. }) {
+        // Get branches BEFORE mutably borrowing modal_state
+        let branches = app.filtered_branches();
+        let item_count = branches.len();
+
+        if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
+            match handle_selector_key(selector, key, item_count, |idx| branches.get(idx).cloned()) {
+                SelectorAction::Selected(branch) => {
+                    app.selected_branch = Some(branch);
+                    app.modal_state = ModalState::None;
                 }
-            }
-            KeyCode::Down => {
-                let max = app.filtered_branches().len().saturating_sub(1);
-                if app.branch_selector_index < max {
-                    app.branch_selector_index += 1;
+                SelectorAction::Cancelled => {
+                    app.modal_state = ModalState::None;
                 }
+                SelectorAction::Continue => {}
             }
-            KeyCode::Enter => {
-                app.select_branch_by_index(app.branch_selector_index);
-                app.showing_branch_selector = false;
-                app.selector_filter.clear();
-            }
-            KeyCode::Esc => {
-                app.showing_branch_selector = false;
-                app.selector_filter.clear();
-            }
-            KeyCode::Backspace => {
-                app.selector_filter.pop();
-                app.branch_selector_index = 0;
-            }
-            KeyCode::Char(c) => {
-                app.selector_filter.push(c);
-                app.branch_selector_index = 0;
-            }
-            _ => {}
         }
         return Ok(());
+    }
+
+    // Global tab navigation with Alt key (works in all views except Login)
+    // These bindings work regardless of input mode
+    if app.view != View::Login {
+        let modifiers = key.modifiers;
+        let has_alt = modifiers.contains(KeyModifiers::ALT);
+        let has_shift = modifiers.contains(KeyModifiers::SHIFT);
+
+        if has_alt {
+            match code {
+                // Alt+0 = go to dashboard (home)
+                KeyCode::Char('0') => {
+                    app.save_chat_draft();
+                    app.view = View::Home;
+                    return Ok(());
+                }
+                // Alt+1..9 = jump directly to tab N
+                KeyCode::Char(c) if c >= '1' && c <= '9' => {
+                    let tab_index = (c as usize) - ('1' as usize);
+                    if tab_index < app.open_tabs.len() {
+                        app.switch_to_tab(tab_index);
+                        app.view = View::Chat;
+                    }
+                    return Ok(());
+                }
+                // Alt+Tab = cycle forward through recently viewed tabs
+                KeyCode::Tab => {
+                    if has_shift {
+                        app.cycle_tab_history_backward();
+                    } else {
+                        app.cycle_tab_history_forward();
+                    }
+                    if !app.open_tabs.is_empty() {
+                        app.view = View::Chat;
+                    }
+                    return Ok(());
+                }
+                // Alt+/ = open tab modal
+                KeyCode::Char('/') => {
+                    if !app.open_tabs.is_empty() || app.view == View::Chat || app.view == View::Home {
+                        app.open_tab_modal();
+                    }
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
     }
 
     // Handle Home view (projects modal and panel navigation)
@@ -560,12 +582,10 @@ fn handle_key(
             }
             // Alt+B = open branch selector
             KeyCode::Char('b') if has_alt => {
-                app.showing_branch_selector = true;
-                app.branch_selector_index = 0;
-                app.selector_filter.clear();
+                app.open_branch_selector();
                 return Ok(());
             }
-            // Number keys 1-9 to jump to tabs
+            // Number keys 1-9 to jump to tabs (without Alt, for backwards compat in Normal mode)
             KeyCode::Char(c) if c >= '1' && c <= '9' => {
                 let tab_index = (c as usize) - ('1' as usize);
                 if tab_index < app.open_tabs.len() {
@@ -951,7 +971,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                                 let project_a_tag = project.a_tag();
                                 let agent_pubkey = Some(agent.pubkey.clone());
 
-                                // Publish the thread (kind:11)
+                                // Publish the thread (kind:1)
                                 if let Err(e) = command_tx.send(NostrCommand::PublishThread {
                                     project_a_tag: project_a_tag.clone(),
                                     title: content.lines().next().unwrap_or("New Thread").to_string(),
@@ -1063,12 +1083,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => HomeTab::Recent,
             };
         }
-        KeyCode::Left => {
-            // Move focus to sidebar
+        KeyCode::Right => {
+            // Move focus to sidebar (on the right)
             app.sidebar_focused = true;
         }
-        KeyCode::Right => {
-            // Move focus to content area
+        KeyCode::Left => {
+            // Move focus to content area (on the left)
             app.sidebar_focused = false;
         }
         KeyCode::Up => {
@@ -1294,9 +1314,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         }
         // % = open branch selector
         KeyCode::Char('%') => {
-            app.showing_branch_selector = true;
-            app.branch_selector_index = 0;
-            app.selector_filter.clear();
+            app.open_branch_selector();
         }
         // Ctrl+A = move to beginning of line
         KeyCode::Char('a') if has_ctrl => {
@@ -1537,6 +1555,66 @@ fn handle_attachment_modal_key(app: &mut App, key: KeyEvent) {
         // Regular character input
         KeyCode::Char(c) => {
             app.attachment_modal_editor.insert_char(c);
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events for the tab modal (Alt+/)
+fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+
+    match code {
+        // Escape closes the modal
+        KeyCode::Esc => {
+            app.close_tab_modal();
+        }
+        // Up arrow moves selection up
+        KeyCode::Up => {
+            if app.tab_modal_index > 0 {
+                app.tab_modal_index -= 1;
+            }
+        }
+        // Down arrow moves selection down
+        KeyCode::Down => {
+            if app.tab_modal_index + 1 < app.open_tabs.len() {
+                app.tab_modal_index += 1;
+            }
+        }
+        // Enter switches to selected tab
+        KeyCode::Enter => {
+            let idx = app.tab_modal_index;
+            app.close_tab_modal();
+            if idx < app.open_tabs.len() {
+                app.switch_to_tab(idx);
+                app.view = View::Chat;
+            }
+        }
+        // 'x' closes the selected tab
+        KeyCode::Char('x') => {
+            if !app.open_tabs.is_empty() {
+                let idx = app.tab_modal_index;
+                app.close_tab_at(idx);
+                // If no more tabs, close the modal
+                if app.open_tabs.is_empty() {
+                    app.close_tab_modal();
+                }
+            }
+        }
+        // '0' goes to dashboard (home)
+        KeyCode::Char('0') => {
+            app.close_tab_modal();
+            app.save_chat_draft();
+            app.view = View::Home;
+        }
+        // Number keys 1-9 switch directly to that tab
+        KeyCode::Char(c) if c >= '1' && c <= '9' => {
+            let tab_index = (c as usize) - ('1' as usize);
+            app.close_tab_modal();
+            if tab_index < app.open_tabs.len() {
+                app.switch_to_tab(tab_index);
+                app.view = View::Chat;
+            }
         }
         _ => {}
     }
