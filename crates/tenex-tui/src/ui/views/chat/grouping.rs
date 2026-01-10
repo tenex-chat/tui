@@ -27,14 +27,14 @@ fn is_collapsible(message: &Message) -> bool {
 
 /// Message visibility info for rendering within an agent group
 #[derive(Debug)]
-pub(crate) struct MessageVisibility<'a> {
+pub struct MessageVisibility<'a> {
     pub message: &'a Message,
     pub visible: bool,
 }
 
-/// Grouped display item - either a single visible message or an agent group
+/// Grouped display item - either a single visible message, an agent group, or a delegation preview
 /// Matches Svelte's DisplayItem type
-pub(crate) enum DisplayItem<'a> {
+pub enum DisplayItem<'a> {
     /// Single message (from user or standalone agent message)
     SingleMessage {
         message: &'a Message,
@@ -56,6 +56,17 @@ pub(crate) enum DisplayItem<'a> {
         /// Count of collapsed (non-visible) messages
         collapsed_count: usize,
     },
+    /// Delegation preview - a reference to another thread via q-tag
+    DelegationPreview {
+        /// The thread ID being delegated to
+        thread_id: String,
+        /// Pubkey of the parent message (for indicator color)
+        parent_pubkey: String,
+        /// True if previous item has the same pubkey
+        is_consecutive: bool,
+        /// True if next item has the same pubkey
+        has_next_consecutive: bool,
+    },
 }
 
 /// Helper to get pubkey from a DisplayItem
@@ -63,6 +74,25 @@ fn item_pubkey<'a>(item: &'a DisplayItem<'a>) -> &'a str {
     match item {
         DisplayItem::SingleMessage { message, .. } => &message.pubkey,
         DisplayItem::AgentGroup { pubkey, .. } => pubkey,
+        DisplayItem::DelegationPreview { parent_pubkey, .. } => parent_pubkey,
+    }
+}
+
+/// Emit DelegationPreview items for any q_tags in the given messages
+fn emit_delegation_previews<'a>(
+    messages: &[&'a Message],
+    parent_pubkey: &str,
+    result: &mut Vec<DisplayItem<'a>>,
+) {
+    for msg in messages {
+        for q_tag in &msg.q_tags {
+            result.push(DisplayItem::DelegationPreview {
+                thread_id: q_tag.clone(),
+                parent_pubkey: parent_pubkey.to_string(),
+                is_consecutive: false,
+                has_next_consecutive: false,
+            });
+        }
     }
 }
 
@@ -90,13 +120,18 @@ fn group_consecutive_agent_messages<'a>(
             return;
         }
 
+        let pk = pubkey.clone().unwrap();
+
         if group.len() == 1 {
             // Single message - emit as SingleMessage
+            let msg = group[0];
             result.push(DisplayItem::SingleMessage {
-                message: group[0],
+                message: msg,
                 is_consecutive: false,
                 has_next_consecutive: false,
             });
+            // Emit delegation previews for this message's q_tags
+            emit_delegation_previews(&[msg], &pk, result);
         } else {
             // Multiple messages - emit as AgentGroup with visibility calculated
             let visibility = calculate_group_visibility(group);
@@ -104,12 +139,14 @@ fn group_consecutive_agent_messages<'a>(
 
             result.push(DisplayItem::AgentGroup {
                 messages: group.clone(),
-                pubkey: pubkey.clone().unwrap(),
+                pubkey: pk.clone(),
                 is_consecutive: false,
                 has_next_consecutive: false,
                 visibility,
                 collapsed_count,
             });
+            // Emit delegation previews for all messages in the group
+            emit_delegation_previews(group, &pk, result);
         }
         group.clear();
         *pubkey = None;
@@ -128,6 +165,8 @@ fn group_consecutive_agent_messages<'a>(
                 is_consecutive: false,
                 has_next_consecutive: false,
             });
+            // User messages can have q_tags too (though rare)
+            emit_delegation_previews(&[msg], &msg.pubkey, &mut result);
             continue;
         }
 
@@ -239,13 +278,21 @@ fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
                 *ic = is_consecutive;
                 *hnc = has_next_consecutive;
             }
+            DisplayItem::DelegationPreview {
+                is_consecutive: ic,
+                has_next_consecutive: hnc,
+                ..
+            } => {
+                *ic = is_consecutive;
+                *hnc = has_next_consecutive;
+            }
         }
     }
 }
 
 /// Group consecutive messages from the same author, then calculate consecutive states.
 /// Matches Svelte's createSimplifiedDisplayModel.
-pub(crate) fn group_messages<'a>(
+pub fn group_messages<'a>(
     messages: &[&'a Message],
     user_pubkey: Option<&str>,
 ) -> Vec<DisplayItem<'a>> {

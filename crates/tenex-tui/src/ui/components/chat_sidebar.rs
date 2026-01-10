@@ -6,7 +6,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::Paragraph,
     Frame,
 };
 
@@ -33,11 +33,13 @@ pub fn render_chat_sidebar(
     area: Rect,
 ) {
     let mut lines: Vec<Line> = Vec::new();
-    let content_width = (area.width as usize).saturating_sub(4);
+    // Horizontal padding: 2 chars on each side
+    let h_padding = 2;
+    let content_width = (area.width as usize).saturating_sub(h_padding * 2);
 
     // === TODOS SECTION ===
     if todo_state.has_todos() {
-        render_todos_section(&mut lines, todo_state, content_width);
+        render_todos_section(&mut lines, todo_state, content_width, h_padding);
     }
 
     // === METADATA SECTION ===
@@ -46,33 +48,32 @@ pub fn render_chat_sidebar(
         if todo_state.has_todos() {
             lines.push(Line::from(""));
         }
-        render_metadata_section(&mut lines, metadata, content_width);
+        render_metadata_section(&mut lines, metadata, content_width, h_padding);
     }
 
     // === EMPTY STATE ===
     if lines.is_empty() {
+        let padding = " ".repeat(h_padding);
         lines.push(Line::from(Span::styled(
-            "No active tasks",
+            format!("{}No active tasks", padding),
             theme::text_muted(),
         )));
     }
 
     let sidebar = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .borders(Borders::LEFT)
-                .border_style(theme::border_inactive()),
-        )
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
 }
 
-fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_width: usize) {
+fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_width: usize, h_padding: usize) {
+    let padding = " ".repeat(h_padding);
+
     // Header with count
     let completed = todo_state.completed_count();
     let total = todo_state.items.len();
     lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
         Span::styled("TODOS ", theme::text_muted()),
         Span::styled(
             format!("{}/{}", completed, total),
@@ -88,6 +89,7 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
     };
     let empty_bar = content_width.saturating_sub(filled);
     lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
         Span::styled(
             "━".repeat(filled),
             Style::default().fg(theme::ACCENT_SUCCESS),
@@ -101,19 +103,25 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
 
     // Active task highlight
     if let Some(active) = todo_state.in_progress_item() {
-        lines.push(Line::from(Span::styled(
-            "In Progress",
-            theme::todo_in_progress(),
-        )));
-        lines.push(Line::from(Span::styled(
-            format!("  {}", truncate_with_ellipsis(&active.title, content_width.saturating_sub(2))),
-            theme::text_primary(),
-        )));
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled("In Progress", theme::todo_in_progress()),
+        ]));
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(
+                format!("  {}", truncate_with_ellipsis(&active.title, content_width.saturating_sub(2))),
+                theme::text_primary(),
+            ),
+        ]));
         if let Some(ref desc) = active.description {
-            lines.push(Line::from(Span::styled(
-                format!("  {}", truncate_with_ellipsis(desc, content_width.saturating_sub(2))),
-                theme::text_muted(),
-            )));
+            lines.push(Line::from(vec![
+                Span::raw(padding.clone()),
+                Span::styled(
+                    format!("  {}", truncate_with_ellipsis(desc, content_width.saturating_sub(2))),
+                    theme::text_muted(),
+                ),
+            ]));
         }
         lines.push(Line::from(""));
     }
@@ -136,6 +144,7 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
 
         let title = truncate_with_ellipsis(&item.title, content_width.saturating_sub(2));
         lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
             Span::styled(format!("{} ", icon), icon_style),
             Span::styled(title, title_style),
         ]));
@@ -146,29 +155,12 @@ fn render_metadata_section<'a>(
     lines: &mut Vec<Line<'a>>,
     metadata: &'a ConversationMetadata,
     content_width: usize,
+    h_padding: usize,
 ) {
-    // Section header
-    let separator_width = content_width.saturating_sub(10);
-    lines.push(Line::from(vec![
-        Span::styled("─ ", theme::text_dim()),
-        Span::styled("METADATA", theme::text_muted()),
-        Span::styled(" ", theme::text_dim()),
-        Span::styled("─".repeat(separator_width), theme::text_dim()),
-    ]));
+    let padding = " ".repeat(h_padding);
 
-    // Title
-    if let Some(ref title) = metadata.title {
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled("title", theme::text_muted())));
-        // Wrap title across multiple lines if needed
-        for line in wrap_text(title, content_width) {
-            lines.push(Line::from(Span::styled(line, theme::text_primary())));
-        }
-    }
-
-    // Status label with color coding
+    // Status value with color coding (no label)
     if let Some(ref status) = metadata.status_label {
-        lines.push(Line::from(""));
         let status_style = match status.to_lowercase().as_str() {
             "completed" | "done" => theme::status_success(),
             "in progress" | "working" => theme::status_warning(),
@@ -176,18 +168,18 @@ fn render_metadata_section<'a>(
             _ => theme::text_primary(),
         };
         lines.push(Line::from(vec![
-            Span::styled("status ", theme::text_muted()),
+            Span::raw(padding.clone()),
             Span::styled(status.clone(), status_style),
         ]));
     }
 
     // Current activity
     if let Some(ref activity) = metadata.status_current_activity {
-        if metadata.status_label.is_none() {
-            lines.push(Line::from(""));
-        }
         for line in wrap_text(activity, content_width) {
-            lines.push(Line::from(Span::styled(line, theme::text_muted())));
+            lines.push(Line::from(vec![
+                Span::raw(padding.clone()),
+                Span::styled(line, theme::text_muted()),
+            ]));
         }
     }
 }

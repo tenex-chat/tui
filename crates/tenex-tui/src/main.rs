@@ -824,6 +824,9 @@ fn handle_key(
                                     app.enter_subthread((*msg).clone());
                                 }
                             }
+                            DisplayItem::DelegationPreview { .. } => {
+                                // Delegation previews don't have actions
+                            }
                         }
                     }
                 }

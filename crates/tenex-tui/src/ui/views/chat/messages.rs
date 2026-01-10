@@ -440,128 +440,8 @@ pub(crate) fn render_messages_panel(
                         ));
                     }
 
-                    // Delegation previews for q-tags
-                    if !msg.q_tags.is_empty() {
-                        // Calculate available width for delegation content
-                        // Prefix is "│  ┌─ " = 6 chars, leave some margin
-                        let delegation_text_width = content_width.saturating_sub(8);
-
-                        // Collect delegation info with store borrow, then render
-                        // title, agent_name, status_label (Option), activity (from 513 or last message)
-                        let delegation_info: Vec<(String, String, Option<String>, String)> = {
-                            let store = app.data_store.borrow();
-                            msg.q_tags
-                                .iter()
-                                .filter_map(|q_tag| {
-                                    store.get_thread_by_id(q_tag).map(|t| {
-                                        // Title: use thread title, fallback to content
-                                        let title = if t.title == "Untitled" || t.title.is_empty() {
-                                            t.content.clone()
-                                        } else {
-                                            t.title.clone()
-                                        };
-
-                                        // Activity: use 513 metadata, fallback to most recent message
-                                        let activity = t.status_current_activity.clone().unwrap_or_else(|| {
-                                            // Get most recent message from this conversation
-                                            store.get_messages(q_tag)
-                                                .last()
-                                                .map(|m| m.content.clone())
-                                                .unwrap_or_default()
-                                        });
-
-                                        (
-                                            title,
-                                            store.get_profile_name(&t.pubkey),
-                                            t.status_label.clone(), // No default
-                                            activity,
-                                        )
-                                    }).or_else(|| {
-                                        Some((
-                                            format!("delegation: {}", &q_tag[..8.min(q_tag.len())]),
-                                            String::new(),
-                                            None,
-                                            String::new(),
-                                        ))
-                                    })
-                                })
-                                .collect()
-                        };
-
-                        for (title, agent_name, status, activity) in delegation_info {
-                            if agent_name.is_empty() {
-                                // Thread not found - show ID only
-                                messages_text.push(Line::from(vec![
-                                    Span::styled("│  ", Style::default().fg(indicator_color)),
-                                    Span::styled(
-                                        format!("→ {}", title),
-                                        Style::default().fg(theme::TEXT_MUTED),
-                                    ),
-                                ]));
-                            } else {
-                                // Delegation card header - use available width
-                                let title_display: String = title.chars().take(delegation_text_width).collect();
-                                messages_text.push(Line::from(vec![
-                                    Span::styled("│  ", Style::default().fg(indicator_color)),
-                                    Span::styled(
-                                        "┌─ ",
-                                        Style::default().fg(theme::BORDER_INACTIVE),
-                                    ),
-                                    Span::styled(
-                                        title_display,
-                                        Style::default()
-                                            .fg(theme::TEXT_PRIMARY)
-                                            .add_modifier(Modifier::BOLD),
-                                    ),
-                                ]));
-
-                                // Agent and status line
-                                let mut agent_line = vec![
-                                    Span::styled("│  ", Style::default().fg(indicator_color)),
-                                    Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
-                                    Span::styled(
-                                        format!("@{}", agent_name),
-                                        Style::default().fg(theme::TEXT_MUTED),
-                                    ),
-                                ];
-                                // Only show status if we have one from 513 metadata
-                                if let Some(ref status_label) = status {
-                                    let status_color = if status_label == "done" {
-                                        theme::ACCENT_SUCCESS
-                                    } else {
-                                        theme::ACCENT_WARNING
-                                    };
-                                    agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-                                    agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color)));
-                                }
-                                messages_text.push(Line::from(agent_line));
-
-                                // Activity line (from 513 or most recent message) - use available width
-                                if !activity.is_empty() {
-                                    let activity_display: String = activity.chars().take(delegation_text_width).collect();
-                                    messages_text.push(Line::from(vec![
-                                        Span::styled("│  ", Style::default().fg(indicator_color)),
-                                        Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
-                                        Span::styled(
-                                            activity_display,
-                                            Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC),
-                                        ),
-                                    ]));
-                                }
-
-                                // Bottom border - match content width
-                                let border_width = delegation_text_width.min(40);
-                                let border: String = "─".repeat(border_width);
-                                messages_text.push(Line::from(vec![
-                                    Span::styled("│  ", Style::default().fg(indicator_color)),
-                                    Span::styled(
-                                        format!("└{}", border),
-                                        Style::default().fg(theme::BORDER_INACTIVE),
-                                    ),
-                                ]));
-                            }
-                        }
-                    }
+                    // Delegation previews are now rendered as separate DelegationPreview items
+                    // (see emit_delegation_previews in grouping.rs)
 
                     // Replies indicator
                     if let Some(replies) = replies_by_parent.get(msg.id.as_str()) {
@@ -588,6 +468,141 @@ pub(crate) fn render_messages_panel(
                     }
 
                     // Only add empty line if no next consecutive (end of author group)
+                    if !has_next_consecutive {
+                        messages_text.push(Line::from(""));
+                    }
+                }
+
+                DisplayItem::DelegationPreview {
+                    thread_id,
+                    parent_pubkey,
+                    is_consecutive,
+                    has_next_consecutive,
+                } => {
+                    // Check if this delegation preview is selected
+                    let is_selected =
+                        group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
+
+                    let indicator_color = theme::user_color(parent_pubkey);
+                    let card_bg = theme::BG_CARD;
+                    let card_bg_selected = theme::BG_SELECTED;
+                    let bg = if is_selected { card_bg_selected } else { card_bg };
+
+                    // Calculate available width for delegation text
+                    let delegation_text_width = content_width.saturating_sub(10); // Account for borders/padding
+
+                    // Get thread info from data store
+                    let (title, agent_name, status, activity) = {
+                        let store = app.data_store.borrow();
+                        if let Some(t) = store.get_thread_by_id(thread_id) {
+                            let title = if t.title == "Untitled" || t.title.is_empty() {
+                                t.content.chars().take(50).collect::<String>()
+                            } else {
+                                t.title.clone()
+                            };
+                            let activity = t.status_current_activity.clone().unwrap_or_else(|| {
+                                store.get_messages(thread_id)
+                                    .last()
+                                    .map(|m| m.content.chars().take(60).collect())
+                                    .unwrap_or_default()
+                            });
+                            (
+                                title,
+                                store.get_profile_name(&t.pubkey),
+                                t.status_label.clone(),
+                                activity,
+                            )
+                        } else {
+                            (
+                                format!("delegation: {}", &thread_id[..8.min(thread_id.len())]),
+                                String::new(),
+                                None,
+                                String::new(),
+                            )
+                        }
+                    };
+
+                    let indicator = if *is_consecutive { "·  " } else { "│  " };
+
+                    if agent_name.is_empty() {
+                        // Thread not found - show ID only
+                        messages_text.push(Line::from(vec![
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled(
+                                format!("→ {}", title),
+                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                            ),
+                        ]));
+                    } else {
+                        // Delegation card header - use available width
+                        let title_display: String = title.chars().take(delegation_text_width).collect();
+                        let hint = if is_selected { " (Enter to open)" } else { "" };
+                        messages_text.push(Line::from(vec![
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled(
+                                "┌─ ",
+                                Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                            ),
+                            Span::styled(
+                                title_display,
+                                Style::default()
+                                    .fg(theme::TEXT_PRIMARY)
+                                    .bg(bg)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                hint,
+                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                            ),
+                        ]));
+
+                        // Agent and status line
+                        let mut agent_line = vec![
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                            Span::styled(
+                                format!("@{}", agent_name),
+                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                            ),
+                        ];
+                        // Only show status if we have one from 513 metadata
+                        if let Some(ref status_label) = status {
+                            let status_color = if status_label == "done" {
+                                theme::ACCENT_SUCCESS
+                            } else {
+                                theme::ACCENT_WARNING
+                            };
+                            agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                            agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
+                        }
+                        messages_text.push(Line::from(agent_line));
+
+                        // Activity line (from 513 or most recent message) - use available width
+                        if !activity.is_empty() {
+                            let activity_display: String = activity.chars().take(delegation_text_width).collect();
+                            messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                Span::styled(
+                                    activity_display,
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg).add_modifier(Modifier::ITALIC),
+                                ),
+                            ]));
+                        }
+
+                        // Bottom border - match content width
+                        let border_width = delegation_text_width.min(40);
+                        let border: String = "─".repeat(border_width);
+                        messages_text.push(Line::from(vec![
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled(
+                                format!("└{}", border),
+                                Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                            ),
+                        ]));
+                    }
+
+                    // Only add empty line if no next consecutive
                     if !has_next_consecutive {
                         messages_text.push(Line::from(""));
                     }

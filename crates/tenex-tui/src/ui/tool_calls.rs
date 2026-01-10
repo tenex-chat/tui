@@ -207,6 +207,37 @@ pub fn render_tool_line(
             format!("▸ {} tasks", count)
         }
 
+        // Ask: "Asking: "title" [Question1, Question2, ...]"
+        "ask" | "askuserquestion" => {
+            let title = tool_call
+                .parameters
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Question");
+
+            // Extract question headers from questions array
+            let question_headers: Vec<String> = tool_call
+                .parameters
+                .get("questions")
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|q| {
+                            q.get("header")
+                                .and_then(|h| h.as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            if question_headers.is_empty() {
+                format!("Asking: \"{}\"", title)
+            } else {
+                format!("Asking: \"{}\" [{}]", title, question_headers.join(", "))
+            }
+        }
+
         // File operations: "Reading path" / "Writing path" / "Editing path"
         "read" | "file_read" => format!("Reading {}", target),
         "write" | "file_write" => format!("Writing {}", target),
