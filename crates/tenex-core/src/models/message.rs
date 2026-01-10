@@ -38,6 +38,15 @@ pub struct Message {
     /// Q-tags pointing to delegated conversation IDs
     /// When an agent delegates work, the delegation message has q-tags pointing to child conversations
     pub q_tags: Vec<String>,
+    /// P-tags (mentions) - pubkeys this message mentions
+    /// Used for message grouping: p-tag breaks consecutive message groups
+    pub p_tags: Vec<String>,
+    /// Tool name from "tool" tag (e.g., "delegate", "fs_read", etc.)
+    /// Used for grouping: delegation tools break groups and are never collapsible
+    pub tool_name: Option<String>,
+    /// LLM metadata tags (llm-prompt-tokens, llm-completion-tokens, llm-model, etc.)
+    /// Key is the tag name without "llm-" prefix, value is the tag value
+    pub llm_metadata: Vec<(String, String)>,
 }
 
 impl Message {
@@ -61,11 +70,38 @@ impl Message {
         let mut reply_to: Option<String> = None;
         let mut is_reasoning = false;
         let mut q_tags: Vec<String> = Vec::new();
+        let mut p_tags: Vec<String> = Vec::new();
+        let mut tool_name: Option<String> = None;
+        let mut llm_metadata: Vec<(String, String)> = Vec::new();
 
-        // Parse e-tags per NIP-10
+        // Parse tags
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
+
+            // Check for llm-* tags first
+            if let Some(name) = tag_name {
+                if name.starts_with("llm-") {
+                    if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                        let key = name.strip_prefix("llm-").unwrap().to_string();
+                        llm_metadata.push((key, value.to_string()));
+                    }
+                    continue;
+                }
+            }
+
             match tag_name {
+                Some("p") => {
+                    // P-tags are mentions (pubkeys)
+                    if let Some(pubkey) = tag.get(1).and_then(|t| t.variant().str()) {
+                        p_tags.push(pubkey.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        p_tags.push(hex::encode(id_bytes));
+                    }
+                }
+                Some("tool") => {
+                    // Tool tag format: ["tool", "tool_name", ...]
+                    tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 Some("q") => {
                     // Q-tags point to delegated conversation IDs
                     if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -131,6 +167,9 @@ impl Message {
             is_reasoning,
             ask_event,
             q_tags,
+            p_tags,
+            tool_name,
+            llm_metadata,
         })
     }
 
@@ -146,16 +185,41 @@ impl Message {
         let content = note.content().to_string();
         let created_at = note.created_at();
 
-        // Verify it's a thread (has a-tag, no e-tags) and collect q-tags
+        // Verify it's a thread (has a-tag, no e-tags) and collect tags
         let mut has_a_tag = false;
         let mut has_e_tag = false;
         let mut q_tags: Vec<String> = Vec::new();
+        let mut p_tags: Vec<String> = Vec::new();
+        let mut tool_name: Option<String> = None;
+        let mut llm_metadata: Vec<(String, String)> = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
+
+            // Check for llm-* tags first
+            if let Some(name) = tag_name {
+                if name.starts_with("llm-") {
+                    if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                        let key = name.strip_prefix("llm-").unwrap().to_string();
+                        llm_metadata.push((key, value.to_string()));
+                    }
+                    continue;
+                }
+            }
+
             match tag_name {
                 Some("a") => has_a_tag = true,
                 Some("e") => has_e_tag = true,
+                Some("p") => {
+                    if let Some(pk) = tag.get(1).and_then(|t| t.variant().str()) {
+                        p_tags.push(pk.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        p_tags.push(hex::encode(id_bytes));
+                    }
+                }
+                Some("tool") => {
+                    tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 Some("q") => {
                     if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
                         q_tags.push(conv_id.to_string());
@@ -184,6 +248,9 @@ impl Message {
             is_reasoning: false,
             ask_event,
             q_tags,
+            p_tags,
+            tool_name,
+            llm_metadata,
         })
     }
 
@@ -501,6 +568,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         assert!(msg.has_images());
 
@@ -514,6 +584,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         assert!(!no_images.has_images());
     }
@@ -530,6 +603,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
@@ -547,6 +623,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
@@ -564,6 +643,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
         assert!(urls.is_empty());
@@ -581,6 +663,9 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);

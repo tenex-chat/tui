@@ -217,7 +217,7 @@ pub(crate) fn render_messages_panel(
                         let msg = vis.message;
                         let is_first_visible = vis_idx == 0 || !visibility[..vis_idx].iter().any(|v| v.visible);
                         let msg_is_consecutive = !is_first_visible || *is_consecutive;
-                        let is_tool_use = msg.tool_name.is_some();
+                        let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
 
                         if is_tool_use {
                             // Tool use: render muted tool line only
@@ -271,18 +271,24 @@ pub(crate) fn render_messages_panel(
                             }
                         }
 
-                        // Delegation previews for q-tags (within group)
+                        // Delegation previews for q-tags (within group) - compact inline
                         if !msg.q_tags.is_empty() {
-                            let delegation_info: Vec<(String, String, String)> = {
+                            let delegation_info: Vec<(String, String, Option<String>)> = {
                                 let store = app.data_store.borrow();
                                 msg.q_tags
                                     .iter()
                                     .filter_map(|q_tag| {
                                         store.get_thread_by_id(q_tag).map(|t| {
+                                            // Title: fallback to content if "Untitled"
+                                            let title = if t.title == "Untitled" || t.title.is_empty() {
+                                                t.content.chars().take(30).collect()
+                                            } else {
+                                                t.title.clone()
+                                            };
                                             (
-                                                t.title.clone(),
+                                                title,
                                                 store.get_profile_name(&t.pubkey),
-                                                t.status_label.clone().unwrap_or_else(|| "working".to_string()),
+                                                t.status_label.clone(), // No default
                                             )
                                         })
                                     })
@@ -290,7 +296,7 @@ pub(crate) fn render_messages_panel(
                             };
 
                             for (title, agent_name, status) in delegation_info {
-                                messages_text.push(Line::from(vec![
+                                let mut spans = vec![
                                     Span::styled("│  ", Style::default().fg(indicator_color)),
                                     Span::styled("→ ", Style::default().fg(theme::BORDER_INACTIVE)),
                                     Span::styled(
@@ -302,15 +308,20 @@ pub(crate) fn render_messages_panel(
                                         format!("@{}", agent_name),
                                         Style::default().fg(theme::TEXT_MUTED),
                                     ),
-                                    Span::styled(
-                                        format!(" [{}]", status),
-                                        Style::default().fg(if status == "done" {
-                                            theme::ACCENT_SUCCESS
-                                        } else {
-                                            theme::ACCENT_WARNING
-                                        }),
-                                    ),
-                                ]));
+                                ];
+                                // Only show status if we have 513 metadata
+                                if let Some(ref status_label) = status {
+                                    let status_color = if status_label == "done" {
+                                        theme::ACCENT_SUCCESS
+                                    } else {
+                                        theme::ACCENT_WARNING
+                                    };
+                                    spans.push(Span::styled(
+                                        format!(" [{}]", status_label),
+                                        Style::default().fg(status_color),
+                                    ));
+                                }
+                                messages_text.push(Line::from(spans));
                             }
                         }
                     }
@@ -347,8 +358,8 @@ pub(crate) fn render_messages_panel(
                     let card_bg_selected = theme::BG_SELECTED;
                     let bg = if is_selected { card_bg_selected } else { card_bg };
 
-                    // Check if this is a tool use message (has tool tag)
-                    let is_tool_use = msg.tool_name.is_some();
+                    // Check if this is a tool use message (has tool tag) or delegation (has q_tags)
+                    let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
 
                     if is_tool_use {
                         // Tool use message: render muted tool line only, no card background
@@ -439,8 +450,8 @@ pub(crate) fn render_messages_panel(
                         }
                     }
 
-                    // LLM metadata chips (only shown when message is selected)
-                    if is_selected && !msg.llm_metadata.is_empty() {
+                    // LLM metadata chips (shown when selected OR when setting is enabled)
+                    if (is_selected || app.show_llm_metadata) && !msg.llm_metadata.is_empty() {
                         messages_text.push(llm_metadata_line(
                             &msg.id,
                             &msg.llm_metadata,
@@ -453,23 +464,40 @@ pub(crate) fn render_messages_panel(
                     // Delegation previews for q-tags
                     if !msg.q_tags.is_empty() {
                         // Collect delegation info with store borrow, then render
-                        let delegation_info: Vec<(String, String, String, String)> = {
+                        // title, agent_name, status_label (Option), activity (from 513 or last message)
+                        let delegation_info: Vec<(String, String, Option<String>, String)> = {
                             let store = app.data_store.borrow();
                             msg.q_tags
                                 .iter()
                                 .filter_map(|q_tag| {
                                     store.get_thread_by_id(q_tag).map(|t| {
+                                        // Title: use thread title, fallback to trimmed content
+                                        let title = if t.title == "Untitled" || t.title.is_empty() {
+                                            t.content.chars().take(50).collect::<String>()
+                                        } else {
+                                            t.title.clone()
+                                        };
+
+                                        // Activity: use 513 metadata, fallback to most recent message
+                                        let activity = t.status_current_activity.clone().unwrap_or_else(|| {
+                                            // Get most recent message from this conversation
+                                            store.get_messages(q_tag)
+                                                .last()
+                                                .map(|m| m.content.chars().take(60).collect())
+                                                .unwrap_or_default()
+                                        });
+
                                         (
-                                            t.title.clone(),
+                                            title,
                                             store.get_profile_name(&t.pubkey),
-                                            t.status_label.clone().unwrap_or_else(|| "working".to_string()),
-                                            t.status_current_activity.clone().unwrap_or_default(),
+                                            t.status_label.clone(), // No default
+                                            activity,
                                         )
                                     }).or_else(|| {
                                         Some((
                                             format!("delegation: {}", &q_tag[..8.min(q_tag.len())]),
                                             String::new(),
-                                            String::new(),
+                                            None,
                                             String::new(),
                                         ))
                                     })
@@ -504,23 +532,27 @@ pub(crate) fn render_messages_panel(
                                 ]));
 
                                 // Agent and status line
-                                let status_color = if status == "done" {
-                                    theme::ACCENT_SUCCESS
-                                } else {
-                                    theme::ACCENT_WARNING
-                                };
-                                messages_text.push(Line::from(vec![
+                                let mut agent_line = vec![
                                     Span::styled("│  ", Style::default().fg(indicator_color)),
                                     Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
                                     Span::styled(
                                         format!("@{}", agent_name),
                                         Style::default().fg(theme::TEXT_MUTED),
                                     ),
-                                    Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-                                    Span::styled(status.clone(), Style::default().fg(status_color)),
-                                ]));
+                                ];
+                                // Only show status if we have one from 513 metadata
+                                if let Some(ref status_label) = status {
+                                    let status_color = if status_label == "done" {
+                                        theme::ACCENT_SUCCESS
+                                    } else {
+                                        theme::ACCENT_WARNING
+                                    };
+                                    agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+                                    agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color)));
+                                }
+                                messages_text.push(Line::from(agent_line));
 
-                                // Activity line (if present)
+                                // Activity line (from 513 or most recent message)
                                 if !activity.is_empty() {
                                     messages_text.push(Line::from(vec![
                                         Span::styled("│  ", Style::default().fg(indicator_color)),

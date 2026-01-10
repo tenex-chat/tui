@@ -1,22 +1,60 @@
 use crate::models::Message;
 
-/// Grouped display item - either a single message or a collapsed group
-/// Includes consecutive state for visual rendering (like Svelte's message grouping)
+/// Check if a message is a delegation tool call (should never be collapsed and breaks groups)
+fn is_delegation_tool(message: &Message) -> bool {
+    matches!(
+        message.tool_name.as_deref(),
+        Some("delegate") | Some("delegate_external")
+    )
+}
+
+/// Check if a message has p-tags (mentions)
+fn has_p_tag(message: &Message) -> bool {
+    !message.p_tags.is_empty()
+}
+
+/// Check if a message is collapsible
+/// Only tool use events are collapsible (except delegations which are never collapsible)
+/// Regular messages without tools are always visible
+fn is_collapsible(message: &Message) -> bool {
+    // Must have a tool to be collapsible
+    let has_tool = message.tool_name.is_some();
+    // Delegations are never collapsible
+    let is_delegation = is_delegation_tool(message);
+
+    has_tool && !is_delegation
+}
+
+/// Message visibility info for rendering within an agent group
+#[derive(Debug)]
+pub(crate) struct MessageVisibility<'a> {
+    pub message: &'a Message,
+    pub visible: bool,
+}
+
+/// Grouped display item - either a single visible message or an agent group
+/// Matches Svelte's DisplayItem type
 pub(crate) enum DisplayItem<'a> {
+    /// Single message (from user or standalone agent message)
     SingleMessage {
         message: &'a Message,
-        /// True if previous message has the same pubkey (show dot instead of header)
+        /// True if previous item has the same pubkey
         is_consecutive: bool,
-        /// True if next message has the same pubkey (extend vertical line)
+        /// True if next item has the same pubkey
         has_next_consecutive: bool,
     },
-    ActionGroup {
+    /// Group of consecutive agent messages (collapsed/expandable)
+    AgentGroup {
         messages: Vec<&'a Message>,
         pubkey: String,
         /// True if previous item has the same pubkey
         is_consecutive: bool,
         /// True if next item has the same pubkey
         has_next_consecutive: bool,
+        /// Visibility for each message in the group
+        visibility: Vec<MessageVisibility<'a>>,
+        /// Count of collapsed (non-visible) messages
+        collapsed_count: usize,
     },
 }
 
@@ -24,183 +62,194 @@ pub(crate) enum DisplayItem<'a> {
 fn item_pubkey<'a>(item: &'a DisplayItem<'a>) -> &'a str {
     match item {
         DisplayItem::SingleMessage { message, .. } => &message.pubkey,
-        DisplayItem::ActionGroup { pubkey, .. } => pubkey,
+        DisplayItem::AgentGroup { pubkey, .. } => pubkey,
     }
 }
 
-/// Group consecutive action messages from the same author, then calculate consecutive states
-pub(crate) fn group_messages<'a>(
+/// Group consecutive messages from the same agent.
+/// Groups break on:
+/// - Different pubkey
+/// - Message has p-tag (mention)
+/// - Message is a delegation tool call
+fn group_consecutive_agent_messages<'a>(
     messages: &[&'a Message],
     user_pubkey: Option<&str>,
 ) -> Vec<DisplayItem<'a>> {
-    // Phase 1: Group action messages (without consecutive state - set to false temporarily)
-    let mut intermediate = Vec::new();
+    if messages.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<DisplayItem<'a>> = Vec::new();
     let mut current_group: Vec<&'a Message> = Vec::new();
     let mut group_pubkey: Option<String> = None;
 
+    let flush_group = |group: &mut Vec<&'a Message>,
+                       pubkey: &mut Option<String>,
+                       result: &mut Vec<DisplayItem<'a>>| {
+        if group.is_empty() {
+            return;
+        }
+
+        if group.len() == 1 {
+            // Single message - emit as SingleMessage
+            result.push(DisplayItem::SingleMessage {
+                message: group[0],
+                is_consecutive: false,
+                has_next_consecutive: false,
+            });
+        } else {
+            // Multiple messages - emit as AgentGroup with visibility calculated
+            let visibility = calculate_group_visibility(group);
+            let collapsed_count = visibility.iter().filter(|v| !v.visible).count();
+
+            result.push(DisplayItem::AgentGroup {
+                messages: group.clone(),
+                pubkey: pubkey.clone().unwrap(),
+                is_consecutive: false,
+                has_next_consecutive: false,
+                visibility,
+                collapsed_count,
+            });
+        }
+        group.clear();
+        *pubkey = None;
+    };
+
     for msg in messages {
         let is_user = user_pubkey.map(|pk| pk == msg.pubkey.as_str()).unwrap_or(false);
-        let is_action = !is_user && is_action_message(&msg.content);
+        let msg_has_p_tag = has_p_tag(msg);
+        let msg_is_delegation = is_delegation_tool(msg);
 
-        if is_action {
-            // Check if we can add to current group
-            if let Some(ref pk) = group_pubkey {
-                if pk == &msg.pubkey {
-                    current_group.push(msg);
-                    continue;
-                }
-            }
-
-            // Flush existing group if any
-            if !current_group.is_empty() {
-                if current_group.len() == 1 {
-                    intermediate.push(DisplayItem::SingleMessage {
-                        message: current_group[0],
-                        is_consecutive: false,
-                        has_next_consecutive: false,
-                    });
-                } else {
-                    intermediate.push(DisplayItem::ActionGroup {
-                        messages: current_group.clone(),
-                        pubkey: group_pubkey.clone().unwrap(),
-                        is_consecutive: false,
-                        has_next_consecutive: false,
-                    });
-                }
-                current_group.clear();
-            }
-
-            // Start new group
-            group_pubkey = Some(msg.pubkey.clone());
-            current_group.push(msg);
-        } else {
-            // Flush any existing group
-            if !current_group.is_empty() {
-                if current_group.len() == 1 {
-                    intermediate.push(DisplayItem::SingleMessage {
-                        message: current_group[0],
-                        is_consecutive: false,
-                        has_next_consecutive: false,
-                    });
-                } else {
-                    intermediate.push(DisplayItem::ActionGroup {
-                        messages: current_group.clone(),
-                        pubkey: group_pubkey.clone().unwrap(),
-                        is_consecutive: false,
-                        has_next_consecutive: false,
-                    });
-                }
-                current_group.clear();
-                group_pubkey = None;
-            }
-
-            intermediate.push(DisplayItem::SingleMessage {
+        // User messages are always standalone
+        if is_user {
+            flush_group(&mut current_group, &mut group_pubkey, &mut result);
+            result.push(DisplayItem::SingleMessage {
                 message: msg,
                 is_consecutive: false,
                 has_next_consecutive: false,
             });
+            continue;
+        }
+
+        // Check if this message should break the current group
+        let should_break = group_pubkey.as_ref().map_or(false, |pk| pk != &msg.pubkey)
+            || msg_has_p_tag
+            || msg_is_delegation;
+
+        if should_break {
+            flush_group(&mut current_group, &mut group_pubkey, &mut result);
+        }
+
+        current_group.push(msg);
+        if group_pubkey.is_none() {
+            group_pubkey = Some(msg.pubkey.clone());
         }
     }
 
     // Flush final group
-    if !current_group.is_empty() {
-        if current_group.len() == 1 {
-            intermediate.push(DisplayItem::SingleMessage {
-                message: current_group[0],
-                is_consecutive: false,
-                has_next_consecutive: false,
-            });
-        } else {
-            intermediate.push(DisplayItem::ActionGroup {
-                messages: current_group,
-                pubkey: group_pubkey.unwrap(),
-                is_consecutive: false,
-                has_next_consecutive: false,
-            });
-        }
-    }
-
-    // Phase 2: Calculate consecutive states by comparing pubkeys of adjacent items
-    let len = intermediate.len();
-    let mut result = Vec::with_capacity(len);
-
-    for (i, item) in intermediate.into_iter().enumerate() {
-        let prev_pubkey = if i > 0 { Some(item_pubkey(&result[i - 1])) } else { None };
-        let current_pubkey = item_pubkey(&item);
-        let is_consecutive = prev_pubkey.map(|pk| pk == current_pubkey).unwrap_or(false);
-
-        // We'll set has_next_consecutive in a second pass or update previous item
-        match item {
-            DisplayItem::SingleMessage { message, .. } => {
-                result.push(DisplayItem::SingleMessage {
-                    message,
-                    is_consecutive,
-                    has_next_consecutive: false, // Will update in next iteration
-                });
-            }
-            DisplayItem::ActionGroup { messages, pubkey, .. } => {
-                result.push(DisplayItem::ActionGroup {
-                    messages,
-                    pubkey,
-                    is_consecutive,
-                    has_next_consecutive: false,
-                });
-            }
-        }
-
-        // Update previous item's has_next_consecutive if current is consecutive
-        if is_consecutive && i > 0 {
-            let prev_idx = i - 1;
-            match &mut result[prev_idx] {
-                DisplayItem::SingleMessage { has_next_consecutive, .. } => {
-                    *has_next_consecutive = true;
-                }
-                DisplayItem::ActionGroup { has_next_consecutive, .. } => {
-                    *has_next_consecutive = true;
-                }
-            }
-        }
-    }
+    flush_group(&mut current_group, &mut group_pubkey, &mut result);
 
     result
 }
 
-/// Check if a message looks like a short action/status message
-fn is_action_message(content: &str) -> bool {
-    let trimmed = content.trim();
+/// Calculate visibility for messages within an agent group
+/// Rules from Svelte:
+/// - If p-tag exists: collapse before p-tag, show from p-tag onwards
+/// - If no p-tag (agent still working): show last 2 collapsible, collapse rest
+/// - Delegations are never collapsible (always shown)
+fn calculate_group_visibility<'a>(messages: &[&'a Message]) -> Vec<MessageVisibility<'a>> {
+    // Find index of first p-tagged message
+    let p_tag_index = messages.iter().position(|m| has_p_tag(m));
 
-    // Must be short (under 100 chars) and single line
-    if trimmed.len() > 100 || trimmed.contains('\n') {
-        return false;
+    if let Some(p_idx) = p_tag_index {
+        // P-tag mode: collapse everything collapsible before p-tag
+        messages
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                let msg_collapsible = is_collapsible(msg);
+                let is_before_p_tag = i < p_idx;
+                // Show if: non-collapsible OR at/after p-tag
+                let visible = !msg_collapsible || !is_before_p_tag;
+                MessageVisibility { message: msg, visible }
+            })
+            .collect()
+    } else {
+        // No p-tag mode: show last 2 collapsible + all non-collapsible
+        let collapsible_indices: Vec<usize> = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| is_collapsible(m))
+            .map(|(i, _)| i)
+            .collect();
+
+        // Last 2 collapsible indices
+        let visible_collapsible: std::collections::HashSet<usize> = collapsible_indices
+            .iter()
+            .rev()
+            .take(2)
+            .copied()
+            .collect();
+
+        messages
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                let msg_collapsible = is_collapsible(msg);
+                // Show if: non-collapsible OR one of last 2 collapsible
+                let visible = !msg_collapsible || visible_collapsible.contains(&i);
+                MessageVisibility { message: msg, visible }
+            })
+            .collect()
+    }
+}
+
+/// Calculate consecutive states by comparing pubkeys of adjacent items
+fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
+    let len = items.len();
+    if len == 0 {
+        return;
     }
 
-    // Common action patterns
-    let action_patterns = [
-        "Sending", "Executing", "Delegating", "Running", "Calling",
-        "Reading", "Writing", "Editing", "Creating", "Deleting",
-        "Searching", "Finding", "Checking", "Validating", "Processing",
-        "Fetching", "Loading", "Saving", "Updating", "Installing",
-        "Building", "Compiling", "Testing", "Deploying",
-        "There is an existing", "Already", "Successfully", "Failed to",
-        "Starting", "Finishing", "Completed", "Done",
-    ];
+    // First pass: collect pubkeys
+    let pubkeys: Vec<String> = items
+        .iter()
+        .map(|i| item_pubkey(i).to_string())
+        .collect();
 
-    for pattern in action_patterns {
-        if trimmed.starts_with(pattern) {
-            return true;
-        }
-    }
+    // Second pass: calculate and apply states
+    for i in 0..len {
+        let is_consecutive = i > 0 && pubkeys[i] == pubkeys[i - 1];
+        let has_next_consecutive = i < len - 1 && pubkeys[i] == pubkeys[i + 1];
 
-    // Also detect messages that look like tool operations (short with specific verbs)
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
-    if words.len() <= 6 {
-        if let Some(first) = words.first() {
-            // Check for -ing verbs
-            if first.ends_with("ing") && first.len() > 4 {
-                return true;
+        match &mut items[i] {
+            DisplayItem::SingleMessage {
+                is_consecutive: ic,
+                has_next_consecutive: hnc,
+                ..
+            } => {
+                *ic = is_consecutive;
+                *hnc = has_next_consecutive;
+            }
+            DisplayItem::AgentGroup {
+                is_consecutive: ic,
+                has_next_consecutive: hnc,
+                ..
+            } => {
+                *ic = is_consecutive;
+                *hnc = has_next_consecutive;
             }
         }
     }
+}
 
-    false
+/// Group consecutive messages from the same author, then calculate consecutive states.
+/// Matches Svelte's createSimplifiedDisplayModel.
+pub(crate) fn group_messages<'a>(
+    messages: &[&'a Message],
+    user_pubkey: Option<&str>,
+) -> Vec<DisplayItem<'a>> {
+    let mut items = group_consecutive_agent_messages(messages, user_pubkey);
+    calculate_consecutive_states(&mut items);
+    items
 }

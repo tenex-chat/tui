@@ -147,6 +147,33 @@ impl AppDataStore {
 
         // Apply metadata (kind:513) to threads
         self.apply_existing_metadata();
+
+        // Load agent definitions (kind:4199)
+        self.load_agent_definitions();
+    }
+
+    /// Load all agent definitions from nostrdb
+    fn load_agent_definitions(&mut self) {
+        use nostrdb::{Filter, Transaction};
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([4199]).build();
+        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
+            return;
+        };
+
+        tracing::info!("Loading {} agent definitions (kind:4199)", results.len());
+
+        for result in results {
+            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(agent_def) = AgentDefinition::from_note(&note) {
+                    self.agent_definitions.insert(agent_def.id.clone(), agent_def);
+                }
+            }
+        }
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -564,6 +591,16 @@ impl AppDataStore {
             .find(|p| p.a_tag() == a_tag)
             .map(|p| p.name.clone())
             .unwrap_or_else(|| "Unknown".to_string())
+    }
+
+    /// Get a thread by its ID (searches across all projects)
+    pub fn get_thread_by_id(&self, thread_id: &str) -> Option<&Thread> {
+        for threads in self.threads_by_project.values() {
+            if let Some(thread) = threads.iter().find(|t| t.id == thread_id) {
+                return Some(thread);
+            }
+        }
+        None
     }
 
     /// Get all threads across all projects, sorted by last_activity descending
