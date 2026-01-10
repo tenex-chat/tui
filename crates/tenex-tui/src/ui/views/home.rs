@@ -64,7 +64,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     match app.home_panel_focus {
         HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
-        HomeTab::Reports => {} // Placeholder: rendering implemented in Task 4
+        HomeTab::Reports => render_reports_list(f, app, padded_content),
     }
 
     // Render sidebar on the right
@@ -141,6 +141,9 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Reports", tab_style(HomeTab::Reports)));
+
     let header_line = Line::from(spans);
 
     // Second line: tab indicator underline
@@ -154,7 +157,10 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Inbox { accent } else { blank }),
-        Span::styled(if inbox_count > 0 { "    " } else { "" }, blank), // account for count
+        Span::styled(if inbox_count > 0 { "    " } else { "" }, blank),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
+            if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),
     ];
     let indicator_line = Line::from(indicator_spans);
 
@@ -654,6 +660,127 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
         Line::from(line2_spans),
         Line::from(line3_spans),
     ])
+}
+
+/// Render the reports list with search
+fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
+    let reports = app.reports();
+
+    // Layout: Search bar + List
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // Search bar
+        Constraint::Min(0),    // List
+    ])
+    .split(area);
+
+    // Render search bar
+    let search_style = if !app.report_search_filter.is_empty() {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let search_text = if app.report_search_filter.is_empty() {
+        "/ Search reports...".to_string()
+    } else {
+        format!("/ {}", app.report_search_filter)
+    };
+
+    let search_line = Paragraph::new(search_text).style(search_style);
+    f.render_widget(search_line, chunks[0]);
+
+    // Empty state
+    if reports.is_empty() {
+        let msg = if app.report_search_filter.is_empty() {
+            "No reports found"
+        } else {
+            "No matching reports"
+        };
+        let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    // Render report cards
+    let mut y_offset = 0u16;
+    for (i, report) in reports.iter().enumerate() {
+        let is_selected = i == app.selected_report_index;
+        let card_height = 3u16; // title, summary, spacing
+
+        if y_offset + card_height > chunks[1].height {
+            break;
+        }
+
+        let card_area = Rect::new(
+            chunks[1].x,
+            chunks[1].y + y_offset,
+            chunks[1].width,
+            card_height,
+        );
+
+        render_report_card(f, app, report, is_selected, card_area);
+        y_offset += card_height;
+    }
+}
+
+/// Render a single report card
+fn render_report_card(
+    f: &mut Frame,
+    app: &App,
+    report: &tenex_core::models::Report,
+    is_selected: bool,
+    area: Rect,
+) {
+    let store = app.data_store.borrow();
+    let project_name = store.get_project_name(&report.project_a_tag);
+    let author_name = store.get_profile_name(&report.author);
+    drop(store);
+
+    let time_str = crate::ui::format::format_relative_time(report.created_at);
+    let reading_time = format!("{}m", report.reading_time_mins);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let bullet = if is_selected { card::BULLET } else { card::SPACER };
+
+    // Line 1: Title + project + reading time + timestamp
+    let title_max = area.width as usize - 30;
+    let title = crate::ui::format::truncate_with_ellipsis(&report.title, title_max);
+
+    let line1 = Line::from(vec![
+        Span::styled(bullet, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(title, title_style),
+        Span::styled("  ", Style::default()),
+        Span::styled(&project_name, Style::default().fg(theme::project_color(&report.project_a_tag))),
+        Span::styled(format!("  {} · {}", reading_time, time_str), Style::default().fg(theme::TEXT_MUTED)),
+    ]);
+
+    // Line 2: Summary + hashtags + author
+    let summary_max = area.width as usize - 40;
+    let summary = crate::ui::format::truncate_with_ellipsis(&report.summary, summary_max);
+    let hashtags: String = report.hashtags.iter().take(3).map(|h| format!("#{} ", h)).collect();
+
+    let line2 = Line::from(vec![
+        Span::styled("  ", Style::default()),
+        Span::styled(summary, Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(format!("  {}", hashtags.trim()), Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(format!("  @{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
+    ]);
+
+    // Line 3: Spacing
+    let line3 = Line::from("");
+
+    let content = Paragraph::new(vec![line1, line2, line3]);
+
+    if is_selected {
+        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
+    } else {
+        f.render_widget(content, area);
+    }
 }
 
 /// Render the project sidebar with checkboxes for filtering
