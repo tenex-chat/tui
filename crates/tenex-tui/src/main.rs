@@ -25,6 +25,7 @@ use tenex_core::runtime::CoreRuntime;
 
 use ui::views::login::{render_login, LoginStep};
 use ui::views::home::get_hierarchical_threads;
+use ui::views::chat::{group_messages, DisplayItem};
 use ui::{App, HomeTab, InputMode, ModalState, View};
 use ui::selector::{handle_selector_key, SelectorAction};
 
@@ -726,20 +727,30 @@ fn handle_key(
                     }
                 }
                 View::Chat => {
-                    // Get display message count for bounds checking
+                    // Get grouped item count for bounds checking (selected_message_index is group index)
                     let messages = app.messages();
                     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-                    let display_count = if let Some(ref root_id) = app.subthread_root {
+                    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+
+                    let display_messages: Vec<&crate::models::Message> = if let Some(ref root_id) = app.subthread_root {
                         messages.iter()
                             .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                            .count()
+                            .collect()
                     } else {
+                        // Include thread root + direct replies
                         messages.iter()
-                            .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == thread_id)
-                            .count()
+                            .filter(|m| {
+                                Some(m.id.as_str()) == thread_id
+                                    || m.reply_to.is_none()
+                                    || m.reply_to.as_deref() == thread_id
+                            })
+                            .collect()
                     };
 
-                    if app.selected_message_index < display_count.saturating_sub(1) {
+                    // Group messages to get actual count of selectable items
+                    let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+
+                    if app.selected_message_index < grouped.len().saturating_sub(1) {
                         app.selected_message_index += 1;
                     }
                 }
@@ -767,26 +778,52 @@ fn handle_key(
             }
             KeyCode::Enter => match app.view {
                 View::Chat => {
-                    // Navigate into subthread if selected message has replies
+                    // Get messages and build grouped display model (same as rendering)
                     let messages = app.messages();
                     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+                    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
 
-                    // Get display messages based on current view
+                    // Get display messages based on current view (must match rendering in messages.rs)
                     let display_messages: Vec<&crate::models::Message> = if let Some(ref root_id) = app.subthread_root {
                         messages.iter()
                             .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
                             .collect()
                     } else {
                         messages.iter()
-                            .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == thread_id)
+                            .filter(|m| {
+                                // Include thread root (id == thread_id) + direct replies
+                                Some(m.id.as_str()) == thread_id
+                                    || m.reply_to.is_none()
+                                    || m.reply_to.as_deref() == thread_id
+                            })
                             .collect()
                     };
 
-                    if let Some(msg) = display_messages.get(app.selected_message_index) {
-                        // Check if this message has replies
-                        let has_replies = messages.iter().any(|m| m.reply_to.as_deref() == Some(msg.id.as_str()));
-                        if has_replies {
-                            app.enter_subthread((*msg).clone());
+                    // Group messages to match rendering
+                    let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+
+                    // Handle based on what's selected
+                    if let Some(item) = grouped.get(app.selected_message_index) {
+                        match item {
+                            DisplayItem::AgentGroup { messages: group_messages, collapsed_count, .. } => {
+                                // For groups with collapsed messages, toggle expansion
+                                if *collapsed_count > 0 {
+                                    if let Some(first_msg) = group_messages.first() {
+                                        app.toggle_group_expansion(&first_msg.id);
+                                    }
+                                }
+                            }
+                            DisplayItem::SingleMessage { message: msg, .. } => {
+                                // For single messages, navigate into subthread if it has replies
+                                let has_replies = messages.iter().any(|m| {
+                                    m.reply_to.as_deref() == Some(msg.id.as_str()) &&
+                                    // Only count as reply if parent is NOT the thread root
+                                    Some(msg.id.as_str()) != thread_id
+                                });
+                                if has_replies {
+                                    app.enter_subthread((*msg).clone());
+                                }
+                            }
                         }
                     }
                 }

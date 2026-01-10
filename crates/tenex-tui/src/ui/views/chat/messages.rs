@@ -44,16 +44,14 @@ pub(crate) fn render_messages_panel(
             .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
             .collect()
     } else {
-        // Main view: show messages with no parent or parent = thread root
-        // Exclude the thread itself - it's rendered separately above
+        // Main view: thread root + messages with no parent or parent = thread root
         all_messages
             .iter()
             .filter(|m| {
-                // Skip the thread message - already rendered above
-                if Some(m.id.as_str()) == thread_id {
-                    return false;
-                }
-                m.reply_to.is_none() || m.reply_to.as_deref() == thread_id
+                // Include thread root (id == thread_id) + direct replies
+                Some(m.id.as_str()) == thread_id
+                    || m.reply_to.is_none()
+                    || m.reply_to.as_deref() == thread_id
             })
             .collect()
     };
@@ -65,52 +63,6 @@ pub(crate) fn render_messages_panel(
     let padding = "   ";
     // Full width - wrapping is handled in cards.rs markdown_lines()
     let content_width = messages_area.width as usize;
-
-    // Render the thread itself (kind:1) as the first message - same style as all other messages
-    if !app.in_subthread() {
-        if let Some(ref thread) = app.selected_thread {
-            if !thread.content.trim().is_empty() || thread.ask_event.is_some() {
-                let author = {
-                    let store = app.data_store.borrow();
-                    store.get_profile_name(&thread.pubkey)
-                };
-
-                // Same card style as all messages - deterministic color from pubkey
-                let indicator_color = theme::user_color(&thread.pubkey);
-                let card_bg = theme::BG_CARD;
-
-                messages_text.push(author_line(&author, indicator_color, card_bg, content_width));
-
-                // Content with markdown
-                if !thread.content.trim().is_empty() {
-                    let rendered = render_markdown(&thread.content);
-                    messages_text.extend(markdown_lines(
-                        &rendered,
-                        indicator_color,
-                        card_bg,
-                        content_width,
-                    ));
-                }
-
-                // Ask event - render if present and not answered by current user
-                if thread.ask_event.is_some() && !app.is_ask_answered_by_user(&thread.id) {
-                    if let Some(modal_state) = app.ask_modal_state() {
-                        if modal_state.message_id == thread.id {
-                            let ask_lines = render_inline_ask_lines(
-                                modal_state,
-                                indicator_color,
-                                card_bg,
-                                content_width,
-                            );
-                            messages_text.extend(ask_lines);
-                        }
-                    }
-                }
-
-                messages_text.push(Line::from(""));
-            }
-        }
-    }
 
     // If in subthread, render the root message first as a header
     if let Some(ref root_msg) = app.subthread_root_message {
@@ -175,42 +127,55 @@ pub(crate) fn render_messages_panel(
         for (group_idx, item) in grouped.iter().enumerate() {
             match item {
                 DisplayItem::AgentGroup {
+                    messages: group_messages,
                     pubkey,
                     is_consecutive,
                     has_next_consecutive,
                     visibility,
                     collapsed_count,
-                    ..
                 } => {
                     // Render agent group with collapsible messages
                     let indicator_color = theme::user_color(pubkey);
                     let card_bg = theme::BG_CARD;
+                    let card_bg_selected = theme::BG_SELECTED;
                     let author = profile_cache
                         .get(pubkey)
                         .cloned()
                         .unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
 
+                    // Check if this group is selected
+                    let is_selected =
+                        group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
+
+                    // Group key for expansion tracking (first message ID)
+                    let group_key = group_messages.first().map(|m| m.id.as_str()).unwrap_or("");
+                    let is_expanded = app.is_group_expanded(group_key);
+
+                    // Use selected background when this group is selected
+                    let bg = if is_selected { card_bg_selected } else { card_bg };
+
                     // Show header only if not consecutive (first in a sequence from this author)
                     if !is_consecutive {
-                        messages_text.push(author_line(&author, indicator_color, card_bg, content_width));
+                        messages_text.push(author_line(&author, indicator_color, bg, content_width));
                     }
 
-                    // Show collapsed count indicator if there are collapsed messages
-                    if *collapsed_count > 0 {
+                    // Show collapsed count indicator if there are collapsed messages and NOT expanded
+                    if *collapsed_count > 0 && !is_expanded {
                         let indicator = if *is_consecutive { "·  " } else { "│  " };
+                        let hint = if is_selected { " (Enter to expand)" } else { "" };
                         messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color)),
-                            Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED)),
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
                             Span::styled(
-                                format!("{} collapsed", collapsed_count),
-                                Style::default().fg(theme::TEXT_MUTED),
+                                format!("{} collapsed{}", collapsed_count, hint),
+                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
                             ),
                         ]));
                     }
 
-                    // Render visible messages
+                    // Render messages (all if expanded, otherwise only visible ones)
                     for (vis_idx, vis) in visibility.iter().enumerate() {
-                        if !vis.visible {
+                        if !vis.visible && !is_expanded {
                             continue;
                         }
 
@@ -324,6 +289,20 @@ pub(crate) fn render_messages_panel(
                                 messages_text.push(Line::from(spans));
                             }
                         }
+                    }
+
+                    // Show collapse indicator at end when expanded and there are collapsed messages
+                    if is_expanded && *collapsed_count > 0 {
+                        let indicator = if *is_consecutive { "·  " } else { "│  " };
+                        let hint = if is_selected { " (Enter to collapse)" } else { "" };
+                        messages_text.push(Line::from(vec![
+                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                            Span::styled("▾ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
+                            Span::styled(
+                                format!("Collapse {}{}", collapsed_count, hint),
+                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                            ),
+                        ]));
                     }
 
                     // Only add blank line if no next consecutive (end of author group)
