@@ -8,13 +8,13 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Paragraph, Wrap},
+    widgets::Paragraph,
     Frame,
 };
 use std::collections::{HashMap, HashSet};
 use tracing::info_span;
 
-use super::cards::{author_line, dot_line, markdown_lines, pad_line};
+use super::cards::{author_line, dot_line, llm_metadata_line, markdown_lines, pad_line};
 use super::grouping::{group_messages, DisplayItem};
 
 pub(crate) fn render_messages_panel(
@@ -63,12 +63,13 @@ pub(crate) fn render_messages_panel(
 
     // Left padding for message content
     let padding = "   ";
-    let content_width = messages_area.width.saturating_sub(2) as usize;
+    // Full width - wrapping is handled in cards.rs markdown_lines()
+    let content_width = messages_area.width as usize;
 
     // Render the thread itself (kind:1) as the first message - same style as all other messages
     if !app.in_subthread() {
         if let Some(ref thread) = app.selected_thread {
-            if !thread.content.trim().is_empty() {
+            if !thread.content.trim().is_empty() || thread.ask_event.is_some() {
                 let author = {
                     let store = app.data_store.borrow();
                     store.get_profile_name(&thread.pubkey)
@@ -81,13 +82,30 @@ pub(crate) fn render_messages_panel(
                 messages_text.push(author_line(&author, indicator_color, card_bg, content_width));
 
                 // Content with markdown
-                let rendered = render_markdown(&thread.content);
-                messages_text.extend(markdown_lines(
-                    &rendered,
-                    indicator_color,
-                    card_bg,
-                    content_width,
-                ));
+                if !thread.content.trim().is_empty() {
+                    let rendered = render_markdown(&thread.content);
+                    messages_text.extend(markdown_lines(
+                        &rendered,
+                        indicator_color,
+                        card_bg,
+                        content_width,
+                    ));
+                }
+
+                // Ask event - render if present and not answered by current user
+                if thread.ask_event.is_some() && !app.is_ask_answered_by_user(&thread.id) {
+                    if let Some(modal_state) = app.ask_modal_state() {
+                        if modal_state.message_id == thread.id {
+                            let ask_lines = render_inline_ask_lines(
+                                modal_state,
+                                indicator_color,
+                                card_bg,
+                                content_width,
+                            );
+                            messages_text.extend(ask_lines);
+                        }
+                    }
+                }
 
                 messages_text.push(Line::from(""));
             }
@@ -156,14 +174,17 @@ pub(crate) fn render_messages_panel(
 
         for (group_idx, item) in grouped.iter().enumerate() {
             match item {
-                DisplayItem::ActionGroup {
-                    messages: action_msgs,
+                DisplayItem::AgentGroup {
                     pubkey,
                     is_consecutive,
                     has_next_consecutive,
+                    visibility,
+                    collapsed_count,
+                    ..
                 } => {
-                    // Render collapsed action group
+                    // Render agent group with collapsible messages
                     let indicator_color = theme::user_color(pubkey);
+                    let card_bg = theme::BG_CARD;
                     let author = profile_cache
                         .get(pubkey)
                         .cloned()
@@ -171,44 +192,128 @@ pub(crate) fn render_messages_panel(
 
                     // Show header only if not consecutive (first in a sequence from this author)
                     if !is_consecutive {
+                        messages_text.push(author_line(&author, indicator_color, card_bg, content_width));
+                    }
+
+                    // Show collapsed count indicator if there are collapsed messages
+                    if *collapsed_count > 0 {
+                        let indicator = if *is_consecutive { "·  " } else { "│  " };
                         messages_text.push(Line::from(vec![
-                            Span::styled("│ ", Style::default().fg(indicator_color)),
+                            Span::styled(indicator, Style::default().fg(indicator_color)),
+                            Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED)),
                             Span::styled(
-                                author,
-                                Style::default()
-                                    .fg(indicator_color)
-                                    .add_modifier(Modifier::BOLD),
+                                format!("{} collapsed", collapsed_count),
+                                Style::default().fg(theme::TEXT_MUTED),
                             ),
                         ]));
                     }
 
-                    // Collapsed summary line with dot indicator if consecutive
-                    let count = action_msgs.len();
-                    let first_action: String = action_msgs
-                        .first()
-                        .map(|m| m.content.trim().chars().take(30).collect())
-                        .unwrap_or_default();
-                    let last_action: String = action_msgs
-                        .last()
-                        .map(|m| m.content.trim().chars().take(30).collect())
-                        .unwrap_or_default();
+                    // Render visible messages
+                    for (vis_idx, vis) in visibility.iter().enumerate() {
+                        if !vis.visible {
+                            continue;
+                        }
 
-                    // Use dot indicator for consecutive messages, regular indicator otherwise
-                    let indicator = if *is_consecutive { "· " } else { "│ " };
-                    messages_text.push(Line::from(vec![
-                        Span::styled(indicator, Style::default().fg(indicator_color)),
-                        Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED)),
-                        Span::styled(
-                            format!("{} actions", count),
-                            Style::default()
-                                .fg(theme::ACCENT_SPECIAL)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-                        Span::styled(first_action, Style::default().fg(theme::TEXT_MUTED)),
-                        Span::styled(" → ", Style::default().fg(theme::TEXT_MUTED)),
-                        Span::styled(last_action, Style::default().fg(theme::TEXT_MUTED)),
-                    ]));
+                        let msg = vis.message;
+                        let is_first_visible = vis_idx == 0 || !visibility[..vis_idx].iter().any(|v| v.visible);
+                        let msg_is_consecutive = !is_first_visible || *is_consecutive;
+                        let is_tool_use = msg.tool_name.is_some();
+
+                        if is_tool_use {
+                            // Tool use: render muted tool line only
+                            let parsed = parse_message_content(&msg.content);
+                            if let MessageContent::Mixed { tool_calls, .. } = &parsed {
+                                for tool_call in tool_calls {
+                                    messages_text.push(render_tool_line(tool_call, indicator_color));
+                                }
+                            } else {
+                                // Fallback
+                                let tool_name = msg.tool_name.as_deref().unwrap_or("tool");
+                                let indicator = if msg_is_consecutive { "·  " } else { "│  " };
+                                messages_text.push(Line::from(vec![
+                                    Span::styled(indicator, Style::default().fg(indicator_color)),
+                                    Span::styled(
+                                        format!("{}: ", tool_name),
+                                        Style::default().fg(theme::TEXT_MUTED),
+                                    ),
+                                    Span::styled(
+                                        msg.content.chars().take(50).collect::<String>(),
+                                        Style::default().fg(theme::TEXT_MUTED),
+                                    ),
+                                ]));
+                            }
+                        } else {
+                            // Non-tool message: full content with background
+                            let parsed = parse_message_content(&msg.content);
+                            let content_text = match &parsed {
+                                MessageContent::PlainText(text) => text.clone(),
+                                MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
+                            };
+                            let rendered = render_markdown(&content_text);
+
+                            // Show dot for consecutive messages within group
+                            if msg_is_consecutive && !is_first_visible {
+                                messages_text.push(dot_line(indicator_color, card_bg, content_width));
+                            }
+
+                            messages_text.extend(markdown_lines(
+                                &rendered,
+                                indicator_color,
+                                card_bg,
+                                content_width,
+                            ));
+
+                            // Tool calls from content
+                            if let MessageContent::Mixed { tool_calls, .. } = &parsed {
+                                for tool_call in tool_calls {
+                                    messages_text.push(render_tool_line(tool_call, indicator_color));
+                                }
+                            }
+                        }
+
+                        // Delegation previews for q-tags (within group)
+                        if !msg.q_tags.is_empty() {
+                            let delegation_info: Vec<(String, String, String)> = {
+                                let store = app.data_store.borrow();
+                                msg.q_tags
+                                    .iter()
+                                    .filter_map(|q_tag| {
+                                        store.get_thread_by_id(q_tag).map(|t| {
+                                            (
+                                                t.title.clone(),
+                                                store.get_profile_name(&t.pubkey),
+                                                t.status_label.clone().unwrap_or_else(|| "working".to_string()),
+                                            )
+                                        })
+                                    })
+                                    .collect()
+                            };
+
+                            for (title, agent_name, status) in delegation_info {
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│  ", Style::default().fg(indicator_color)),
+                                    Span::styled("→ ", Style::default().fg(theme::BORDER_INACTIVE)),
+                                    Span::styled(
+                                        title.chars().take(30).collect::<String>(),
+                                        Style::default().fg(theme::TEXT_PRIMARY),
+                                    ),
+                                    Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+                                    Span::styled(
+                                        format!("@{}", agent_name),
+                                        Style::default().fg(theme::TEXT_MUTED),
+                                    ),
+                                    Span::styled(
+                                        format!(" [{}]", status),
+                                        Style::default().fg(if status == "done" {
+                                            theme::ACCENT_SUCCESS
+                                        } else {
+                                            theme::ACCENT_WARNING
+                                        }),
+                                    ),
+                                ]));
+                            }
+                        }
+                    }
 
                     // Only add blank line if no next consecutive (end of author group)
                     if !has_next_consecutive {
@@ -242,58 +347,200 @@ pub(crate) fn render_messages_panel(
                     let card_bg_selected = theme::BG_SELECTED;
                     let bg = if is_selected { card_bg_selected } else { card_bg };
 
-                    // First line: author header OR dot indicator for consecutive messages
-                    if *is_consecutive {
-                        messages_text.push(dot_line(indicator_color, bg, content_width));
+                    // Check if this is a tool use message (has tool tag)
+                    let is_tool_use = msg.tool_name.is_some();
+
+                    if is_tool_use {
+                        // Tool use message: render muted tool line only, no card background
+                        let tool_name = msg.tool_name.as_deref().unwrap_or("tool");
+
+                        // Parse content for tool-specific rendering
+                        let parsed = parse_message_content(&msg.content);
+
+                        // Show dot for consecutive, otherwise just indicator
+                        let indicator = if *is_consecutive { "·  " } else { "│  " };
+
+                        // Render tool calls if present, otherwise show tool name
+                        if let MessageContent::Mixed { tool_calls, .. } = &parsed {
+                            for tool_call in tool_calls {
+                                messages_text.push(render_tool_line(tool_call, indicator_color));
+                            }
+                        } else {
+                            // Fallback: show tool name with content preview
+                            let content_preview: String = msg.content.chars().take(50).collect();
+                            messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color)),
+                                Span::styled(
+                                    format!("{}: ", tool_name),
+                                    Style::default().fg(theme::TEXT_MUTED),
+                                ),
+                                Span::styled(
+                                    content_preview,
+                                    Style::default().fg(theme::TEXT_MUTED),
+                                ),
+                            ]));
+                        }
                     } else {
-                        messages_text.push(author_line(
-                            &author,
+                        // Non-tool message: render full card with background
+
+                        // First line: author header OR dot indicator for consecutive messages
+                        if *is_consecutive {
+                            messages_text.push(dot_line(indicator_color, bg, content_width));
+                        } else {
+                            messages_text.push(author_line(
+                                &author,
+                                indicator_color,
+                                bg,
+                                content_width,
+                            ));
+                        }
+
+                        // Content with markdown
+                        let parsed = parse_message_content(&msg.content);
+                        let content_text = match &parsed {
+                            MessageContent::PlainText(text) => text.clone(),
+                            MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
+                        };
+                        let rendered = render_markdown(&content_text);
+
+                        // Content lines: indicator + content with background (padded)
+                        messages_text.extend(markdown_lines(
+                            &rendered,
+                            indicator_color,
+                            bg,
+                            content_width,
+                        ));
+
+                        // Ask event - only render if NOT answered by current user
+                        if msg.ask_event.is_some() && !app.is_ask_answered_by_user(&msg.id) {
+                            // Unanswered question - render full inline ask UI
+                            // The modal should be auto-opened (handled at start of render)
+                            if let Some(modal_state) = app.ask_modal_state() {
+                                if modal_state.message_id == msg.id {
+                                    let ask_lines = render_inline_ask_lines(
+                                        modal_state,
+                                        indicator_color,
+                                        bg,
+                                        content_width,
+                                    );
+                                    messages_text.extend(ask_lines);
+                                }
+                            }
+                            // If modal not open for this message yet, it will be auto-opened
+                            // on next render cycle (handled at start of render_chat)
+                        }
+                        // If answered, don't render anything special - answer shows as reply message
+
+                        // Tool calls from content (with tool-specific rendering, no background)
+                        if let MessageContent::Mixed { tool_calls, .. } = &parsed {
+                            for tool_call in tool_calls {
+                                messages_text.push(render_tool_line(tool_call, indicator_color));
+                            }
+                        }
+                    }
+
+                    // LLM metadata chips (only shown when message is selected)
+                    if is_selected && !msg.llm_metadata.is_empty() {
+                        messages_text.push(llm_metadata_line(
+                            &msg.id,
+                            &msg.llm_metadata,
                             indicator_color,
                             bg,
                             content_width,
                         ));
                     }
 
-                    // Content with markdown
-                    let parsed = parse_message_content(&msg.content);
-                    let content_text = match &parsed {
-                        MessageContent::PlainText(text) => text.clone(),
-                        MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
-                    };
-                    let rendered = render_markdown(&content_text);
+                    // Delegation previews for q-tags
+                    if !msg.q_tags.is_empty() {
+                        // Collect delegation info with store borrow, then render
+                        let delegation_info: Vec<(String, String, String, String)> = {
+                            let store = app.data_store.borrow();
+                            msg.q_tags
+                                .iter()
+                                .filter_map(|q_tag| {
+                                    store.get_thread_by_id(q_tag).map(|t| {
+                                        (
+                                            t.title.clone(),
+                                            store.get_profile_name(&t.pubkey),
+                                            t.status_label.clone().unwrap_or_else(|| "working".to_string()),
+                                            t.status_current_activity.clone().unwrap_or_default(),
+                                        )
+                                    }).or_else(|| {
+                                        Some((
+                                            format!("delegation: {}", &q_tag[..8.min(q_tag.len())]),
+                                            String::new(),
+                                            String::new(),
+                                            String::new(),
+                                        ))
+                                    })
+                                })
+                                .collect()
+                        };
 
-                    // Content lines: indicator + content with background (padded)
-                    messages_text.extend(markdown_lines(
-                        &rendered,
-                        indicator_color,
-                        bg,
-                        content_width,
-                    ));
+                        for (title, agent_name, status, activity) in delegation_info {
+                            if agent_name.is_empty() {
+                                // Thread not found - show ID only
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│  ", Style::default().fg(indicator_color)),
+                                    Span::styled(
+                                        format!("→ {}", title),
+                                        Style::default().fg(theme::TEXT_MUTED),
+                                    ),
+                                ]));
+                            } else {
+                                // Delegation card header
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│  ", Style::default().fg(indicator_color)),
+                                    Span::styled(
+                                        "┌─ ",
+                                        Style::default().fg(theme::BORDER_INACTIVE),
+                                    ),
+                                    Span::styled(
+                                        title.chars().take(40).collect::<String>(),
+                                        Style::default()
+                                            .fg(theme::TEXT_PRIMARY)
+                                            .add_modifier(Modifier::BOLD),
+                                    ),
+                                ]));
 
-                    // Ask event - only render if NOT answered by current user
-                    if msg.ask_event.is_some() && !app.is_ask_answered_by_user(&msg.id) {
-                        // Unanswered question - render full inline ask UI
-                        // The modal should be auto-opened (handled at start of render)
-                        if let Some(modal_state) = app.ask_modal_state() {
-                            if modal_state.message_id == msg.id {
-                                let ask_lines = render_inline_ask_lines(
-                                    modal_state,
-                                    indicator_color,
-                                    bg,
-                                    content_width,
-                                );
-                                messages_text.extend(ask_lines);
+                                // Agent and status line
+                                let status_color = if status == "done" {
+                                    theme::ACCENT_SUCCESS
+                                } else {
+                                    theme::ACCENT_WARNING
+                                };
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│  ", Style::default().fg(indicator_color)),
+                                    Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
+                                    Span::styled(
+                                        format!("@{}", agent_name),
+                                        Style::default().fg(theme::TEXT_MUTED),
+                                    ),
+                                    Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+                                    Span::styled(status.clone(), Style::default().fg(status_color)),
+                                ]));
+
+                                // Activity line (if present)
+                                if !activity.is_empty() {
+                                    messages_text.push(Line::from(vec![
+                                        Span::styled("│  ", Style::default().fg(indicator_color)),
+                                        Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
+                                        Span::styled(
+                                            activity.chars().take(60).collect::<String>(),
+                                            Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC),
+                                        ),
+                                    ]));
+                                }
+
+                                // Bottom border
+                                messages_text.push(Line::from(vec![
+                                    Span::styled("│  ", Style::default().fg(indicator_color)),
+                                    Span::styled(
+                                        "└───────────────────────────────────",
+                                        Style::default().fg(theme::BORDER_INACTIVE),
+                                    ),
+                                ]));
                             }
-                        }
-                        // If modal not open for this message yet, it will be auto-opened
-                        // on next render cycle (handled at start of render_chat)
-                    }
-                    // If answered, don't render anything special - answer shows as reply message
-
-                    // Tool calls (with tool-specific rendering, no background)
-                    if let MessageContent::Mixed { tool_calls, .. } = &parsed {
-                        for tool_call in tool_calls {
-                            messages_text.push(render_tool_line(tool_call, indicator_color));
                         }
                     }
 
@@ -336,7 +583,7 @@ pub(crate) fn render_messages_panel(
         if !buffer.text_content.is_empty() || !buffer.reasoning_content.is_empty() {
             // Render agent header with streaming indicator
             messages_text.push(Line::from(vec![
-                Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
+                Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
                 Span::styled(
                     "Agent",
                     Style::default()
@@ -357,7 +604,7 @@ pub(crate) fn render_messages_panel(
                     Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC);
                 for line in buffer.reasoning_content.lines() {
                     messages_text.push(Line::from(vec![
-                        Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
+                        Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
                         Span::styled(line.to_string(), reasoning_style),
                     ]));
                 }
@@ -368,7 +615,7 @@ pub(crate) fn render_messages_panel(
                 let markdown_lines = render_markdown(&buffer.text_content);
                 for (i, line) in markdown_lines.iter().enumerate() {
                     let mut line_spans =
-                        vec![Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL))];
+                        vec![Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL))];
                     line_spans.extend(line.spans.clone());
 
                     // Add cursor indicator at the end of the last line
@@ -383,7 +630,7 @@ pub(crate) fn render_messages_panel(
             } else if !buffer.is_complete {
                 // Show just cursor if we have no text yet but are streaming
                 messages_text.push(Line::from(vec![
-                    Span::styled("│ ", Style::default().fg(theme::ACCENT_SPECIAL)),
+                    Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
                     Span::styled("▌", Style::default().fg(theme::ACCENT_SPECIAL)),
                 ]));
             }
@@ -398,21 +645,9 @@ pub(crate) fn render_messages_panel(
         f.render_widget(empty, messages_area);
     } else {
         let visible_height = messages_area.height as usize;
-        let content_width = messages_area.width as usize;
 
-        // Calculate actual line count after wrapping
-        let total_lines: usize = messages_text
-            .iter()
-            .map(|line| {
-                let line_len: usize = line.spans.iter().map(|s| s.content.len()).sum();
-                if line_len == 0 {
-                    1 // Empty lines still take one row
-                } else {
-                    (line_len + content_width - 1) / content_width.max(1) // Ceiling division
-                }
-            })
-            .sum();
-
+        // Wrapping is pre-computed in markdown_lines(), so each line = one visual line
+        let total_lines = messages_text.len();
         let max_scroll = total_lines.saturating_sub(visible_height);
 
         // Update max_scroll_offset so scroll methods work correctly
@@ -421,9 +656,8 @@ pub(crate) fn render_messages_panel(
         // Use scroll_offset, clamped to max
         let scroll = app.scroll_offset.min(max_scroll);
 
-        let messages = Paragraph::new(messages_text)
-            .wrap(Wrap { trim: false })
-            .scroll((scroll as u16, 0));
+        // No Wrap - wrapping is handled in cards.rs markdown_lines()
+        let messages = Paragraph::new(messages_text).scroll((scroll as u16, 0));
 
         f.render_widget(messages, messages_area);
     }
