@@ -463,6 +463,10 @@ pub(crate) fn render_messages_panel(
 
                     // Delegation previews for q-tags
                     if !msg.q_tags.is_empty() {
+                        // Calculate available width for delegation content
+                        // Prefix is "│  ┌─ " = 6 chars, leave some margin
+                        let delegation_text_width = content_width.saturating_sub(8);
+
                         // Collect delegation info with store borrow, then render
                         // title, agent_name, status_label (Option), activity (from 513 or last message)
                         let delegation_info: Vec<(String, String, Option<String>, String)> = {
@@ -471,9 +475,9 @@ pub(crate) fn render_messages_panel(
                                 .iter()
                                 .filter_map(|q_tag| {
                                     store.get_thread_by_id(q_tag).map(|t| {
-                                        // Title: use thread title, fallback to trimmed content
+                                        // Title: use thread title, fallback to content
                                         let title = if t.title == "Untitled" || t.title.is_empty() {
-                                            t.content.chars().take(50).collect::<String>()
+                                            t.content.clone()
                                         } else {
                                             t.title.clone()
                                         };
@@ -483,7 +487,7 @@ pub(crate) fn render_messages_panel(
                                             // Get most recent message from this conversation
                                             store.get_messages(q_tag)
                                                 .last()
-                                                .map(|m| m.content.chars().take(60).collect())
+                                                .map(|m| m.content.clone())
                                                 .unwrap_or_default()
                                         });
 
@@ -516,7 +520,8 @@ pub(crate) fn render_messages_panel(
                                     ),
                                 ]));
                             } else {
-                                // Delegation card header
+                                // Delegation card header - use available width
+                                let title_display: String = title.chars().take(delegation_text_width).collect();
                                 messages_text.push(Line::from(vec![
                                     Span::styled("│  ", Style::default().fg(indicator_color)),
                                     Span::styled(
@@ -524,7 +529,7 @@ pub(crate) fn render_messages_panel(
                                         Style::default().fg(theme::BORDER_INACTIVE),
                                     ),
                                     Span::styled(
-                                        title.chars().take(40).collect::<String>(),
+                                        title_display,
                                         Style::default()
                                             .fg(theme::TEXT_PRIMARY)
                                             .add_modifier(Modifier::BOLD),
@@ -552,23 +557,26 @@ pub(crate) fn render_messages_panel(
                                 }
                                 messages_text.push(Line::from(agent_line));
 
-                                // Activity line (from 513 or most recent message)
+                                // Activity line (from 513 or most recent message) - use available width
                                 if !activity.is_empty() {
+                                    let activity_display: String = activity.chars().take(delegation_text_width).collect();
                                     messages_text.push(Line::from(vec![
                                         Span::styled("│  ", Style::default().fg(indicator_color)),
                                         Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE)),
                                         Span::styled(
-                                            activity.chars().take(60).collect::<String>(),
+                                            activity_display,
                                             Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC),
                                         ),
                                     ]));
                                 }
 
-                                // Bottom border
+                                // Bottom border - match content width
+                                let border_width = delegation_text_width.min(40);
+                                let border: String = "─".repeat(border_width);
                                 messages_text.push(Line::from(vec![
                                     Span::styled("│  ", Style::default().fg(indicator_color)),
                                     Span::styled(
-                                        "└───────────────────────────────────",
+                                        format!("└{}", border),
                                         Style::default().fg(theme::BORDER_INACTIVE),
                                     ),
                                 ]));
