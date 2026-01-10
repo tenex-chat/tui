@@ -336,6 +336,76 @@ impl ProjectActionsState {
     }
 }
 
+/// Focus area in report viewer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportViewerFocus {
+    Content,
+    Threads,
+}
+
+/// View mode in report viewer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportViewMode {
+    Current,
+    Changes,
+}
+
+/// State for the report viewer modal
+#[derive(Debug, Clone)]
+pub struct ReportViewerState {
+    pub report: tenex_core::models::Report,
+    pub focus: ReportViewerFocus,
+    pub view_mode: ReportViewMode,
+    pub content_scroll: usize,
+    pub threads_scroll: usize,
+    pub selected_thread_index: usize,
+    pub version_index: usize,
+    pub show_threads: bool,
+    pub show_copy_menu: bool,
+    pub copy_menu_index: usize,
+}
+
+impl ReportViewerState {
+    pub fn new(report: tenex_core::models::Report) -> Self {
+        Self {
+            report,
+            focus: ReportViewerFocus::Content,
+            view_mode: ReportViewMode::Current,
+            content_scroll: 0,
+            threads_scroll: 0,
+            selected_thread_index: 0,
+            version_index: 0,
+            show_threads: false,
+            show_copy_menu: false,
+            copy_menu_index: 0,
+        }
+    }
+}
+
+/// Copy menu options for report viewer
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReportCopyOption {
+    Bech32Id,
+    RawEvent,
+    Markdown,
+}
+
+impl ReportCopyOption {
+    pub const ALL: [ReportCopyOption; 3] = [
+        ReportCopyOption::Bech32Id,
+        ReportCopyOption::RawEvent,
+        ReportCopyOption::Markdown,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ReportCopyOption::Bech32Id => "Copy Event ID (bech32)",
+            ReportCopyOption::RawEvent => "Copy Raw Event (JSON)",
+            ReportCopyOption::Markdown => "Copy Markdown Content",
+        }
+    }
+}
+
 /// Unified modal state - only one modal can be open at a time
 #[derive(Debug, Clone)]
 pub enum ModalState {
@@ -378,6 +448,8 @@ pub enum ModalState {
     CreateAgent(CreateAgentState),
     /// Project actions modal (boot, settings)
     ProjectActions(ProjectActionsState),
+    /// Report viewer modal with document, versions, and threads
+    ReportViewer(ReportViewerState),
 }
 
 impl Default for ModalState {
