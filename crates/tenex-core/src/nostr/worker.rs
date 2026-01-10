@@ -47,6 +47,12 @@ pub enum NostrCommand {
         project_a_tag: String,
         agent_ids: Vec<String>,
     },
+    /// Stop operations on specified events (kind:24134)
+    StopOperations {
+        project_a_tag: String,
+        event_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
+    },
     Shutdown,
 }
 
@@ -163,6 +169,12 @@ impl NostrWorker {
                             error!("Failed to update project agents: {}", e);
                         }
                     }
+                    NostrCommand::StopOperations { project_a_tag, event_ids, agent_pubkeys } => {
+                        info!("Worker: Sending stop command for {} events", event_ids.len());
+                        if let Err(e) = rt.block_on(self.handle_stop_operations(project_a_tag, event_ids, agent_pubkeys)) {
+                            error!("Failed to send stop command: {}", e);
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         info!("Worker: Shutting down");
                         let _ = rt.block_on(self.handle_disconnect());
@@ -223,6 +235,9 @@ impl NostrWorker {
         // Agent lessons (kind 4129) - learning insights from agents
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
 
+        // Operations status (kind 24133) - which agents are working on what
+        let operations_status_filter = Filter::new().kind(Kind::Custom(24133));
+
         info!("Starting persistent subscriptions");
 
         let subscription_id = client
@@ -235,6 +250,7 @@ impl NostrWorker {
                     all_status_filter,
                     metadata_filter,
                     lesson_filter,
+                    operations_status_filter,
                 ],
                 None,
             )
@@ -673,6 +689,53 @@ impl NostrWorker {
             Ok(Ok(output)) => info!("Updated project agents: {}", output.id()),
             Ok(Err(e)) => error!("Failed to send project update to relay: {}", e),
             Err(_) => error!("Timeout sending project update to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
+
+    async fn handle_stop_operations(
+        &self,
+        project_a_tag: String,
+        event_ids: Vec<String>,
+        agent_pubkeys: Vec<String>,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Parse project coordinate for a-tag
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
+
+        // Build kind:24134 stop command event
+        let mut event = EventBuilder::new(Kind::Custom(24134), "")
+            .tag(Tag::coordinate(coordinate));
+
+        // Add e-tags for events to stop
+        for event_id in &event_ids {
+            event = event.tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![event_id.clone()],
+            ));
+        }
+
+        // Add p-tags for agents to stop (optional - if empty, stops all agents on the events)
+        for agent_pk in &agent_pubkeys {
+            if let Ok(pk) = PublicKey::parse(agent_pk) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Sent stop command: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send stop command to relay: {}", e),
+            Err(_) => error!("Timeout sending stop command to relay"),
         }
 
         Ok(())

@@ -56,7 +56,7 @@ impl CoreRuntime {
         });
 
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 24010, 513])
+            .kinds([31933, 1, 0, 4199, 24010, 513, 24133])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);
@@ -127,6 +127,10 @@ impl CoreRuntime {
                         if let Some(status) = ProjectStatus::from_note(&note) {
                             events.push(CoreEvent::ProjectStatus(status));
                         }
+                    }
+                    24133 => {
+                        // Operations status - already handled by data_store.handle_event
+                        // No CoreEvent needed as UI will query data_store directly
                     }
                     _ => {}
                 }

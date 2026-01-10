@@ -236,59 +236,8 @@ pub(crate) fn render_messages_panel(
                             }
                         }
 
-                        // Delegation previews for q-tags (within group) - compact inline
-                        if !msg.q_tags.is_empty() {
-                            let delegation_info: Vec<(String, String, Option<String>)> = {
-                                let store = app.data_store.borrow();
-                                msg.q_tags
-                                    .iter()
-                                    .filter_map(|q_tag| {
-                                        store.get_thread_by_id(q_tag).map(|t| {
-                                            // Title: fallback to content if "Untitled"
-                                            let title = if t.title == "Untitled" || t.title.is_empty() {
-                                                t.content.chars().take(30).collect()
-                                            } else {
-                                                t.title.clone()
-                                            };
-                                            (
-                                                title,
-                                                store.get_profile_name(&t.pubkey),
-                                                t.status_label.clone(), // No default
-                                            )
-                                        })
-                                    })
-                                    .collect()
-                            };
-
-                            for (title, agent_name, status) in delegation_info {
-                                let mut spans = vec![
-                                    Span::styled("│  ", Style::default().fg(indicator_color)),
-                                    Span::styled("→ ", Style::default().fg(theme::BORDER_INACTIVE)),
-                                    Span::styled(
-                                        title.chars().take(30).collect::<String>(),
-                                        Style::default().fg(theme::TEXT_PRIMARY),
-                                    ),
-                                    Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-                                    Span::styled(
-                                        format!("@{}", agent_name),
-                                        Style::default().fg(theme::TEXT_MUTED),
-                                    ),
-                                ];
-                                // Only show status if we have 513 metadata
-                                if let Some(ref status_label) = status {
-                                    let status_color = if status_label == "done" {
-                                        theme::ACCENT_SUCCESS
-                                    } else {
-                                        theme::ACCENT_WARNING
-                                    };
-                                    spans.push(Span::styled(
-                                        format!(" [{}]", status_label),
-                                        Style::default().fg(status_color),
-                                    ));
-                                }
-                                messages_text.push(Line::from(spans));
-                            }
-                        }
+                        // Delegation previews are now rendered as separate DelegationPreview items
+                        // (see emit_delegation_previews in grouping.rs)
                     }
 
                     // Show collapse indicator at end when expanded and there are collapsed messages
@@ -492,8 +441,10 @@ pub(crate) fn render_messages_panel(
                     let delegation_text_width = content_width.saturating_sub(10); // Account for borders/padding
 
                     // Get thread info from data store
-                    let (title, agent_name, status, activity) = {
+                    let (title, agent_name, status, activity, is_busy) = {
                         let store = app.data_store.borrow();
+                        // Check if any agents are working on this delegation
+                        let is_busy = store.is_event_busy(thread_id);
                         if let Some(t) = store.get_thread_by_id(thread_id) {
                             let title = if t.title == "Untitled" || t.title.is_empty() {
                                 t.content.chars().take(50).collect::<String>()
@@ -511,6 +462,7 @@ pub(crate) fn render_messages_panel(
                                 store.get_profile_name(&t.pubkey),
                                 t.status_label.clone(),
                                 activity,
+                                is_busy,
                             )
                         } else {
                             (
@@ -518,6 +470,7 @@ pub(crate) fn render_messages_panel(
                                 String::new(),
                                 None,
                                 String::new(),
+                                is_busy,
                             )
                         }
                     };
@@ -565,9 +518,21 @@ pub(crate) fn render_messages_panel(
                                 Style::default().fg(theme::TEXT_MUTED).bg(bg),
                             ),
                         ];
-                        // Only show status if we have one from 513 metadata
-                        if let Some(ref status_label) = status {
-                            let status_color = if status_label == "done" {
+                        // Show "working..." with spinner if agents are busy, otherwise show 513 status
+                        if is_busy {
+                            // Animated spinner based on time
+                            const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+                            let idx = (std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() / 100)
+                                .unwrap_or(0) % 10) as usize;
+                            agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                            agent_line.push(Span::styled(
+                                format!("{} working...", SPINNERS[idx]),
+                                Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
+                            ));
+                        } else if let Some(ref status_label) = status {
+                            let status_color = if status_label == "done" || status_label == "Done" {
                                 theme::ACCENT_SUCCESS
                             } else {
                                 theme::ACCENT_WARNING

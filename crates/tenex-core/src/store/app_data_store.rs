@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Project, ProjectStatus, Thread};
+use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, OperationsStatus, Project, ProjectStatus, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -28,6 +28,10 @@ pub struct AppDataStore {
 
     // Agent definitions - kind:4199 events
     pub agent_definitions: HashMap<String, AgentDefinition>,  // keyed by id
+
+    // Operations status - kind:24133 events
+    // Maps event_id -> OperationsStatus (which agents are working on which events)
+    operations_by_event: HashMap<String, OperationsStatus>,
 }
 
 impl AppDataStore {
@@ -45,6 +49,7 @@ impl AppDataStore {
             agent_chatter: Vec::new(),
             lessons: HashMap::new(),
             agent_definitions: HashMap::new(),
+            operations_by_event: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -263,6 +268,7 @@ impl AppDataStore {
             513 => self.handle_metadata_event(note),
             4129 => self.handle_lesson_event(note),
             4199 => self.handle_agent_definition_event(note),
+            24133 => self.handle_operations_status_event(note),
             _ => {}
         }
     }
@@ -437,7 +443,7 @@ impl AppDataStore {
     }
 
     /// Find which project a thread belongs to
-    fn find_project_for_thread(&self, thread_id: &str) -> Option<String> {
+    pub fn find_project_for_thread(&self, thread_id: &str) -> Option<String> {
         for (a_tag, threads) in &self.threads_by_project {
             if threads.iter().any(|t| t.id == thread_id) {
                 return Some(a_tag.clone());
@@ -727,5 +733,59 @@ impl AppDataStore {
 
     pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
         self.agent_definitions.get(id)
+    }
+
+    // ===== Operations Status Methods (kind:24133) =====
+
+    fn handle_operations_status_event(&mut self, note: &Note) {
+        if let Some(status) = OperationsStatus::from_note(note) {
+            let event_id = status.event_id.clone();
+
+            // If no agents are working, remove the entry (event is no longer being processed)
+            if status.agent_pubkeys.is_empty() {
+                self.operations_by_event.remove(&event_id);
+            } else {
+                // Only update if this event is newer than what we have
+                if let Some(existing) = self.operations_by_event.get(&event_id) {
+                    if existing.created_at > status.created_at {
+                        return; // Keep the newer one
+                    }
+                }
+                self.operations_by_event.insert(event_id, status);
+            }
+        }
+    }
+
+    /// Get agent pubkeys currently working on a specific event
+    pub fn get_working_agents(&self, event_id: &str) -> Vec<String> {
+        self.operations_by_event
+            .get(event_id)
+            .map(|s| s.agent_pubkeys.clone())
+            .unwrap_or_default()
+    }
+
+    /// Check if any agents are working on a specific event
+    pub fn is_event_busy(&self, event_id: &str) -> bool {
+        self.operations_by_event
+            .get(event_id)
+            .map(|s| !s.agent_pubkeys.is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Get count of active operations for a project
+    pub fn get_active_operations_count(&self, project_a_tag: &str) -> usize {
+        self.operations_by_event
+            .values()
+            .filter(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
+            .count()
+    }
+
+    /// Get all event IDs with active operations for a project
+    pub fn get_active_event_ids(&self, project_a_tag: &str) -> Vec<String> {
+        self.operations_by_event
+            .iter()
+            .filter(|(_, s)| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 }

@@ -279,7 +279,7 @@ fn render_card_content(
     let indent_len = indent.chars().count();
 
     // Extract data
-    let (project_name, thread_author_name, preview, timestamp) = {
+    let (project_name, thread_author_name, preview, timestamp, is_busy) = {
         let store = app.data_store.borrow();
         let project_name = store.get_project_name(a_tag);
         // Thread author is the person who created/started the thread
@@ -292,7 +292,21 @@ fn render_card_content(
         } else {
             ("No messages yet".to_string(), thread.last_activity)
         };
-        (project_name, thread_author_name, preview, timestamp)
+        // Check if any agents are working on this thread
+        let is_busy = store.is_event_busy(&thread.id);
+        (project_name, thread_author_name, preview, timestamp, is_busy)
+    };
+
+    // Spinner for busy threads (braille animation based on time)
+    let spinner_char = if is_busy {
+        const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let idx = (std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() / 100)
+            .unwrap_or(0) % 10) as usize;
+        Some(SPINNERS[idx])
+    } else {
+        None
     };
 
     let time_str = format_relative_time(timestamp);
@@ -341,15 +355,16 @@ fn render_card_content(
 
     if is_compact {
         // COMPACT: 2 lines - same table layout as full mode
-        // LINE 1: [title] [#nested]     [project]     [status]
+        // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
+        let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
         let nested_suffix = if is_collapsed && child_count > 0 {
             format!(" +{}", child_count)
         } else {
             String::new()
         };
-        let title_max = main_col_width.saturating_sub(nested_suffix.chars().count());
+        let title_max = main_col_width.saturating_sub(nested_suffix.chars().count() + spinner_suffix.chars().count());
         let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
-        let title_display_len = title_truncated.chars().count() + nested_suffix.chars().count();
+        let title_display_len = title_truncated.chars().count() + spinner_suffix.chars().count() + nested_suffix.chars().count();
         let title_padding = main_col_width.saturating_sub(title_display_len);
 
         // Project (middle column)
@@ -375,6 +390,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if !spinner_suffix.is_empty() {
+            line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
+        }
         if !nested_suffix.is_empty() {
             line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
         }
@@ -409,17 +427,17 @@ fn render_card_content(
     } else {
         // FULL MODE: Table-like layout (3 lines + optional activity + spacing)
 
-        // LINE 1: [title] [#nested]     [project]     [status]
-        // Build title with nested count
+        // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
+        // Build title with spinner and nested count
+        let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
         let nested_suffix = if has_children && child_count > 0 {
             format!(" {}", child_count)
         } else {
             String::new()
         };
-        let title_max = main_col_width.saturating_sub(nested_suffix.chars().count());
+        let title_max = main_col_width.saturating_sub(nested_suffix.chars().count() + spinner_suffix.chars().count());
         let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
-        let title_with_nested = format!("{}{}", title_truncated, nested_suffix);
-        let title_display_len = title_with_nested.chars().count();
+        let title_display_len = title_truncated.chars().count() + spinner_suffix.chars().count() + nested_suffix.chars().count();
         let title_padding = main_col_width.saturating_sub(title_display_len);
 
         // Project for line 1 (middle column)
@@ -445,6 +463,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if !spinner_suffix.is_empty() {
+            line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
+        }
         if !nested_suffix.is_empty() {
             line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
         }

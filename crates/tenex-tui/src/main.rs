@@ -416,6 +416,17 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     } else {
         let text = match (&app.view, &app.input_mode) {
             (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
+            (View::Chat, InputMode::Normal) => {
+                // Check if current thread has active operations
+                let is_busy = app.selected_thread.as_ref()
+                    .map(|t| app.data_store.borrow().is_event_busy(&t.id))
+                    .unwrap_or(false);
+                if is_busy {
+                    "q quit · i edit · s stop".to_string()
+                } else {
+                    "q quit · i edit".to_string()
+                }
+            }
             (_, InputMode::Normal) => "Press 'q' to quit".to_string(),
             _ => String::new(), // Chat/Threads editing has its own input box
         };
@@ -658,6 +669,30 @@ fn handle_key(
                     app.open_agent_selector();
                 } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
                     app.open_agent_selector();
+                } else if c == 's' && app.view == View::Chat {
+                    // 's' stops agents working on the current thread
+                    if let Some(ref thread) = app.selected_thread {
+                        let (is_busy, project_a_tag) = {
+                            let store = app.data_store.borrow();
+                            let is_busy = store.is_event_busy(&thread.id);
+                            let project_a_tag = store.find_project_for_thread(&thread.id);
+                            (is_busy, project_a_tag)
+                        };
+                        if is_busy {
+                            if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
+                                let working_agents = app.data_store.borrow().get_working_agents(&thread.id);
+                                if let Err(e) = core_handle.send(NostrCommand::StopOperations {
+                                    project_a_tag: a_tag,
+                                    event_ids: vec![thread.id.clone()],
+                                    agent_pubkeys: working_agents,
+                                }) {
+                                    app.set_status(&format!("Failed to stop: {}", e));
+                                } else {
+                                    app.set_status("Stop command sent");
+                                }
+                            }
+                        }
+                    }
                 } else if c == 't' && app.view == View::Chat {
                     // 't' toggles todo sidebar
                     app.todo_sidebar_visible = !app.todo_sidebar_visible;
@@ -824,8 +859,19 @@ fn handle_key(
                                     app.enter_subthread((*msg).clone());
                                 }
                             }
-                            DisplayItem::DelegationPreview { .. } => {
-                                // Delegation previews don't have actions
+                            DisplayItem::DelegationPreview { thread_id, .. } => {
+                                // Navigate to the delegated conversation
+                                let thread_and_project = {
+                                    let store = app.data_store.borrow();
+                                    store.get_thread_by_id(thread_id).map(|t| {
+                                        let project_a_tag = store.find_project_for_thread(thread_id)
+                                            .unwrap_or_default();
+                                        (t.clone(), project_a_tag)
+                                    })
+                                };
+                                if let Some((thread, project_a_tag)) = thread_and_project {
+                                    app.open_thread_from_home(&thread, &project_a_tag);
+                                }
                             }
                         }
                     }
