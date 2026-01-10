@@ -10,6 +10,7 @@ pub mod lesson_viewer;
 pub mod login;
 pub mod nudge_selector;
 pub mod project_settings;
+pub mod report_viewer;
 
 pub use agent_browser::render_agent_browser;
 pub use ask_modal::render_ask_modal;
@@ -21,3 +22,4 @@ pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
 pub use nudge_selector::render_nudge_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};
+pub use report_viewer::render_report_viewer;
