@@ -192,6 +192,12 @@ pub struct App {
 
     /// Project a_tag when waiting for a newly created thread to appear
     pub pending_new_thread_project: Option<String>,
+
+    /// Selected nudge IDs for the current conversation
+    pub selected_nudge_ids: Vec<String>,
+
+    /// Frame counter for animations (incremented on each tick)
+    pub frame_counter: u64,
 }
 
 impl App {
@@ -263,7 +269,21 @@ impl App {
             collapsed_threads: HashSet::new(),
             expanded_groups: HashSet::new(),
             pending_new_thread_project: None,
+            selected_nudge_ids: Vec::new(),
+            frame_counter: 0,
         }
+    }
+
+    /// Increment frame counter (call on each tick)
+    pub fn tick(&mut self) {
+        self.frame_counter = self.frame_counter.wrapping_add(1);
+    }
+
+    /// Get spinner character based on frame counter
+    pub fn spinner_char(&self) -> char {
+        const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        // Divide by 2 to slow down the animation (every 2 frames = ~200ms at 10fps)
+        SPINNERS[(self.frame_counter / 2) as usize % SPINNERS.len()]
     }
 
     /// Toggle collapse state for a thread (for hierarchical folding)
@@ -796,6 +816,7 @@ impl App {
                             content,
                             agent_pubkey,
                             branch,
+                            nudge_ids: vec![],
                         }) {
                             self.set_status(&format!("Failed to create thread: {}", e));
                         } else {
@@ -1447,6 +1468,30 @@ impl App {
             .collect()
     }
 
+    /// Get all agent definitions
+    pub fn all_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
+        self.data_store.borrow()
+            .get_agent_definitions()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get agent definitions filtered by a custom filter string
+    pub fn agent_definitions_filtered_by(&self, filter: &str) -> Vec<tenex_core::models::AgentDefinition> {
+        self.data_store.borrow()
+            .get_agent_definitions()
+            .into_iter()
+            .filter(|d| {
+                filter.is_empty() ||
+                fuzzy_matches(&d.name, filter) ||
+                fuzzy_matches(&d.description, filter) ||
+                fuzzy_matches(&d.role, filter)
+            })
+            .cloned()
+            .collect()
+    }
+
     // ===== Search Methods =====
 
     /// Get search results based on current search_filter
@@ -1556,6 +1601,139 @@ impl App {
             // Fallback: just take first 60 chars
             content.chars().take(60).collect::<String>().replace('\n', " ")
         }
+    }
+
+    // ===== Nudge Selector Methods =====
+
+    /// Open the nudge selector modal
+    pub fn open_nudge_selector(&mut self) {
+        use crate::ui::modal::NudgeSelectorState;
+        use crate::ui::selector::SelectorState;
+
+        self.modal_state = ModalState::NudgeSelector(NudgeSelectorState {
+            selector: SelectorState::new(),
+            selected_nudge_ids: self.selected_nudge_ids.clone(),
+        });
+    }
+
+    /// Close the nudge selector modal, applying selections
+    pub fn close_nudge_selector(&mut self, apply: bool) {
+        if let ModalState::NudgeSelector(ref state) = self.modal_state {
+            if apply {
+                self.selected_nudge_ids = state.selected_nudge_ids.clone();
+            }
+        }
+        if matches!(self.modal_state, ModalState::NudgeSelector(_)) {
+            self.modal_state = ModalState::None;
+        }
+    }
+
+    /// Toggle a nudge selection in the nudge selector
+    pub fn toggle_nudge_selection(&mut self, nudge_id: &str) {
+        if let ModalState::NudgeSelector(ref mut state) = self.modal_state {
+            if let Some(pos) = state.selected_nudge_ids.iter().position(|id| id == nudge_id) {
+                state.selected_nudge_ids.remove(pos);
+            } else {
+                state.selected_nudge_ids.push(nudge_id.to_string());
+            }
+        }
+    }
+
+    /// Get filtered nudges for the selector
+    pub fn filtered_nudges(&self) -> Vec<tenex_core::models::Nudge> {
+        let filter = match &self.modal_state {
+            ModalState::NudgeSelector(state) => &state.selector.filter,
+            _ => "",
+        };
+        self.data_store.borrow()
+            .get_nudges()
+            .into_iter()
+            .filter(|n| {
+                fuzzy_matches(&n.title, filter) ||
+                fuzzy_matches(&n.description, filter)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get nudge selector index
+    pub fn nudge_selector_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::NudgeSelector(state) => state.selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get nudge selector filter
+    pub fn nudge_selector_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::NudgeSelector(state) => &state.selector.filter,
+            _ => "",
+        }
+    }
+
+    /// Get the thread ID to stop operations on, based on current selection
+    /// Returns the delegation's thread_id if a DelegationPreview is selected,
+    /// otherwise returns the current thread's ID
+    pub fn get_stop_target_thread_id(&self) -> Option<String> {
+        use crate::ui::views::chat::{group_messages, DisplayItem};
+
+        // Get current thread
+        let thread = self.selected_thread.as_ref()?;
+        let thread_id = thread.id.as_str();
+
+        // Get messages and group them (same logic as rendering)
+        let messages = self.messages();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Get display messages based on current view
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| {
+                    Some(m.id.as_str()) == Some(thread_id)
+                        || m.reply_to.is_none()
+                        || m.reply_to.as_deref() == Some(thread_id)
+                })
+                .collect()
+        };
+
+        // Group messages to get display items
+        let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+
+        // Check if the selected item is a DelegationPreview
+        if let Some(item) = grouped.get(self.selected_message_index) {
+            match item {
+                DisplayItem::DelegationPreview { thread_id: delegation_thread_id, .. } => {
+                    return Some(delegation_thread_id.clone());
+                }
+                _ => {}
+            }
+        }
+
+        // Default: return current thread ID
+        Some(thread.id.clone())
+    }
+
+    /// Check if a nudge is selected in the nudge selector
+    pub fn is_nudge_selected(&self, nudge_id: &str) -> bool {
+        match &self.modal_state {
+            ModalState::NudgeSelector(state) => state.selected_nudge_ids.contains(&nudge_id.to_string()),
+            _ => self.selected_nudge_ids.contains(&nudge_id.to_string()),
+        }
+    }
+
+    /// Remove a nudge from selected nudges (outside of modal)
+    pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
+        self.selected_nudge_ids.retain(|id| id != nudge_id);
+    }
+
+    /// Clear all selected nudges
+    pub fn clear_selected_nudges(&mut self) {
+        self.selected_nudge_ids.clear();
     }
 }
 

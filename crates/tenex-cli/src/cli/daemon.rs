@@ -363,6 +363,7 @@ fn handle_request(
                             agent_pubkey: None,
                             reply_to: Some(thread_id.to_string()),
                             branch: None,
+                            nudge_ids: vec![],
                         })
                         .is_ok()
                     {
@@ -402,6 +403,7 @@ fn handle_request(
                     content: title.to_string(),
                     agent_pubkey: None,
                     branch: None,
+                    nudge_ids: vec![],
                 })
                 .is_ok()
             {

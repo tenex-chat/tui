@@ -171,9 +171,8 @@ async fn run_app(
                                     // Second Ctrl+C - quit immediately
                                     app.quit();
                                 } else {
-                                    // First Ctrl+C - set pending and show warning
+                                    // First Ctrl+C - set pending (footer shows warning)
                                     app.pending_quit = true;
-                                    app.set_status("Press Ctrl+C again to quit");
                                 }
                             } else if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
                                 // Ctrl+V - check clipboard for image
@@ -260,6 +259,7 @@ async fn run_app(
             // Tick for regular updates (data channel polling for non-message updates)
             _ = tick_interval.tick() => {
                 let _span = info_span!("check_data_updates").entered();
+                app.tick(); // Increment frame counter for animations
                 app.check_for_data_updates()?;
             }
 
@@ -417,9 +417,9 @@ fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         let text = match (&app.view, &app.input_mode) {
             (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
             (View::Chat, InputMode::Normal) => {
-                // Check if current thread has active operations
-                let is_busy = app.selected_thread.as_ref()
-                    .map(|t| app.data_store.borrow().is_event_busy(&t.id))
+                // Check if selected item (thread or delegation) has active operations
+                let is_busy = app.get_stop_target_thread_id()
+                    .map(|id| app.data_store.borrow().is_event_busy(&id))
                     .unwrap_or(false);
                 if is_busy {
                     "q quit · i edit · s stop".to_string()
@@ -540,6 +540,24 @@ fn handle_key(
     // Handle hotkey help modal when open
     if matches!(app.modal_state, ModalState::HotkeyHelp) {
         handle_hotkey_help_modal_key(app, key);
+        return Ok(());
+    }
+
+    // Handle nudge selector modal when open
+    if matches!(app.modal_state, ModalState::NudgeSelector(_)) {
+        handle_nudge_selector_key(app, key);
+        return Ok(());
+    }
+
+    // Handle create agent modal when open (global, works in any view)
+    if matches!(app.modal_state, ModalState::CreateAgent(_)) {
+        handle_create_agent_key(app, key);
+        return Ok(());
+    }
+
+    // Handle project actions modal when open
+    if matches!(app.modal_state, ModalState::ProjectActions(_)) {
+        handle_project_actions_modal_key(app, key);
         return Ok(());
     }
 
@@ -670,20 +688,21 @@ fn handle_key(
                 } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
                     app.open_agent_selector();
                 } else if c == 's' && app.view == View::Chat {
-                    // 's' stops agents working on the current thread
-                    if let Some(ref thread) = app.selected_thread {
+                    // 's' stops agents working on the selected item
+                    // Uses delegation thread_id if a DelegationPreview is selected
+                    if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
                         let (is_busy, project_a_tag) = {
                             let store = app.data_store.borrow();
-                            let is_busy = store.is_event_busy(&thread.id);
-                            let project_a_tag = store.find_project_for_thread(&thread.id);
+                            let is_busy = store.is_event_busy(&stop_thread_id);
+                            let project_a_tag = store.find_project_for_thread(&stop_thread_id);
                             (is_busy, project_a_tag)
                         };
                         if is_busy {
                             if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                                let working_agents = app.data_store.borrow().get_working_agents(&thread.id);
+                                let working_agents = app.data_store.borrow().get_working_agents(&stop_thread_id);
                                 if let Err(e) = core_handle.send(NostrCommand::StopOperations {
                                     project_a_tag: a_tag,
-                                    event_ids: vec![thread.id.clone()],
+                                    event_ids: vec![stop_thread_id.clone()],
                                     agent_pubkeys: working_agents,
                                 }) {
                                     app.set_status(&format!("Failed to stop: {}", e));
@@ -706,8 +725,31 @@ fn handle_key(
                     app.scroll_down(3);
                 } else if c == 'k' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
                     app.scroll_up(3);
-                } else if app.view == View::AgentBrowser && !app.agent_browser_in_detail && c != 'q' {
-                    // In list mode, add characters to search filter (but not 'q' for quit)
+                } else if c == 'f' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+                    // Fork the currently viewed agent
+                    if let Some(ref agent_id) = app.viewing_agent_id.clone() {
+                        if let Some(agent) = app.all_agent_definitions().iter().find(|a| a.id == *agent_id).cloned() {
+                            app.modal_state = ui::modal::ModalState::CreateAgent(
+                                ui::modal::CreateAgentState::fork_from(&agent)
+                            );
+                        }
+                    }
+                } else if c == 'c' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+                    // Clone the currently viewed agent
+                    if let Some(ref agent_id) = app.viewing_agent_id.clone() {
+                        if let Some(agent) = app.all_agent_definitions().iter().find(|a| a.id == *agent_id).cloned() {
+                            app.modal_state = ui::modal::ModalState::CreateAgent(
+                                ui::modal::CreateAgentState::clone_from(&agent)
+                            );
+                        }
+                    }
+                } else if c == 'n' && app.view == View::AgentBrowser && !app.agent_browser_in_detail {
+                    // Create new agent
+                    app.modal_state = ui::modal::ModalState::CreateAgent(
+                        ui::modal::CreateAgentState::new()
+                    );
+                } else if app.view == View::AgentBrowser && !app.agent_browser_in_detail && c != 'q' && c != 'n' {
+                    // In list mode, add characters to search filter (but not 'q' for quit or 'n' for new)
                     app.agent_browser_filter.push(c);
                     app.agent_browser_index = 0; // Reset selection when filter changes
                 } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
@@ -1101,6 +1143,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
+    // Handle create project modal when showing
+    if matches!(app.modal_state, ModalState::CreateProject(_)) {
+        handle_create_project_key(app, key);
+        return Ok(());
+    }
+
     // Normal Home view navigation
     match code {
         KeyCode::Char('q') => app.quit(),
@@ -1128,6 +1176,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('A') => {
             // Open agent browser
             app.open_agent_browser();
+        }
+        KeyCode::Char('N') if has_shift => {
+            // Open create project modal
+            app.modal_state = ui::modal::ModalState::CreateProject(
+                ui::modal::CreateProjectState::new()
+            );
         }
         KeyCode::Tab => {
             // Switch between tabs (forward)
@@ -1229,19 +1283,76 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 );
             }
         }
+        KeyCode::Char('S') if app.sidebar_focused && has_shift => {
+            // Stop all agents working on this project (Shift+S)
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                let a_tag = project.a_tag();
+                let (is_busy, event_ids, agent_pubkeys) = {
+                    let store = app.data_store.borrow();
+                    (
+                        store.is_project_busy(&a_tag),
+                        store.get_active_event_ids(&a_tag),
+                        store.get_project_working_agents(&a_tag),
+                    )
+                };
+                if is_busy {
+                    if let Some(core_handle) = app.core_handle.clone() {
+                        if let Err(e) = core_handle.send(NostrCommand::StopOperations {
+                            project_a_tag: a_tag,
+                            event_ids,
+                            agent_pubkeys,
+                        }) {
+                            app.set_status(&format!("Failed to stop: {}", e));
+                        } else {
+                            app.set_status("Stop command sent for all project operations");
+                        }
+                    }
+                }
+            }
+        }
+        KeyCode::Char('b') if app.sidebar_focused => {
+            // Boot offline project
+            let (online, offline) = app.filtered_projects();
+            let online_count = online.len();
+            if app.sidebar_project_index >= online_count {
+                // This is an offline project
+                let offline_index = app.sidebar_project_index - online_count;
+                if let Some(project) = offline.get(offline_index) {
+                    let a_tag = project.a_tag();
+                    let pubkey = project.pubkey.clone();
+                    if let Some(core_handle) = app.core_handle.clone() {
+                        if let Err(e) = core_handle.send(NostrCommand::BootProject {
+                            project_a_tag: a_tag,
+                            project_pubkey: Some(pubkey),
+                        }) {
+                            app.set_status(&format!("Failed to boot: {}", e));
+                        } else {
+                            app.set_status(&format!("Boot request sent for {}", project.name));
+                        }
+                    }
+                }
+            } else {
+                app.set_status("Project is already online");
+            }
+        }
         KeyCode::Enter => {
             if app.sidebar_focused {
-                // Toggle project visibility (same as space)
+                // Open project actions modal
                 let (online, offline) = app.filtered_projects();
+                let online_count = online.len();
+                let is_online = app.sidebar_project_index < online_count;
                 let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
                 if let Some(project) = all_projects.get(app.sidebar_project_index) {
-                    let a_tag = project.a_tag();
-                    if app.visible_projects.contains(&a_tag) {
-                        app.visible_projects.remove(&a_tag);
-                    } else {
-                        app.visible_projects.insert(a_tag);
-                    }
-                    app.save_selected_projects();
+                    app.modal_state = ui::modal::ModalState::ProjectActions(
+                        ui::modal::ProjectActionsState::new(
+                            project.a_tag(),
+                            project.name.clone(),
+                            project.pubkey.clone(),
+                            is_online,
+                        )
+                    );
                 }
             } else {
                 // Open selected item
@@ -1431,6 +1542,329 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
     app.modal_state = ModalState::ProjectSettings(state);
 }
 
+/// Handle key events for the create project modal
+fn handle_create_project_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{CreateProjectFocus, CreateProjectStep};
+
+    let code = key.code;
+
+    // Extract state to avoid borrow issues
+    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::CreateProject(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match state.step {
+        CreateProjectStep::Details => {
+            match code {
+                KeyCode::Esc => {
+                    // Cancel - close modal
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Tab => {
+                    // Switch focus between fields
+                    state.focus = match state.focus {
+                        CreateProjectFocus::Name => CreateProjectFocus::Description,
+                        CreateProjectFocus::Description => CreateProjectFocus::Name,
+                    };
+                }
+                KeyCode::Enter => {
+                    // Proceed to next step if name is valid
+                    if state.can_proceed() {
+                        state.step = CreateProjectStep::SelectAgents;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    match state.focus {
+                        CreateProjectFocus::Name => state.name.push(c),
+                        CreateProjectFocus::Description => state.description.push(c),
+                    }
+                }
+                KeyCode::Backspace => {
+                    match state.focus {
+                        CreateProjectFocus::Name => { state.name.pop(); }
+                        CreateProjectFocus::Description => { state.description.pop(); }
+                    }
+                }
+                _ => {}
+            }
+        }
+        CreateProjectStep::SelectAgents => {
+            // Get filtered agents for index bounds checking
+            let filtered_agents = app.agent_definitions_filtered_by(&state.agent_selector.filter);
+            let item_count = filtered_agents.len();
+
+            match code {
+                KeyCode::Esc => {
+                    // Cancel - close modal
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Backspace if state.agent_selector.filter.is_empty() => {
+                    // Go back to details step
+                    state.step = CreateProjectStep::Details;
+                }
+                KeyCode::Backspace => {
+                    // Remove from filter
+                    state.agent_selector.filter.pop();
+                    state.agent_selector.index = 0;
+                }
+                KeyCode::Up => {
+                    if state.agent_selector.index > 0 {
+                        state.agent_selector.index -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if item_count > 0 && state.agent_selector.index + 1 < item_count {
+                        state.agent_selector.index += 1;
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    // Toggle agent selection
+                    if let Some(agent) = filtered_agents.get(state.agent_selector.index) {
+                        state.toggle_agent(agent.id.clone());
+                    }
+                }
+                KeyCode::Enter => {
+                    // Create the project
+                    if let Some(ref core_handle) = app.core_handle {
+                        if let Err(e) = core_handle.send(NostrCommand::CreateProject {
+                            name: state.name.clone(),
+                            description: state.description.clone(),
+                            agent_ids: state.agent_ids.clone(),
+                        }) {
+                            app.set_status(&format!("Failed to create project: {}", e));
+                        } else {
+                            app.set_status("Project created");
+                        }
+                    }
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Char(c) => {
+                    // Add to filter
+                    state.agent_selector.filter.push(c);
+                    state.agent_selector.index = 0;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Restore the state
+    app.modal_state = ModalState::CreateProject(state);
+}
+
+/// Handle key events for the create agent modal
+fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{AgentCreateStep, AgentFormFocus};
+
+    let code = key.code;
+    let modifiers = key.modifiers;
+    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+    // Extract state to avoid borrow issues
+    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::CreateAgent(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match state.step {
+        AgentCreateStep::Basics => {
+            match code {
+                KeyCode::Esc => {
+                    // Cancel - close modal
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Tab => {
+                    // Cycle through fields
+                    state.focus = match state.focus {
+                        AgentFormFocus::Name => AgentFormFocus::Description,
+                        AgentFormFocus::Description => AgentFormFocus::Role,
+                        AgentFormFocus::Role => AgentFormFocus::Name,
+                    };
+                }
+                KeyCode::Enter => {
+                    // Proceed to next step if valid
+                    if state.can_proceed() {
+                        state.step = AgentCreateStep::Instructions;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    match state.focus {
+                        AgentFormFocus::Name => state.name.push(c),
+                        AgentFormFocus::Description => state.description.push(c),
+                        AgentFormFocus::Role => state.role.push(c),
+                    }
+                }
+                KeyCode::Backspace => {
+                    match state.focus {
+                        AgentFormFocus::Name => { state.name.pop(); }
+                        AgentFormFocus::Description => { state.description.pop(); }
+                        AgentFormFocus::Role => { state.role.pop(); }
+                    }
+                }
+                _ => {}
+            }
+        }
+        AgentCreateStep::Instructions => {
+            match code {
+                KeyCode::Esc => {
+                    // Cancel - close modal
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Enter if has_ctrl => {
+                    // Proceed to review step
+                    state.step = AgentCreateStep::Review;
+                    state.instructions_scroll = 0;
+                }
+                KeyCode::Enter => {
+                    // Add newline to instructions
+                    state.instructions.insert(state.instructions_cursor, '\n');
+                    state.instructions_cursor += 1;
+                }
+                KeyCode::Backspace => {
+                    if state.instructions_cursor > 0 {
+                        state.instructions_cursor -= 1;
+                        state.instructions.remove(state.instructions_cursor);
+                    } else if state.instructions.is_empty() {
+                        // Go back to basics step if empty
+                        state.step = AgentCreateStep::Basics;
+                    }
+                }
+                KeyCode::Char(c) => {
+                    state.instructions.insert(state.instructions_cursor, c);
+                    state.instructions_cursor += 1;
+                }
+                KeyCode::Left => {
+                    if state.instructions_cursor > 0 {
+                        state.instructions_cursor -= 1;
+                    }
+                }
+                KeyCode::Right => {
+                    if state.instructions_cursor < state.instructions.len() {
+                        state.instructions_cursor += 1;
+                    }
+                }
+                KeyCode::Up => {
+                    // Move cursor up one line
+                    let current_line_start = state.instructions[..state.instructions_cursor]
+                        .rfind('\n')
+                        .map(|pos| pos + 1)
+                        .unwrap_or(0);
+                    let col = state.instructions_cursor - current_line_start;
+
+                    if let Some(prev_line_end) = state.instructions[..current_line_start.saturating_sub(1)]
+                        .rfind('\n')
+                    {
+                        let prev_line_start = prev_line_end + 1;
+                        let prev_line_len = current_line_start.saturating_sub(1) - prev_line_start;
+                        state.instructions_cursor = prev_line_start + col.min(prev_line_len);
+                    } else if current_line_start > 0 {
+                        // First line, go to start
+                        state.instructions_cursor = col.min(current_line_start.saturating_sub(1));
+                    }
+                }
+                KeyCode::Down => {
+                    // Move cursor down one line
+                    let current_line_start = state.instructions[..state.instructions_cursor]
+                        .rfind('\n')
+                        .map(|pos| pos + 1)
+                        .unwrap_or(0);
+                    let col = state.instructions_cursor - current_line_start;
+
+                    if let Some(next_line_start_offset) = state.instructions[state.instructions_cursor..]
+                        .find('\n')
+                    {
+                        let next_line_start = state.instructions_cursor + next_line_start_offset + 1;
+                        let next_line_end = state.instructions[next_line_start..]
+                            .find('\n')
+                            .map(|pos| next_line_start + pos)
+                            .unwrap_or(state.instructions.len());
+                        let next_line_len = next_line_end - next_line_start;
+                        state.instructions_cursor = next_line_start + col.min(next_line_len);
+                    }
+                }
+                KeyCode::Home => {
+                    // Move to start of current line
+                    state.instructions_cursor = state.instructions[..state.instructions_cursor]
+                        .rfind('\n')
+                        .map(|pos| pos + 1)
+                        .unwrap_or(0);
+                }
+                KeyCode::End => {
+                    // Move to end of current line
+                    state.instructions_cursor = state.instructions[state.instructions_cursor..]
+                        .find('\n')
+                        .map(|pos| state.instructions_cursor + pos)
+                        .unwrap_or(state.instructions.len());
+                }
+                _ => {}
+            }
+        }
+        AgentCreateStep::Review => {
+            match code {
+                KeyCode::Esc => {
+                    // Cancel - close modal
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Backspace => {
+                    // Go back to instructions step
+                    state.step = AgentCreateStep::Instructions;
+                    state.instructions_scroll = 0;
+                }
+                KeyCode::Up => {
+                    // Scroll up
+                    if state.instructions_scroll > 0 {
+                        state.instructions_scroll -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    // Scroll down
+                    let line_count = state.instructions.lines().count();
+                    if state.instructions_scroll + 1 < line_count {
+                        state.instructions_scroll += 1;
+                    }
+                }
+                KeyCode::Enter => {
+                    // Publish the agent definition
+                    if let Some(ref core_handle) = app.core_handle {
+                        if let Err(e) = core_handle.send(NostrCommand::CreateAgentDefinition {
+                            name: state.name.clone(),
+                            description: state.description.clone(),
+                            role: state.role.clone(),
+                            instructions: state.instructions.clone(),
+                            version: state.version.clone(),
+                            source_id: state.source_id.clone(),
+                            is_fork: matches!(state.mode, ui::modal::AgentCreateMode::Fork),
+                        }) {
+                            app.set_status(&format!("Failed to create agent: {}", e));
+                        } else {
+                            app.set_status(&format!("Agent '{}' created", state.name));
+                        }
+                    }
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Restore the state
+    app.modal_state = ModalState::CreateAgent(state);
+}
+
 /// Handle key events for the chat editor (rich text editing)
 fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
@@ -1454,6 +1888,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                     let project_a_tag = project.a_tag();
                     let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
                     let branch = app.selected_branch.clone();
+                    let nudge_ids = app.selected_nudge_ids.clone();
 
                     if let Some(ref thread) = app.selected_thread {
                         // Reply to existing thread
@@ -1474,10 +1909,12 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                             agent_pubkey,
                             reply_to,
                             branch,
+                            nudge_ids,
                         }) {
                             app.set_status(&format!("Failed to publish message: {}", e));
                         } else {
                             app.delete_chat_draft();
+                            app.selected_nudge_ids.clear();
                         }
                     } else {
                         // Create new thread (kind:1)
@@ -1488,11 +1925,13 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                             content,
                             agent_pubkey,
                             branch,
+                            nudge_ids,
                         }) {
                             app.set_status(&format!("Failed to create thread: {}", e));
                         } else {
                             // Navigate to it once it arrives via subscription
                             app.pending_new_thread_project = Some(project_a_tag.clone());
+                            app.selected_nudge_ids.clear();
                         }
                     }
                 }
@@ -1542,6 +1981,10 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         // % = open branch selector
         KeyCode::Char('%') => {
             app.open_branch_selector();
+        }
+        // Ctrl+N = open nudge selector
+        KeyCode::Char('n') if has_ctrl => {
+            app.open_nudge_selector();
         }
         // Ctrl+A = move to beginning of line
         KeyCode::Char('a') if has_ctrl => {
@@ -1722,6 +2165,7 @@ fn submit_ask_response(app: &mut App) {
             agent_pubkey: None,
             reply_to: Some(message_id),
             branch: None,
+            nudge_ids: vec![],
         });
     }
 
@@ -2134,6 +2578,98 @@ fn handle_message_actions_modal_key(app: &mut App, key: KeyEvent) {
     }
 }
 
+/// Handle key events for the project actions modal
+fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::ProjectAction;
+
+    let code = key.code;
+
+    // Get current state
+    let state = match &app.modal_state {
+        ModalState::ProjectActions(s) => s.clone(),
+        _ => return,
+    };
+
+    let actions = state.available_actions();
+    let action_count = actions.len();
+
+    match code {
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if state.selected_index > 0 {
+                if let ModalState::ProjectActions(ref mut s) = app.modal_state {
+                    s.selected_index -= 1;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if state.selected_index + 1 < action_count {
+                if let ModalState::ProjectActions(ref mut s) = app.modal_state {
+                    s.selected_index += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(action) = state.selected_action() {
+                execute_project_action(app, &state, action);
+            }
+        }
+        // Direct hotkeys
+        KeyCode::Char('b') if !state.is_online => {
+            execute_project_action(app, &state, ProjectAction::Boot);
+        }
+        KeyCode::Char('s') => {
+            execute_project_action(app, &state, ProjectAction::Settings);
+        }
+        _ => {}
+    }
+}
+
+/// Execute a project action
+fn execute_project_action(
+    app: &mut App,
+    state: &ui::modal::ProjectActionsState,
+    action: ui::modal::ProjectAction,
+) {
+    use ui::modal::ProjectAction;
+
+    match action {
+        ProjectAction::Boot => {
+            // Send boot command
+            if let Some(core_handle) = app.core_handle.clone() {
+                if let Err(e) = core_handle.send(NostrCommand::BootProject {
+                    project_a_tag: state.project_a_tag.clone(),
+                    project_pubkey: Some(state.project_pubkey.clone()),
+                }) {
+                    app.set_status(&format!("Failed to boot: {}", e));
+                } else {
+                    app.set_status(&format!("Boot request sent for {}", state.project_name));
+                }
+            }
+            app.modal_state = ModalState::None;
+        }
+        ProjectAction::Settings => {
+            // Open project settings
+            let agent_ids = {
+                let store = app.data_store.borrow();
+                store
+                    .get_projects()
+                    .iter()
+                    .find(|p| p.a_tag() == state.project_a_tag)
+                    .map(|p| p.agent_ids.clone())
+                    .unwrap_or_default()
+            };
+            app.modal_state = ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
+                state.project_a_tag.clone(),
+                state.project_name.clone(),
+                agent_ids,
+            ));
+        }
+    }
+}
+
 /// Handle key events for the view raw event modal
 fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
@@ -2217,6 +2753,58 @@ fn handle_hotkey_help_modal_key(app: &mut App, key: KeyEvent) {
         }
         _ => {
             app.modal_state = ModalState::None;
+        }
+    }
+}
+
+/// Handle key events for the nudge selector modal
+fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
+    let nudges = app.filtered_nudges();
+    let item_count = nudges.len();
+
+    if let ModalState::NudgeSelector(ref mut state) = app.modal_state {
+        match key.code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Enter => {
+                // Confirm selection - copy selected nudge ids to app
+                let selected_ids = state.selected_nudge_ids.clone();
+                app.selected_nudge_ids = selected_ids;
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Up => {
+                if state.selector.index > 0 {
+                    state.selector.index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if item_count > 0 && state.selector.index < item_count - 1 {
+                    state.selector.index += 1;
+                }
+            }
+            KeyCode::Char(' ') => {
+                // Toggle selection of current item
+                if let Some(nudge) = nudges.get(state.selector.index) {
+                    let nudge_id = nudge.id.clone();
+                    if let Some(pos) = state.selected_nudge_ids.iter().position(|id| id == &nudge_id) {
+                        state.selected_nudge_ids.remove(pos);
+                    } else {
+                        state.selected_nudge_ids.push(nudge_id);
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                // Add to filter
+                state.selector.filter.push(c);
+                state.selector.index = 0;
+            }
+            KeyCode::Backspace => {
+                // Remove from filter
+                state.selector.filter.pop();
+                state.selector.index = 0;
+            }
+            _ => {}
         }
     }
 }

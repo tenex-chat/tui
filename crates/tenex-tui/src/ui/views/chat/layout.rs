@@ -138,6 +138,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if matches!(app.modal_state, ModalState::HotkeyHelp) {
         actions::render_hotkey_help_modal(f, area);
     }
+
+    // Render nudge selector modal if showing
+    if let ModalState::NudgeSelector(ref state) = app.modal_state {
+        super::super::render_nudge_selector(f, app, area, state);
+    }
 }
 
 fn build_layout(

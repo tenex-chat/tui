@@ -217,11 +217,24 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
         ]));
     }
 
-    // Context line at bottom: @agent on %branch
-    let context_str = format!("@{}{}", agent_display, branch_display);
+    // Build nudge display string
+    let nudge_display = if app.selected_nudge_ids.is_empty() {
+        String::new()
+    } else {
+        let nudge_titles: Vec<String> = app
+            .selected_nudge_ids
+            .iter()
+            .filter_map(|id| app.data_store.borrow().get_nudge(id).map(|n| format!("/{}", n.title)))
+            .collect();
+        format!(" [{}]", nudge_titles.join(", "))
+    };
+
+    // Context line at bottom: @agent on %branch [nudges]
+    let context_str = format!("@{}{}{}", agent_display, branch_display, nudge_display);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + 4) as usize; // +4 for "│  " and " "
-    lines.push(Line::from(vec![
+
+    let mut context_spans = vec![
         Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
         Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
         Span::styled(
@@ -234,8 +247,18 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
             branch_display.clone(),
             Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg),
         ),
-        Span::styled(" ".repeat(context_pad), Style::default().bg(input_bg)),
-    ]));
+    ];
+
+    // Add nudge display if any selected
+    if !nudge_display.is_empty() {
+        context_spans.push(Span::styled(
+            nudge_display,
+            Style::default().fg(theme::ACCENT_WARNING).bg(input_bg),
+        ));
+    }
+
+    context_spans.push(Span::styled(" ".repeat(context_pad.max(0)), Style::default().bg(input_bg)));
+    lines.push(Line::from(context_spans));
 
     // Render with half-block borders for visual padding effect
     let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄

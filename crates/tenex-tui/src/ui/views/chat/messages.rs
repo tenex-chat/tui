@@ -520,15 +520,9 @@ pub(crate) fn render_messages_panel(
                         ];
                         // Show "working..." with spinner if agents are busy, otherwise show 513 status
                         if is_busy {
-                            // Animated spinner based on time
-                            const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-                            let idx = (std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() / 100)
-                                .unwrap_or(0) % 10) as usize;
                             agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
                             agent_line.push(Span::styled(
-                                format!("{} working...", SPINNERS[idx]),
+                                format!("{} working...", app.spinner_char()),
                                 Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
                             ));
                         } else if let Some(ref status_label) = status {

@@ -1,17 +1,23 @@
 pub mod agent_browser;
 pub mod ask_modal;
 pub mod chat;
+pub mod create_agent;
+pub mod create_project;
 mod home_helpers;
 pub mod home;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
+pub mod nudge_selector;
 pub mod project_settings;
 
 pub use agent_browser::render_agent_browser;
 pub use ask_modal::render_ask_modal;
 pub use chat::render_chat;
+pub use create_agent::render_create_agent;
+pub use create_project::render_create_project;
 pub use home::render_home;
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
+pub use nudge_selector::render_nudge_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};

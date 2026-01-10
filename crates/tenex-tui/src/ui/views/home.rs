@@ -5,7 +5,7 @@ use crate::ui::components::{
     ModalSection, ModalSize,
 };
 use crate::ui::card;
-use crate::ui::modal::ModalState;
+use crate::ui::modal::{ModalState, ProjectActionsState};
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 pub use crate::ui::views::home_helpers::HierarchicalThread;
@@ -85,6 +85,21 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Project settings modal overlay
     if let ModalState::ProjectSettings(ref state) = app.modal_state {
         super::render_project_settings(f, app, area, state);
+    }
+
+    // Create project modal overlay
+    if let ModalState::CreateProject(ref state) = app.modal_state {
+        super::render_create_project(f, app, area, state);
+    }
+
+    // Create agent modal overlay
+    if let ModalState::CreateAgent(ref state) = app.modal_state {
+        super::render_create_agent(f, area, state);
+    }
+
+    // Project actions modal overlay
+    if let ModalState::ProjectActions(ref state) = app.modal_state {
+        render_project_actions_modal(f, area, state);
     }
 
     // Tab modal overlay (Alt+/)
@@ -297,14 +312,9 @@ fn render_card_content(
         (project_name, thread_author_name, preview, timestamp, is_busy)
     };
 
-    // Spinner for busy threads (braille animation based on time)
+    // Spinner for busy threads (uses frame counter from App)
     let spinner_char = if is_busy {
-        const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        let idx = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() / 100)
-            .unwrap_or(0) % 10) as usize;
-        Some(SPINNERS[idx])
+        Some(app.spinner_char())
     } else {
         None
     };
@@ -397,7 +407,7 @@ fn render_card_content(
             line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
         }
         line1.push(Span::styled(" ".repeat(title_padding), Style::default()));
-        line1.push(Span::styled(project_display, Style::default().fg(theme::ACCENT_SUCCESS)));
+        line1.push(Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))));
         line1.push(Span::styled(" ".repeat(project_padding), Style::default()));
         line1.push(Span::styled(" ".repeat(status_padding), Style::default()));
         line1.push(Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)));
@@ -470,7 +480,7 @@ fn render_card_content(
             line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
         }
         line1.push(Span::styled(" ".repeat(title_padding), Style::default()));
-        line1.push(Span::styled(project_display, Style::default().fg(theme::ACCENT_SUCCESS)));
+        line1.push(Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))));
         line1.push(Span::styled(" ".repeat(project_padding), Style::default()));
         line1.push(Span::styled(" ".repeat(status_padding), Style::default()));
         line1.push(Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)));
@@ -630,7 +640,7 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     let line2_spans = vec![
         Span::styled(type_str, Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" in ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(project_name, Style::default().fg(theme::ACCENT_SUCCESS)),
+        Span::styled(project_name, Style::default().fg(theme::project_color(&item.project_a_tag))),
         Span::styled(" by ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(author_name, Style::default().fg(theme::ACCENT_SPECIAL)),
     ];
@@ -684,10 +694,13 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(i);
+        let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let name = truncate_with_ellipsis(&project.name, 20); // Fits wider sidebar
+        // Reserve space for spinner (2 chars: spinner + space)
+        let name_max = if is_busy { 18 } else { 20 };
+        let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
             Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -701,11 +714,21 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
 
-        let item = ListItem::new(Line::from(vec![
+        let mut spans = vec![
             Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
-        ]));
+        ];
+
+        // Add spinner if project is busy
+        if is_busy {
+            spans.push(Span::styled(
+                format!(" {}", app.spinner_char()),
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ));
+        }
+
+        let item = ListItem::new(Line::from(spans));
 
         let item = if is_focused {
             item.style(Style::default().bg(theme::BG_SELECTED))
@@ -730,10 +753,12 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(online_count + i);
+        let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let name = truncate_with_ellipsis(&project.name, 20); // Fits wider sidebar
+        let name_max = if is_busy { 18 } else { 20 };
+        let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
             Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -747,11 +772,21 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Style::default().fg(theme::TEXT_MUTED)
         };
 
-        let item = ListItem::new(Line::from(vec![
+        let mut spans = vec![
             Span::styled(focus_indicator, Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
-        ]));
+        ];
+
+        // Add spinner if project is busy (unlikely for offline, but for consistency)
+        if is_busy {
+            spans.push(Span::styled(
+                format!(" {}", app.spinner_char()),
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ));
+        }
+
+        let item = ListItem::new(Line::from(spans));
 
         let item = if is_focused {
             item.style(Style::default().bg(theme::BG_SELECTED))
@@ -824,7 +859,22 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
     let hints = if app.sidebar_focused {
-        "← back · ↑↓ navigate · Space toggle · m filter · f time · A agents · Tab switch · q quit"
+        // Check if focused project is busy or offline
+        let (online, offline) = app.filtered_projects();
+        let online_count = online.len();
+        let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+        let is_busy = all_projects.get(app.sidebar_project_index)
+            .map(|p| app.data_store.borrow().is_project_busy(&p.a_tag()))
+            .unwrap_or(false);
+        let is_offline = app.sidebar_project_index >= online_count;
+
+        if is_busy {
+            "← back · ↑↓ navigate · Space toggle · S stop · Enter actions · q quit"
+        } else if is_offline {
+            "← back · ↑↓ navigate · Space toggle · b boot · Enter actions · q quit"
+        } else {
+            "← back · ↑↓ navigate · Space toggle · Enter actions · q quit"
+        }
     } else {
         match app.home_panel_focus {
             HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · A agents · q quit",
@@ -1121,6 +1171,56 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
         1,
     );
     let hints = Paragraph::new("↑↓ navigate · enter open · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+
+/// Render the project actions modal (boot, settings)
+fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectActionsState) {
+    render_modal_overlay(f, area);
+
+    let actions = state.available_actions();
+    let content_height = (actions.len() + 2) as u16;
+    let total_height = content_height + 4;
+    let height_percent = (total_height as f32 / area.height as f32).min(0.5);
+
+    let size = ModalSize {
+        max_width: 40,
+        height_percent,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(2),
+    );
+
+    let remaining = render_modal_header(f, inner_area, &state.project_name, "esc");
+
+    let items: Vec<ModalItem> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let is_selected = i == state.selected_index;
+            ModalItem::new(action.label())
+                .with_shortcut(action.hotkey().to_string())
+                .selected(is_selected)
+        })
+        .collect();
+
+    render_modal_items(f, remaining, &items);
+
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }

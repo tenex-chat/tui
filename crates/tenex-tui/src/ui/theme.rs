@@ -92,6 +92,12 @@ pub fn user_color(pubkey: &str) -> Color {
     USER_PALETTE[hash % USER_PALETTE.len()]
 }
 
+/// Get a deterministic color for a project based on its a_tag
+pub fn project_color(a_tag: &str) -> Color {
+    let hash: usize = a_tag.bytes().map(|b| b as usize).sum();
+    USER_PALETTE[hash % USER_PALETTE.len()]
+}
+
 // -----------------------------------------------------------------------------
 // LLM Metadata Colors - For displaying token counts, model info, etc.
 // -----------------------------------------------------------------------------

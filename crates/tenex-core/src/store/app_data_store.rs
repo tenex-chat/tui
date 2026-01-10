@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, OperationsStatus, Project, ProjectStatus, Thread};
+use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectStatus, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -29,6 +29,9 @@ pub struct AppDataStore {
     // Agent definitions - kind:4199 events
     pub agent_definitions: HashMap<String, AgentDefinition>,  // keyed by id
 
+    // Nudges - kind:4201 events
+    pub nudges: HashMap<String, Nudge>,  // keyed by id
+
     // Operations status - kind:24133 events
     // Maps event_id -> OperationsStatus (which agents are working on which events)
     operations_by_event: HashMap<String, OperationsStatus>,
@@ -49,6 +52,7 @@ impl AppDataStore {
             agent_chatter: Vec::new(),
             lessons: HashMap::new(),
             agent_definitions: HashMap::new(),
+            nudges: HashMap::new(),
             operations_by_event: HashMap::new(),
         };
         store.rebuild_from_ndb();
@@ -155,6 +159,12 @@ impl AppDataStore {
 
         // Load agent definitions (kind:4199)
         self.load_agent_definitions();
+
+        // Load nudges (kind:4201)
+        self.load_nudges();
+
+        // Load operations status (kind:24133) - only recent ones matter
+        self.load_operations_status();
     }
 
     /// Load all agent definitions from nostrdb
@@ -179,6 +189,79 @@ impl AppDataStore {
                 }
             }
         }
+    }
+
+    /// Load all nudges from nostrdb
+    fn load_nudges(&mut self) {
+        use nostrdb::{Filter, Transaction};
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([4201]).build();
+        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
+            return;
+        };
+
+        tracing::info!("Loading {} nudges (kind:4201)", results.len());
+
+        for result in results {
+            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(nudge) = Nudge::from_note(&note) {
+                    self.nudges.insert(nudge.id.clone(), nudge);
+                }
+            }
+        }
+    }
+
+    /// Load recent operations status events (kind:24133)
+    /// Only keeps the most recent status per event_id, and only if agents are still working
+    fn load_operations_status(&mut self) {
+        use nostrdb::{Filter, Transaction};
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return;
+        };
+
+        // Only load recent events (last 5 minutes) since older ones are stale
+        let five_mins_ago = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs().saturating_sub(300))
+            .unwrap_or(0);
+
+        let filter = Filter::new()
+            .kinds([24133])
+            .since(five_mins_ago)
+            .build();
+        let Ok(results) = self.ndb.query(&txn, &[filter], 500) else {
+            return;
+        };
+
+        tracing::info!("Loading {} recent operations status events (kind:24133)", results.len());
+
+        for result in results {
+            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(status) = OperationsStatus::from_note(&note) {
+                    let event_id = status.event_id.clone();
+
+                    // Skip if no agents working (event finished)
+                    if status.agent_pubkeys.is_empty() {
+                        continue;
+                    }
+
+                    // Only keep newest status per event
+                    if let Some(existing) = self.operations_by_event.get(&event_id) {
+                        if existing.created_at > status.created_at {
+                            continue;
+                        }
+                    }
+                    self.operations_by_event.insert(event_id, status);
+                }
+            }
+        }
+
+        tracing::info!("Loaded {} active operations", self.operations_by_event.len());
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -268,6 +351,7 @@ impl AppDataStore {
             513 => self.handle_metadata_event(note),
             4129 => self.handle_lesson_event(note),
             4199 => self.handle_agent_definition_event(note),
+            4201 => self.handle_nudge_event(note),
             24133 => self.handle_operations_status_event(note),
             _ => {}
         }
@@ -327,15 +411,29 @@ impl AppDataStore {
         // Parse thread directly from the note we already have
         // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
         if let Some(thread) = Thread::from_note(note) {
+            let thread_id = thread.id.clone();
+
             if let Some(a_tag) = Self::extract_project_a_tag(note) {
                 // Add to existing threads list, maintaining sort order by last_activity
                 let threads = self.threads_by_project.entry(a_tag).or_default();
 
                 // Check if thread already exists (avoid duplicates)
-                if !threads.iter().any(|t| t.id == thread.id) {
+                if !threads.iter().any(|t| t.id == thread_id) {
                     // Insert in sorted position (most recent first)
                     let insert_pos = threads.partition_point(|t| t.last_activity > thread.last_activity);
                     threads.insert(insert_pos, thread);
+                }
+            }
+
+            // Also add the thread root as the first message in the conversation
+            // This ensures the initial kind:1 that started the conversation is rendered
+            if let Some(root_message) = Message::from_thread_note(note) {
+                let messages = self.messages_by_thread.entry(thread_id).or_default();
+
+                // Check if message already exists (avoid duplicates)
+                if !messages.iter().any(|m| m.id == root_message.id) {
+                    // Thread root is always the first message (oldest), insert at beginning
+                    messages.insert(0, root_message);
                 }
             }
         }
@@ -735,6 +833,25 @@ impl AppDataStore {
         self.agent_definitions.get(id)
     }
 
+    // ===== Nudge Methods (kind:4201) =====
+
+    fn handle_nudge_event(&mut self, note: &Note) {
+        if let Some(nudge) = Nudge::from_note(note) {
+            self.nudges.insert(nudge.id.clone(), nudge);
+        }
+    }
+
+    /// Get all nudges, sorted by created_at descending (most recent first)
+    pub fn get_nudges(&self) -> Vec<&Nudge> {
+        let mut nudges: Vec<_> = self.nudges.values().collect();
+        nudges.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        nudges
+    }
+
+    pub fn get_nudge(&self, id: &str) -> Option<&Nudge> {
+        self.nudges.get(id)
+    }
+
     // ===== Operations Status Methods (kind:24133) =====
 
     fn handle_operations_status_event(&mut self, note: &Note) {
@@ -787,5 +904,23 @@ impl AppDataStore {
             .filter(|(_, s)| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
             .map(|(id, _)| id.clone())
             .collect()
+    }
+
+    /// Get all agent pubkeys currently working on any event for a project
+    pub fn get_project_working_agents(&self, project_a_tag: &str) -> Vec<String> {
+        let mut agents: HashSet<String> = HashSet::new();
+        for status in self.operations_by_event.values() {
+            if status.project_coordinate == project_a_tag && !status.agent_pubkeys.is_empty() {
+                agents.extend(status.agent_pubkeys.iter().cloned());
+            }
+        }
+        agents.into_iter().collect()
+    }
+
+    /// Check if a project has any active operations
+    pub fn is_project_busy(&self, project_a_tag: &str) -> bool {
+        self.operations_by_event
+            .values()
+            .any(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
     }
 }

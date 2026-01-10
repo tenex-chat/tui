@@ -1,5 +1,6 @@
 use crate::ui::card;
 use crate::ui::markdown::render_markdown;
+use crate::ui::modal::ModalState;
 use crate::ui::{theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -21,11 +22,16 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
                 .cloned();
             if let Some(agent) = agent {
                 render_agent_detail(f, app, area, &agent);
-                return;
             }
         }
+    } else {
+        render_agent_list(f, app, area);
     }
-    render_agent_list(f, app, area);
+
+    // Render create agent modal overlay
+    if let ModalState::CreateAgent(ref state) = app.modal_state {
+        super::render_create_agent(f, area, state);
+    }
 }
 
 /// Render the agent list with search filter
@@ -181,9 +187,9 @@ fn render_list_footer(f: &mut Frame, area: Rect) {
         Span::styled("↑/↓", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" navigate | ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" view details | ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Backspace", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" clear filter | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" view | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("n", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" new | ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
     ];
@@ -369,8 +375,12 @@ fn render_detail_footer(f: &mut Frame, area: Rect) {
     let help_spans = vec![
         Span::styled("j/k", Style::default().fg(theme::ACCENT_WARNING)),
         Span::styled(" scroll | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("f", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" fork | ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("c", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" clone | ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" back to list", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
     ];
 
     let footer = Paragraph::new(vec![Line::from(help_spans)])
