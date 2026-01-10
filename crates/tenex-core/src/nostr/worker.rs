@@ -29,6 +29,7 @@ pub enum NostrCommand {
         content: String,
         agent_pubkey: Option<String>,
         branch: Option<String>,
+        nudge_ids: Vec<String>,
     },
     PublishMessage {
         thread_id: String,
@@ -37,6 +38,7 @@ pub enum NostrCommand {
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
         branch: Option<String>,
+        nudge_ids: Vec<String>,
     },
     #[allow(dead_code)]
     BootProject {
@@ -46,6 +48,22 @@ pub enum NostrCommand {
     UpdateProjectAgents {
         project_a_tag: String,
         agent_ids: Vec<String>,
+    },
+    /// Create a new project (kind:31933)
+    CreateProject {
+        name: String,
+        description: String,
+        agent_ids: Vec<String>,
+    },
+    /// Create a new agent definition (kind:4199)
+    CreateAgentDefinition {
+        name: String,
+        description: String,
+        role: String,
+        instructions: String,
+        version: String,
+        source_id: Option<String>,
+        is_fork: bool,
     },
     /// Stop operations on specified events (kind:24134)
     StopOperations {
@@ -145,15 +163,15 @@ impl NostrWorker {
                             error!("Failed to sync: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids } => {
                         info!("Worker: Publishing thread");
-                        if let Err(e) = rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch)) {
+                        if let Err(e) = rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
                             error!("Failed to publish thread: {}", e);
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch } => {
+                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids } => {
                         info!("Worker: Publishing message");
-                        if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch)) {
+                        if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids)) {
                             error!("Failed to publish message: {}", e);
                         }
                     }
@@ -167,6 +185,18 @@ impl NostrWorker {
                         info!("Worker: Updating project agents for {}", project_a_tag);
                         if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids)) {
                             error!("Failed to update project agents: {}", e);
+                        }
+                    }
+                    NostrCommand::CreateProject { name, description, agent_ids } => {
+                        info!("Worker: Creating project {}", name);
+                        if let Err(e) = rt.block_on(self.handle_create_project(name, description, agent_ids)) {
+                            error!("Failed to create project: {}", e);
+                        }
+                    }
+                    NostrCommand::CreateAgentDefinition { name, description, role, instructions, version, source_id, is_fork } => {
+                        info!("Worker: Creating agent definition {}", name);
+                        if let Err(e) = rt.block_on(self.handle_create_agent_definition(name, description, role, instructions, version, source_id, is_fork)) {
+                            error!("Failed to create agent definition: {}", e);
                         }
                     }
                     NostrCommand::StopOperations { project_a_tag, event_ids, agent_pubkeys } => {
@@ -238,6 +268,9 @@ impl NostrWorker {
         // Operations status (kind 24133) - which agents are working on what
         let operations_status_filter = Filter::new().kind(Kind::Custom(24133));
 
+        // Nudges (kind 4201) - agent nudges/prompts
+        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+
         info!("Starting persistent subscriptions");
 
         let subscription_id = client
@@ -251,6 +284,7 @@ impl NostrWorker {
                     metadata_filter,
                     lesson_filter,
                     operations_status_filter,
+                    nudge_filter,
                 ],
                 None,
             )
@@ -486,6 +520,7 @@ impl NostrWorker {
         content: String,
         agent_pubkey: Option<String>,
         branch: Option<String>,
+        nudge_ids: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
@@ -500,6 +535,11 @@ impl NostrWorker {
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("title")),
                 vec![title],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
             ));
 
         // Agent p-tag for routing (required for agent to respond)
@@ -514,6 +554,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
                 vec![br],
+            ));
+        }
+
+        // Nudge tags
+        for nudge_id in nudge_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("nudge")),
+                vec![nudge_id],
             ));
         }
 
@@ -546,6 +594,7 @@ impl NostrWorker {
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
         branch: Option<String>,
+        nudge_ids: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
@@ -560,7 +609,12 @@ impl NostrWorker {
                 vec![thread_id.clone(), "".to_string(), "root".to_string()],
             ))
             // Project reference (a tag)
-            .tag(Tag::coordinate(coordinate));
+            .tag(Tag::coordinate(coordinate))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
 
         // NIP-10: e-tag with "reply" marker (optional, for threaded replies)
         if let Some(reply_id) = reply_to {
@@ -582,6 +636,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
                 vec![br],
+            ));
+        }
+
+        // Nudge tags
+        for nudge_id in nudge_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("nudge")),
+                vec![nudge_id],
             ));
         }
 
@@ -615,7 +677,12 @@ impl NostrWorker {
 
         // Kind 24000 boot request with a-tag pointing to project
         let mut event = EventBuilder::new(Kind::Custom(24000), "")
-            .tag(Tag::coordinate(coordinate));
+            .tag(Tag::coordinate(coordinate))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
 
         // Add p-tag for project owner (required by backend)
         if let Some(pubkey) = project_pubkey {
@@ -659,6 +726,11 @@ impl NostrWorker {
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("title")),
                 vec![project.name.clone()],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
             ));
 
         // Add participant p-tags
@@ -694,6 +766,136 @@ impl NostrWorker {
         Ok(())
     }
 
+    async fn handle_create_project(
+        &self,
+        name: String,
+        description: String,
+        agent_ids: Vec<String>,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Generate d-tag from name (lowercase, replace spaces with dashes)
+        let d_tag = name
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_alphanumeric() { c } else { '-' })
+            .collect::<String>();
+
+        // Build the project event (kind 31933, NIP-33 replaceable)
+        let mut event = EventBuilder::new(Kind::Custom(31933), &description)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec![d_tag],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![name],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        // Add agent tags
+        for agent_id in &agent_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
+                vec![agent_id.clone()],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Created project: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send project to relay: {}", e),
+            Err(_) => error!("Timeout sending project to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
+
+    async fn handle_create_agent_definition(
+        &self,
+        name: String,
+        description: String,
+        role: String,
+        instructions: String,
+        version: String,
+        source_id: Option<String>,
+        is_fork: bool,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Build the agent definition event (kind 4199)
+        let mut event = EventBuilder::new(Kind::Custom(4199), &instructions)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![name.clone()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                vec![description],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("role")),
+                vec![role],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("version")),
+                vec![version],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        // Add source reference for fork/clone
+        if let Some(ref source) = source_id {
+            if is_fork {
+                // Fork: use 'e' tag to reference parent
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("e")),
+                    vec![source.clone()],
+                ));
+            } else {
+                // Clone: use 'cloned-from' tag
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("cloned-from")),
+                    vec![source.clone()],
+                ));
+            }
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Created agent definition '{}': {}", name, output.id()),
+            Ok(Err(e)) => error!("Failed to send agent definition to relay: {}", e),
+            Err(_) => error!("Timeout sending agent definition to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
+
     async fn handle_stop_operations(
         &self,
         project_a_tag: String,
@@ -709,7 +911,12 @@ impl NostrWorker {
 
         // Build kind:24134 stop command event
         let mut event = EventBuilder::new(Kind::Custom(24134), "")
-            .tag(Tag::coordinate(coordinate));
+            .tag(Tag::coordinate(coordinate))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
 
         // Add e-tags for events to stop
         for event_id in &event_ids {
