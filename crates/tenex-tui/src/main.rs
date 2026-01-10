@@ -3005,6 +3005,20 @@ fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                     if let Ok(mut clipboard) = arboard::Clipboard::new() {
                         let _ = clipboard.set_text(&text);
                     }
+                } else if state.focus == ReportViewerFocus::Threads {
+                    // Open selected thread from document threads
+                    let a_tag = state.report.a_tag();
+                    let project_a_tag = state.report.project_a_tag.clone();
+                    let threads = app.data_store.borrow().get_document_threads(&a_tag).to_vec();
+                    if let Some(thread) = threads.get(state.selected_thread_index) {
+                        app.open_thread_from_home(thread, &project_a_tag);
+                        app.modal_state = ModalState::None;
+                    }
+                }
+            }
+            KeyCode::Char('n') => {
+                if state.focus == ReportViewerFocus::Threads || state.show_threads {
+                    app.set_status("Thread creation not yet implemented");
                 }
             }
             _ => {}
