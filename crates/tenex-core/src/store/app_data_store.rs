@@ -229,9 +229,21 @@ impl AppDataStore {
         }
     }
 
-    /// Load all reports from nostrdb (kind:30023)
+    /// Load reports from nostrdb (kind:30023) that belong to known projects
     fn load_reports(&mut self) {
         use nostrdb::{Filter, Transaction};
+
+        // Collect project a-tags to filter reports
+        let project_a_tags: std::collections::HashSet<String> = self
+            .projects
+            .iter()
+            .map(|p| p.a_tag())
+            .collect();
+
+        if project_a_tags.is_empty() {
+            tracing::debug!("No projects loaded, skipping report loading");
+            return;
+        }
 
         let Ok(txn) = Transaction::new(&self.ndb) else {
             return;
@@ -242,15 +254,20 @@ impl AppDataStore {
             return;
         };
 
-        tracing::info!("Loading {} reports (kind:30023)", results.len());
-
+        let mut loaded_count = 0;
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
                 if let Some(report) = Report::from_note(&note) {
-                    self.add_report(report);
+                    // Only add reports that belong to known projects
+                    if project_a_tags.contains(&report.project_a_tag) {
+                        self.add_report(report);
+                        loaded_count += 1;
+                    }
                 }
             }
         }
+
+        tracing::info!("Loaded {} reports (kind:30023) for {} projects", loaded_count, project_a_tags.len());
     }
 
     /// Add a report, maintaining version history and latest-by-slug
@@ -1002,7 +1019,11 @@ impl AppDataStore {
 
     fn handle_report_event(&mut self, note: &Note) {
         if let Some(report) = Report::from_note(note) {
-            self.add_report(report);
+            // Only add reports that belong to known projects
+            let is_known_project = self.projects.iter().any(|p| p.a_tag() == report.project_a_tag);
+            if is_known_project {
+                self.add_report(report);
+            }
         }
     }
 

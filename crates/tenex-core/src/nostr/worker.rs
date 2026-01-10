@@ -271,8 +271,7 @@ impl NostrWorker {
         // Nudges (kind 4201) - agent nudges/prompts
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
 
-        // Reports/Articles (kind 30023) - project documentation
-        let report_filter = Filter::new().kind(Kind::Custom(30023));
+        // Note: Reports (kind 30023) are fetched per-project in subscribe_to_project_content
 
         info!("Starting persistent subscriptions");
 
@@ -288,7 +287,6 @@ impl NostrWorker {
                     lesson_filter,
                     operations_status_filter,
                     nudge_filter,
-                    report_filter,
                 ],
                 None,
             )
@@ -490,8 +488,23 @@ impl NostrWorker {
             // UI gets notified via nostrdb SubscriptionStream when data is ready
         }
 
-        // Subscribe for real-time updates on kind:1 events for this project
-        client.subscribe(vec![kind1_filter], None).await?;
+        // Fetch reports (kind 30023) for this project
+        let report_filter = Filter::new()
+            .kind(Kind::Custom(30023))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), [project_a_tag]);
+
+        let report_events = client
+            .fetch_events(vec![report_filter.clone()], std::time::Duration::from_secs(10))
+            .await?;
+
+        let report_events_vec: Vec<Event> = report_events.iter().cloned().collect();
+        if !report_events_vec.is_empty() {
+            info!("Fetched {} reports for project {}", report_events_vec.len(), &project_a_tag[..20.min(project_a_tag.len())]);
+            ingest_events(&self.ndb, &report_events_vec, Some(RELAY_URL))?;
+        }
+
+        // Subscribe for real-time updates on kind:1 and kind:30023 events for this project
+        client.subscribe(vec![kind1_filter, report_filter], None).await?;
 
         Ok(())
     }
