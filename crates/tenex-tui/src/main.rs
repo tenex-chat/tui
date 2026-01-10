@@ -1086,6 +1086,25 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let modifiers = key.modifiers;
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
+    // Handle Reports search input mode
+    if app.input_mode == InputMode::Editing && app.home_panel_focus == HomeTab::Reports {
+        match code {
+            KeyCode::Char(c) => {
+                app.report_search_filter.push(c);
+                app.selected_report_index = 0;
+            }
+            KeyCode::Backspace => {
+                app.report_search_filter.pop();
+                app.selected_report_index = 0;
+            }
+            KeyCode::Esc | KeyCode::Enter => {
+                app.input_mode = InputMode::Normal;
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
     // Handle projects modal when showing (using ModalState)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         // Get projects and for_new_thread flag BEFORE mutably borrowing modal_state
@@ -1153,10 +1172,15 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     match code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char('/') => {
-            // Open search modal
-            app.showing_search_modal = true;
-            app.search_filter.clear();
-            app.search_index = 0;
+            if app.home_panel_focus == HomeTab::Reports {
+                // Enter search mode for Reports tab
+                app.input_mode = InputMode::Editing;
+            } else {
+                // Open search modal for other tabs
+                app.showing_search_modal = true;
+                app.search_filter.clear();
+                app.search_index = 0;
+            }
         }
         KeyCode::Char('p') => {
             app.open_projects_modal(false);
@@ -1423,6 +1447,56 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 if item.has_children {
                     app.toggle_thread_collapse(&item.thread.id);
                 }
+            }
+        }
+        // Vim-style navigation (j/k)
+        KeyCode::Char('k') if !app.sidebar_focused => {
+            match app.home_panel_focus {
+                HomeTab::Inbox => {
+                    if app.selected_inbox_index > 0 {
+                        app.selected_inbox_index -= 1;
+                    }
+                }
+                HomeTab::Recent => {
+                    if app.selected_recent_index > 0 {
+                        app.selected_recent_index -= 1;
+                    }
+                }
+                HomeTab::Reports => {
+                    if app.selected_report_index > 0 {
+                        app.selected_report_index -= 1;
+                    }
+                }
+            }
+        }
+        KeyCode::Char('j') if !app.sidebar_focused => {
+            match app.home_panel_focus {
+                HomeTab::Inbox => {
+                    let max = app.inbox_items().len().saturating_sub(1);
+                    if app.selected_inbox_index < max {
+                        app.selected_inbox_index += 1;
+                    }
+                }
+                HomeTab::Recent => {
+                    let hierarchy = get_hierarchical_threads(app);
+                    let max = hierarchy.len().saturating_sub(1);
+                    if app.selected_recent_index < max {
+                        app.selected_recent_index += 1;
+                    }
+                }
+                HomeTab::Reports => {
+                    let count = app.reports().len();
+                    if app.selected_report_index + 1 < count {
+                        app.selected_report_index += 1;
+                    }
+                }
+            }
+        }
+        // Esc to clear Reports search filter
+        KeyCode::Esc if app.home_panel_focus == HomeTab::Reports => {
+            if !app.report_search_filter.is_empty() {
+                app.report_search_filter.clear();
+                app.selected_report_index = 0;
             }
         }
         // Number keys for tab switching (same as Chat view)
