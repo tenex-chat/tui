@@ -103,6 +103,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         render_project_actions_modal(f, area, state);
     }
 
+    // Report viewer modal overlay
+    if let ModalState::ReportViewer(ref state) = app.modal_state {
+        super::render_report_viewer(f, app, area, state);
+    }
+
     // Tab modal overlay (Alt+/)
     if app.showing_tab_modal {
         render_tab_modal(f, app, area);

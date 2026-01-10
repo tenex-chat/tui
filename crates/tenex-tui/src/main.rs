@@ -561,6 +561,12 @@ fn handle_key(
         return Ok(());
     }
 
+    // Handle report viewer modal when open
+    if matches!(app.modal_state, ModalState::ReportViewer(_)) {
+        handle_report_viewer_modal_key(app, key);
+        return Ok(());
+    }
+
     // Global tab navigation with Alt key (works in all views except Login)
     // These bindings work regardless of input mode
     if app.view != View::Login {
@@ -1427,7 +1433,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
                     HomeTab::Reports => {
-                        // Placeholder: report viewer modal implemented in Task 6
+                        let reports = app.reports();
+                        if let Some(report) = reports.get(app.selected_report_index) {
+                            app.modal_state = ModalState::ReportViewer(
+                                ui::modal::ReportViewerState::new(report.clone())
+                            );
+                        }
                     }
                 }
             }
@@ -2893,6 +2904,108 @@ fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
                 // Remove from filter
                 state.selector.filter.pop();
                 state.selector.index = 0;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Handle key events for the report viewer modal
+fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{ReportViewerFocus, ReportViewMode, ReportCopyOption};
+
+    if let ModalState::ReportViewer(ref mut state) = app.modal_state {
+        match key.code {
+            KeyCode::Esc => {
+                if state.show_copy_menu {
+                    state.show_copy_menu = false;
+                } else {
+                    app.modal_state = ModalState::None;
+                }
+            }
+            KeyCode::Tab => {
+                state.view_mode = match state.view_mode {
+                    ReportViewMode::Current => ReportViewMode::Changes,
+                    ReportViewMode::Changes => ReportViewMode::Current,
+                };
+            }
+            KeyCode::Char('t') => {
+                state.show_threads = !state.show_threads;
+            }
+            KeyCode::Char('h') | KeyCode::Left => {
+                state.focus = ReportViewerFocus::Content;
+            }
+            KeyCode::Char('l') | KeyCode::Right => {
+                if state.show_threads {
+                    state.focus = ReportViewerFocus::Threads;
+                }
+            }
+            KeyCode::Char('y') => {
+                state.show_copy_menu = !state.show_copy_menu;
+            }
+            KeyCode::Char('[') => {
+                let slug = state.report.slug.clone();
+                let versions = app.data_store.borrow().get_report_versions(&slug).into_iter().cloned().collect::<Vec<_>>();
+                if state.version_index + 1 < versions.len() {
+                    state.version_index += 1;
+                    if let Some(v) = versions.get(state.version_index) {
+                        state.report = v.clone();
+                        state.content_scroll = 0;
+                    }
+                }
+            }
+            KeyCode::Char(']') => {
+                if state.version_index > 0 {
+                    state.version_index -= 1;
+                    let slug = state.report.slug.clone();
+                    let versions = app.data_store.borrow().get_report_versions(&slug).into_iter().cloned().collect::<Vec<_>>();
+                    if let Some(v) = versions.get(state.version_index) {
+                        state.report = v.clone();
+                        state.content_scroll = 0;
+                    }
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                match state.focus {
+                    ReportViewerFocus::Content => {
+                        state.content_scroll = state.content_scroll.saturating_sub(1);
+                    }
+                    ReportViewerFocus::Threads => {
+                        if state.selected_thread_index > 0 {
+                            state.selected_thread_index -= 1;
+                        }
+                    }
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                match state.focus {
+                    ReportViewerFocus::Content => {
+                        state.content_scroll += 1;
+                    }
+                    ReportViewerFocus::Threads => {
+                        state.selected_thread_index += 1;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                if state.show_copy_menu {
+                    let option = ReportCopyOption::ALL[state.copy_menu_index];
+                    let text = match option {
+                        ReportCopyOption::Bech32Id => {
+                            format!("nevent1{}", state.report.id)
+                        }
+                        ReportCopyOption::RawEvent => {
+                            "Raw event copy not implemented".to_string()
+                        }
+                        ReportCopyOption::Markdown => {
+                            state.report.content.clone()
+                        }
+                    };
+                    state.show_copy_menu = false;
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        let _ = clipboard.set_text(&text);
+                    }
+                }
             }
             _ => {}
         }
