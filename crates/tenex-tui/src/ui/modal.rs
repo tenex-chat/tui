@@ -11,6 +11,13 @@ pub struct AskModalState {
     pub input_state: AskInputState,
 }
 
+/// State for nudge selector modal (multi-select nudges for messages)
+#[derive(Debug, Clone)]
+pub struct NudgeSelectorState {
+    pub selector: SelectorState,
+    pub selected_nudge_ids: Vec<String>,  // Multi-select
+}
+
 /// State for project settings modal
 #[derive(Debug, Clone)]
 pub struct ProjectSettingsState {
@@ -22,6 +29,176 @@ pub struct ProjectSettingsState {
     pub in_add_mode: bool,
     pub add_filter: String,
     pub add_index: usize,
+}
+
+/// Step in the create project wizard
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateProjectStep {
+    Details,      // name + description
+    SelectAgents, // agent picker
+}
+
+/// Which field is focused in the details step
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateProjectFocus {
+    Name,
+    Description,
+}
+
+/// State for the create project modal
+#[derive(Debug, Clone)]
+pub struct CreateProjectState {
+    pub step: CreateProjectStep,
+    pub focus: CreateProjectFocus,
+    pub name: String,
+    pub description: String,
+    pub agent_ids: Vec<String>,
+    pub agent_selector: SelectorState,
+}
+
+impl CreateProjectState {
+    pub fn new() -> Self {
+        Self {
+            step: CreateProjectStep::Details,
+            focus: CreateProjectFocus::Name,
+            name: String::new(),
+            description: String::new(),
+            agent_ids: Vec::new(),
+            agent_selector: SelectorState::default(),
+        }
+    }
+
+    pub fn can_proceed(&self) -> bool {
+        match self.step {
+            CreateProjectStep::Details => !self.name.trim().is_empty(),
+            CreateProjectStep::SelectAgents => true, // Can always finish from agent selection
+        }
+    }
+
+    pub fn toggle_agent(&mut self, agent_id: String) {
+        if let Some(pos) = self.agent_ids.iter().position(|id| id == &agent_id) {
+            self.agent_ids.remove(pos);
+        } else {
+            self.agent_ids.push(agent_id);
+        }
+    }
+}
+
+/// Mode for creating an agent definition
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentCreateMode {
+    New,
+    Fork,  // increment version, add e-tag reference
+    Clone, // new identity, add cloned-from tag
+}
+
+/// Step in the create agent wizard
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentCreateStep {
+    Basics,       // name, description, role
+    Instructions, // system prompt (multi-line)
+    Review,       // preview before publish
+}
+
+/// Which field is focused in the basics step
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentFormFocus {
+    Name,
+    Description,
+    Role,
+}
+
+/// State for the create/fork/clone agent modal
+#[derive(Debug, Clone)]
+pub struct CreateAgentState {
+    pub mode: AgentCreateMode,
+    pub step: AgentCreateStep,
+    pub focus: AgentFormFocus,
+    pub name: String,
+    pub description: String,
+    pub role: String,
+    pub instructions: String,
+    pub version: String,
+    /// Source event ID (for fork/clone)
+    pub source_id: Option<String>,
+    /// Scroll offset for instructions view
+    pub instructions_scroll: usize,
+    /// Cursor position in instructions
+    pub instructions_cursor: usize,
+}
+
+impl CreateAgentState {
+    pub fn new() -> Self {
+        Self {
+            mode: AgentCreateMode::New,
+            step: AgentCreateStep::Basics,
+            focus: AgentFormFocus::Name,
+            name: String::new(),
+            description: String::new(),
+            role: "assistant".to_string(),
+            instructions: String::new(),
+            version: "1".to_string(),
+            source_id: None,
+            instructions_scroll: 0,
+            instructions_cursor: 0,
+        }
+    }
+
+    pub fn fork_from(agent: &tenex_core::models::AgentDefinition) -> Self {
+        // Increment version
+        let version = agent.version.as_ref()
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|v| (v + 1).to_string())
+            .unwrap_or_else(|| "2".to_string());
+
+        Self {
+            mode: AgentCreateMode::Fork,
+            step: AgentCreateStep::Basics,
+            focus: AgentFormFocus::Name,
+            name: agent.name.clone(),
+            description: agent.description.clone(),
+            role: agent.role.clone(),
+            instructions: agent.instructions.clone(),
+            version,
+            source_id: Some(agent.id.clone()),
+            instructions_scroll: 0,
+            instructions_cursor: agent.instructions.len(),
+        }
+    }
+
+    pub fn clone_from(agent: &tenex_core::models::AgentDefinition) -> Self {
+        Self {
+            mode: AgentCreateMode::Clone,
+            step: AgentCreateStep::Basics,
+            focus: AgentFormFocus::Name,
+            name: format!("{} (Copy)", agent.name),
+            description: agent.description.clone(),
+            role: agent.role.clone(),
+            instructions: agent.instructions.clone(),
+            version: "1".to_string(),
+            source_id: Some(agent.id.clone()),
+            instructions_scroll: 0,
+            instructions_cursor: agent.instructions.len(),
+        }
+    }
+
+    pub fn can_proceed(&self) -> bool {
+        match self.step {
+            AgentCreateStep::Basics => {
+                !self.name.trim().is_empty() && !self.description.trim().is_empty()
+            }
+            AgentCreateStep::Instructions => true,
+            AgentCreateStep::Review => true,
+        }
+    }
+
+    pub fn mode_label(&self) -> &'static str {
+        match self.mode {
+            AgentCreateMode::New => "New Agent",
+            AgentCreateMode::Fork => "Fork Agent",
+            AgentCreateMode::Clone => "Clone Agent",
+        }
+    }
 }
 
 impl ProjectSettingsState {
@@ -102,6 +279,63 @@ impl MessageAction {
     }
 }
 
+/// Project action types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectAction {
+    Boot,
+    Settings,
+}
+
+impl ProjectAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            ProjectAction::Boot => "Boot Project",
+            ProjectAction::Settings => "Settings",
+        }
+    }
+
+    pub fn hotkey(&self) -> char {
+        match self {
+            ProjectAction::Boot => 'b',
+            ProjectAction::Settings => 's',
+        }
+    }
+}
+
+/// State for project actions modal
+#[derive(Debug, Clone)]
+pub struct ProjectActionsState {
+    pub project_a_tag: String,
+    pub project_name: String,
+    pub project_pubkey: String,
+    pub is_online: bool,
+    pub selected_index: usize,
+}
+
+impl ProjectActionsState {
+    pub fn new(project_a_tag: String, project_name: String, project_pubkey: String, is_online: bool) -> Self {
+        Self {
+            project_a_tag,
+            project_name,
+            project_pubkey,
+            is_online,
+            selected_index: 0,
+        }
+    }
+
+    pub fn available_actions(&self) -> Vec<ProjectAction> {
+        if self.is_online {
+            vec![ProjectAction::Settings]
+        } else {
+            vec![ProjectAction::Boot, ProjectAction::Settings]
+        }
+    }
+
+    pub fn selected_action(&self) -> Option<ProjectAction> {
+        self.available_actions().get(self.selected_index).copied()
+    }
+}
+
 /// Unified modal state - only one modal can be open at a time
 #[derive(Debug, Clone)]
 pub enum ModalState {
@@ -122,6 +356,10 @@ pub enum ModalState {
     },
     AskModal(AskModalState),
     ProjectSettings(ProjectSettingsState),
+    /// Create new project wizard
+    CreateProject(CreateProjectState),
+    /// Nudge selector for adding nudges to messages
+    NudgeSelector(NudgeSelectorState),
     /// Message action menu (/) - shows available actions for selected message
     MessageActions {
         message_id: String,
@@ -136,6 +374,10 @@ pub enum ModalState {
     },
     /// Hotkey help modal (Ctrl+T+?)
     HotkeyHelp,
+    /// Create/fork/clone agent definition wizard
+    CreateAgent(CreateAgentState),
+    /// Project actions modal (boot, settings)
+    ProjectActions(ProjectActionsState),
 }
 
 impl Default for ModalState {
