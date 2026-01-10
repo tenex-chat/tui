@@ -299,6 +299,50 @@ mod tests {
     }
 
     #[test]
+    fn test_get_projects_with_agent_tags() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let keys = Keys::generate();
+        // Use valid 64-character hex strings (event IDs)
+        let agent_id_1 = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
+        let agent_id_2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+        let event = EventBuilder::new(Kind::Custom(31933), "Description")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["proj-with-agents".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Project With Agents".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
+                vec![agent_id_1.to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
+                vec![agent_id_2.to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event], None).unwrap();
+
+        // Wait for async processing
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let projects = get_projects(&db.ndb).unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].name, "Project With Agents");
+        assert_eq!(projects[0].agent_ids.len(), 2, "Expected 2 agent IDs, got {:?}", projects[0].agent_ids);
+        assert_eq!(projects[0].agent_ids[0], agent_id_1);
+        assert_eq!(projects[0].agent_ids[1], agent_id_2);
+    }
+
+    #[test]
     fn test_get_threads_for_project() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();

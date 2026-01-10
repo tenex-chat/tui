@@ -177,11 +177,21 @@ async fn run_app(
                             } else if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
                                 // Ctrl+V - check clipboard for image
                                 app.pending_quit = false;
+                                app.prefix_key_active = false;
                                 if app.view == View::Chat && app.input_mode == InputMode::Editing {
                                     if let Some(keys) = app.keys.clone() {
                                         handle_clipboard_paste(app, &keys, upload_tx.clone());
                                     }
                                 }
+                            } else if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                                // Ctrl+T - activate prefix key mode (tmux-style)
+                                app.pending_quit = false;
+                                app.prefix_key_active = true;
+                            } else if app.prefix_key_active {
+                                // Handle prefix key commands (Ctrl+T + key)
+                                app.prefix_key_active = false;
+                                app.pending_quit = false;
+                                handle_prefix_key(app, key);
                             } else {
                                 // Any other key clears pending quit state
                                 app.pending_quit = false;
@@ -239,6 +249,10 @@ async fn run_app(
                 let _span = info_span!("ndb_subscription", note_count = note_keys.len()).entered();
                 let events = core_runtime.process_note_keys(&note_keys)?;
                 handle_core_events(app, events);
+
+                // Check for pending new thread and navigate to it if found
+                check_pending_new_thread(app);
+
                 debug!("core_runtime processing complete");
             }
 
@@ -301,6 +315,33 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                 }
             }
         }
+    }
+}
+
+/// Check if a pending new thread has arrived and navigate to it
+fn check_pending_new_thread(app: &mut App) {
+    let Some(project_a_tag) = app.pending_new_thread_project.clone() else {
+        return;
+    };
+
+    let user_pubkey = app.keys.as_ref().map(|k| k.public_key().to_hex());
+    let Some(user_pubkey) = user_pubkey else {
+        return;
+    };
+
+    // Find the most recent thread from user (threads sorted by last_activity desc)
+    let thread = {
+        let store = app.data_store.borrow();
+        store.get_threads(&project_a_tag)
+            .iter()
+            .find(|t| t.pubkey == user_pubkey)
+            .cloned()
+    };
+
+    if let Some(thread) = thread {
+        app.pending_new_thread_project = None;
+        app.creating_thread = false;
+        app.open_thread_from_home(&thread, &project_a_tag);
     }
 }
 
@@ -472,6 +513,24 @@ fn handle_key(
         return Ok(());
     }
 
+    // Handle message actions modal when open
+    if matches!(app.modal_state, ModalState::MessageActions { .. }) {
+        handle_message_actions_modal_key(app, key);
+        return Ok(());
+    }
+
+    // Handle view raw event modal when open
+    if matches!(app.modal_state, ModalState::ViewRawEvent { .. }) {
+        handle_view_raw_event_modal_key(app, key);
+        return Ok(());
+    }
+
+    // Handle hotkey help modal when open
+    if matches!(app.modal_state, ModalState::HotkeyHelp) {
+        handle_hotkey_help_modal_key(app, key);
+        return Ok(());
+    }
+
     // Global tab navigation with Alt key (works in all views except Login)
     // These bindings work regardless of input mode
     if app.view != View::Login {
@@ -539,11 +598,6 @@ fn handle_key(
         let has_alt = modifiers.contains(KeyModifiers::ALT);
 
         match code {
-            // Alt+M = toggle LLM metadata display
-            KeyCode::Char('m') if has_alt => {
-                app.show_llm_metadata = !app.show_llm_metadata;
-                return Ok(());
-            }
             // Alt+B = open branch selector
             KeyCode::Char('b') if has_alt => {
                 app.open_branch_selector();
@@ -569,6 +623,11 @@ fn handle_key(
             // x closes current tab
             KeyCode::Char('x') => {
                 app.close_current_tab();
+                return Ok(());
+            }
+            // / = open message actions modal
+            KeyCode::Char('/') => {
+                app.open_message_actions_modal();
                 return Ok(());
             }
             _ => {}
@@ -1346,11 +1405,8 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                         }) {
                             app.set_status(&format!("Failed to create thread: {}", e));
                         } else {
-                            app.creating_thread = false;
-                            app.set_status("Thread created");
-                            // Navigate back to home - the new thread will appear there
-                            app.view = View::Home;
-                            app.input_mode = InputMode::Normal;
+                            // Navigate to it once it arrives via subscription
+                            app.pending_new_thread_project = Some(project_a_tag.clone());
                         }
                     }
                 }
@@ -1916,4 +1972,165 @@ fn image_to_png(image: &arboard::ImageData) -> anyhow::Result<Vec<u8>> {
     }
 
     Ok(png_data)
+}
+
+/// Handle key events for the message actions modal
+fn handle_message_actions_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::MessageAction;
+
+    let code = key.code;
+
+    // Get current state
+    let (message_id, selected_index, has_trace) = match &app.modal_state {
+        ModalState::MessageActions {
+            message_id,
+            selected_index,
+            has_trace,
+        } => (message_id.clone(), *selected_index, *has_trace),
+        _ => return,
+    };
+
+    // Count available actions
+    let action_count = if has_trace { 4 } else { 3 };
+
+    match code {
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if selected_index > 0 {
+                if let ModalState::MessageActions {
+                    selected_index: ref mut idx,
+                    ..
+                } = app.modal_state
+                {
+                    *idx -= 1;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if selected_index + 1 < action_count {
+                if let ModalState::MessageActions {
+                    selected_index: ref mut idx,
+                    ..
+                } = app.modal_state
+                {
+                    *idx += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            // Execute selected action
+            let actions: Vec<MessageAction> = MessageAction::ALL
+                .iter()
+                .filter(|a| has_trace || !matches!(a, MessageAction::OpenTrace))
+                .copied()
+                .collect();
+
+            if let Some(action) = actions.get(selected_index) {
+                app.execute_message_action(&message_id, *action);
+            }
+        }
+        // Direct hotkeys
+        KeyCode::Char('c') => {
+            app.execute_message_action(&message_id, MessageAction::CopyRawEvent);
+        }
+        KeyCode::Char('s') => {
+            app.execute_message_action(&message_id, MessageAction::SendAgain);
+        }
+        KeyCode::Char('v') => {
+            app.execute_message_action(&message_id, MessageAction::ViewRawEvent);
+        }
+        KeyCode::Char('t') if has_trace => {
+            app.execute_message_action(&message_id, MessageAction::OpenTrace);
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events for the view raw event modal
+fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+
+    match code {
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let ModalState::ViewRawEvent {
+                scroll_offset: ref mut offset,
+                ..
+            } = app.modal_state
+            {
+                *offset = offset.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let ModalState::ViewRawEvent {
+                scroll_offset: ref mut offset,
+                ..
+            } = app.modal_state
+            {
+                *offset += 1;
+            }
+        }
+        KeyCode::PageUp => {
+            if let ModalState::ViewRawEvent {
+                scroll_offset: ref mut offset,
+                ..
+            } = app.modal_state
+            {
+                *offset = offset.saturating_sub(20);
+            }
+        }
+        KeyCode::PageDown => {
+            if let ModalState::ViewRawEvent {
+                scroll_offset: ref mut offset,
+                ..
+            } = app.modal_state
+            {
+                *offset += 20;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle prefix key commands (Ctrl+T + key)
+fn handle_prefix_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        // m = toggle LLM metadata display
+        KeyCode::Char('m') => {
+            app.toggle_llm_metadata();
+            let status = if app.show_llm_metadata {
+                "LLM metadata: ON"
+            } else {
+                "LLM metadata: OFF"
+            };
+            app.set_status(status);
+        }
+        // ? = show hotkey help
+        KeyCode::Char('?') => {
+            app.modal_state = ModalState::HotkeyHelp;
+        }
+        // t = toggle todo sidebar (same as plain 't' in normal mode, but available everywhere)
+        KeyCode::Char('t') => {
+            app.todo_sidebar_visible = !app.todo_sidebar_visible;
+        }
+        // Unknown prefix command - ignore
+        _ => {}
+    }
+}
+
+/// Handle key events for the hotkey help modal
+fn handle_hotkey_help_modal_key(app: &mut App, key: KeyEvent) {
+    // Any key closes the modal
+    match key.code {
+        KeyCode::Esc | KeyCode::Enter | KeyCode::Char('?') | KeyCode::Char('q') => {
+            app.modal_state = ModalState::None;
+        }
+        _ => {
+            app.modal_state = ModalState::None;
+        }
+    }
 }

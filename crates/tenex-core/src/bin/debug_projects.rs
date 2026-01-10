@@ -17,25 +17,46 @@ fn main() -> Result<()> {
 
     // Parse as projects (check that Project::from_note works)
     let mut project_count = 0;
-    for result in results.iter().take(5) {
+    let mut projects_with_agents = 0;
+    for result in results.iter() {
         if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
             project_count += 1;
-            // Get name from tags
+            // Get name and agent tags
             let mut name = String::from("<unnamed>");
+            let mut agent_ids: Vec<String> = Vec::new();
             for tag in note.tags() {
                 if tag.count() >= 2 {
                     if let Some(first) = tag.get(0).and_then(|s| s.variant().str()) {
-                        if first == "name" {
+                        if first == "name" || first == "title" {
                             if let Some(n) = tag.get(1).and_then(|s| s.variant().str()) {
-                                name = n.to_string();
+                                if name == "<unnamed>" {
+                                    name = n.to_string();
+                                }
+                            }
+                        }
+                        if first == "agent" {
+                            if let Some(elem) = tag.get(1) {
+                                // nostrdb stores event IDs as binary Id variant
+                                if let Some(id_bytes) = elem.variant().id() {
+                                    agent_ids.push(hex::encode(id_bytes));
+                                } else if let Some(s) = elem.variant().str() {
+                                    agent_ids.push(s.to_string());
+                                }
                             }
                         }
                     }
                 }
             }
-            println!("  {}. {} - {}", project_count, name, &note.content()[..50.min(note.content().len())]);
+            if !agent_ids.is_empty() {
+                projects_with_agents += 1;
+                if projects_with_agents <= 10 {
+                    println!("  {}. {} - {} agent(s): {:?}", project_count, name, agent_ids.len(), agent_ids);
+                }
+            }
         }
     }
+
+    println!("\n  Total: {} projects, {} with agent tags", project_count, projects_with_agents);
 
     if results.len() > 5 {
         println!("  ... and {} more", results.len() - 5);

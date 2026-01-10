@@ -66,6 +66,42 @@ impl ProjectSettingsState {
     }
 }
 
+/// Message action types
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageAction {
+    CopyRawEvent,
+    SendAgain,
+    ViewRawEvent,
+    OpenTrace,
+}
+
+impl MessageAction {
+    pub const ALL: [MessageAction; 4] = [
+        MessageAction::CopyRawEvent,
+        MessageAction::SendAgain,
+        MessageAction::ViewRawEvent,
+        MessageAction::OpenTrace,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            MessageAction::CopyRawEvent => "Copy Raw Event",
+            MessageAction::SendAgain => "Send Again (New Conversation)",
+            MessageAction::ViewRawEvent => "View Raw Event",
+            MessageAction::OpenTrace => "Open Trace in Jaeger",
+        }
+    }
+
+    pub fn hotkey(&self) -> char {
+        match self {
+            MessageAction::CopyRawEvent => 'c',
+            MessageAction::SendAgain => 's',
+            MessageAction::ViewRawEvent => 'v',
+            MessageAction::OpenTrace => 't',
+        }
+    }
+}
+
 /// Unified modal state - only one modal can be open at a time
 #[derive(Debug, Clone)]
 pub enum ModalState {
@@ -86,6 +122,20 @@ pub enum ModalState {
     },
     AskModal(AskModalState),
     ProjectSettings(ProjectSettingsState),
+    /// Message action menu (/) - shows available actions for selected message
+    MessageActions {
+        message_id: String,
+        selected_index: usize,
+        has_trace: bool,
+    },
+    /// View raw event JSON in a scrollable modal
+    ViewRawEvent {
+        message_id: String,
+        json: String,
+        scroll_offset: usize,
+    },
+    /// Hotkey help modal (Ctrl+T+?)
+    HotkeyHelp,
 }
 
 impl Default for ModalState {

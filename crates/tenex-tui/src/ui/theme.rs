@@ -92,6 +92,27 @@ pub fn user_color(pubkey: &str) -> Color {
     USER_PALETTE[hash % USER_PALETTE.len()]
 }
 
+// -----------------------------------------------------------------------------
+// LLM Metadata Colors - For displaying token counts, model info, etc.
+// -----------------------------------------------------------------------------
+
+pub const LLM_METADATA_PALETTE: [Color; 8] = [
+    Color::Rgb(86, 156, 214),  // Blue - prompt
+    Color::Rgb(106, 153, 85),  // Green - completion
+    Color::Rgb(169, 154, 203), // Purple - total
+    Color::Rgb(206, 145, 120), // Orange - model
+    Color::Rgb(180, 100, 140), // Pink - ral
+    Color::Rgb(78, 154, 154),  // Cyan - cached
+    Color::Rgb(180, 180, 120), // Yellow - reasoning
+    Color::Rgb(180, 100, 100), // Red - cost
+];
+
+/// Get a deterministic color for an LLM metadata key
+pub fn llm_metadata_color(key: &str) -> Color {
+    let hash: usize = key.bytes().map(|b| b as usize).sum();
+    LLM_METADATA_PALETTE[hash % LLM_METADATA_PALETTE.len()]
+}
+
 // =============================================================================
 // STYLE FUNCTIONS - Semantic styles for common UI patterns
 // =============================================================================

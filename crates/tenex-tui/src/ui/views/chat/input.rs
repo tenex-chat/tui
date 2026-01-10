@@ -1,3 +1,4 @@
+use crate::ui::card;
 use crate::ui::{theme, App, InputMode, ModalState};
 use ratatui::{
     layout::Rect,
@@ -8,9 +9,9 @@ use ratatui::{
 };
 
 pub(crate) fn input_height(app: &App) -> u16 {
-    // +3 = 1 for padding top, 1 for context line at bottom, 1 extra for visual breathing room
+    // +5 = 1 for padding top, 1 for context line at bottom, 2 for half-block borders, 1 extra
     let line_count = app.chat_editor.line_count().max(1);
-    (line_count as u16 + 3).clamp(4, 12)
+    (line_count as u16 + 5).clamp(6, 14)
 }
 
 pub(crate) fn has_attachments(app: &App) -> bool {
@@ -204,7 +205,8 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Reserve last line for context - pad middle lines to fill space
-    let target_height = area.height.saturating_sub(1) as usize; // -1 for context line
+    // Content area is area.height - 2 (for half-block borders), minus 1 for context line
+    let target_height = area.height.saturating_sub(3) as usize;
     while lines.len() < target_height {
         lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
@@ -235,11 +237,34 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(" ".repeat(context_pad), Style::default().bg(input_bg)),
     ]));
 
+    // Render with half-block borders for visual padding effect
+    let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄
+    let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER.horizontal_top.repeat(area.width as usize); // ▀
+
+    // Top half-block line (fg=input bg color, no bg - creates "growing down" effect)
+    let top_area = Rect::new(area.x, area.y, area.width, 1);
+    let top_line = Paragraph::new(Line::from(Span::styled(
+        half_block_top,
+        Style::default().fg(input_bg),
+    )));
+    f.render_widget(top_line, top_area);
+
+    // Content area (with input background)
+    let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
     let input = Paragraph::new(lines).style(Style::default().bg(input_bg));
-    f.render_widget(input, area);
+    f.render_widget(input, content_area);
+
+    // Bottom half-block line (fg=input bg color, no bg - creates "growing up" effect)
+    let bottom_y = area.y + area.height.saturating_sub(1);
+    let bottom_area = Rect::new(area.x, bottom_y, area.width, 1);
+    let bottom_line = Paragraph::new(Line::from(Span::styled(
+        half_block_bottom,
+        Style::default().fg(input_bg),
+    )));
+    f.render_widget(bottom_line, bottom_area);
 
     // Show cursor in input mode (but not when ask modal is active)
-    // +1 for top padding line, +3 for "│  " prefix
+    // +2 for half-block top + top padding line, +3 for "│  " prefix
     if is_input_active && !app.is_attachment_modal_open() {
         // Calculate visual cursor position accounting for line wrapping
         let cursor_pos = app.chat_editor.cursor;
@@ -255,7 +280,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
 
         f.set_cursor_position((
             area.x + visual_col as u16 + 3, // +3 for "│  "
-            area.y + visual_row as u16 + 1, // +1 for top padding
+            area.y + visual_row as u16 + 2, // +2 for half-block top + top padding
         ));
     }
 }

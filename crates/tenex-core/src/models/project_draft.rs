@@ -72,6 +72,8 @@ pub struct Preferences {
     pub only_by_me: bool,
     #[serde(default)]
     pub time_filter: Option<TimeFilter>,
+    #[serde(default)]
+    pub show_llm_metadata: bool,
 }
 
 pub struct PreferencesStorage {
@@ -130,6 +132,15 @@ impl PreferencesStorage {
 
     pub fn set_time_filter(&mut self, filter: Option<TimeFilter>) {
         self.prefs.time_filter = filter;
+        self.save_to_file();
+    }
+
+    pub fn show_llm_metadata(&self) -> bool {
+        self.prefs.show_llm_metadata
+    }
+
+    pub fn set_show_llm_metadata(&mut self, value: bool) {
+        self.prefs.show_llm_metadata = value;
         self.save_to_file();
     }
 }

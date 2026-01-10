@@ -177,15 +177,21 @@ pub struct App {
     /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
     pub show_llm_metadata: bool,
 
+    /// Prefix key mode (ctrl+t was pressed, waiting for next key)
+    pub prefix_key_active: bool,
+
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
 
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
 
-    /// When creating a new thread, stores (project_a_tag, user_pubkey, created_after_timestamp)
-    /// The timestamp ensures we find the newly created thread, not an existing one
-    pub pending_new_thread: Option<(String, String, u64)>,
+    /// Expanded message groups (group key = first message ID)
+    /// When a group is in this set, all collapsed messages are shown
+    pub expanded_groups: HashSet<String>,
+
+    /// Project a_tag when waiting for a newly created thread to appear
+    pub pending_new_thread_project: Option<String>,
 }
 
 impl App {
@@ -252,9 +258,11 @@ impl App {
             search_index: 0,
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
+            prefix_key_active: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
-            pending_new_thread: None,
+            expanded_groups: HashSet::new(),
+            pending_new_thread_project: None,
         }
     }
 
@@ -265,6 +273,20 @@ impl App {
         } else {
             self.collapsed_threads.insert(thread_id.to_string());
         }
+    }
+
+    /// Toggle expansion for a message group (group key = first message ID)
+    pub fn toggle_group_expansion(&mut self, group_key: &str) {
+        if self.expanded_groups.contains(group_key) {
+            self.expanded_groups.remove(group_key);
+        } else {
+            self.expanded_groups.insert(group_key.to_string());
+        }
+    }
+
+    /// Check if a message group is expanded
+    pub fn is_group_expanded(&self, group_key: &str) -> bool {
+        self.expanded_groups.contains(group_key)
     }
 
     /// Get project status for a project - delegates to data store
@@ -1365,6 +1387,7 @@ impl App {
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
         self.only_by_me = prefs.only_by_me();
         self.time_filter = prefs.time_filter();
+        self.show_llm_metadata = prefs.show_llm_metadata();
     }
 
     /// Save selected projects to preferences
@@ -1383,6 +1406,12 @@ impl App {
     pub fn cycle_time_filter(&mut self) {
         self.time_filter = TimeFilter::cycle_next(self.time_filter);
         self.preferences.borrow_mut().set_time_filter(self.time_filter);
+    }
+
+    /// Toggle LLM metadata display and persist
+    pub fn toggle_llm_metadata(&mut self) {
+        self.show_llm_metadata = !self.show_llm_metadata;
+        self.preferences.borrow_mut().set_show_llm_metadata(self.show_llm_metadata);
     }
 
     // ===== Agent Browser Methods =====

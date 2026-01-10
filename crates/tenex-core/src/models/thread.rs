@@ -1,5 +1,7 @@
 use nostrdb::Note;
 
+use super::message::{AskEvent, Message};
+
 #[derive(Debug, Clone)]
 pub struct Thread {
     pub id: String,
@@ -16,6 +18,8 @@ pub struct Thread {
     pub parent_conversation_id: Option<String>,
     /// Pubkeys mentioned in p-tags of the root event
     pub p_tags: Vec<String>,
+    /// Ask event data if this thread contains questions
+    pub ask_event: Option<AskEvent>,
 }
 
 impl Thread {
@@ -79,6 +83,9 @@ impl Thread {
 
         let content = note.content().to_string();
 
+        // Parse ask event data if present
+        let ask_event = Message::parse_ask_event(note);
+
         Some(Thread {
             id,
             title: title.unwrap_or_else(|| "Untitled".to_string()),
@@ -89,6 +96,7 @@ impl Thread {
             status_current_activity: None,
             parent_conversation_id,
             p_tags,
+            ask_event,
         })
     }
 }

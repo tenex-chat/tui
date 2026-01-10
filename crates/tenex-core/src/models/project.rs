@@ -42,8 +42,13 @@ impl Project {
                     }
                 }
                 Some("agent") => {
-                    if let Some(agent_id) = tag.get(1).and_then(|t| t.variant().str()) {
-                        agent_ids.push(agent_id.to_string());
+                    if let Some(elem) = tag.get(1) {
+                        // nostrdb stores event IDs as binary Id variant, not as strings
+                        if let Some(id_bytes) = elem.variant().id() {
+                            agent_ids.push(hex::encode(id_bytes));
+                        } else if let Some(s) = elem.variant().str() {
+                            agent_ids.push(s.to_string());
+                        }
                     }
                 }
                 _ => {}

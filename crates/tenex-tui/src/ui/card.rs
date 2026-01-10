@@ -20,3 +20,18 @@ pub const TODO_DONE_GLYPH: &str = CHECKMARK;
 pub const TODO_IN_PROGRESS_GLYPH: &str = "\u{25d0}";
 pub const TODO_PENDING_GLYPH: &str = HOLLOW_BULLET_GLYPH;
 pub const META_SEPARATOR: &str = " \u{2022} ";
+
+// Half-block border characters (like lipgloss OuterHalfBlockBorder)
+// Creates visually "half-height" borders for softer edges
+use ratatui::symbols::border::Set;
+
+pub const OUTER_HALF_BLOCK_BORDER: Set = Set {
+    top_left: "\u{259B}",     // ▛
+    top_right: "\u{259C}",    // ▜
+    bottom_left: "\u{2599}",  // ▙
+    bottom_right: "\u{259F}", // ▟
+    vertical_left: "\u{258C}",  // ▌
+    vertical_right: "\u{2590}", // ▐
+    horizontal_top: "\u{2580}", // ▀
+    horizontal_bottom: "\u{2584}", // ▄
+};

@@ -15,7 +15,7 @@ use ratatui::{
 use std::rc::Rc;
 use tracing::info_span;
 
-use super::{input, messages};
+use super::{actions, input, messages};
 
 pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
@@ -112,6 +112,31 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render tab modal if showing (Alt+/)
     if app.showing_tab_modal {
         super::super::home::render_tab_modal(f, app, area);
+    }
+
+    // Render message actions modal if showing
+    if let ModalState::MessageActions {
+        selected_index,
+        has_trace,
+        ..
+    } = &app.modal_state
+    {
+        actions::render_message_actions_modal(f, *selected_index, *has_trace, area);
+    }
+
+    // Render view raw event modal if showing
+    if let ModalState::ViewRawEvent {
+        json,
+        scroll_offset,
+        ..
+    } = &app.modal_state
+    {
+        actions::render_view_raw_event_modal(f, json, *scroll_offset, area);
+    }
+
+    // Render hotkey help modal if showing
+    if matches!(app.modal_state, ModalState::HotkeyHelp) {
+        actions::render_hotkey_help_modal(f, area);
     }
 }
 
