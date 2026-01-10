@@ -163,6 +163,8 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         ("Prefix Commands (Ctrl+T + key)", vec![
             ("m", "Toggle LLM metadata display"),
             ("t", "Toggle todo sidebar"),
+            ("v", "Toggle vim mode"),
+            ("A", "Toggle show archived"),
             ("?", "Show this help"),
         ]),
         ("Navigation", vec![
@@ -196,10 +198,16 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         ("Input Mode", vec![
             ("Enter", "Send message"),
             ("Alt+Enter", "New line"),
-            ("Ctrl+A", "Start of line"),
-            ("Ctrl+E", "End of line"),
+            ("Ctrl+Z", "Undo"),
+            ("Ctrl+Shift+Z", "Redo"),
+            ("Ctrl+A", "Select all"),
+            ("Ctrl+C/X", "Copy/Cut selection"),
+            ("Ctrl+E", "Expand to full-screen editor"),
             ("Ctrl+K", "Delete to end of line"),
+            ("Shift+←/→", "Extend selection"),
             ("Alt+←/→", "Word left/right"),
+            ("↑ (empty)", "Previous sent message"),
+            ("↓ (history)", "Next sent message"),
         ]),
     ];
 

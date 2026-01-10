@@ -49,6 +49,12 @@ pub struct TextEditor {
     next_image_id: usize,
     /// Currently focused attachment index (None = main input focused)
     pub focused_attachment: Option<usize>,
+    /// Undo stack: (text, cursor) snapshots
+    undo_stack: Vec<(String, usize)>,
+    /// Redo stack: (text, cursor) snapshots
+    redo_stack: Vec<(String, usize)>,
+    /// Selection anchor (start of selection, cursor is end)
+    pub selection_anchor: Option<usize>,
 }
 
 impl Default for TextEditor {
@@ -67,7 +73,113 @@ impl TextEditor {
             image_attachments: Vec::new(),
             next_image_id: 1,
             focused_attachment: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            selection_anchor: None,
         }
+    }
+
+    /// Push current state to undo stack (call before any mutation)
+    fn push_undo_state(&mut self) {
+        self.undo_stack.push((self.text.clone(), self.cursor));
+        // New edit invalidates redo
+        self.redo_stack.clear();
+        // Limit undo stack size
+        if self.undo_stack.len() > 100 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Undo last change
+    pub fn undo(&mut self) {
+        if let Some((text, cursor)) = self.undo_stack.pop() {
+            self.redo_stack.push((self.text.clone(), self.cursor));
+            self.text = text;
+            self.cursor = cursor;
+        }
+    }
+
+    /// Redo last undone change
+    pub fn redo(&mut self) {
+        if let Some((text, cursor)) = self.redo_stack.pop() {
+            self.undo_stack.push((self.text.clone(), self.cursor));
+            self.text = text;
+            self.cursor = cursor;
+        }
+    }
+
+    /// Check if there's an active selection
+    pub fn has_selection(&self) -> bool {
+        self.selection_anchor.is_some()
+    }
+
+    /// Get selection range as (start, end) byte offsets
+    pub fn selection_range(&self) -> Option<(usize, usize)> {
+        self.selection_anchor.map(|anchor| {
+            (anchor.min(self.cursor), anchor.max(self.cursor))
+        })
+    }
+
+    /// Get selected text
+    pub fn selected_text(&self) -> Option<String> {
+        self.selection_range().map(|(start, end)| self.text[start..end].to_string())
+    }
+
+    /// Delete the selected text
+    pub fn delete_selection(&mut self) {
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.push_undo_state();
+                self.text.drain(start..end);
+                self.cursor = start;
+                self.selection_anchor = None;
+            }
+        }
+    }
+
+    /// Select all text
+    pub fn select_all(&mut self) {
+        if !self.text.is_empty() {
+            self.selection_anchor = Some(0);
+            self.cursor = self.text.len();
+        }
+    }
+
+    /// Clear selection without modifying text
+    pub fn clear_selection(&mut self) {
+        self.selection_anchor = None;
+    }
+
+    /// Move left extending selection (Shift+Left)
+    pub fn move_left_extend_selection(&mut self) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.move_left();
+    }
+
+    /// Move right extending selection (Shift+Right)
+    pub fn move_right_extend_selection(&mut self) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.move_right();
+    }
+
+    /// Move word left extending selection (Shift+Alt+Left)
+    pub fn move_word_left_extend_selection(&mut self) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.move_word_left();
+    }
+
+    /// Move word right extending selection (Shift+Alt+Right)
+    pub fn move_word_right_extend_selection(&mut self) {
+        if self.selection_anchor.is_none() {
+            self.selection_anchor = Some(self.cursor);
+        }
+        self.move_word_right();
     }
 
     /// Check if text should become an attachment (>5 lines or >500 chars)
@@ -77,8 +189,18 @@ impl TextEditor {
         line_count > 5 || char_count > 500
     }
 
-    /// Handle pasted text - may become attachment if large
+    /// Handle pasted text - may become attachment if large (replaces selection if any)
+    /// Uses smart paste detection for JSON and code
     pub fn handle_paste(&mut self, text: &str) {
+        self.push_undo_state();
+        // Delete selection first if any
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.text.drain(start..end);
+                self.cursor = start;
+            }
+        }
+        self.selection_anchor = None;
         if Self::should_be_attachment(text) {
             let attachment = PasteAttachment {
                 id: self.next_attachment_id,
@@ -87,16 +209,180 @@ impl TextEditor {
             self.next_attachment_id += 1;
             self.attachments.push(attachment);
         } else {
+            // Apply smart paste detection for code/JSON
+            let formatted = self.smart_format_paste(text);
             // Insert at cursor position
-            self.text.insert_str(self.cursor, text);
-            self.cursor += text.len();
+            self.text.insert_str(self.cursor, &formatted);
+            self.cursor += formatted.len();
         }
     }
 
-    /// Insert a single character at cursor
+    /// Detect content type and wrap in appropriate markdown code block
+    fn smart_format_paste(&self, text: &str) -> String {
+        let trimmed = text.trim();
+
+        // Skip if already in a code block
+        if trimmed.starts_with("```") {
+            return text.to_string();
+        }
+
+        // Skip short single-line text (likely just a word or phrase)
+        if !trimmed.contains('\n') && trimmed.len() < 50 {
+            return text.to_string();
+        }
+
+        // Detect JSON
+        if Self::looks_like_json(trimmed) {
+            return format!("```json\n{}\n```", trimmed);
+        }
+
+        // Detect various code patterns
+        if let Some(lang) = Self::detect_code_language(trimmed) {
+            return format!("```{}\n{}\n```", lang, trimmed);
+        }
+
+        text.to_string()
+    }
+
+    /// Check if text looks like JSON
+    fn looks_like_json(text: &str) -> bool {
+        let trimmed = text.trim();
+        // Must start with { or [ and end with } or ]
+        (trimmed.starts_with('{') && trimmed.ends_with('}'))
+            || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    }
+
+    /// Detect programming language from code patterns
+    fn detect_code_language(text: &str) -> Option<&'static str> {
+        // Rust
+        if text.contains("fn ") && text.contains("->")
+            || text.contains("impl ")
+            || text.contains("pub struct ")
+            || text.contains("use std::")
+            || text.contains("#[derive(")
+        {
+            return Some("rust");
+        }
+
+        // TypeScript/JavaScript
+        if text.contains("import ") && text.contains(" from ")
+            || text.contains("export ")
+            || text.contains("const ") && text.contains(" = ")
+            || text.contains("function ")
+            || text.contains("=> {")
+        {
+            // Distinguish TypeScript from JavaScript
+            if text.contains(": string")
+                || text.contains(": number")
+                || text.contains(": boolean")
+                || text.contains("interface ")
+                || text.contains("<T>")
+            {
+                return Some("typescript");
+            }
+            return Some("javascript");
+        }
+
+        // Python
+        if text.contains("def ") && text.contains(":")
+            || text.contains("import ")
+                && !text.contains(" from \"")
+                && !text.contains(" from '")
+            || text.contains("class ") && text.contains(":")
+            || text.contains("if __name__")
+        {
+            return Some("python");
+        }
+
+        // Go
+        if text.contains("func ") && text.contains("package ")
+            || text.contains("type ") && text.contains(" struct {")
+        {
+            return Some("go");
+        }
+
+        // Shell/Bash
+        if text.starts_with("#!/bin/")
+            || text.starts_with("$ ")
+            || (text.contains("echo ") && text.contains("&&"))
+        {
+            return Some("bash");
+        }
+
+        // HTML
+        if text.contains("<!DOCTYPE") || text.contains("<html") || text.contains("<div") {
+            return Some("html");
+        }
+
+        // CSS
+        if text.contains("{") && (text.contains("color:") || text.contains("display:")) {
+            return Some("css");
+        }
+
+        // SQL
+        if text.to_uppercase().contains("SELECT ")
+            && (text.to_uppercase().contains(" FROM ")
+                || text.to_uppercase().contains(" WHERE "))
+        {
+            return Some("sql");
+        }
+
+        None
+    }
+
+    /// Get the matching closing character for auto-pair
+    fn auto_pair_closing(c: char) -> Option<char> {
+        match c {
+            '(' => Some(')'),
+            '[' => Some(']'),
+            '{' => Some('}'),
+            '"' => Some('"'),
+            '\'' => Some('\''),
+            '`' => Some('`'),
+            _ => None,
+        }
+    }
+
+    /// Check if a character is a closing bracket/quote
+    fn is_closing_char(c: char) -> bool {
+        matches!(c, ')' | ']' | '}' | '"' | '\'' | '`')
+    }
+
+    /// Insert a single character at cursor (replaces selection if any, supports auto-pair)
     pub fn insert_char(&mut self, c: char) {
-        self.text.insert(self.cursor, c);
-        self.cursor += c.len_utf8();
+        // Check for skip-over: if typing a closing char that matches what's at cursor
+        if Self::is_closing_char(c) {
+            if let Some(next_char) = self.text.get(self.cursor..).and_then(|s| s.chars().next()) {
+                if c == next_char {
+                    // Just move cursor past the closing char (skip over)
+                    self.selection_anchor = None;
+                    self.cursor += c.len_utf8();
+                    return;
+                }
+            }
+        }
+
+        self.push_undo_state();
+        // Delete selection first if any
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.text.drain(start..end);
+                self.cursor = start;
+            }
+        }
+        self.selection_anchor = None;
+
+        // Check for auto-pair
+        if let Some(closing) = Self::auto_pair_closing(c) {
+            // Insert both opening and closing, cursor between them
+            self.text.insert(self.cursor, c);
+            self.cursor += c.len_utf8();
+            self.text.insert(self.cursor, closing);
+            // Cursor stays between the pair (don't advance past closing)
+        } else {
+            self.text.insert(self.cursor, c);
+            self.cursor += c.len_utf8();
+        }
     }
 
     /// Insert a newline at cursor
@@ -104,9 +390,21 @@ impl TextEditor {
         self.insert_char('\n');
     }
 
-    /// Delete character before cursor (backspace)
+    /// Delete character before cursor (backspace) - deletes selection if any
     pub fn delete_char_before(&mut self) {
+        // If there's a selection, delete it instead
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.push_undo_state();
+                self.text.drain(start..end);
+                self.cursor = start;
+                self.selection_anchor = None;
+                return;
+            }
+        }
+        self.selection_anchor = None;
         if self.cursor > 0 {
+            self.push_undo_state();
             // Find the previous character boundary
             let prev_boundary = self.text[..self.cursor]
                 .char_indices()
@@ -118,9 +416,21 @@ impl TextEditor {
         }
     }
 
-    /// Delete character at cursor (delete key)
+    /// Delete character at cursor (delete key) - deletes selection if any
     pub fn delete_char_at(&mut self) {
+        // If there's a selection, delete it instead
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.push_undo_state();
+                self.text.drain(start..end);
+                self.cursor = start;
+                self.selection_anchor = None;
+                return;
+            }
+        }
+        self.selection_anchor = None;
         if self.cursor < self.text.len() {
+            self.push_undo_state();
             self.text.remove(self.cursor);
         }
     }
@@ -171,7 +481,10 @@ impl TextEditor {
             .find('\n')
             .map(|i| self.cursor + i)
             .unwrap_or(self.text.len());
-        self.text.drain(self.cursor..end);
+        if self.cursor < end {
+            self.push_undo_state();
+            self.text.drain(self.cursor..end);
+        }
     }
 
     /// Move cursor to previous word boundary (Alt+Left)
@@ -218,6 +531,63 @@ impl TextEditor {
             .unwrap_or(after.len());
 
         self.cursor += next_word;
+    }
+
+    /// Move cursor up one line (preserving column position where possible)
+    pub fn move_up(&mut self) {
+        self.clear_selection();
+        let (row, col) = self.cursor_position();
+        if row == 0 {
+            // Already at first line, move to start
+            self.cursor = 0;
+            return;
+        }
+
+        // Find the start of the previous line
+        let lines: Vec<&str> = self.text.split('\n').collect();
+        let prev_line = lines[row - 1];
+        let prev_line_col = col.min(prev_line.len());
+
+        // Calculate byte offset to that position
+        let mut offset = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if i == row - 1 {
+                offset += prev_line_col;
+                break;
+            }
+            offset += line.len() + 1; // +1 for newline
+        }
+
+        self.cursor = offset;
+    }
+
+    /// Move cursor down one line (preserving column position where possible)
+    pub fn move_down(&mut self) {
+        self.clear_selection();
+        let (row, col) = self.cursor_position();
+        let lines: Vec<&str> = self.text.split('\n').collect();
+
+        if row >= lines.len().saturating_sub(1) {
+            // Already at last line, move to end
+            self.cursor = self.text.len();
+            return;
+        }
+
+        // Find the start of the next line
+        let next_line = lines[row + 1];
+        let next_line_col = col.min(next_line.len());
+
+        // Calculate byte offset to that position
+        let mut offset = 0;
+        for (i, line) in lines.iter().enumerate() {
+            if i == row + 1 {
+                offset += next_line_col;
+                break;
+            }
+            offset += line.len() + 1; // +1 for newline
+        }
+
+        self.cursor = offset;
     }
 
     /// Clear all content

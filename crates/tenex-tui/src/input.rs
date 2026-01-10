@@ -139,6 +139,12 @@ pub(crate) fn handle_key(
         return Ok(());
     }
 
+    // Handle expanded editor modal when open
+    if matches!(app.modal_state, ModalState::ExpandedEditor { .. }) {
+        handle_expanded_editor_key(app, key);
+        return Ok(());
+    }
+
     // Global tab navigation with Alt key (works in all views except Login)
     // These bindings work regardless of input mode
     if app.view != View::Login {
@@ -1608,6 +1614,27 @@ fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
 
 /// Handle key events for the chat editor (rich text editing)
 fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
+    use ui::app::VimMode;
+
+    // If vim mode is enabled, dispatch based on mode
+    if app.vim_enabled {
+        match app.vim_mode {
+            VimMode::Normal => {
+                handle_vim_normal_mode(app, key);
+                return;
+            }
+            VimMode::Insert => {
+                // Esc exits insert mode
+                if key.code == KeyCode::Esc {
+                    app.vim_enter_normal();
+                    app.save_chat_draft();
+                    return;
+                }
+                // Otherwise fall through to normal editing
+            }
+        }
+    }
+
     let code = key.code;
     let modifiers = key.modifiers;
     let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
@@ -1738,13 +1765,13 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
-        // Ctrl+A = move to beginning of line
+        // Ctrl+A = select all
         KeyCode::Char('a') if has_ctrl => {
-            app.chat_editor.move_to_line_start();
+            app.chat_editor.select_all();
         }
-        // Ctrl+E = move to end of line
+        // Ctrl+E = expand to full-screen editor modal
         KeyCode::Char('e') if has_ctrl => {
-            app.chat_editor.move_to_line_end();
+            app.open_expanded_editor_modal();
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
@@ -1851,6 +1878,239 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) => {
             app.chat_editor.insert_char(c);
             app.save_chat_draft();
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events for vim normal mode in chat editor
+fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+
+    match code {
+        // Mode switching
+        KeyCode::Char('i') => {
+            app.vim_enter_insert();
+        }
+        KeyCode::Char('a') => {
+            app.vim_enter_append();
+        }
+        KeyCode::Char('A') => {
+            // Append at end of line
+            app.chat_editor.move_to_line_end();
+            app.vim_enter_insert();
+        }
+        KeyCode::Char('I') => {
+            // Insert at beginning of line
+            app.chat_editor.move_to_line_start();
+            app.vim_enter_insert();
+        }
+        KeyCode::Char('o') => {
+            // Open line below
+            app.chat_editor.move_to_line_end();
+            app.chat_editor.insert_newline();
+            app.vim_enter_insert();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('O') => {
+            // Open line above
+            app.chat_editor.move_to_line_start();
+            app.chat_editor.insert_newline();
+            app.chat_editor.move_up();
+            app.vim_enter_insert();
+            app.save_chat_draft();
+        }
+
+        // Movement
+        KeyCode::Char('h') | KeyCode::Left => {
+            app.chat_editor.move_left();
+        }
+        KeyCode::Char('l') | KeyCode::Right => {
+            app.chat_editor.move_right();
+        }
+        KeyCode::Char('j') | KeyCode::Down => {
+            app.chat_editor.move_down();
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            app.chat_editor.move_up();
+        }
+        KeyCode::Char('w') => {
+            app.chat_editor.move_word_right();
+        }
+        KeyCode::Char('b') => {
+            app.chat_editor.move_word_left();
+        }
+        KeyCode::Char('0') => {
+            app.chat_editor.move_to_line_start();
+        }
+        KeyCode::Char('$') => {
+            app.chat_editor.move_to_line_end();
+        }
+
+        // Editing
+        KeyCode::Char('x') => {
+            app.chat_editor.delete_char_at();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('X') => {
+            app.chat_editor.delete_char_before();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('u') => {
+            app.chat_editor.undo();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.chat_editor.redo();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('D') => {
+            app.chat_editor.kill_to_line_end();
+            app.save_chat_draft();
+        }
+
+        // Esc in normal mode exits editing mode
+        KeyCode::Esc => {
+            app.save_chat_draft();
+            app.input_mode = InputMode::Normal;
+        }
+
+        _ => {}
+    }
+}
+
+/// Handle key events for the expanded editor modal (Ctrl+E)
+fn handle_expanded_editor_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+    let modifiers = key.modifiers;
+    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+    let has_alt = modifiers.contains(KeyModifiers::ALT);
+    let has_shift = modifiers.contains(KeyModifiers::SHIFT);
+
+    match code {
+        // Esc = close modal without saving
+        KeyCode::Esc => {
+            app.cancel_expanded_editor();
+        }
+        // Ctrl+S = save and close
+        KeyCode::Char('s') if has_ctrl => {
+            app.save_and_close_expanded_editor();
+        }
+        // Enter = newline
+        KeyCode::Enter => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.insert_newline();
+            }
+        }
+        // Ctrl+Shift+Z = redo
+        KeyCode::Char('z') if has_ctrl && has_shift => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.redo();
+            }
+        }
+        // Ctrl+Z = undo
+        KeyCode::Char('z') if has_ctrl => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.undo();
+            }
+        }
+        // Ctrl+A = select all
+        KeyCode::Char('a') if has_ctrl => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.select_all();
+            }
+        }
+        // Alt+arrows = word navigation with selection
+        KeyCode::Left if has_alt && has_shift => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_word_left_extend_selection();
+            }
+        }
+        KeyCode::Right if has_alt && has_shift => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_word_right_extend_selection();
+            }
+        }
+        KeyCode::Left if has_alt => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_word_left();
+            }
+        }
+        KeyCode::Right if has_alt => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_word_right();
+            }
+        }
+        // Shift+arrows = selection
+        KeyCode::Left if has_shift => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_left_extend_selection();
+            }
+        }
+        KeyCode::Right if has_shift => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_right_extend_selection();
+            }
+        }
+        // Basic navigation
+        KeyCode::Left => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_left();
+            }
+        }
+        KeyCode::Right => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_right();
+            }
+        }
+        KeyCode::Up => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.move_down();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.delete_char_before();
+            }
+        }
+        KeyCode::Delete => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.delete_char_at();
+            }
+        }
+        // Ctrl+C = copy selection
+        KeyCode::Char('c') if has_ctrl => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                if let Some(selected) = editor.selected_text() {
+                    use arboard::Clipboard;
+                    if let Ok(mut clipboard) = Clipboard::new() {
+                        let _ = clipboard.set_text(selected);
+                    }
+                }
+            }
+        }
+        // Ctrl+X = cut selection
+        KeyCode::Char('x') if has_ctrl => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                if let Some(selected) = editor.selected_text() {
+                    use arboard::Clipboard;
+                    if let Ok(mut clipboard) = Clipboard::new() {
+                        let _ = clipboard.set_text(selected);
+                    }
+                    editor.delete_selection();
+                }
+            }
+        }
+        // Regular character input
+        KeyCode::Char(c) => {
+            if let Some(editor) = app.expanded_editor_mut() {
+                editor.insert_char(c);
+            }
         }
         _ => {}
     }
@@ -2520,6 +2780,10 @@ pub(crate) fn handle_prefix_key(app: &mut App, key: KeyEvent) {
         // A = toggle show archived conversations
         KeyCode::Char('A') => {
             app.toggle_show_archived();
+        }
+        // v = toggle vim mode
+        KeyCode::Char('v') => {
+            app.toggle_vim_mode();
         }
         // Unknown prefix command - ignore
         _ => {}

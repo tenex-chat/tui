@@ -5,6 +5,7 @@ use crate::ui::components::{
 };
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
+use crate::ui::text_editor::TextEditor;
 use crate::ui::{App, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -107,6 +108,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Render attachment modal if showing
     if app.is_attachment_modal_open() {
         render_attachment_modal(f, app, area);
+    }
+
+    // Render expanded editor modal if showing (Ctrl+E)
+    if let ModalState::ExpandedEditor { ref editor } = app.modal_state {
+        render_expanded_editor_modal(f, editor, area);
     }
 
     // Render tab modal if showing (Alt+/)
@@ -261,6 +267,46 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
             Block::default()
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(theme::ACCENT_WARNING))
+                .title(title),
+        )
+        .wrap(Wrap { trim: false });
+
+    f.render_widget(modal, popup_area);
+
+    // Show cursor in the modal
+    let (cursor_row, cursor_col) = editor.cursor_position();
+    f.set_cursor_position((
+        popup_area.x + cursor_col as u16 + 1,
+        popup_area.y + cursor_row as u16 + 1,
+    ));
+}
+
+fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) {
+    // Full-screen modal covering most of the screen
+    let popup_width = (area.width as f32 * 0.9) as u16;
+    let popup_height = (area.height as f32 * 0.9) as u16;
+    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
+    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
+
+    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+    // Clear the area behind the modal
+    f.render_widget(Clear, popup_area);
+
+    let line_count = editor.text.lines().count().max(1);
+    let char_count = editor.text.len();
+    let title = format!(
+        "Expanded Editor ({} lines, {} chars) - Ctrl+S save, Esc cancel",
+        line_count, char_count
+    );
+
+    // Render the modal content with text
+    let modal = Paragraph::new(editor.text.as_str())
+        .style(Style::default().fg(theme::TEXT_PRIMARY))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
                 .title(title),
         )
         .wrap(Wrap { trim: false });
