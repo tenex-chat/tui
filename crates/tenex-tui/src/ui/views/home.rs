@@ -305,6 +305,9 @@ fn render_card_content(
     let indent = card::INDENT_UNIT.repeat(depth);
     let indent_len = indent.chars().count();
 
+    // Check if this thread has an unsent draft
+    let has_draft = app.has_draft_for_thread(&thread.id);
+
     // Extract data
     let (project_name, thread_author_name, preview, timestamp, is_busy) = {
         let store = app.data_store.borrow();
@@ -336,8 +339,8 @@ fn render_card_content(
     // Column widths for table layout
     // Middle column: project (line 1) / author (line 2) - same width for alignment
     // Right column: status (line 1) / time (line 2) - same width for alignment
-    let middle_col_width = 18;
-    let right_col_width = 10;
+    let middle_col_width = 22;
+    let right_col_width = 14;
 
     let title_style = if is_selected {
         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -412,6 +415,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if has_draft {
+            line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
+        }
         if !spinner_suffix.is_empty() {
             line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
         }
@@ -485,6 +491,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if has_draft {
+            line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
+        }
         if !spinner_suffix.is_empty() {
             line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
         }
