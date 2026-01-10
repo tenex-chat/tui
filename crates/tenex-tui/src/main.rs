@@ -2100,6 +2100,16 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.chat_editor.kill_to_line_end();
             app.save_chat_draft();
         }
+        // Ctrl+Shift+Z = redo
+        KeyCode::Char('z') if has_ctrl && modifiers.contains(KeyModifiers::SHIFT) => {
+            app.chat_editor.redo();
+            app.save_chat_draft();
+        }
+        // Ctrl+Z = undo
+        KeyCode::Char('z') if has_ctrl => {
+            app.chat_editor.undo();
+            app.save_chat_draft();
+        }
         // Alt+Left = word left
         KeyCode::Left if has_alt => {
             app.chat_editor.move_word_left();
@@ -2989,13 +2999,26 @@ fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if state.show_copy_menu {
+                    use nostr_sdk::prelude::{EventId, ToBech32};
+                    use crate::store::get_raw_event_json;
+
                     let option = ReportCopyOption::ALL[state.copy_menu_index];
                     let text = match option {
                         ReportCopyOption::Bech32Id => {
-                            format!("nevent1{}", state.report.id)
+                            EventId::from_hex(&state.report.id)
+                                .ok()
+                                .and_then(|id| id.to_bech32().ok())
+                                .unwrap_or_else(|| state.report.id.clone())
                         }
                         ReportCopyOption::RawEvent => {
-                            "Raw event copy not implemented".to_string()
+                            get_raw_event_json(&app.db.ndb, &state.report.id)
+                                .map(|json| {
+                                    serde_json::from_str::<serde_json::Value>(&json)
+                                        .ok()
+                                        .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                                        .unwrap_or(json)
+                                })
+                                .unwrap_or_else(|| "Failed to get raw event".to_string())
                         }
                         ReportCopyOption::Markdown => {
                             state.report.content.clone()
