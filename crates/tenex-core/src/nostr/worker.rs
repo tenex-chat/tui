@@ -271,6 +271,9 @@ impl NostrWorker {
         // Nudges (kind 4201) - agent nudges/prompts
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
 
+        // Reports/Articles (kind 30023) - project documentation
+        let report_filter = Filter::new().kind(Kind::Custom(30023));
+
         info!("Starting persistent subscriptions");
 
         let subscription_id = client
@@ -285,6 +288,7 @@ impl NostrWorker {
                     lesson_filter,
                     operations_status_filter,
                     nudge_filter,
+                    report_filter,
                 ],
                 None,
             )
