@@ -76,6 +76,14 @@ pub struct LocalStreamBuffer {
     pub is_complete: bool,
 }
 
+/// Vim mode states
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum VimMode {
+    #[default]
+    Normal,
+    Insert,
+}
+
 pub struct App {
     pub running: bool,
     pub view: View,
@@ -201,6 +209,20 @@ pub struct App {
 
     /// Frame counter for animations (incremented on each tick)
     pub frame_counter: u64,
+
+    /// Sent message history for ↑/↓ navigation (max 50)
+    pub message_history: Vec<String>,
+    /// Current index in message history (None = typing new)
+    pub history_index: Option<usize>,
+    /// Draft preserved when browsing history
+    pub history_draft: Option<String>,
+
+    /// Whether vim mode is enabled
+    pub vim_enabled: bool,
+    /// Current vim mode (Normal or Insert)
+    pub vim_mode: VimMode,
+    /// Whether to show archived conversations in Recent/Inbox
+    pub show_archived: bool,
 }
 
 impl App {
@@ -276,6 +298,12 @@ impl App {
             pending_new_thread_project: None,
             selected_nudge_ids: Vec::new(),
             frame_counter: 0,
+            message_history: Vec::new(),
+            history_index: None,
+            history_draft: None,
+            vim_enabled: false,
+            vim_mode: VimMode::Normal,
+            show_archived: false,
         }
     }
 
@@ -440,6 +468,38 @@ impl App {
         self.chat_editor.delete_focused_attachment();
         self.attachment_modal_editor.clear();
         self.showing_attachment_modal = false;
+    }
+
+    /// Open expanded editor modal (Ctrl+E) for full-screen editing
+    pub fn open_expanded_editor_modal(&mut self) {
+        let mut editor = TextEditor::new();
+        editor.text = self.chat_editor.text.clone();
+        editor.cursor = self.chat_editor.cursor;
+        self.modal_state = ModalState::ExpandedEditor { editor };
+    }
+
+    /// Save expanded editor changes and close
+    pub fn save_and_close_expanded_editor(&mut self) {
+        if let ModalState::ExpandedEditor { editor } = &self.modal_state {
+            self.chat_editor.text = editor.text.clone();
+            self.chat_editor.cursor = editor.cursor;
+            self.save_chat_draft();
+        }
+        self.modal_state = ModalState::None;
+    }
+
+    /// Cancel expanded editor without saving
+    pub fn cancel_expanded_editor(&mut self) {
+        self.modal_state = ModalState::None;
+    }
+
+    /// Get mutable reference to expanded editor (if open)
+    pub fn expanded_editor_mut(&mut self) -> Option<&mut TextEditor> {
+        if let ModalState::ExpandedEditor { editor } = &mut self.modal_state {
+            Some(editor)
+        } else {
+            None
+        }
     }
 
     /// Get filtered projects based on current filter (from ModalState)
@@ -1107,7 +1167,7 @@ impl App {
 
     // ===== Home View Methods =====
 
-    /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter)
+    /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1120,10 +1180,15 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let prefs = self.preferences.borrow();
 
         threads.into_iter()
             // Project filter
             .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
+            // Archive filter - hide archived unless show_archived is true
+            .filter(|(thread, _)| {
+                self.show_archived || !prefs.is_thread_archived(&thread.id)
+            })
             // "Only by me" filter
             .filter(|(thread, _)| {
                 if !self.only_by_me {
@@ -1143,7 +1208,7 @@ impl App {
             .collect()
     }
 
-    /// Get inbox items for Home view (filtered by visible_projects, only_by_me, time_filter)
+    /// Get inbox items for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1156,10 +1221,19 @@ impl App {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        let prefs = self.preferences.borrow();
 
         items.into_iter()
             // Project filter
             .filter(|item| self.visible_projects.contains(&item.project_a_tag))
+            // Archive filter - hide items from archived threads unless show_archived is true
+            .filter(|item| {
+                if let Some(ref thread_id) = item.thread_id {
+                    self.show_archived || !prefs.is_thread_archived(thread_id)
+                } else {
+                    true  // Keep items without thread_id
+                }
+            })
             // "Only by me" filter - based on author_pubkey
             .filter(|item| {
                 if !self.only_by_me {
@@ -1765,6 +1839,134 @@ impl App {
     /// Clear all selected nudges
     pub fn clear_selected_nudges(&mut self) {
         self.selected_nudge_ids.clear();
+    }
+
+    /// Check if a thread has an unsent draft
+    pub fn has_draft_for_thread(&self, thread_id: &str) -> bool {
+        self.draft_storage.borrow().load(thread_id)
+            .map(|d| !d.text.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    /// Add a message to history (called after successful send)
+    pub fn add_to_message_history(&mut self, content: String) {
+        if content.trim().is_empty() {
+            return;
+        }
+        // Avoid duplicates at the end
+        if self.message_history.last().map(|s| s.as_str()) != Some(content.trim()) {
+            self.message_history.push(content);
+            // Limit to 50 entries
+            if self.message_history.len() > 50 {
+                self.message_history.remove(0);
+            }
+        }
+        // Reset history navigation
+        self.history_index = None;
+        self.history_draft = None;
+    }
+
+    /// Navigate to previous message in history (↑ key)
+    pub fn history_prev(&mut self) {
+        if self.message_history.is_empty() {
+            return;
+        }
+        match self.history_index {
+            None => {
+                // Save current input as draft and go to last history entry
+                self.history_draft = Some(self.chat_editor.text.clone());
+                self.history_index = Some(self.message_history.len() - 1);
+                self.chat_editor.text = self.message_history.last().cloned().unwrap_or_default();
+                self.chat_editor.cursor = self.chat_editor.text.len();
+            }
+            Some(idx) if idx > 0 => {
+                // Go to older entry
+                self.history_index = Some(idx - 1);
+                self.chat_editor.text = self.message_history.get(idx - 1).cloned().unwrap_or_default();
+                self.chat_editor.cursor = self.chat_editor.text.len();
+            }
+            _ => {}
+        }
+        self.chat_editor.clear_selection();
+    }
+
+    /// Navigate to next message in history (↓ key)
+    pub fn history_next(&mut self) {
+        if let Some(idx) = self.history_index {
+            if idx + 1 < self.message_history.len() {
+                // Go to newer entry
+                self.history_index = Some(idx + 1);
+                self.chat_editor.text = self.message_history.get(idx + 1).cloned().unwrap_or_default();
+                self.chat_editor.cursor = self.chat_editor.text.len();
+            } else {
+                // Restore draft and exit history mode
+                self.chat_editor.text = self.history_draft.take().unwrap_or_default();
+                self.chat_editor.cursor = self.chat_editor.text.len();
+                self.history_index = None;
+            }
+            self.chat_editor.clear_selection();
+        }
+    }
+
+    /// Check if currently browsing history
+    pub fn is_browsing_history(&self) -> bool {
+        self.history_index.is_some()
+    }
+
+    /// Exit history mode without changing input
+    pub fn exit_history_mode(&mut self) {
+        self.history_index = None;
+        self.history_draft = None;
+    }
+
+    /// Toggle vim mode on/off
+    pub fn toggle_vim_mode(&mut self) {
+        self.vim_enabled = !self.vim_enabled;
+        if self.vim_enabled {
+            self.vim_mode = VimMode::Normal;
+            self.set_status("Vim mode enabled (Esc=normal, i/a=insert)");
+        } else {
+            self.set_status("Vim mode disabled");
+        }
+    }
+
+    /// Enter vim insert mode
+    pub fn vim_enter_insert(&mut self) {
+        self.vim_mode = VimMode::Insert;
+    }
+
+    /// Enter vim insert mode after cursor (append)
+    pub fn vim_enter_append(&mut self) {
+        self.vim_mode = VimMode::Insert;
+        self.chat_editor.move_right();
+    }
+
+    /// Enter vim normal mode
+    pub fn vim_enter_normal(&mut self) {
+        self.vim_mode = VimMode::Normal;
+    }
+
+    // ===== Archive Methods =====
+
+    /// Toggle visibility of archived conversations
+    pub fn toggle_show_archived(&mut self) {
+        self.show_archived = !self.show_archived;
+        let status = if self.show_archived {
+            "Showing archived conversations"
+        } else {
+            "Hiding archived conversations"
+        };
+        self.set_status(status);
+    }
+
+    /// Check if a thread is archived
+    pub fn is_thread_archived(&self, thread_id: &str) -> bool {
+        self.preferences.borrow().is_thread_archived(thread_id)
+    }
+
+    /// Toggle archive status of a thread
+    pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
+        self.preferences.borrow_mut().toggle_thread_archived(thread_id)
     }
 }
 

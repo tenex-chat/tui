@@ -243,6 +243,66 @@ impl ProjectSettingsState {
     }
 }
 
+/// Conversation action types (for Home view)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConversationAction {
+    Open,
+    ExportJsonl,
+    ToggleArchive,
+}
+
+impl ConversationAction {
+    pub const ALL: [ConversationAction; 3] = [
+        ConversationAction::Open,
+        ConversationAction::ExportJsonl,
+        ConversationAction::ToggleArchive,
+    ];
+
+    pub fn label(&self, is_archived: bool) -> &'static str {
+        match self {
+            ConversationAction::Open => "Open Conversation",
+            ConversationAction::ExportJsonl => "Export as JSONL",
+            ConversationAction::ToggleArchive => {
+                if is_archived { "Unarchive" } else { "Archive" }
+            }
+        }
+    }
+
+    pub fn hotkey(&self) -> char {
+        match self {
+            ConversationAction::Open => 'o',
+            ConversationAction::ExportJsonl => 'e',
+            ConversationAction::ToggleArchive => 'a',
+        }
+    }
+}
+
+/// State for conversation actions modal
+#[derive(Debug, Clone)]
+pub struct ConversationActionsState {
+    pub thread_id: String,
+    pub thread_title: String,
+    pub project_a_tag: String,
+    pub is_archived: bool,
+    pub selected_index: usize,
+}
+
+impl ConversationActionsState {
+    pub fn new(thread_id: String, thread_title: String, project_a_tag: String, is_archived: bool) -> Self {
+        Self {
+            thread_id,
+            thread_title,
+            project_a_tag,
+            is_archived,
+            selected_index: 0,
+        }
+    }
+
+    pub fn selected_action(&self) -> ConversationAction {
+        ConversationAction::ALL[self.selected_index]
+    }
+}
+
 /// Message action types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageAction {
@@ -436,6 +496,8 @@ pub enum ModalState {
         selected_index: usize,
         has_trace: bool,
     },
+    /// Conversation action menu (/) in Home view - shows actions for selected conversation
+    ConversationActions(ConversationActionsState),
     /// View raw event JSON in a scrollable modal
     ViewRawEvent {
         message_id: String,
@@ -450,6 +512,10 @@ pub enum ModalState {
     ProjectActions(ProjectActionsState),
     /// Report viewer modal with document, versions, and threads
     ReportViewer(ReportViewerState),
+    /// Expanded editor modal for full-screen text editing (Ctrl+E)
+    ExpandedEditor {
+        editor: TextEditor,
+    },
 }
 
 impl Default for ModalState {

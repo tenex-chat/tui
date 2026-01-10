@@ -5,7 +5,7 @@ use crate::ui::components::{
     ModalSection, ModalSize,
 };
 use crate::ui::card;
-use crate::ui::modal::{ModalState, ProjectActionsState};
+use crate::ui::modal::{ConversationAction, ConversationActionsState, ModalState, ProjectActionsState};
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 pub use crate::ui::views::home_helpers::HierarchicalThread;
@@ -103,6 +103,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         render_project_actions_modal(f, area, state);
     }
 
+    // Conversation actions modal overlay
+    if let ModalState::ConversationActions(ref state) = app.modal_state {
+        render_conversation_actions_modal(f, area, state);
+    }
+
     // Report viewer modal overlay
     if let ModalState::ReportViewer(ref state) = app.modal_state {
         super::render_report_viewer(f, app, area, state);
@@ -148,6 +153,12 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Reports", tab_style(HomeTab::Reports)));
+
+    // Show archived mode indicator
+    if app.show_archived {
+        spans.push(Span::styled("   ", Style::default()));
+        spans.push(Span::styled("[showing archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+    }
 
     let header_line = Line::from(spans);
 
@@ -260,6 +271,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 
         if visible_height > 0 {
             let content_area = Rect::new(area.x, area.y + render_y, area.width, visible_height);
+            let is_archived = app.is_thread_archived(&item.thread.id);
 
             render_card_content(
                 f,
@@ -271,6 +283,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
                 item.has_children,
                 item.child_count,
                 item.is_collapsed,
+                is_archived,
                 content_area,
             );
         }
@@ -299,6 +312,7 @@ fn render_card_content(
     has_children: bool,
     child_count: usize,
     is_collapsed: bool,
+    is_archived: bool,
     area: Rect,
 ) {
     let is_compact = depth > 0;
@@ -415,6 +429,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if is_archived {
+            line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
         if has_draft {
             line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
         }
@@ -491,6 +508,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if is_archived {
+            line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
         if has_draft {
             line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
         }
@@ -1350,6 +1370,57 @@ fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectAction
         .map(|(i, action)| {
             let is_selected = i == state.selected_index;
             ModalItem::new(action.label())
+                .with_shortcut(action.hotkey().to_string())
+                .selected(is_selected)
+        })
+        .collect();
+
+    render_modal_items(f, remaining, &items);
+
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+
+fn render_conversation_actions_modal(f: &mut Frame, area: Rect, state: &ConversationActionsState) {
+    render_modal_overlay(f, area);
+
+    let actions = ConversationAction::ALL;
+    let content_height = (actions.len() + 2) as u16;
+    let total_height = content_height + 4;
+    let height_percent = (total_height as f32 / area.height as f32).min(0.5);
+
+    let size = ModalSize {
+        max_width: 45,
+        height_percent,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(2),
+    );
+
+    // Truncate title if too long
+    let title = truncate_with_ellipsis(&state.thread_title, 35);
+    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    let items: Vec<ModalItem> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let is_selected = i == state.selected_index;
+            ModalItem::new(action.label(state.is_archived))
                 .with_shortcut(action.hotkey().to_string())
                 .selected(is_selected)
         })

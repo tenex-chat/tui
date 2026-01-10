@@ -1,6 +1,6 @@
 use super::TimeFilter;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
@@ -74,6 +74,8 @@ pub struct Preferences {
     pub time_filter: Option<TimeFilter>,
     #[serde(default)]
     pub show_llm_metadata: bool,
+    #[serde(default)]
+    pub archived_thread_ids: HashSet<String>,
 }
 
 pub struct PreferencesStorage {
@@ -142,5 +144,25 @@ impl PreferencesStorage {
     pub fn set_show_llm_metadata(&mut self, value: bool) {
         self.prefs.show_llm_metadata = value;
         self.save_to_file();
+    }
+
+    pub fn archived_thread_ids(&self) -> &HashSet<String> {
+        &self.prefs.archived_thread_ids
+    }
+
+    pub fn is_thread_archived(&self, thread_id: &str) -> bool {
+        self.prefs.archived_thread_ids.contains(thread_id)
+    }
+
+    pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
+        let is_now_archived = if self.prefs.archived_thread_ids.contains(thread_id) {
+            self.prefs.archived_thread_ids.remove(thread_id);
+            false
+        } else {
+            self.prefs.archived_thread_ids.insert(thread_id.to_string());
+            true
+        };
+        self.save_to_file();
+        is_now_archived
     }
 }

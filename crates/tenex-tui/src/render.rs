@@ -1,0 +1,108 @@
+use ratatui::{
+    layout::{Constraint, Layout},
+    style::Style,
+    widgets::{Block, Paragraph},
+    Frame,
+};
+
+use crate::ui;
+use crate::ui::views::login::{render_login, LoginStep};
+use crate::ui::{App, InputMode, View};
+
+pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
+    // Fill entire frame with app background (pure black)
+    let bg_block = Block::default().style(Style::default().bg(ui::theme::BG_APP));
+    f.render_widget(bg_block, f.area());
+
+    // Home view has its own chrome - give it full area
+    if app.view == View::Home {
+        ui::views::render_home(f, app, f.area());
+        return;
+    }
+
+    // Chrome height varies by view
+    let (header_height, footer_height) = match app.view {
+        View::Chat => (3, 2), // More padding for chat chrome
+        _ => (1, 1),
+    };
+
+    let chunks = Layout::vertical([
+        Constraint::Length(header_height),
+        Constraint::Min(0),
+        Constraint::Length(footer_height),
+    ])
+    .split(f.area());
+
+    // Determine chrome color based on pending_quit state
+    let chrome_color = if app.pending_quit { ui::theme::ACCENT_ERROR } else { ui::theme::ACCENT_PRIMARY };
+
+    // Header
+    let title: String = match app.view {
+        View::Login => "TENEX - Login".to_string(),
+        View::Home => "TENEX - Home".to_string(), // Won't reach here
+        View::Chat => app.selected_thread.as_ref()
+            .map(|t| t.title.clone())
+            .unwrap_or_else(|| "Chat".to_string()),
+        View::LessonViewer => "TENEX - Lesson".to_string(),
+        View::AgentBrowser => "TENEX - Agent Definitions".to_string(),
+    };
+
+    // For chat view, center the title with padding
+    if app.view == View::Chat {
+        let header = Paragraph::new(format!("\n  {}", title))
+            .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
+        f.render_widget(header, chunks[0]);
+    } else {
+        let header = Paragraph::new(title)
+            .style(Style::default().fg(chrome_color));
+        f.render_widget(header, chunks[0]);
+    }
+
+    // Main content
+    match app.view {
+        View::Login => render_login(f, app, chunks[1], login_step),
+        View::Home => {} // Won't reach here
+        View::Chat => ui::views::render_chat(f, app, chunks[1]),
+        View::LessonViewer => {
+            if let Some(ref lesson_id) = app.viewing_lesson_id.clone() {
+                if let Some(lesson) = app.data_store.borrow().get_lesson(lesson_id) {
+                    ui::views::render_lesson_viewer(f, app, chunks[1], lesson);
+                }
+            }
+        }
+        View::AgentBrowser => ui::views::render_agent_browser(f, app, chunks[1]),
+    }
+
+    // Footer - show quit warning if pending, otherwise normal hints
+    let (footer_text, footer_style) = if app.pending_quit {
+        ("⚠ Press Ctrl+C again to quit".to_string(), Style::default().fg(ui::theme::ACCENT_ERROR))
+    } else {
+        let text = match (&app.view, &app.input_mode) {
+            (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
+            (View::Chat, InputMode::Normal) => {
+                // Check if selected item (thread or delegation) has active operations
+                let is_busy = app.get_stop_target_thread_id()
+                    .map(|id| app.data_store.borrow().is_event_busy(&id))
+                    .unwrap_or(false);
+                if is_busy {
+                    "q quit · i edit · s stop".to_string()
+                } else {
+                    "q quit · i edit".to_string()
+                }
+            }
+            (_, InputMode::Normal) => "Press 'q' to quit".to_string(),
+            _ => String::new(), // Chat/Threads editing has its own input box
+        };
+        (text, Style::default().fg(ui::theme::TEXT_MUTED))
+    };
+
+    // For chat view, add padding to footer
+    let formatted_footer = if app.view == View::Chat {
+        format!("  {}", footer_text)
+    } else {
+        footer_text
+    };
+    let footer = Paragraph::new(formatted_footer)
+        .style(footer_style);
+    f.render_widget(footer, chunks[2]);
+}
