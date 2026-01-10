@@ -44,6 +44,9 @@ pub struct Message {
     /// Tool name from "tool" tag (e.g., "delegate", "fs_read", etc.)
     /// Used for grouping: delegation tools break groups and are never collapsible
     pub tool_name: Option<String>,
+    /// Tool arguments from "tool-args" tag (JSON string)
+    /// Used for extracting tool call parameters when stored in tags rather than content
+    pub tool_args: Option<String>,
     /// LLM metadata tags (llm-prompt-tokens, llm-completion-tokens, llm-model, etc.)
     /// Key is the tag name without "llm-" prefix, value is the tag value
     pub llm_metadata: Vec<(String, String)>,
@@ -72,6 +75,7 @@ impl Message {
         let mut q_tags: Vec<String> = Vec::new();
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
+        let mut tool_args: Option<String> = None;
         let mut llm_metadata: Vec<(String, String)> = Vec::new();
 
         // Parse tags
@@ -101,6 +105,10 @@ impl Message {
                 Some("tool") => {
                     // Tool tag format: ["tool", "tool_name", ...]
                     tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("tool-args") => {
+                    // Tool args tag format: ["tool-args", "json_string"]
+                    tool_args = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
                 }
                 Some("q") => {
                     // Q-tags point to delegated conversation IDs
@@ -169,6 +177,7 @@ impl Message {
             q_tags,
             p_tags,
             tool_name,
+            tool_args,
             llm_metadata,
         })
     }
@@ -191,6 +200,7 @@ impl Message {
         let mut q_tags: Vec<String> = Vec::new();
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
+        let mut tool_args: Option<String> = None;
         let mut llm_metadata: Vec<(String, String)> = Vec::new();
 
         for tag in note.tags() {
@@ -219,6 +229,9 @@ impl Message {
                 }
                 Some("tool") => {
                     tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
+                Some("tool-args") => {
+                    tool_args = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
                 }
                 Some("q") => {
                     if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -250,6 +263,7 @@ impl Message {
             q_tags,
             p_tags,
             tool_name,
+            tool_args,
             llm_metadata,
         })
     }
@@ -570,6 +584,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         assert!(msg.has_images());
@@ -586,6 +601,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         assert!(!no_images.has_images());
@@ -605,6 +621,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
@@ -625,6 +642,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
@@ -645,6 +663,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
@@ -665,6 +684,7 @@ mod tests {
             q_tags: vec![],
             p_tags: vec![],
             tool_name: None,
+            tool_args: None,
             llm_metadata: vec![],
         };
         let urls = msg.extract_image_urls();
