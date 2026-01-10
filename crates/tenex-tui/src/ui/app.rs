@@ -52,6 +52,7 @@ pub enum InputMode {
 pub enum HomeTab {
     Recent,
     Inbox,
+    Reports,
 }
 
 /// An open tab representing a thread
@@ -139,6 +140,8 @@ pub struct App {
     // Home view state
     pub home_panel_focus: HomeTab,
     pub selected_inbox_index: usize,
+    pub selected_report_index: usize,
+    pub report_search_filter: String,
     pub selected_recent_index: usize,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
@@ -245,6 +248,8 @@ impl App {
             tab_modal_index: 0,
             home_panel_focus: HomeTab::Recent,
             selected_inbox_index: 0,
+            selected_report_index: 0,
+            report_search_filter: String::new(),
             selected_recent_index: 0,
             sidebar_focused: false,
             sidebar_project_index: 0,
@@ -1171,6 +1176,32 @@ impl App {
                     true
                 }
             })
+            .collect()
+    }
+
+    /// Get reports for Home view (filtered by visible_projects and search filter)
+    pub fn reports(&self) -> Vec<tenex_core::models::Report> {
+        // Empty visible_projects = show nothing
+        if self.visible_projects.is_empty() {
+            return vec![];
+        }
+
+        let store = self.data_store.borrow();
+        let filter = self.report_search_filter.to_lowercase();
+
+        store.get_reports()
+            .into_iter()
+            .filter(|r| self.visible_projects.contains(&r.project_a_tag))
+            .filter(|r| {
+                if filter.is_empty() {
+                    return true;
+                }
+                r.title.to_lowercase().contains(&filter)
+                    || r.summary.to_lowercase().contains(&filter)
+                    || r.content.to_lowercase().contains(&filter)
+                    || r.hashtags.iter().any(|h| h.to_lowercase().contains(&filter))
+            })
+            .cloned()
             .collect()
     }
 

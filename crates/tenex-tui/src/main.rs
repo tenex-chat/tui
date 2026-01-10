@@ -1187,14 +1187,16 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             // Switch between tabs (forward)
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Recent => HomeTab::Inbox,
-                HomeTab::Inbox => HomeTab::Recent,
+                HomeTab::Inbox => HomeTab::Reports,
+                HomeTab::Reports => HomeTab::Recent,
             };
         }
         KeyCode::BackTab if has_shift => {
             // Shift+Tab switches tabs (backward)
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Inbox,
+                HomeTab::Recent => HomeTab::Reports,
                 HomeTab::Inbox => HomeTab::Recent,
+                HomeTab::Reports => HomeTab::Inbox,
             };
         }
         KeyCode::Right => {
@@ -1224,6 +1226,11 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.selected_recent_index -= 1;
                         }
                     }
+                    HomeTab::Reports => {
+                        if app.selected_report_index > 0 {
+                            app.selected_report_index -= 1;
+                        }
+                    }
                 }
             }
         }
@@ -1250,6 +1257,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         let max = hierarchy.len().saturating_sub(1);
                         if app.selected_recent_index < max {
                             app.selected_recent_index += 1;
+                        }
+                    }
+                    HomeTab::Reports => {
+                        let count = app.reports().len();
+                        if app.selected_report_index + 1 < count {
+                            app.selected_report_index += 1;
                         }
                     }
                 }
@@ -1388,6 +1401,9 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             let a_tag = item.a_tag.clone();
                             app.open_thread_from_home(&thread, &a_tag);
                         }
+                    }
+                    HomeTab::Reports => {
+                        // Placeholder: report viewer modal implemented in Task 6
                     }
                 }
             }

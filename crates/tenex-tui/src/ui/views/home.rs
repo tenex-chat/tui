@@ -64,6 +64,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     match app.home_panel_focus {
         HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
+        HomeTab::Reports => {} // Placeholder: rendering implemented in Task 4
     }
 
     // Render sidebar on the right
@@ -879,6 +880,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
         match app.home_panel_focus {
             HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · A agents · q quit",
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
+            HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
         }
     };
 
