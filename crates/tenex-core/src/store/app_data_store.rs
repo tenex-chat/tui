@@ -37,6 +37,8 @@ pub struct AppDataStore {
     pub reports: HashMap<String, Report>,
     // All versions by slug (for version history)
     pub reports_all_versions: HashMap<String, Vec<Report>>,
+    // Threads by document a-tag (kind:1 events that a-tag a document)
+    pub document_threads: HashMap<String, Vec<Thread>>,
 
     // Operations status - kind:24133 events
     // Maps event_id -> OperationsStatus (which agents are working on which events)
@@ -61,6 +63,7 @@ impl AppDataStore {
             nudges: HashMap::new(),
             reports: HashMap::new(),
             reports_all_versions: HashMap::new(),
+            document_threads: HashMap::new(),
             operations_by_event: HashMap::new(),
         };
         store.rebuild_from_ndb();
@@ -435,6 +438,25 @@ impl AppDataStore {
         } else {
             // No e-tag: it's a thread
             self.handle_thread_event(note);
+
+            // Check if this is a document discussion thread (has a-tag for a report)
+            for tag in note.tags() {
+                if tag.get(0).and_then(|t| t.variant().str()) == Some("a") {
+                    if let Some(a_val) = tag.get(1).and_then(|t| t.variant().str()) {
+                        // Check if it's a report a-tag (30023:pubkey:slug)
+                        if a_val.starts_with("30023:") {
+                            if let Some(thread) = Thread::from_note(note) {
+                                let threads = self.document_threads.entry(a_val.to_string()).or_default();
+                                if !threads.iter().any(|t| t.id == thread.id) {
+                                    threads.push(thread);
+                                    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                                }
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -948,6 +970,13 @@ impl AppDataStore {
         let versions = self.reports_all_versions.get(slug)?;
         let current_idx = versions.iter().position(|r| r.id == current_id)?;
         versions.get(current_idx + 1)
+    }
+
+    /// Get threads for a specific document (by document a-tag)
+    pub fn get_document_threads(&self, document_a_tag: &str) -> &[Thread] {
+        self.document_threads.get(document_a_tag)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
     }
 
     // ===== Operations Status Methods (kind:24133) =====

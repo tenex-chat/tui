@@ -281,10 +281,9 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
     f.render_widget(content, list_area);
 }
 
-fn get_document_threads(_app: &App, _report: &tenex_core::models::Report) -> Vec<tenex_core::models::Thread> {
-    // Get threads that reference this document via a-tag
-    // For now, return empty - will be populated when we add document thread support (Task 9)
-    vec![]
+fn get_document_threads(app: &App, report: &tenex_core::models::Report) -> Vec<tenex_core::models::Thread> {
+    let a_tag = report.a_tag();
+    app.data_store.borrow().get_document_threads(&a_tag).to_vec()
 }
 
 fn render_help_bar(f: &mut Frame, state: &ReportViewerState, area: Rect) {
