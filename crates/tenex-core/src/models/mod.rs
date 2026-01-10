@@ -9,6 +9,7 @@ pub mod operations_status;
 pub mod project;
 pub mod project_draft;
 pub mod project_status;
+pub mod report;
 pub mod thread;
 pub mod time_filter;
 
@@ -23,5 +24,6 @@ pub use operations_status::OperationsStatus;
 pub use project::Project;
 pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage};
 pub use project_status::{ProjectAgent, ProjectStatus};
+pub use report::Report;
 pub use thread::Thread;
 pub use time_filter::TimeFilter;
