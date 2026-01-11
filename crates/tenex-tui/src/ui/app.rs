@@ -1430,11 +1430,25 @@ impl App {
                 .collect()
         };
 
-        for msg in display_messages {
+        for msg in &display_messages {
             if let Some(ref ask_event) = msg.ask_event {
                 // Check if this message has been replied to by current user
                 if !replied_to_by_user.contains(msg.id.as_str()) {
                     return Some((msg.id.clone(), ask_event.clone()));
+                }
+            }
+        }
+
+        // Also check q-tags for ask events (like Svelte's DelegationPreview)
+        // q-tags may point directly to ask events instead of threads
+        for msg in display_messages {
+            for q_tag in &msg.q_tags {
+                // Check if this q-tag points to an ask event
+                if let Some((ask_event, _pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
+                    // Check if this ask event has been replied to by current user
+                    if !replied_to_by_user.contains(q_tag.as_str()) {
+                        return Some((q_tag.clone(), ask_event));
+                    }
                 }
             }
         }

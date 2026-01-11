@@ -353,8 +353,9 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     let selector_filter = app.agent_selector_filter();
 
     // Calculate dynamic height based on content
+    // +7 accounts for: header (2) + search (2) + vertical padding (3)
     let item_count = agents.len().max(1);
-    let content_height = (item_count as u16 + 6).min(20); // +6 for header, search, hints
+    let content_height = (item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
     let size = ModalSize {
@@ -426,8 +427,9 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     let selector_filter = app.branch_selector_filter();
 
     // Calculate dynamic height based on content
+    // +7 accounts for: header (2) + search (2) + vertical padding (3)
     let item_count = branches.len().max(1);
-    let content_height = (item_count as u16 + 6).min(20);
+    let content_height = (item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
     let size = ModalSize {

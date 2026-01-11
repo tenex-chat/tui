@@ -805,6 +805,21 @@ impl AppDataStore {
         None
     }
 
+    /// Get an ask event by its ID (for q-tags that point to ask events).
+    /// Returns the ask event and the pubkey of the event.
+    /// Used when a delegation preview's q-tag points to an ask event rather than a thread.
+    pub fn get_ask_event_by_id(&self, event_id: &str) -> Option<(crate::models::AskEvent, String)> {
+        let txn = Transaction::new(&self.ndb).ok()?;
+        let note_id_bytes = hex::decode(event_id).ok()?;
+        let note_id: [u8; 32] = note_id_bytes.try_into().ok()?;
+        let note = self.ndb.get_note_by_id(&txn, &note_id).ok()?;
+
+        let ask_event = crate::models::Message::parse_ask_event(&note)?;
+        let pubkey = hex::encode(note.pubkey());
+
+        Some((ask_event, pubkey))
+    }
+
     /// Get all threads across all projects, sorted by last_activity descending
     /// Returns (Thread, project_a_tag) tuples
     pub fn get_all_recent_threads(&self, limit: usize) -> Vec<(Thread, String)> {

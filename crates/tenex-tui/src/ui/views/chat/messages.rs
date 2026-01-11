@@ -440,125 +440,201 @@ pub(crate) fn render_messages_panel(
                     // Calculate available width for delegation text
                     let delegation_text_width = content_width.saturating_sub(10); // Account for borders/padding
 
-                    // Get thread info from data store
-                    let (title, agent_name, status, activity, is_busy) = {
-                        let store = app.data_store.borrow();
-                        // Check if any agents are working on this delegation
-                        let is_busy = store.is_event_busy(thread_id);
-                        if let Some(t) = store.get_thread_by_id(thread_id) {
-                            let title = if t.title == "Untitled" || t.title.is_empty() {
-                                t.content.chars().take(50).collect::<String>()
-                            } else {
-                                t.title.clone()
-                            };
-                            let activity = t.status_current_activity.clone().unwrap_or_else(|| {
-                                store.get_messages(thread_id)
-                                    .last()
-                                    .map(|m| m.content.chars().take(60).collect())
-                                    .unwrap_or_default()
-                            });
-                            (
-                                title,
-                                store.get_profile_name(&t.pubkey),
-                                t.status_label.clone(),
-                                activity,
-                                is_busy,
-                            )
-                        } else {
-                            (
-                                format!("delegation: {}", &thread_id[..8.min(thread_id.len())]),
-                                String::new(),
-                                None,
-                                String::new(),
-                                is_busy,
-                            )
-                        }
-                    };
-
                     let indicator = if *is_consecutive { "·  " } else { "│  " };
 
-                    if agent_name.is_empty() {
-                        // Thread not found - show ID only
-                        messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled(
-                                format!("→ {}", title),
-                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                            ),
-                        ]));
-                    } else {
-                        // Delegation card header - use available width
-                        let title_display: String = title.chars().take(delegation_text_width).collect();
-                        let hint = if is_selected { " (Enter to open)" } else { "" };
-                        messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled(
-                                "┌─ ",
-                                Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
-                            ),
-                            Span::styled(
-                                title_display,
-                                Style::default()
-                                    .fg(theme::TEXT_PRIMARY)
-                                    .bg(bg)
-                                    .add_modifier(Modifier::BOLD),
-                            ),
-                            Span::styled(
-                                hint,
-                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                            ),
-                        ]));
+                    // Check if this is an ask event (q-tag pointing to ask event instead of thread)
+                    // Like Svelte's DelegationPreview, inline ask events instead of showing delegation card
+                    let ask_event_data = {
+                        let store = app.data_store.borrow();
+                        store.get_ask_event_by_id(thread_id)
+                    };
 
-                        // Agent and status line
-                        let mut agent_line = vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
-                            Span::styled(
-                                format!("@{}", agent_name),
-                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                            ),
-                        ];
-                        // Show "working..." with spinner if agents are busy, otherwise show 513 status
-                        if is_busy {
-                            agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
-                            agent_line.push(Span::styled(
-                                format!("{} working...", app.spinner_char()),
-                                Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
-                            ));
-                        } else if let Some(ref status_label) = status {
-                            let status_color = if status_label == "done" || status_label == "Done" {
-                                theme::ACCENT_SUCCESS
-                            } else {
-                                theme::ACCENT_WARNING
+                    if let Some((ask_event, ask_pubkey)) = ask_event_data {
+                        // This is an ask event - render inline ask UI
+                        let ask_answered = app.is_ask_answered_by_user(thread_id);
+
+                        if ask_answered {
+                            // Show "Ask answered" indicator
+                            let mut answered_spans = vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    "✓ Ask answered",
+                                    Style::default().fg(theme::ACCENT_SUCCESS).bg(bg),
+                                ),
+                            ];
+                            pad_line(&mut answered_spans, 2 + 14, content_width, bg);
+                            messages_text.push(Line::from(answered_spans));
+                        } else {
+                            // Render ask event title/context
+                            let title_text = ask_event.title.clone().unwrap_or_else(|| "Question".to_string());
+                            let agent_name = {
+                                let store = app.data_store.borrow();
+                                store.get_profile_name(&ask_pubkey)
                             };
-                            agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
-                            agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
-                        }
-                        messages_text.push(Line::from(agent_line));
 
-                        // Activity line (from 513 or most recent message) - use available width
-                        if !activity.is_empty() {
-                            let activity_display: String = activity.chars().take(delegation_text_width).collect();
+                            // Header line with title
+                            let mut header_spans = vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    format!("@{} ", agent_name),
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ),
+                                Span::styled(
+                                    title_text.clone(),
+                                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg),
+                                ),
+                            ];
+                            let header_len = 1 + agent_name.len() + 2 + title_text.len();
+                            pad_line(&mut header_spans, header_len, content_width, bg);
+                            messages_text.push(Line::from(header_spans));
+
+                            // Context line (if present and not empty)
+                            if !ask_event.context.is_empty() {
+                                let context_display: String = ask_event.context.chars().take(delegation_text_width).collect();
+                                let mut context_spans = vec![
+                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                    Span::styled(
+                                        context_display.clone(),
+                                        Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                    ),
+                                ];
+                                pad_line(&mut context_spans, 1 + context_display.len(), content_width, bg);
+                                messages_text.push(Line::from(context_spans));
+                            }
+
+                            // Render inline ask UI if modal is open for this event
+                            if let Some(modal_state) = app.ask_modal_state() {
+                                if modal_state.message_id == *thread_id {
+                                    let ask_lines = render_inline_ask_lines(
+                                        modal_state,
+                                        indicator_color,
+                                        bg,
+                                        content_width,
+                                    );
+                                    messages_text.extend(ask_lines);
+                                }
+                            }
+                        }
+                    } else {
+                        // Not an ask event - show normal delegation card
+                        // Get thread info from data store
+                        let (title, agent_name, status, activity, is_busy) = {
+                            let store = app.data_store.borrow();
+                            // Check if any agents are working on this delegation
+                            let is_busy = store.is_event_busy(thread_id);
+                            if let Some(t) = store.get_thread_by_id(thread_id) {
+                                let title = if t.title == "Untitled" || t.title.is_empty() {
+                                    t.content.chars().take(50).collect::<String>()
+                                } else {
+                                    t.title.clone()
+                                };
+                                let activity = t.status_current_activity.clone().unwrap_or_else(|| {
+                                    store.get_messages(thread_id)
+                                        .last()
+                                        .map(|m| m.content.chars().take(60).collect())
+                                        .unwrap_or_default()
+                                });
+                                (
+                                    title,
+                                    store.get_profile_name(&t.pubkey),
+                                    t.status_label.clone(),
+                                    activity,
+                                    is_busy,
+                                )
+                            } else {
+                                (
+                                    format!("delegation: {}", &thread_id[..8.min(thread_id.len())]),
+                                    String::new(),
+                                    None,
+                                    String::new(),
+                                    is_busy,
+                                )
+                            }
+                        };
+
+                        if agent_name.is_empty() {
+                            // Thread not found - show ID only
                             messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    format!("→ {}", title),
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ),
+                            ]));
+                        } else {
+                            // Delegation card header - use available width
+                            let title_display: String = title.chars().take(delegation_text_width).collect();
+                            let hint = if is_selected { " (Enter to open)" } else { "" };
+                            messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    "┌─ ",
+                                    Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                ),
+                                Span::styled(
+                                    title_display,
+                                    Style::default()
+                                        .fg(theme::TEXT_PRIMARY)
+                                        .bg(bg)
+                                        .add_modifier(Modifier::BOLD),
+                                ),
+                                Span::styled(
+                                    hint,
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ),
+                            ]));
+
+                            // Agent and status line
+                            let mut agent_line = vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
                                 Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                 Span::styled(
-                                    activity_display,
-                                    Style::default().fg(theme::TEXT_MUTED).bg(bg).add_modifier(Modifier::ITALIC),
+                                    format!("@{}", agent_name),
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ),
+                            ];
+                            // Show "working..." with spinner if agents are busy, otherwise show 513 status
+                            if is_busy {
+                                agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_line.push(Span::styled(
+                                    format!("{} working...", app.spinner_char()),
+                                    Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
+                                ));
+                            } else if let Some(ref status_label) = status {
+                                let status_color = if status_label == "done" || status_label == "Done" {
+                                    theme::ACCENT_SUCCESS
+                                } else {
+                                    theme::ACCENT_WARNING
+                                };
+                                agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
+                            }
+                            messages_text.push(Line::from(agent_line));
+
+                            // Activity line (from 513 or most recent message) - use available width
+                            if !activity.is_empty() {
+                                let activity_display: String = activity.chars().take(delegation_text_width).collect();
+                                messages_text.push(Line::from(vec![
+                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                    Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                    Span::styled(
+                                        activity_display,
+                                        Style::default().fg(theme::TEXT_MUTED).bg(bg).add_modifier(Modifier::ITALIC),
+                                    ),
+                                ]));
+                            }
+
+                            // Bottom border - match content width
+                            let border_width = delegation_text_width.min(40);
+                            let border: String = "─".repeat(border_width);
+                            messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    format!("└{}", border),
+                                    Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
                                 ),
                             ]));
                         }
-
-                        // Bottom border - match content width
-                        let border_width = delegation_text_width.min(40);
-                        let border: String = "─".repeat(border_width);
-                        messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled(
-                                format!("└{}", border),
-                                Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
-                            ),
-                        ]));
                     }
 
                     // Only add empty line if no next consecutive
