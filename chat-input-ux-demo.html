@@ -1,0 +1,1476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat Input UX Proposals - Interactive Demo</title>
+  <style>
+    :root {
+      --bg: #1a1a2e;
+      --bg-lighter: #232342;
+      --bg-input: #2d2d4a;
+      --text: #e0e0e0;
+      --text-dim: #888;
+      --accent: #7b68ee;
+      --accent-dim: #5a4fcf;
+      --success: #4ade80;
+      --warning: #fbbf24;
+      --error: #f87171;
+      --border: #3d3d5c;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', Consolas, monospace;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+      color: var(--accent);
+      font-size: 1.5rem;
+    }
+
+    .subtitle {
+      text-align: center;
+      color: var(--text-dim);
+      margin-bottom: 30px;
+      font-size: 0.85rem;
+    }
+
+    .demo-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+      gap: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .demo-card {
+      background: var(--bg-lighter);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      transition: border-color 0.2s;
+    }
+
+    .demo-card:hover {
+      border-color: var(--accent-dim);
+    }
+
+    .demo-card h2 {
+      font-size: 1rem;
+      margin-bottom: 8px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .demo-card h2 .badge {
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--accent-dim);
+      color: white;
+    }
+
+    .demo-card p {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+
+    .chat-container {
+      background: var(--bg);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+
+    .messages {
+      padding: 12px;
+      max-height: 150px;
+      overflow-y: auto;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .message {
+      margin-bottom: 8px;
+      font-size: 0.85rem;
+    }
+
+    .message.user {
+      color: var(--success);
+    }
+
+    .message.agent {
+      color: var(--accent);
+    }
+
+    .message .prefix {
+      opacity: 0.6;
+    }
+
+    .input-area {
+      padding: 12px;
+      position: relative;
+    }
+
+    .input-wrapper {
+      position: relative;
+    }
+
+    .chat-input {
+      width: 100%;
+      background: var(--bg-input);
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 10px 12px;
+      resize: none;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .chat-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.2);
+    }
+
+    .chat-input::placeholder {
+      color: var(--text-dim);
+    }
+
+    .chat-input.vim-normal {
+      border-color: var(--warning);
+      caret-color: transparent;
+    }
+
+    .shortcuts {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .shortcut {
+      font-size: 0.7rem;
+      padding: 3px 6px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-dim);
+    }
+
+    .shortcut kbd {
+      color: var(--warning);
+      font-weight: bold;
+    }
+
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 12px;
+      background: var(--bg-input);
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      border-top: 1px solid var(--border);
+    }
+
+    .status-bar .mode {
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: bold;
+    }
+
+    .status-bar .mode.insert {
+      background: var(--success);
+      color: var(--bg);
+    }
+
+    .status-bar .mode.normal {
+      background: var(--warning);
+      color: var(--bg);
+    }
+
+    .history-indicator {
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 0.75rem;
+      color: var(--accent);
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .history-indicator.visible {
+      opacity: 1;
+    }
+
+    .autocomplete-popup {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      right: 0;
+      background: var(--bg-lighter);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      margin-bottom: 4px;
+      display: none;
+      overflow: hidden;
+    }
+
+    .autocomplete-popup.visible {
+      display: block;
+    }
+
+    .autocomplete-item {
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .autocomplete-item:hover,
+    .autocomplete-item.selected {
+      background: var(--accent-dim);
+    }
+
+    .autocomplete-item .icon {
+      width: 20px;
+      text-align: center;
+    }
+
+    .char-count {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    .char-count.warning {
+      color: var(--warning);
+    }
+
+    .char-count.error {
+      color: var(--error);
+    }
+
+    .selection-highlight {
+      background: rgba(123, 104, 238, 0.3);
+    }
+
+    .undo-stack {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 6px;
+    }
+
+    .preview-toggle {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .preview-toggle button {
+      padding: 4px 10px;
+      font-size: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text-dim);
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .preview-toggle button.active {
+      background: var(--accent-dim);
+      color: white;
+      border-color: var(--accent);
+    }
+
+    .markdown-preview {
+      background: var(--bg-input);
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 0.9rem;
+      min-height: 60px;
+      display: none;
+    }
+
+    .markdown-preview.visible {
+      display: block;
+    }
+
+    .markdown-preview code {
+      background: var(--bg);
+      padding: 2px 6px;
+      border-radius: 3px;
+      color: var(--warning);
+    }
+
+    .markdown-preview strong {
+      color: var(--accent);
+    }
+
+    .expand-button {
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+
+    .input-wrapper:hover .expand-button {
+      opacity: 1;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .modal-overlay.visible {
+      display: flex;
+    }
+
+    .modal {
+      background: var(--bg-lighter);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 80%;
+      max-width: 800px;
+      max-height: 80vh;
+      overflow: hidden;
+    }
+
+    .modal-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-header h3 {
+      font-size: 1rem;
+      color: var(--accent);
+    }
+
+    .modal-close {
+      background: none;
+      border: none;
+      color: var(--text-dim);
+      font-size: 1.2rem;
+      cursor: pointer;
+    }
+
+    .modal-body {
+      padding: 16px;
+    }
+
+    .modal-body textarea {
+      width: 100%;
+      height: 300px;
+      background: var(--bg-input);
+      border: 2px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.9rem;
+      padding: 12px;
+      resize: none;
+      outline: none;
+    }
+
+    .modal-body textarea:focus {
+      border-color: var(--accent);
+    }
+
+    .modal-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .modal-footer button {
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+
+    .modal-footer .cancel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+    }
+
+    .modal-footer .submit {
+      background: var(--accent);
+      border: none;
+      color: white;
+    }
+
+    .smart-paste-popup {
+      position: absolute;
+      bottom: 100%;
+      left: 0;
+      background: var(--bg-lighter);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      margin-bottom: 8px;
+      display: none;
+      font-size: 0.8rem;
+    }
+
+    .smart-paste-popup.visible {
+      display: block;
+    }
+
+    .smart-paste-popup .detected {
+      color: var(--warning);
+      margin-bottom: 6px;
+    }
+
+    .smart-paste-popup .actions {
+      display: flex;
+      gap: 6px;
+    }
+
+    .smart-paste-popup button {
+      padding: 4px 8px;
+      font-size: 0.75rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text);
+      cursor: pointer;
+      font-family: inherit;
+    }
+
+    .smart-paste-popup button:hover {
+      background: var(--accent-dim);
+    }
+
+    .sed-demo {
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--bg);
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    .sed-demo .before {
+      color: var(--error);
+      text-decoration: line-through;
+    }
+
+    .sed-demo .after {
+      color: var(--success);
+    }
+
+    .typing-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 12px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    .typing-indicator .dots {
+      display: flex;
+      gap: 3px;
+    }
+
+    .typing-indicator .dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: bounce 1.4s infinite;
+    }
+
+    .typing-indicator .dot:nth-child(2) {
+      animation-delay: 0.2s;
+    }
+
+    .typing-indicator .dot:nth-child(3) {
+      animation-delay: 0.4s;
+    }
+
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-4px); }
+    }
+
+    .line-numbers {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 30px;
+      background: var(--bg);
+      border-right: 1px solid var(--border);
+      padding: 10px 4px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      text-align: right;
+      line-height: 1.5;
+      pointer-events: none;
+    }
+
+    .with-line-numbers {
+      padding-left: 40px !important;
+    }
+
+    .code-block-wrapper {
+      position: relative;
+    }
+
+    .code-lang-badge {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      padding: 2px 6px;
+      background: var(--accent-dim);
+      border-radius: 3px;
+      font-size: 0.65rem;
+      color: white;
+    }
+
+    .draft-indicator {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 0.75rem;
+      color: var(--warning);
+      margin-bottom: 6px;
+    }
+
+    .draft-indicator::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      background: var(--warning);
+      border-radius: 50%;
+    }
+
+    .thread-list {
+      margin-bottom: 8px;
+    }
+
+    .thread-item {
+      padding: 6px 10px;
+      font-size: 0.8rem;
+      border-radius: 4px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .thread-item:hover {
+      background: var(--bg-input);
+    }
+
+    .thread-item.active {
+      background: var(--accent-dim);
+    }
+
+    .thread-item .draft-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--warning);
+      border-radius: 50%;
+    }
+
+    .focus-ring {
+      animation: pulse-ring 2s infinite;
+    }
+
+    @keyframes pulse-ring {
+      0%, 100% { box-shadow: 0 0 0 3px rgba(123, 104, 238, 0.2); }
+      50% { box-shadow: 0 0 0 6px rgba(123, 104, 238, 0.1); }
+    }
+
+    .send-flash {
+      animation: flash 0.3s ease-out;
+    }
+
+    @keyframes flash {
+      0% { background: var(--accent); }
+      100% { background: var(--bg-input); }
+    }
+
+    .attachment-preview {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .attachment-thumb {
+      width: 60px;
+      height: 60px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      position: relative;
+    }
+
+    .attachment-thumb .remove {
+      position: absolute;
+      top: -6px;
+      right: -6px;
+      width: 18px;
+      height: 18px;
+      background: var(--error);
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-size: 0.7rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .instructions {
+      background: var(--bg);
+      padding: 10px 12px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+
+    .instructions strong {
+      color: var(--text);
+    }
+  </style>
+</head>
+<body>
+  <h1>Chat Input UX Proposals</h1>
+  <p class="subtitle">Interactive demos - click into each input to try the features</p>
+
+  <div class="demo-grid">
+
+    <!-- 1. Message History Navigation -->
+    <div class="demo-card">
+      <h2>Message History Navigation <span class="badge">HIGH PRIORITY</span></h2>
+      <p>Press ↑/↓ when input is empty to cycle through sent messages. Like bash/zsh command history.</p>
+      <div class="chat-container">
+        <div class="messages" id="history-messages">
+          <div class="message user"><span class="prefix">you:</span> What's the status of the project?</div>
+          <div class="message agent"><span class="prefix">agent:</span> The project is on track...</div>
+          <div class="message user"><span class="prefix">you:</span> Can you check the latest commits?</div>
+          <div class="message agent"><span class="prefix">agent:</span> Here are the recent commits...</div>
+          <div class="message user"><span class="prefix">you:</span> Run the test suite please</div>
+        </div>
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="history-input" rows="2" placeholder="Type or press ↑ to recall history..."></textarea>
+            <span class="history-indicator" id="history-indicator">↑ 1/3</span>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>↑</kbd> previous</span>
+            <span class="shortcut"><kbd>↓</kbd> next</span>
+            <span class="shortcut"><kbd>Ctrl+↑</kbd> edit last sent</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Undo/Redo -->
+    <div class="demo-card">
+      <h2>Undo/Redo <span class="badge">HIGH PRIORITY</span></h2>
+      <p>Essential editing feature. Ctrl+Z to undo, Ctrl+Shift+Z to redo. Stack persists during session.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="undo-input" rows="3" placeholder="Type something, then Ctrl+Z to undo..."></textarea>
+          </div>
+          <div class="undo-stack" id="undo-stack">Undo stack: 0 | Redo stack: 0</div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>Ctrl+Z</kbd> undo</span>
+            <span class="shortcut"><kbd>Ctrl+Shift+Z</kbd> redo</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Text Selection -->
+    <div class="demo-card">
+      <h2>Text Selection <span class="badge">HIGH PRIORITY</span></h2>
+      <p>Shift+arrows to select text. Ctrl+Shift+arrows for word selection. Ctrl+A to select all.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="selection-input" rows="3">Try selecting this text with Shift+arrows or double-click a word</textarea>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>Shift+←→</kbd> select char</span>
+            <span class="shortcut"><kbd>Ctrl+Shift+←→</kbd> select word</span>
+            <span class="shortcut"><kbd>Ctrl+A</kbd> select all</span>
+            <span class="shortcut"><kbd>Ctrl+X/C</kbd> cut/copy</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. Vim Mode -->
+    <div class="demo-card">
+      <h2>Vim Mode (Optional)</h2>
+      <p>Toggle vim-style editing. Esc for normal mode, i/a/o for insert. Full motion support.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="vim-input" rows="3" placeholder="Press Esc to enter normal mode...">Hello world, this is some text to edit with vim motions</textarea>
+          </div>
+          <div class="status-bar">
+            <span class="mode insert" id="vim-mode">INSERT</span>
+            <span id="vim-cmd"></span>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>Esc</kbd> normal</span>
+            <span class="shortcut"><kbd>i/a/o</kbd> insert</span>
+            <span class="shortcut"><kbd>w/b/e</kbd> word</span>
+            <span class="shortcut"><kbd>dd/yy</kbd> line ops</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. Auto-pair -->
+    <div class="demo-card">
+      <h2>Auto-pair Brackets & Quotes</h2>
+      <p>Automatically insert matching brackets, quotes, and backticks. Skip over closing chars.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="autopair-input" rows="3" placeholder="Try typing ( [ { &quot; ' ` ..."></textarea>
+          </div>
+          <div class="instructions">
+            <strong>Try:</strong> Type <code>(</code> → get <code>()</code> with cursor inside<br>
+            Type <code>"hello</code> → auto-closes the quote<br>
+            Type <code>```</code> → prompts for language
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. Autocomplete -->
+    <div class="demo-card">
+      <h2>@ Mentions & / Commands</h2>
+      <p>Type @ for agent/user mentions, / for commands, : for emoji. Fuzzy search with ↑↓ to select.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <div class="autocomplete-popup" id="autocomplete-popup">
+              <div class="autocomplete-item selected"><span class="icon">🤖</span> @claude-agent</div>
+              <div class="autocomplete-item"><span class="icon">🤖</span> @code-reviewer</div>
+              <div class="autocomplete-item"><span class="icon">🤖</span> @architect</div>
+            </div>
+            <textarea class="chat-input" id="autocomplete-input" rows="2" placeholder="Type @ for mentions, / for commands..."></textarea>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>@</kbd> mention</span>
+            <span class="shortcut"><kbd>/</kbd> command</span>
+            <span class="shortcut"><kbd>:emoji:</kbd> emoji</span>
+            <span class="shortcut"><kbd>↑↓</kbd> navigate</span>
+            <span class="shortcut"><kbd>Tab</kbd> complete</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 7. Character Count -->
+    <div class="demo-card">
+      <h2>Character Count & Limits</h2>
+      <p>Show character count. Warn as approaching limit. Prevent exceeding maximum.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="charcount-input" rows="3" placeholder="Type to see character count..." maxlength="200"></textarea>
+          </div>
+          <div class="char-count" id="char-count">0 / 200</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 8. Markdown Preview -->
+    <div class="demo-card">
+      <h2>Markdown Preview</h2>
+      <p>Toggle between edit and preview mode to see formatted output before sending.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="preview-toggle">
+            <button class="active" id="edit-btn">Edit</button>
+            <button id="preview-btn">Preview</button>
+          </div>
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="markdown-input" rows="4">Try **bold**, `code`, and *italics* here</textarea>
+            <div class="markdown-preview" id="markdown-preview"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 9. Expand to Modal -->
+    <div class="demo-card">
+      <h2>Expand to Full Editor</h2>
+      <p>Ctrl+E opens a full-screen modal for composing longer messages comfortably.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="expand-input" rows="2" placeholder="Press Ctrl+E or click expand button..."></textarea>
+            <button class="expand-button" id="expand-btn">⛶ Expand</button>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>Ctrl+E</kbd> expand</span>
+            <span class="shortcut"><kbd>Esc</kbd> close modal</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 10. Smart Paste -->
+    <div class="demo-card">
+      <h2>Smart Paste Detection</h2>
+      <p>Detects pasted content type (code, URLs, JSON) and offers to format appropriately.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper">
+            <div class="smart-paste-popup" id="paste-popup">
+              <div class="detected">🔍 Detected: JSON</div>
+              <div class="actions">
+                <button onclick="formatAsCode()">Format as code block</button>
+                <button onclick="pasteRaw()">Paste raw</button>
+              </div>
+            </div>
+            <textarea class="chat-input" id="paste-input" rows="3" placeholder='Paste JSON like {"key": "value"} or a URL...'></textarea>
+          </div>
+          <div class="instructions">
+            <strong>Try pasting:</strong><br>
+            • JSON: <code>{"name": "test"}</code><br>
+            • URL: <code>https://example.com</code><br>
+            • Code: multi-line text
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 11. Sed-style Correction -->
+    <div class="demo-card">
+      <h2>Quick Corrections</h2>
+      <p>Type ^old^new to correct last message. !! to repeat last message.</p>
+      <div class="chat-container">
+        <div class="messages">
+          <div class="message user"><span class="prefix">you:</span> Check the stauts of the build</div>
+        </div>
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="sed-input" rows="2" placeholder="Try ^stauts^status to fix the typo..."></textarea>
+          </div>
+          <div class="sed-demo" id="sed-demo" style="display: none;">
+            <span class="before">stauts</span> → <span class="after">status</span>
+          </div>
+          <div class="shortcuts">
+            <span class="shortcut"><kbd>^old^new</kbd> fix typo</span>
+            <span class="shortcut"><kbd>!!</kbd> repeat last</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 12. Typing Indicator -->
+    <div class="demo-card">
+      <h2>Typing Indicator</h2>
+      <p>Show when the agent is typing/thinking. Provides feedback that your message was received.</p>
+      <div class="chat-container">
+        <div class="messages">
+          <div class="message user"><span class="prefix">you:</span> Analyze this codebase</div>
+          <div class="typing-indicator">
+            <span class="dots">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+            </span>
+            <span>Agent is thinking...</span>
+          </div>
+        </div>
+        <div class="input-area">
+          <div class="input-wrapper">
+            <textarea class="chat-input" rows="2" placeholder="Send a message to see typing indicator..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 13. Line Numbers -->
+    <div class="demo-card">
+      <h2>Line Numbers</h2>
+      <p>Optional line numbers for multi-line compositions. Helpful for longer technical messages.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="input-wrapper code-block-wrapper">
+            <div class="line-numbers" id="line-nums">1<br>2<br>3<br>4</div>
+            <textarea class="chat-input with-line-numbers" id="linenums-input" rows="4">function example() {
+  const x = 1;
+  return x + 1;
+}</textarea>
+            <span class="code-lang-badge">javascript</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 14. Draft Indicator -->
+    <div class="demo-card">
+      <h2>Draft Persistence & Indicators</h2>
+      <p>Show draft indicator in thread list. Drafts persist across thread switches.</p>
+      <div class="chat-container">
+        <div class="thread-list">
+          <div class="thread-item">Project Discussion</div>
+          <div class="thread-item active">
+            <span>Code Review</span>
+            <span class="draft-dot" title="Has draft"></span>
+          </div>
+          <div class="thread-item">Bug Investigation</div>
+        </div>
+        <div class="input-area">
+          <div class="draft-indicator">Draft saved</div>
+          <div class="input-wrapper">
+            <textarea class="chat-input" rows="2">I was thinking we should refactor the...</textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 15. Image Paste Preview -->
+    <div class="demo-card">
+      <h2>Attachment Previews</h2>
+      <p>Show thumbnails for pasted/uploaded images. Click to remove or preview larger.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="attachment-preview">
+            <div class="attachment-thumb">
+              📷
+              <button class="remove">×</button>
+            </div>
+            <div class="attachment-thumb">
+              📄
+              <button class="remove">×</button>
+            </div>
+          </div>
+          <div class="input-wrapper">
+            <textarea class="chat-input" rows="2" placeholder="Paste images with Ctrl+V..."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 16. Enter vs Alt+Enter Config -->
+    <div class="demo-card">
+      <h2>Configurable Send Key</h2>
+      <p>Choose whether Enter sends or creates newline. Some prefer Ctrl+Enter to send.</p>
+      <div class="chat-container">
+        <div class="input-area">
+          <div class="preview-toggle">
+            <button class="active" id="enter-send">Enter = Send</button>
+            <button id="enter-newline">Enter = Newline</button>
+          </div>
+          <div class="input-wrapper">
+            <textarea class="chat-input" id="enter-config-input" rows="2" placeholder="Try Enter and Alt+Enter..."></textarea>
+          </div>
+          <div class="shortcuts" id="enter-shortcuts">
+            <span class="shortcut"><kbd>Enter</kbd> send</span>
+            <span class="shortcut"><kbd>Alt+Enter</kbd> new line</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Modal for expand -->
+  <div class="modal-overlay" id="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>Compose Message</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <textarea id="modal-textarea" placeholder="Write your message..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="cancel" onclick="closeModal()">Cancel</button>
+        <button class="submit" onclick="submitModal()">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Message History Navigation
+    const historyMessages = [
+      "Run the test suite please",
+      "Can you check the latest commits?",
+      "What's the status of the project?"
+    ];
+    let historyIndex = -1;
+    const historyInput = document.getElementById('history-input');
+    const historyIndicator = document.getElementById('history-indicator');
+
+    historyInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowUp' && historyInput.value === '') {
+        e.preventDefault();
+        if (historyIndex < historyMessages.length - 1) {
+          historyIndex++;
+          historyInput.value = historyMessages[historyIndex];
+          historyIndicator.textContent = `↑ ${historyIndex + 1}/${historyMessages.length}`;
+          historyIndicator.classList.add('visible');
+        }
+      } else if (e.key === 'ArrowDown' && historyIndex >= 0) {
+        e.preventDefault();
+        historyIndex--;
+        if (historyIndex >= 0) {
+          historyInput.value = historyMessages[historyIndex];
+          historyIndicator.textContent = `↑ ${historyIndex + 1}/${historyMessages.length}`;
+        } else {
+          historyInput.value = '';
+          historyIndicator.classList.remove('visible');
+        }
+      }
+    });
+
+    historyInput.addEventListener('input', () => {
+      if (historyInput.value === '') {
+        historyIndex = -1;
+        historyIndicator.classList.remove('visible');
+      }
+    });
+
+    // Undo/Redo
+    const undoInput = document.getElementById('undo-input');
+    const undoStackDisplay = document.getElementById('undo-stack');
+    let undoStack = [];
+    let redoStack = [];
+    let lastValue = '';
+
+    undoInput.addEventListener('input', () => {
+      if (undoInput.value !== lastValue) {
+        undoStack.push(lastValue);
+        redoStack = [];
+        lastValue = undoInput.value;
+        updateUndoDisplay();
+      }
+    });
+
+    undoInput.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (undoStack.length > 0) {
+          redoStack.push(undoInput.value);
+          undoInput.value = undoStack.pop();
+          lastValue = undoInput.value;
+          updateUndoDisplay();
+        }
+      } else if (e.ctrlKey && e.key === 'z' && e.shiftKey) {
+        e.preventDefault();
+        if (redoStack.length > 0) {
+          undoStack.push(undoInput.value);
+          undoInput.value = redoStack.pop();
+          lastValue = undoInput.value;
+          updateUndoDisplay();
+        }
+      }
+    });
+
+    function updateUndoDisplay() {
+      undoStackDisplay.textContent = `Undo stack: ${undoStack.length} | Redo stack: ${redoStack.length}`;
+    }
+
+    // Vim Mode
+    const vimInput = document.getElementById('vim-input');
+    const vimMode = document.getElementById('vim-mode');
+    const vimCmd = document.getElementById('vim-cmd');
+    let isNormalMode = false;
+    let vimCommand = '';
+
+    vimInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        isNormalMode = true;
+        vimMode.textContent = 'NORMAL';
+        vimMode.className = 'mode normal';
+        vimInput.classList.add('vim-normal');
+        e.preventDefault();
+      } else if (isNormalMode) {
+        e.preventDefault();
+        if (['i', 'a', 'o'].includes(e.key)) {
+          isNormalMode = false;
+          vimMode.textContent = 'INSERT';
+          vimMode.className = 'mode insert';
+          vimInput.classList.remove('vim-normal');
+          vimCommand = '';
+          vimCmd.textContent = '';
+        } else {
+          vimCommand += e.key;
+          vimCmd.textContent = vimCommand;
+
+          // Simple vim commands demo
+          if (vimCommand === 'dd') {
+            const lines = vimInput.value.split('\n');
+            const pos = vimInput.selectionStart;
+            let lineIndex = vimInput.value.substring(0, pos).split('\n').length - 1;
+            lines.splice(lineIndex, 1);
+            vimInput.value = lines.join('\n');
+            vimCommand = '';
+            vimCmd.textContent = '';
+          } else if (vimCommand === 'w') {
+            // Move to next word
+            const text = vimInput.value;
+            let pos = vimInput.selectionStart;
+            while (pos < text.length && /\w/.test(text[pos])) pos++;
+            while (pos < text.length && /\s/.test(text[pos])) pos++;
+            vimInput.selectionStart = vimInput.selectionEnd = pos;
+            vimCommand = '';
+            vimCmd.textContent = '';
+          } else if (vimCommand === 'b') {
+            // Move to previous word
+            let pos = vimInput.selectionStart - 1;
+            const text = vimInput.value;
+            while (pos > 0 && /\s/.test(text[pos])) pos--;
+            while (pos > 0 && /\w/.test(text[pos - 1])) pos--;
+            vimInput.selectionStart = vimInput.selectionEnd = pos;
+            vimCommand = '';
+            vimCmd.textContent = '';
+          }
+
+          if (vimCommand.length > 2) {
+            vimCommand = '';
+            vimCmd.textContent = '';
+          }
+        }
+      }
+    });
+
+    // Auto-pair
+    const autopairInput = document.getElementById('autopair-input');
+    const pairs = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
+
+    autopairInput.addEventListener('keydown', (e) => {
+      if (pairs[e.key]) {
+        e.preventDefault();
+        const start = autopairInput.selectionStart;
+        const end = autopairInput.selectionEnd;
+        const text = autopairInput.value;
+        const before = text.substring(0, start);
+        const selected = text.substring(start, end);
+        const after = text.substring(end);
+
+        if (selected) {
+          autopairInput.value = before + e.key + selected + pairs[e.key] + after;
+          autopairInput.selectionStart = start + 1;
+          autopairInput.selectionEnd = end + 1;
+        } else {
+          autopairInput.value = before + e.key + pairs[e.key] + after;
+          autopairInput.selectionStart = autopairInput.selectionEnd = start + 1;
+        }
+      } else if (Object.values(pairs).includes(e.key)) {
+        const pos = autopairInput.selectionStart;
+        if (autopairInput.value[pos] === e.key) {
+          e.preventDefault();
+          autopairInput.selectionStart = autopairInput.selectionEnd = pos + 1;
+        }
+      }
+    });
+
+    // Autocomplete
+    const autocompleteInput = document.getElementById('autocomplete-input');
+    const autocompletePopup = document.getElementById('autocomplete-popup');
+
+    const agents = ['claude-agent', 'code-reviewer', 'architect', 'debugger', 'tester'];
+    const commands = ['commit', 'review-pr', 'analyze', 'brainstorm', 'plan'];
+
+    autocompleteInput.addEventListener('input', () => {
+      const text = autocompleteInput.value;
+      const cursorPos = autocompleteInput.selectionStart;
+      const textBeforeCursor = text.substring(0, cursorPos);
+
+      const atMatch = textBeforeCursor.match(/@(\w*)$/);
+      const slashMatch = textBeforeCursor.match(/\/(\w*)$/);
+
+      if (atMatch) {
+        const filter = atMatch[1].toLowerCase();
+        const filtered = agents.filter(a => a.includes(filter));
+        if (filtered.length > 0) {
+          autocompletePopup.innerHTML = filtered.map((a, i) =>
+            `<div class="autocomplete-item${i === 0 ? ' selected' : ''}"><span class="icon">🤖</span> @${a}</div>`
+          ).join('');
+          autocompletePopup.classList.add('visible');
+        } else {
+          autocompletePopup.classList.remove('visible');
+        }
+      } else if (slashMatch) {
+        const filter = slashMatch[1].toLowerCase();
+        const filtered = commands.filter(c => c.includes(filter));
+        if (filtered.length > 0) {
+          autocompletePopup.innerHTML = filtered.map((c, i) =>
+            `<div class="autocomplete-item${i === 0 ? ' selected' : ''}"><span class="icon">⚡</span> /${c}</div>`
+          ).join('');
+          autocompletePopup.classList.add('visible');
+        } else {
+          autocompletePopup.classList.remove('visible');
+        }
+      } else {
+        autocompletePopup.classList.remove('visible');
+      }
+    });
+
+    autocompleteInput.addEventListener('keydown', (e) => {
+      if (autocompletePopup.classList.contains('visible') && e.key === 'Tab') {
+        e.preventDefault();
+        const selected = autocompletePopup.querySelector('.selected');
+        if (selected) {
+          const completion = selected.textContent.trim();
+          const text = autocompleteInput.value;
+          const cursorPos = autocompleteInput.selectionStart;
+          const match = text.substring(0, cursorPos).match(/[@/]\w*$/);
+          if (match) {
+            const before = text.substring(0, cursorPos - match[0].length);
+            const after = text.substring(cursorPos);
+            autocompleteInput.value = before + completion + ' ' + after;
+            autocompleteInput.selectionStart = autocompleteInput.selectionEnd = before.length + completion.length + 1;
+          }
+          autocompletePopup.classList.remove('visible');
+        }
+      }
+    });
+
+    // Character Count
+    const charcountInput = document.getElementById('charcount-input');
+    const charCount = document.getElementById('char-count');
+
+    charcountInput.addEventListener('input', () => {
+      const len = charcountInput.value.length;
+      const max = 200;
+      charCount.textContent = `${len} / ${max}`;
+      charCount.className = 'char-count';
+      if (len > max * 0.9) charCount.classList.add('error');
+      else if (len > max * 0.75) charCount.classList.add('warning');
+    });
+
+    // Markdown Preview
+    const markdownInput = document.getElementById('markdown-input');
+    const markdownPreview = document.getElementById('markdown-preview');
+    const editBtn = document.getElementById('edit-btn');
+    const previewBtn = document.getElementById('preview-btn');
+
+    function renderMarkdown(text) {
+      return text
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+    }
+
+    editBtn.addEventListener('click', () => {
+      editBtn.classList.add('active');
+      previewBtn.classList.remove('active');
+      markdownInput.style.display = 'block';
+      markdownPreview.classList.remove('visible');
+    });
+
+    previewBtn.addEventListener('click', () => {
+      previewBtn.classList.add('active');
+      editBtn.classList.remove('active');
+      markdownInput.style.display = 'none';
+      markdownPreview.innerHTML = renderMarkdown(markdownInput.value);
+      markdownPreview.classList.add('visible');
+    });
+
+    // Expand Modal
+    const expandInput = document.getElementById('expand-input');
+    const expandBtn = document.getElementById('expand-btn');
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalTextarea = document.getElementById('modal-textarea');
+
+    function openModal() {
+      modalTextarea.value = expandInput.value;
+      modalOverlay.classList.add('visible');
+      modalTextarea.focus();
+    }
+
+    function closeModal() {
+      modalOverlay.classList.remove('visible');
+    }
+
+    function submitModal() {
+      expandInput.value = modalTextarea.value;
+      closeModal();
+      expandInput.classList.add('send-flash');
+      setTimeout(() => expandInput.classList.remove('send-flash'), 300);
+    }
+
+    expandBtn.addEventListener('click', openModal);
+    expandInput.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'e') {
+        e.preventDefault();
+        openModal();
+      }
+    });
+
+    modalOverlay.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+
+    // Smart Paste
+    const pasteInput = document.getElementById('paste-input');
+    const pastePopup = document.getElementById('paste-popup');
+    let pastedContent = '';
+
+    pasteInput.addEventListener('paste', (e) => {
+      const text = e.clipboardData.getData('text');
+
+      // Detect content type
+      let detected = null;
+      try {
+        JSON.parse(text);
+        detected = 'JSON';
+      } catch {
+        if (/^https?:\/\//.test(text.trim())) {
+          detected = 'URL';
+        } else if (text.includes('\n') && (text.includes('function') || text.includes('const ') || text.includes('import '))) {
+          detected = 'Code';
+        }
+      }
+
+      if (detected) {
+        e.preventDefault();
+        pastedContent = text;
+        pastePopup.querySelector('.detected').textContent = `🔍 Detected: ${detected}`;
+        pastePopup.classList.add('visible');
+      }
+    });
+
+    window.formatAsCode = function() {
+      pasteInput.value += '```\n' + pastedContent + '\n```';
+      pastePopup.classList.remove('visible');
+    };
+
+    window.pasteRaw = function() {
+      pasteInput.value += pastedContent;
+      pastePopup.classList.remove('visible');
+    };
+
+    // Sed-style correction
+    const sedInput = document.getElementById('sed-input');
+    const sedDemo = document.getElementById('sed-demo');
+
+    sedInput.addEventListener('input', () => {
+      const match = sedInput.value.match(/^\^(.+?)\^(.+?)$/);
+      if (match) {
+        sedDemo.style.display = 'block';
+        sedDemo.innerHTML = `<span class="before">${match[1]}</span> → <span class="after">${match[2]}</span>`;
+      } else if (sedInput.value === '!!') {
+        sedDemo.style.display = 'block';
+        sedDemo.innerHTML = `Repeat: <span class="after">Check the stauts of the build</span>`;
+      } else {
+        sedDemo.style.display = 'none';
+      }
+    });
+
+    // Line numbers
+    const linenumInput = document.getElementById('linenums-input');
+    const lineNums = document.getElementById('line-nums');
+
+    function updateLineNumbers() {
+      const lines = linenumInput.value.split('\n').length;
+      lineNums.innerHTML = Array.from({length: lines}, (_, i) => i + 1).join('<br>');
+    }
+
+    linenumInput.addEventListener('input', updateLineNumbers);
+    updateLineNumbers();
+
+    // Enter config
+    const enterSend = document.getElementById('enter-send');
+    const enterNewline = document.getElementById('enter-newline');
+    const enterConfigInput = document.getElementById('enter-config-input');
+    const enterShortcuts = document.getElementById('enter-shortcuts');
+    let sendOnEnter = true;
+
+    enterSend.addEventListener('click', () => {
+      sendOnEnter = true;
+      enterSend.classList.add('active');
+      enterNewline.classList.remove('active');
+      enterShortcuts.innerHTML = '<span class="shortcut"><kbd>Enter</kbd> send</span><span class="shortcut"><kbd>Alt+Enter</kbd> new line</span>';
+    });
+
+    enterNewline.addEventListener('click', () => {
+      sendOnEnter = false;
+      enterNewline.classList.add('active');
+      enterSend.classList.remove('active');
+      enterShortcuts.innerHTML = '<span class="shortcut"><kbd>Enter</kbd> new line</span><span class="shortcut"><kbd>Ctrl+Enter</kbd> send</span>';
+    });
+
+    enterConfigInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        if (sendOnEnter && !e.altKey) {
+          e.preventDefault();
+          enterConfigInput.classList.add('send-flash');
+          setTimeout(() => {
+            enterConfigInput.classList.remove('send-flash');
+            enterConfigInput.value = '';
+          }, 300);
+        } else if (!sendOnEnter && e.ctrlKey) {
+          e.preventDefault();
+          enterConfigInput.classList.add('send-flash');
+          setTimeout(() => {
+            enterConfigInput.classList.remove('send-flash');
+            enterConfigInput.value = '';
+          }, 300);
+        }
+      }
+    });
+  </script>
+</body>
+</html>
