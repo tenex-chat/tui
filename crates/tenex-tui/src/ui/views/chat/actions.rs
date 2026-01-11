@@ -161,6 +161,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     // Define hotkey sections
     let sections = vec![
         ("Prefix Commands (Ctrl+T + key)", vec![
+            ("e", "Expand to full-screen editor"),
             ("m", "Toggle LLM metadata display"),
             ("t", "Toggle todo sidebar"),
             ("v", "Toggle vim mode"),
@@ -197,17 +198,18 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         ]),
         ("Input Mode", vec![
             ("Enter", "Send message"),
-            ("Alt+Enter", "New line"),
+            ("Shift/Alt+Enter", "New line"),
+            ("Ctrl+A/E", "Line start/end"),
+            ("Ctrl+K/U", "Kill to end/start of line"),
+            ("Ctrl+W", "Delete word backward"),
+            ("Ctrl+D", "Delete char at cursor"),
             ("Ctrl+Z", "Undo"),
             ("Ctrl+Shift+Z", "Redo"),
-            ("Ctrl+A", "Select all"),
             ("Ctrl+C/X", "Copy/Cut selection"),
-            ("Ctrl+E", "Expand to full-screen editor"),
-            ("Ctrl+K", "Delete to end of line"),
-            ("Shift+←/→", "Extend selection"),
+            ("Home/End", "Line start/end"),
             ("Alt+←/→", "Word left/right"),
-            ("↑ (empty)", "Previous sent message"),
-            ("↓ (history)", "Next sent message"),
+            ("Alt+Backspace", "Delete word backward"),
+            ("Shift+←/→", "Extend selection"),
         ]),
     ];
 

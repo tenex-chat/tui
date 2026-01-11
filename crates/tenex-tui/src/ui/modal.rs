@@ -303,6 +303,77 @@ impl ConversationActionsState {
     }
 }
 
+/// Chat action types (for Chat view input - Ctrl+T /)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatAction {
+    GoToParent,
+    ExportJsonl,
+}
+
+impl ChatAction {
+    /// Get available actions based on whether this conversation has a parent
+    pub fn available(has_parent: bool) -> Vec<ChatAction> {
+        if has_parent {
+            vec![ChatAction::GoToParent, ChatAction::ExportJsonl]
+        } else {
+            vec![ChatAction::ExportJsonl]
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            ChatAction::GoToParent => "Go to Parent Conversation",
+            ChatAction::ExportJsonl => "Copy All Events as JSONL",
+        }
+    }
+
+    pub fn hotkey(&self) -> char {
+        match self {
+            ChatAction::GoToParent => 'p',
+            ChatAction::ExportJsonl => 'e',
+        }
+    }
+}
+
+/// State for chat actions modal (opened from chat input with Ctrl+T /)
+#[derive(Debug, Clone)]
+pub struct ChatActionsState {
+    pub thread_id: String,
+    pub thread_title: String,
+    pub project_a_tag: String,
+    pub parent_conversation_id: Option<String>,
+    pub selected_index: usize,
+}
+
+impl ChatActionsState {
+    pub fn new(
+        thread_id: String,
+        thread_title: String,
+        project_a_tag: String,
+        parent_conversation_id: Option<String>,
+    ) -> Self {
+        Self {
+            thread_id,
+            thread_title,
+            project_a_tag,
+            parent_conversation_id,
+            selected_index: 0,
+        }
+    }
+
+    pub fn has_parent(&self) -> bool {
+        self.parent_conversation_id.is_some()
+    }
+
+    pub fn available_actions(&self) -> Vec<ChatAction> {
+        ChatAction::available(self.has_parent())
+    }
+
+    pub fn selected_action(&self) -> Option<ChatAction> {
+        self.available_actions().get(self.selected_index).copied()
+    }
+}
+
 /// Message action types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageAction {
@@ -498,6 +569,8 @@ pub enum ModalState {
     },
     /// Conversation action menu (/) in Home view - shows actions for selected conversation
     ConversationActions(ConversationActionsState),
+    /// Chat action menu (Ctrl+T /) in Chat view - shows actions for current conversation
+    ChatActions(ChatActionsState),
     /// View raw event JSON in a scrollable modal
     ViewRawEvent {
         message_id: String,

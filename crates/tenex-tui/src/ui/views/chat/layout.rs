@@ -1,8 +1,10 @@
 use crate::ui::components::{
     modal_area, render_chat_sidebar, render_modal_background, render_modal_header,
-    render_modal_items, render_modal_search, render_tab_bar, ConversationMetadata, ModalItem,
-    ModalSize,
+    render_modal_items, render_modal_overlay, render_modal_search, render_tab_bar,
+    ConversationMetadata, ModalItem, ModalSize,
 };
+use crate::ui::format::truncate_with_ellipsis;
+use crate::ui::modal::ChatActionsState;
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
 use crate::ui::text_editor::TextEditor;
@@ -149,6 +151,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if let ModalState::NudgeSelector(ref state) = app.modal_state {
         super::super::render_nudge_selector(f, app, area, state);
     }
+
+    // Render chat actions modal if showing (Ctrl+T /)
+    if let ModalState::ChatActions(ref state) = app.modal_state {
+        render_chat_actions_modal(f, area, state);
+    }
 }
 
 fn build_layout(
@@ -282,42 +289,60 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) {
-    // Full-screen modal covering most of the screen
-    let popup_width = (area.width as f32 * 0.9) as u16;
-    let popup_height = (area.height as f32 * 0.9) as u16;
-    let popup_x = area.x + (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.y + (area.height.saturating_sub(popup_height)) / 2;
-
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    // Clear the area behind the modal
-    f.render_widget(Clear, popup_area);
-
     let line_count = editor.text.lines().count().max(1);
     let char_count = editor.text.len();
-    let title = format!(
-        "Expanded Editor ({} lines, {} chars) - Ctrl+S save, Esc cancel",
-        line_count, char_count
+    let title = format!("Expanded Editor ({} lines, {} chars)", line_count, char_count);
+
+    // Use consistent modal sizing (large modal for editing)
+    let size = ModalSize {
+        max_width: (area.width as f32 * 0.85) as u16,
+        height_percent: 0.8,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    // Add vertical padding
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(3),
     );
 
-    // Render the modal content with text
-    let modal = Paragraph::new(editor.text.as_str())
+    // Render header with title and hint
+    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    // Content area for the text editor
+    let content_area = Rect::new(
+        remaining.x + 2,
+        remaining.y,
+        remaining.width.saturating_sub(4),
+        remaining.height.saturating_sub(2),
+    );
+
+    // Render the text content
+    let text = Paragraph::new(editor.text.as_str())
         .style(Style::default().fg(theme::TEXT_PRIMARY))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-                .title(title),
-        )
         .wrap(Wrap { trim: false });
+    f.render_widget(text, content_area);
 
-    f.render_widget(modal, popup_area);
+    // Render hints at bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("ctrl+s save · esc cancel")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
 
-    // Show cursor in the modal
+    // Show cursor in the modal (offset by content area position)
     let (cursor_row, cursor_col) = editor.cursor_position();
     f.set_cursor_position((
-        popup_area.x + cursor_col as u16 + 1,
-        popup_area.y + cursor_row as u16 + 1,
+        content_area.x + cursor_col as u16,
+        content_area.y + cursor_row as u16,
     ));
 }
 
@@ -463,4 +488,56 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
 
         render_ask_modal(f, modal_state, modal_area);
     }
+}
+
+/// Render the chat actions modal (Ctrl+T /)
+fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState) {
+    render_modal_overlay(f, area);
+
+    let actions = state.available_actions();
+    let content_height = (actions.len() + 2) as u16;
+    let total_height = content_height + 4;
+    let height_percent = (total_height as f32 / area.height as f32).min(0.5);
+
+    let size = ModalSize {
+        max_width: 45,
+        height_percent,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(2),
+    );
+
+    // Truncate title if too long
+    let title = truncate_with_ellipsis(&state.thread_title, 35);
+    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    let items: Vec<ModalItem> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let is_selected = i == state.selected_index;
+            ModalItem::new(action.label())
+                .with_shortcut(action.hotkey().to_string())
+                .selected(is_selected)
+        })
+        .collect();
+
+    render_modal_items(f, remaining, &items);
+
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
 }

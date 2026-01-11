@@ -139,6 +139,12 @@ pub(crate) fn handle_key(
         return Ok(());
     }
 
+    // Handle chat actions modal when open (Ctrl+T /)
+    if matches!(app.modal_state, ModalState::ChatActions(_)) {
+        handle_chat_actions_modal_key(app, key);
+        return Ok(());
+    }
+
     // Handle expanded editor modal when open
     if matches!(app.modal_state, ModalState::ExpandedEditor { .. }) {
         handle_expanded_editor_key(app, key);
@@ -1639,10 +1645,11 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     let modifiers = key.modifiers;
     let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
     let has_alt = modifiers.contains(KeyModifiers::ALT);
+    let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
     match code {
-        // Alt+Enter = newline
-        KeyCode::Enter if has_alt => {
+        // Shift+Enter or Alt+Enter = newline
+        KeyCode::Enter if has_shift || has_alt => {
             app.chat_editor.insert_newline();
             app.save_chat_draft();
         }
@@ -1765,17 +1772,32 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
-        // Ctrl+A = select all
+        // Ctrl+A = move to beginning of line
         KeyCode::Char('a') if has_ctrl => {
-            app.chat_editor.select_all();
+            app.chat_editor.move_to_line_start();
         }
-        // Ctrl+E = expand to full-screen editor modal
+        // Ctrl+E = move to end of line
         KeyCode::Char('e') if has_ctrl => {
-            app.open_expanded_editor_modal();
+            app.chat_editor.move_to_line_end();
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
             app.chat_editor.kill_to_line_end();
+            app.save_chat_draft();
+        }
+        // Ctrl+U = kill to beginning of line
+        KeyCode::Char('u') if has_ctrl => {
+            app.chat_editor.kill_to_line_start();
+            app.save_chat_draft();
+        }
+        // Ctrl+W = delete word backward
+        KeyCode::Char('w') if has_ctrl => {
+            app.chat_editor.delete_word_backward();
+            app.save_chat_draft();
+        }
+        // Ctrl+D = delete character at cursor
+        KeyCode::Char('d') if has_ctrl => {
+            app.chat_editor.delete_char_at();
             app.save_chat_draft();
         }
         // Ctrl+Shift+Z = redo
@@ -1842,6 +1864,21 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Right => {
             app.chat_editor.clear_selection();
             app.chat_editor.move_right();
+        }
+        // Home = move to beginning of line
+        KeyCode::Home => {
+            app.chat_editor.clear_selection();
+            app.chat_editor.move_to_line_start();
+        }
+        // End = move to end of line
+        KeyCode::End => {
+            app.chat_editor.clear_selection();
+            app.chat_editor.move_to_line_end();
+        }
+        // Alt+Backspace = delete word backward
+        KeyCode::Backspace if has_alt => {
+            app.chat_editor.delete_word_backward();
+            app.save_chat_draft();
         }
         KeyCode::Backspace => {
             // If an attachment is focused, delete it
@@ -2616,6 +2653,93 @@ fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
     }
 }
 
+/// Handle key events for the chat actions modal (Ctrl+T /)
+fn handle_chat_actions_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::ChatAction;
+
+    let code = key.code;
+
+    // Get current state
+    let state = match &app.modal_state {
+        ModalState::ChatActions(s) => s.clone(),
+        _ => return,
+    };
+
+    let actions = state.available_actions();
+    let action_count = actions.len();
+
+    match code {
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if state.selected_index > 0 {
+                if let ModalState::ChatActions(ref mut s) = app.modal_state {
+                    s.selected_index -= 1;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if state.selected_index + 1 < action_count {
+                if let ModalState::ChatActions(ref mut s) = app.modal_state {
+                    s.selected_index += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            if let Some(action) = state.selected_action() {
+                execute_chat_action(app, &state, action);
+            }
+        }
+        // Direct hotkeys
+        KeyCode::Char('p') => {
+            if state.has_parent() {
+                execute_chat_action(app, &state, ChatAction::GoToParent);
+            }
+        }
+        KeyCode::Char('e') => {
+            execute_chat_action(app, &state, ChatAction::ExportJsonl);
+        }
+        _ => {}
+    }
+}
+
+/// Execute a chat action
+fn execute_chat_action(
+    app: &mut App,
+    state: &ui::modal::ChatActionsState,
+    action: ui::modal::ChatAction,
+) {
+    use ui::modal::ChatAction;
+
+    match action {
+        ChatAction::GoToParent => {
+            if let Some(ref parent_id) = state.parent_conversation_id {
+                // Find the parent thread and navigate to it
+                let parent_thread = app.data_store.borrow()
+                    .get_threads(&state.project_a_tag)
+                    .iter()
+                    .find(|t| t.id == *parent_id)
+                    .cloned();
+
+                if let Some(thread) = parent_thread {
+                    let a_tag = state.project_a_tag.clone();
+                    app.modal_state = ModalState::None;
+                    app.open_thread_from_home(&thread, &a_tag);
+                    app.set_status(&format!("Navigated to parent: {}", thread.title));
+                } else {
+                    app.set_status("Parent conversation not found");
+                    app.modal_state = ModalState::None;
+                }
+            }
+        }
+        ChatAction::ExportJsonl => {
+            export_thread_as_jsonl(app, &state.thread_id);
+            app.modal_state = ModalState::None;
+        }
+    }
+}
+
 /// Handle key events for the project actions modal
 fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
     use ui::modal::ProjectAction;
@@ -2784,6 +2908,25 @@ pub(crate) fn handle_prefix_key(app: &mut App, key: KeyEvent) {
         // v = toggle vim mode
         KeyCode::Char('v') => {
             app.toggle_vim_mode();
+        }
+        // e = expand to full-screen editor modal
+        KeyCode::Char('e') => {
+            app.open_expanded_editor_modal();
+        }
+        // / = open chat actions modal (when in chat view with a thread selected)
+        KeyCode::Char('/') => {
+            if app.view == View::Chat {
+                if let (Some(ref thread), Some(ref project)) = (&app.selected_thread, &app.selected_project) {
+                    app.modal_state = ModalState::ChatActions(
+                        ui::modal::ChatActionsState::new(
+                            thread.id.clone(),
+                            thread.title.clone(),
+                            project.a_tag(),
+                            thread.parent_conversation_id.clone(),
+                        )
+                    );
+                }
+            }
         }
         // Unknown prefix command - ignore
         _ => {}

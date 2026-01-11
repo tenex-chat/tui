@@ -330,38 +330,8 @@ impl TextEditor {
         None
     }
 
-    /// Get the matching closing character for auto-pair
-    fn auto_pair_closing(c: char) -> Option<char> {
-        match c {
-            '(' => Some(')'),
-            '[' => Some(']'),
-            '{' => Some('}'),
-            '"' => Some('"'),
-            '\'' => Some('\''),
-            '`' => Some('`'),
-            _ => None,
-        }
-    }
-
-    /// Check if a character is a closing bracket/quote
-    fn is_closing_char(c: char) -> bool {
-        matches!(c, ')' | ']' | '}' | '"' | '\'' | '`')
-    }
-
-    /// Insert a single character at cursor (replaces selection if any, supports auto-pair)
+    /// Insert a single character at cursor (replaces selection if any)
     pub fn insert_char(&mut self, c: char) {
-        // Check for skip-over: if typing a closing char that matches what's at cursor
-        if Self::is_closing_char(c) {
-            if let Some(next_char) = self.text.get(self.cursor..).and_then(|s| s.chars().next()) {
-                if c == next_char {
-                    // Just move cursor past the closing char (skip over)
-                    self.selection_anchor = None;
-                    self.cursor += c.len_utf8();
-                    return;
-                }
-            }
-        }
-
         self.push_undo_state();
         // Delete selection first if any
         if let Some((start, end)) = self.selection_range() {
@@ -372,17 +342,8 @@ impl TextEditor {
         }
         self.selection_anchor = None;
 
-        // Check for auto-pair
-        if let Some(closing) = Self::auto_pair_closing(c) {
-            // Insert both opening and closing, cursor between them
-            self.text.insert(self.cursor, c);
-            self.cursor += c.len_utf8();
-            self.text.insert(self.cursor, closing);
-            // Cursor stays between the pair (don't advance past closing)
-        } else {
-            self.text.insert(self.cursor, c);
-            self.cursor += c.len_utf8();
-        }
+        self.text.insert(self.cursor, c);
+        self.cursor += c.len_utf8();
     }
 
     /// Insert a newline at cursor
@@ -485,6 +446,48 @@ impl TextEditor {
             self.push_undo_state();
             self.text.drain(self.cursor..end);
         }
+    }
+
+    /// Kill from cursor to beginning of line (Ctrl+U)
+    pub fn kill_to_line_start(&mut self) {
+        let start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        if start < self.cursor {
+            self.push_undo_state();
+            self.text.drain(start..self.cursor);
+            self.cursor = start;
+        }
+    }
+
+    /// Delete word backward (Ctrl+W / Alt+Backspace)
+    pub fn delete_word_backward(&mut self) {
+        if self.cursor == 0 {
+            return;
+        }
+
+        let before = &self.text[..self.cursor];
+
+        // Skip whitespace first
+        let trimmed = before.trim_end();
+        if trimmed.is_empty() {
+            // Only whitespace before cursor, delete it all
+            self.push_undo_state();
+            self.text.drain(0..self.cursor);
+            self.cursor = 0;
+            return;
+        }
+
+        // Find start of the word
+        let word_start = trimmed
+            .rfind(|c: char| c.is_whitespace())
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        self.push_undo_state();
+        self.text.drain(word_start..self.cursor);
+        self.cursor = word_start;
     }
 
     /// Move cursor to previous word boundary (Alt+Left)
