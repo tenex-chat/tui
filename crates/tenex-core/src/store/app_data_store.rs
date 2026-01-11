@@ -840,6 +840,25 @@ impl AppDataStore {
         relationships
     }
 
+    /// Find parent conversation ID for a thread by checking delegation tags in messages.
+    /// This is a fallback for when the thread root doesn't have a delegation tag,
+    /// but one of its messages does (e.g., the first message that was delegated).
+    /// Returns the first delegation tag value found in any message of the thread.
+    pub fn get_parent_conversation_from_messages(&self, thread_id: &str) -> Option<String> {
+        if let Some(messages) = self.messages_by_thread.get(thread_id) {
+            for message in messages {
+                if let Some(ref parent_id) = message.delegation_tag {
+                    // Don't return if the delegation tag points to the same thread
+                    // (that would be self-referential)
+                    if parent_id != thread_id {
+                        return Some(parent_id.clone());
+                    }
+                }
+            }
+        }
+        None
+    }
+
     // ===== Inbox Methods =====
 
     pub fn get_inbox_items(&self) -> &[InboxItem] {

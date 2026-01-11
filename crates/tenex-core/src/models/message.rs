@@ -50,6 +50,9 @@ pub struct Message {
     /// LLM metadata tags (llm-prompt-tokens, llm-completion-tokens, llm-model, etc.)
     /// Key is the tag name without "llm-" prefix, value is the tag value
     pub llm_metadata: Vec<(String, String)>,
+    /// Delegation tag value - parent conversation ID if this message has a delegation tag
+    /// Format: ["delegation", "<parent-conversation-id>"]
+    pub delegation_tag: Option<String>,
 }
 
 impl Message {
@@ -77,6 +80,7 @@ impl Message {
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
         let mut llm_metadata: Vec<(String, String)> = Vec::new();
+        let mut delegation_tag: Option<String> = None;
 
         // Parse tags
         for tag in note.tags() {
@@ -155,6 +159,10 @@ impl Message {
                 Some("reasoning") => {
                     is_reasoning = true;
                 }
+                Some("delegation") => {
+                    // Delegation tag format: ["delegation", "<parent-conversation-id>"]
+                    delegation_tag = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 _ => {}
             }
         }
@@ -179,6 +187,7 @@ impl Message {
             tool_name,
             tool_args,
             llm_metadata,
+            delegation_tag,
         })
     }
 
@@ -265,6 +274,7 @@ impl Message {
             tool_name,
             tool_args,
             llm_metadata,
+            delegation_tag: None, // Thread root doesn't have delegation tag (use Thread.parent_conversation_id)
         })
     }
 
@@ -586,6 +596,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         assert!(msg.has_images());
 
@@ -603,6 +614,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         assert!(!no_images.has_images());
     }
@@ -623,6 +635,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
@@ -644,6 +657,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
@@ -665,6 +679,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         let urls = msg.extract_image_urls();
         assert!(urls.is_empty());
@@ -686,6 +701,7 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);

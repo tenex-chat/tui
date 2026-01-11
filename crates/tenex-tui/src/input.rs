@@ -2917,12 +2917,19 @@ pub(crate) fn handle_prefix_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('/') => {
             if app.view == View::Chat {
                 if let (Some(ref thread), Some(ref project)) = (&app.selected_thread, &app.selected_project) {
+                    // Try thread's parent_conversation_id first, fallback to checking messages
+                    let parent_id = thread.parent_conversation_id.clone()
+                        .or_else(|| {
+                            app.data_store.borrow()
+                                .get_parent_conversation_from_messages(&thread.id)
+                        });
+
                     app.modal_state = ModalState::ChatActions(
                         ui::modal::ChatActionsState::new(
                             thread.id.clone(),
                             thread.title.clone(),
                             project.a_tag(),
-                            thread.parent_conversation_id.clone(),
+                            parent_id,
                         )
                     );
                 }
