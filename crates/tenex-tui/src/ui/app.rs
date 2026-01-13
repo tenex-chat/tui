@@ -33,6 +33,44 @@ pub fn fuzzy_matches(target: &str, pattern: &str) -> bool {
     false
 }
 
+/// Fuzzy match score: lower is better (0 = exact prefix match)
+/// Returns None if no match, Some(score) if match
+/// Scoring: prefix matches get 0, then +1 per position after start, +1 per gap
+pub fn fuzzy_score(target: &str, pattern: &str) -> Option<usize> {
+    if pattern.is_empty() {
+        return Some(0);
+    }
+    let target_lower = target.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+    let target_chars: Vec<char> = target_lower.chars().collect();
+    let pattern_chars: Vec<char> = pattern_lower.chars().collect();
+
+    let mut pattern_idx = 0;
+    let mut first_match_pos = None;
+    let mut total_gaps = 0;
+    let mut last_match_pos: Option<usize> = None;
+
+    for (i, &c) in target_chars.iter().enumerate() {
+        if pattern_idx < pattern_chars.len() && c == pattern_chars[pattern_idx] {
+            if first_match_pos.is_none() {
+                first_match_pos = Some(i);
+            }
+            if let Some(last) = last_match_pos {
+                total_gaps += i - last - 1;
+            }
+            last_match_pos = Some(i);
+            pattern_idx += 1;
+        }
+    }
+
+    if pattern_idx == pattern_chars.len() {
+        // Score: position of first match + total gaps between matches
+        Some(first_match_pos.unwrap_or(0) + total_gaps)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -123,6 +161,9 @@ pub struct App {
 
     /// Editor for the attachment modal content
     pub attachment_modal_editor: TextEditor,
+
+    /// Current wrap width for chat input (updated during rendering for visual line navigation)
+    pub chat_input_wrap_width: usize,
 
     /// Single source of truth for app data
     pub data_store: Rc<RefCell<AppDataStore>>,
@@ -259,6 +300,7 @@ impl App {
             chat_editor: TextEditor::new(),
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
+            chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
             subthread_root: None,
             subthread_root_message: None,
@@ -503,19 +545,26 @@ impl App {
     }
 
     /// Get filtered projects based on current filter (from ModalState)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
 
-        let matching: Vec<&Project> = projects
+        let mut matching: Vec<_> = projects
             .iter()
-            .filter(|p| fuzzy_matches(&p.name, filter))
+            .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
 
-        // Separate into online and offline
+        // Sort by score (lower = better match), then alphabetically for ties
+        matching.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+        });
+
+        // Separate into online and offline, preserving sort order
         let (online, offline): (Vec<_>, Vec<_>) = matching
             .into_iter()
+            .map(|(p, _)| p)
             .partition(|p| store.is_project_online(&p.a_tag()));
 
         (online.into_iter().cloned().collect(), offline.into_iter().cloned().collect())
@@ -669,15 +718,21 @@ impl App {
     }
 
     /// Get agents filtered by current filter (from ModalState or empty)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
         let filter = match &self.modal_state {
             ModalState::AgentSelector { selector } => &selector.filter,
             _ => "",
         };
-        self.available_agents()
+        let mut agents_with_scores: Vec<_> = self.available_agents()
             .into_iter()
-            .filter(|a| fuzzy_matches(&a.name, filter))
-            .collect()
+            .filter_map(|a| fuzzy_score(&a.name, filter).map(|score| (a, score)))
+            .collect();
+        // Sort by score (lower = better match), then alphabetically for ties
+        agents_with_scores.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+        });
+        agents_with_scores.into_iter().map(|(a, _)| a).collect()
     }
 
     /// Get agent selector index (from ModalState)
@@ -711,15 +766,21 @@ impl App {
     }
 
     /// Get branches filtered by current filter (from ModalState)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_branches(&self) -> Vec<String> {
         let filter = match &self.modal_state {
             ModalState::BranchSelector { selector } => &selector.filter,
             _ => "",
         };
-        self.available_branches()
+        let mut branches_with_scores: Vec<_> = self.available_branches()
             .into_iter()
-            .filter(|b| fuzzy_matches(b, filter))
-            .collect()
+            .filter_map(|b| fuzzy_score(&b, filter).map(|score| (b, score)))
+            .collect();
+        // Sort by score (lower = better match), then alphabetically for ties
+        branches_with_scores.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.cmp(b))
+        });
+        branches_with_scores.into_iter().map(|(b, _)| b).collect()
     }
 
     /// Get branch selector index (from ModalState or legacy)
@@ -1297,6 +1358,24 @@ impl App {
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
             self.scroll_offset = usize::MAX;
+        }
+    }
+
+    /// Start a new thread for a specific project (navigates to chat without a thread selected)
+    pub fn start_new_thread_for_project(&mut self, project_a_tag: &str) {
+        // Find and set selected project
+        let project = self.data_store.borrow().get_projects()
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .cloned();
+
+        if let Some(project) = project {
+            self.selected_project = Some(project);
+            self.selected_thread = None;
+            self.creating_thread = true;
+            self.view = View::Chat;
+            self.input_mode = InputMode::Editing;
+            self.chat_editor.clear();
         }
     }
 
