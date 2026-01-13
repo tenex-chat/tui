@@ -31,14 +31,44 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
 
-    // Build conversation metadata from selected thread
+    // Build conversation metadata from selected thread, including work status
     let metadata = app
         .selected_thread
         .as_ref()
-        .map(|thread| ConversationMetadata {
-            title: Some(thread.title.clone()),
-            status_label: thread.status_label.clone(),
-            status_current_activity: thread.status_current_activity.clone(),
+        .map(|thread| {
+            // Get working agent names from 24133 events
+            let working_agents = {
+                let store = app.data_store.borrow();
+                let agent_pubkeys = store.get_working_agents(&thread.id);
+
+                // Get project a_tag to look up agent names from project status
+                let project_a_tag = store.find_project_for_thread(&thread.id);
+
+                // Resolve pubkeys to agent names via project status
+                agent_pubkeys
+                    .iter()
+                    .map(|pubkey| {
+                        // Look up agent name from project status
+                        project_a_tag.as_ref()
+                            .and_then(|a_tag| store.get_project_status(a_tag))
+                            .and_then(|status| {
+                                status.agents.iter()
+                                    .find(|a| a.pubkey == *pubkey)
+                                    .map(|a| a.name.clone())
+                            })
+                            .unwrap_or_else(|| {
+                                // Fallback to short pubkey if agent not found
+                                format!("{}...", &pubkey[..8.min(pubkey.len())])
+                            })
+                    })
+                    .collect()
+            };
+            ConversationMetadata {
+                title: Some(thread.title.clone()),
+                status_label: thread.status_label.clone(),
+                status_current_activity: thread.status_current_activity.clone(),
+                working_agents,
+            }
         })
         .unwrap_or_default();
 
@@ -67,9 +97,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     messages::render_messages_panel(f, app, messages_area, &all_messages);
 
-    // Render chat sidebar (todos + metadata)
+    // Render chat sidebar (work indicator + todos + metadata)
     if let Some(sidebar) = sidebar_area {
-        render_chat_sidebar(f, &todo_state, &metadata, sidebar);
+        render_chat_sidebar(f, &todo_state, &metadata, app.spinner_char(), sidebar);
     }
 
     // Calculate chunk indices based on layout
@@ -165,13 +195,14 @@ fn build_layout(
     has_status: bool,
     has_tabs: bool,
 ) -> Rc<[Rect]> {
+    // Tab bar now uses 2 lines (title + project)
     match (has_attachments, has_status, has_tabs) {
         (true, true, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Status line
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(1),         // Tab bar
+            Constraint::Length(2),         // Tab bar (2 lines)
         ])
         .split(area),
         (true, true, false) => Layout::vertical([
@@ -185,7 +216,7 @@ fn build_layout(
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(1),         // Tab bar
+            Constraint::Length(2),         // Tab bar (2 lines)
         ])
         .split(area),
         (true, false, false) => Layout::vertical([
@@ -198,7 +229,7 @@ fn build_layout(
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Status line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(1),         // Tab bar
+            Constraint::Length(2),         // Tab bar (2 lines)
         ])
         .split(area),
         (false, true, false) => Layout::vertical([
@@ -210,7 +241,7 @@ fn build_layout(
         (false, false, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(1),         // Tab bar
+            Constraint::Length(2),         // Tab bar (2 lines)
         ])
         .split(area),
         (false, false, false) => Layout::vertical([

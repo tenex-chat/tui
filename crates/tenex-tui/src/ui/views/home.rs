@@ -9,7 +9,7 @@ use crate::ui::modal::{ConversationAction, ConversationActionsState, ModalState,
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 pub use crate::ui::views::home_helpers::HierarchicalThread;
-use crate::ui::{theme, App, HomeTab};
+use crate::ui::{theme, App, HomeTab, View};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -31,7 +31,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(2), // Tab header
             Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Help bar
-            Constraint::Length(1), // Open tabs bar
+            Constraint::Length(2), // Open tabs bar (2 lines: title + project)
         ])
         .split(area)
     } else {
@@ -1170,8 +1170,8 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     // Dim the background
     render_modal_overlay(f, area);
 
-    // Calculate modal dimensions - dynamic based on tab count
-    let tab_count = app.open_tabs.len();
+    // Calculate modal dimensions - dynamic based on tab count (+1 for Home entry)
+    let tab_count = app.open_tabs.len() + 1; // +1 for Home
     let content_height = (tab_count + 2) as u16; // +2 for header spacing
     let total_height = content_height + 4; // +4 for padding and hints
     let height_percent = (total_height as f32 / area.height as f32).min(0.7);
@@ -1195,27 +1195,40 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     // Render header with title and hint
     let remaining = render_modal_header(f, inner_area, "Open Tabs", "esc");
 
-    // Build items list
+    // Build items list - Home is always first (option 1)
     let data_store = app.data_store.borrow();
-    let items: Vec<ModalItem> = app
-        .open_tabs
-        .iter()
-        .enumerate()
-        .map(|(i, tab)| {
-            let is_selected = i == app.tab_modal_index;
-            let is_active = i == app.active_tab_index;
+    let mut items: Vec<ModalItem> = Vec::with_capacity(app.open_tabs.len() + 1);
 
-            let project_name = data_store.get_project_name(&tab.project_a_tag);
-            let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
+    // Home entry (option 1)
+    let home_selected = app.tab_modal_index == 0 && app.open_tabs.is_empty();
+    let home_active = app.view == View::Home;
+    let home_marker = if home_active { card::BULLET } else { card::SPACER };
+    items.push(
+        ModalItem::new(format!("{}Home (Dashboard)", home_marker))
+            .with_shortcut("1".to_string())
+            .selected(home_selected),
+    );
 
-            let active_marker = if is_active { card::BULLET } else { card::SPACER };
-            let text = format!("{}{} · {}", active_marker, project_name, title_display);
+    // Tab entries (options 2-9)
+    for (i, tab) in app.open_tabs.iter().enumerate() {
+        let is_selected = i == app.tab_modal_index;
+        let is_active = i == app.active_tab_index && app.view == View::Chat;
 
-            ModalItem::new(text)
-                .with_shortcut(format!("{}", i + 1))
-                .selected(is_selected)
-        })
-        .collect();
+        let project_name = data_store.get_project_name(&tab.project_a_tag);
+        let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
+
+        let active_marker = if is_active { card::BULLET } else { card::SPACER };
+        let text = format!("{}{} · {}", active_marker, project_name, title_display);
+
+        // Tab number is i+2 (since 1 is Home)
+        let shortcut = if i + 2 <= 9 {
+            format!("{}", i + 2)
+        } else {
+            String::new()
+        };
+
+        items.push(ModalItem::new(text).with_shortcut(shortcut).selected(is_selected));
+    }
     drop(data_store);
 
     // Render the items
@@ -1228,7 +1241,7 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("↑↓ navigate · enter switch · x close · 0-9 jump")
+    let hints = Paragraph::new("↑↓ navigate · enter switch · x close · 1=Home 2-9=tabs")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }

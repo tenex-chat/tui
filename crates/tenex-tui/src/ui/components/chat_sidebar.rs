@@ -16,20 +16,27 @@ pub struct ConversationMetadata {
     pub title: Option<String>,
     pub status_label: Option<String>,
     pub status_current_activity: Option<String>,
+    /// Agent names currently working on this conversation (from kind:24133)
+    pub working_agents: Vec<String>,
 }
 
 impl ConversationMetadata {
     pub fn has_content(&self) -> bool {
         self.title.is_some() || self.status_label.is_some() || self.status_current_activity.is_some()
     }
+
+    pub fn is_busy(&self) -> bool {
+        !self.working_agents.is_empty()
+    }
 }
 
 /// Render the conversation sidebar on the right side of the chat.
-/// Shows todos (if any) at the top, metadata below.
+/// Shows work indicator (if busy), todos (if any), and metadata below.
 pub fn render_chat_sidebar(
     f: &mut Frame,
     todo_state: &TodoState,
     metadata: &ConversationMetadata,
+    spinner_char: char,
     area: Rect,
 ) {
     let mut lines: Vec<Line> = Vec::new();
@@ -37,15 +44,24 @@ pub fn render_chat_sidebar(
     let h_padding = 2;
     let content_width = (area.width as usize).saturating_sub(h_padding * 2);
 
+    // === WORK INDICATOR SECTION ===
+    if metadata.is_busy() {
+        render_work_indicator_section(&mut lines, metadata, spinner_char, content_width, h_padding);
+    }
+
     // === TODOS SECTION ===
     if todo_state.has_todos() {
+        // Add separator if we had work indicator
+        if metadata.is_busy() {
+            lines.push(Line::from(""));
+        }
         render_todos_section(&mut lines, todo_state, content_width, h_padding);
     }
 
     // === METADATA SECTION ===
     if metadata.has_content() {
-        // Add separator if we had todos
-        if todo_state.has_todos() {
+        // Add separator if we had todos or work indicator
+        if todo_state.has_todos() || metadata.is_busy() {
             lines.push(Line::from(""));
         }
         render_metadata_section(&mut lines, metadata, content_width, h_padding);
@@ -64,6 +80,43 @@ pub fn render_chat_sidebar(
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
+}
+
+fn render_work_indicator_section(
+    lines: &mut Vec<Line>,
+    metadata: &ConversationMetadata,
+    spinner_char: char,
+    content_width: usize,
+    h_padding: usize,
+) {
+    let padding = " ".repeat(h_padding);
+
+    // Header with spinner
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled(
+            format!("{} ", spinner_char),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ),
+        Span::styled("WORKING", Style::default().fg(theme::ACCENT_PRIMARY)),
+    ]));
+
+    // List working agents
+    for agent_name in &metadata.working_agents {
+        let display_name = truncate_with_ellipsis(agent_name, content_width.saturating_sub(2));
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(format!("  {}", display_name), theme::text_muted()),
+        ]));
+    }
+
+    // Hint about stopping
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled("s", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" to stop", theme::text_muted()),
+    ]));
 }
 
 fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_width: usize, h_padding: usize) {

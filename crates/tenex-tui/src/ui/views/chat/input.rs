@@ -88,7 +88,10 @@ pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(attachments, area);
 }
 
-pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
+pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
+    // Update wrap width for visual line navigation
+    let input_content_width_val = area.width.saturating_sub(5) as usize;
+    app.chat_input_wrap_width = input_content_width_val;
     // Normal chat input - deterministic color border based on user's pubkey
     let is_input_active =
         app.input_mode == InputMode::Editing && !matches!(app.modal_state, ModalState::AskModal(_));

@@ -160,15 +160,15 @@ pub(crate) fn handle_key(
 
         if has_alt {
             match code {
-                // Alt+0 = go to dashboard (home)
-                KeyCode::Char('0') => {
+                // Alt+1 = go to dashboard (home) - always first tab
+                KeyCode::Char('1') => {
                     app.save_chat_draft();
                     app.view = View::Home;
                     return Ok(());
                 }
-                // Alt+1..9 = jump directly to tab N
-                KeyCode::Char(c) if c >= '1' && c <= '9' => {
-                    let tab_index = (c as usize) - ('1' as usize);
+                // Alt+2..9 = jump directly to tab N-1 (since 1 is Home)
+                KeyCode::Char(c) if c >= '2' && c <= '9' => {
+                    let tab_index = (c as usize) - ('2' as usize); // '2' -> 0, '3' -> 1, etc.
                     if tab_index < app.open_tabs.len() {
                         app.switch_to_tab(tab_index);
                         app.view = View::Chat;
@@ -223,9 +223,14 @@ pub(crate) fn handle_key(
                 app.open_branch_selector();
                 return Ok(());
             }
-            // Number keys 1-9 to jump to tabs (without Alt, for backwards compat in Normal mode)
-            KeyCode::Char(c) if c >= '1' && c <= '9' => {
-                let tab_index = (c as usize) - ('1' as usize);
+            // Number keys 1-9 to navigate (1 = Home, 2-9 = tabs) in Normal mode
+            KeyCode::Char('1') => {
+                app.save_chat_draft();
+                app.view = View::Home;
+                return Ok(());
+            }
+            KeyCode::Char(c) if c >= '2' && c <= '9' => {
+                let tab_index = (c as usize) - ('2' as usize); // '2' -> 0, '3' -> 1, etc.
                 if tab_index < app.open_tabs.len() {
                     app.switch_to_tab(tab_index);
                 }
@@ -1162,9 +1167,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.selected_report_index = 0;
             }
         }
-        // Number keys for tab switching (same as Chat view)
-        KeyCode::Char(c) if c >= '1' && c <= '9' => {
-            let tab_index = (c as usize) - ('1' as usize);
+        // Number keys for tab switching (1 = stay on Home, 2-9 = tabs)
+        KeyCode::Char('1') => {
+            // Already on Home, do nothing
+        }
+        KeyCode::Char(c) if c >= '2' && c <= '9' => {
+            let tab_index = (c as usize) - ('2' as usize); // '2' -> 0, '3' -> 1, etc.
             if tab_index < app.open_tabs.len() {
                 app.switch_to_tab(tab_index);
                 app.view = View::Chat;
@@ -1772,13 +1780,13 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
-        // Ctrl+A = move to beginning of line
+        // Ctrl+A = move to beginning of visual line
         KeyCode::Char('a') if has_ctrl => {
-            app.chat_editor.move_to_line_start();
+            app.chat_editor.move_to_visual_line_start(app.chat_input_wrap_width);
         }
-        // Ctrl+E = move to end of line
+        // Ctrl+E = move to end of visual line
         KeyCode::Char('e') if has_ctrl => {
-            app.chat_editor.move_to_line_end();
+            app.chat_editor.move_to_visual_line_end(app.chat_input_wrap_width);
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
@@ -1905,6 +1913,13 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Down if has_ctrl => {
             app.scroll_down(3);
         }
+        // Up/Down = move by visual lines (for wrapped text navigation)
+        KeyCode::Up => {
+            app.chat_editor.move_up_visual(app.chat_input_wrap_width);
+        }
+        KeyCode::Down => {
+            app.chat_editor.move_down_visual(app.chat_input_wrap_width);
+        }
         KeyCode::PageUp => {
             app.scroll_up(20);
         }
@@ -1966,10 +1981,10 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
             app.chat_editor.move_right();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.chat_editor.move_down();
+            app.chat_editor.move_down_visual(app.chat_input_wrap_width);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.chat_editor.move_up();
+            app.chat_editor.move_up_visual(app.chat_input_wrap_width);
         }
         KeyCode::Char('w') => {
             app.chat_editor.move_word_right();
@@ -2010,6 +2025,15 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.save_chat_draft();
             app.input_mode = InputMode::Normal;
+        }
+
+        // Shift+Enter or Alt+Enter = newline (even in normal mode)
+        KeyCode::Enter
+            if key.modifiers.contains(KeyModifiers::SHIFT)
+                || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            app.chat_editor.insert_newline();
+            app.save_chat_draft();
         }
 
         _ => {}
@@ -2376,15 +2400,15 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // '0' goes to dashboard (home)
-        KeyCode::Char('0') => {
+        // '1' goes to dashboard (home) - always first "tab"
+        KeyCode::Char('1') => {
             app.close_tab_modal();
             app.save_chat_draft();
             app.view = View::Home;
         }
-        // Number keys 1-9 switch directly to that tab
-        KeyCode::Char(c) if c >= '1' && c <= '9' => {
-            let tab_index = (c as usize) - ('1' as usize);
+        // Number keys 2-9 switch directly to that tab (2 -> tab 0, 3 -> tab 1, etc.)
+        KeyCode::Char(c) if c >= '2' && c <= '9' => {
+            let tab_index = (c as usize) - ('2' as usize);
             app.close_tab_modal();
             if tab_index < app.open_tabs.len() {
                 app.switch_to_tab(tab_index);
@@ -2692,6 +2716,9 @@ fn handle_chat_actions_modal_key(app: &mut App, key: KeyEvent) {
             }
         }
         // Direct hotkeys
+        KeyCode::Char('n') => {
+            execute_chat_action(app, &state, ChatAction::NewConversation);
+        }
         KeyCode::Char('p') => {
             if state.has_parent() {
                 execute_chat_action(app, &state, ChatAction::GoToParent);
@@ -2713,6 +2740,15 @@ fn execute_chat_action(
     use ui::modal::ChatAction;
 
     match action {
+        ChatAction::NewConversation => {
+            // Start a new conversation keeping the same project, agent, and branch context
+            app.modal_state = ModalState::None;
+            app.selected_thread = None;
+            app.creating_thread = true;
+            app.input_mode = InputMode::Editing;
+            app.chat_editor.clear();
+            app.set_status("New conversation (same project, agent, and branch)");
+        }
         ChatAction::GoToParent => {
             if let Some(ref parent_id) = state.parent_conversation_id {
                 // Find the parent thread and navigate to it
@@ -2779,6 +2815,9 @@ fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
             }
         }
         // Direct hotkeys
+        KeyCode::Char('n') if state.is_online => {
+            execute_project_action(app, &state, ProjectAction::NewConversation);
+        }
         KeyCode::Char('b') if !state.is_online => {
             execute_project_action(app, &state, ProjectAction::Boot);
         }
@@ -2828,6 +2867,43 @@ fn execute_project_action(
                 state.project_name.clone(),
                 agent_ids,
             ));
+        }
+        ProjectAction::NewConversation => {
+            // Find the project and set it as selected
+            let project = {
+                let store = app.data_store.borrow();
+                store
+                    .get_projects()
+                    .iter()
+                    .find(|p| p.a_tag() == state.project_a_tag)
+                    .cloned()
+            };
+
+            if let Some(project) = project {
+                let a_tag = project.a_tag();
+                app.selected_project = Some(project);
+
+                // Auto-select PM agent and default branch from status
+                if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
+                    if let Some(pm) = status.pm_agent() {
+                        app.selected_agent = Some(pm.clone());
+                    }
+                    if app.selected_branch.is_none() {
+                        app.selected_branch = status.default_branch().map(String::from);
+                    }
+                }
+
+                // Navigate to chat view to create new thread
+                app.modal_state = ModalState::None;
+                app.selected_thread = None;
+                app.creating_thread = true;
+                app.view = View::Chat;
+                app.input_mode = InputMode::Editing;
+                app.chat_editor.clear();
+            } else {
+                app.modal_state = ModalState::None;
+                app.set_status("Project not found");
+            }
         }
     }
 }

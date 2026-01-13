@@ -306,6 +306,7 @@ impl ConversationActionsState {
 /// Chat action types (for Chat view input - Ctrl+T /)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatAction {
+    NewConversation,
     GoToParent,
     ExportJsonl,
 }
@@ -314,14 +315,19 @@ impl ChatAction {
     /// Get available actions based on whether this conversation has a parent
     pub fn available(has_parent: bool) -> Vec<ChatAction> {
         if has_parent {
-            vec![ChatAction::GoToParent, ChatAction::ExportJsonl]
+            vec![
+                ChatAction::NewConversation,
+                ChatAction::GoToParent,
+                ChatAction::ExportJsonl,
+            ]
         } else {
-            vec![ChatAction::ExportJsonl]
+            vec![ChatAction::NewConversation, ChatAction::ExportJsonl]
         }
     }
 
     pub fn label(&self) -> &'static str {
         match self {
+            ChatAction::NewConversation => "New Conversation (Same Context)",
             ChatAction::GoToParent => "Go to Parent Conversation",
             ChatAction::ExportJsonl => "Copy All Events as JSONL",
         }
@@ -329,6 +335,7 @@ impl ChatAction {
 
     pub fn hotkey(&self) -> char {
         match self {
+            ChatAction::NewConversation => 'n',
             ChatAction::GoToParent => 'p',
             ChatAction::ExportJsonl => 'e',
         }
@@ -413,6 +420,7 @@ impl MessageAction {
 /// Project action types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectAction {
+    NewConversation,
     Boot,
     Settings,
 }
@@ -420,6 +428,7 @@ pub enum ProjectAction {
 impl ProjectAction {
     pub fn label(&self) -> &'static str {
         match self {
+            ProjectAction::NewConversation => "New Conversation",
             ProjectAction::Boot => "Boot Project",
             ProjectAction::Settings => "Settings",
         }
@@ -427,6 +436,7 @@ impl ProjectAction {
 
     pub fn hotkey(&self) -> char {
         match self {
+            ProjectAction::NewConversation => 'n',
             ProjectAction::Boot => 'b',
             ProjectAction::Settings => 's',
         }
@@ -456,7 +466,7 @@ impl ProjectActionsState {
 
     pub fn available_actions(&self) -> Vec<ProjectAction> {
         if self.is_online {
-            vec![ProjectAction::Settings]
+            vec![ProjectAction::NewConversation, ProjectAction::Settings]
         } else {
             vec![ProjectAction::Boot, ProjectAction::Settings]
         }
