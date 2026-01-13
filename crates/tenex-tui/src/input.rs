@@ -1657,7 +1657,13 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
 
     match code {
         // Shift+Enter or Alt+Enter = newline
+        // Also handle Ctrl+J which is what iTerm2/macOS sends for Shift+Enter (LF = ^J = ASCII 10)
         KeyCode::Enter if has_shift || has_alt => {
+            app.chat_editor.insert_newline();
+            app.save_chat_draft();
+        }
+        KeyCode::Char('j') | KeyCode::Char('J') if has_ctrl => {
+            // Ctrl+J is Line Feed (ASCII 10), same as Shift+Enter on many terminals
             app.chat_editor.insert_newline();
             app.save_chat_draft();
         }
@@ -1940,6 +1946,15 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
     let code = key.code;
 
     match code {
+        // Ctrl+J is Line Feed (ASCII 10), same as Shift+Enter on iTerm2/macOS
+        // MUST come before regular 'j' movement handler
+        KeyCode::Char('j') | KeyCode::Char('J')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
+        {
+            app.chat_editor.insert_newline();
+            app.save_chat_draft();
+        }
+
         // Mode switching
         KeyCode::Char('i') => {
             app.vim_enter_insert();
@@ -2031,6 +2046,15 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter
             if key.modifiers.contains(KeyModifiers::SHIFT)
                 || key.modifiers.contains(KeyModifiers::ALT) =>
+        {
+            app.chat_editor.insert_newline();
+            app.save_chat_draft();
+        }
+
+        // Ctrl+J is Line Feed (ASCII 10), same as Shift+Enter on iTerm2/macOS
+        // This must be handled BEFORE the regular 'j' movement key
+        KeyCode::Char('j') | KeyCode::Char('J')
+            if key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
             app.chat_editor.insert_newline();
             app.save_chat_draft();
