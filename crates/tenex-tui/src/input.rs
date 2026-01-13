@@ -158,6 +158,38 @@ pub(crate) fn handle_key(
         let has_alt = modifiers.contains(KeyModifiers::ALT);
         let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
+        // macOS Option+Number produces special characters instead of Alt+Number
+        // Handle these characters for tab switching
+        match code {
+            // Option+1 on macOS produces '¡' - go to dashboard
+            KeyCode::Char('¡') => {
+                app.save_chat_draft();
+                app.view = View::Home;
+                return Ok(());
+            }
+            // Option+2..9 on macOS produces special chars - switch to tab
+            // ™=2, £=3, ¢=4, ∞=5, §=6, ¶=7, •=8, ª=9
+            KeyCode::Char(c) if matches!(c, '™' | '£' | '¢' | '∞' | '§' | '¶' | '•' | 'ª') => {
+                let tab_index = match c {
+                    '™' => 0, // Option+2 -> tab 0
+                    '£' => 1, // Option+3 -> tab 1
+                    '¢' => 2, // Option+4 -> tab 2
+                    '∞' => 3, // Option+5 -> tab 3
+                    '§' => 4, // Option+6 -> tab 4
+                    '¶' => 5, // Option+7 -> tab 5
+                    '•' => 6, // Option+8 -> tab 6
+                    'ª' => 7, // Option+9 -> tab 7
+                    _ => return Ok(()),
+                };
+                if tab_index < app.open_tabs.len() {
+                    app.switch_to_tab(tab_index);
+                    app.view = View::Chat;
+                }
+                return Ok(());
+            }
+            _ => {}
+        }
+
         if has_alt {
             match code {
                 // Alt+1 = go to dashboard (home) - always first tab
@@ -2046,15 +2078,6 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Enter
             if key.modifiers.contains(KeyModifiers::SHIFT)
                 || key.modifiers.contains(KeyModifiers::ALT) =>
-        {
-            app.chat_editor.insert_newline();
-            app.save_chat_draft();
-        }
-
-        // Ctrl+J is Line Feed (ASCII 10), same as Shift+Enter on iTerm2/macOS
-        // This must be handled BEFORE the regular 'j' movement key
-        KeyCode::Char('j') | KeyCode::Char('J')
-            if key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
             app.chat_editor.insert_newline();
             app.save_chat_draft();
