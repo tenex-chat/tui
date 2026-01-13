@@ -30,7 +30,9 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(theme::TEXT_MUTED)
     };
     let home_title_style = if home_active {
-        theme::tab_active()
+        Style::default()
+            .fg(theme::ACCENT_SUCCESS)
+            .add_modifier(ratatui::style::Modifier::BOLD)
     } else {
         theme::tab_inactive()
     };
