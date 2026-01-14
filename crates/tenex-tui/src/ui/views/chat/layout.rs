@@ -4,6 +4,7 @@ use crate::ui::components::{
     ConversationMetadata, ModalItem, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
+use crate::ui::layout;
 use crate::ui::modal::ChatActionsState;
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
@@ -74,8 +75,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Auto-open ask modal for first unanswered question (only when no modal is active)
     if matches!(app.modal_state, ModalState::None) {
-        if let Some((msg_id, ask_event)) = app.has_unanswered_ask_event() {
-            app.open_ask_modal(msg_id, ask_event);
+        if let Some((msg_id, ask_event, author_pubkey)) = app.has_unanswered_ask_event() {
+            app.open_ask_modal(msg_id, ask_event, author_pubkey);
         }
     }
 
@@ -92,8 +93,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let (messages_area_raw, sidebar_area) =
         split_messages_area(chunks[0], app.todo_sidebar_visible);
 
-    // Add horizontal padding to messages area for breathing room
-    let messages_area = with_horizontal_padding(messages_area_raw, 3);
+    // Add horizontal padding to messages area for breathing room (consistent with Home)
+    let messages_area = layout::with_content_padding(messages_area_raw);
 
     messages::render_messages_panel(f, app, messages_area, &all_messages);
 
@@ -186,6 +187,16 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if let ModalState::ChatActions(ref state) = app.modal_state {
         render_chat_actions_modal(f, area, state);
     }
+
+    // Render agent settings modal if showing
+    if let ModalState::AgentSettings(ref state) = app.modal_state {
+        render_agent_settings_modal(f, area, state);
+    }
+
+    // Command palette overlay (Ctrl+T)
+    if let ModalState::CommandPalette(ref state) = app.modal_state {
+        super::super::render_command_palette(f, area, state);
+    }
 }
 
 fn build_layout(
@@ -254,20 +265,14 @@ fn build_layout(
 
 fn split_messages_area(messages_area: Rect, show_sidebar: bool) -> (Rect, Option<Rect>) {
     if show_sidebar {
-        let horiz = Layout::horizontal([Constraint::Min(40), Constraint::Length(30)])
-            .split(messages_area);
+        let horiz = Layout::horizontal([
+            Constraint::Min(40),
+            Constraint::Length(layout::SIDEBAR_WIDTH_CHAT),
+        ])
+        .split(messages_area);
         (horiz[0], Some(horiz[1]))
     } else {
         (messages_area, None)
-    }
-}
-
-fn with_horizontal_padding(area: Rect, padding: u16) -> Rect {
-    Rect {
-        x: area.x + padding,
-        y: area.y,
-        width: area.width.saturating_sub(padding * 2),
-        height: area.height,
     }
 }
 
@@ -446,7 +451,7 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("↑↓ navigate · enter select · esc cancel")
+    let hints = Paragraph::new("↑↓ navigate · s settings · enter select · esc cancel")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
@@ -571,6 +576,202 @@ fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState
         1,
     );
     let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}
+
+/// Render the agent settings modal
+fn render_agent_settings_modal(
+    f: &mut Frame,
+    area: Rect,
+    state: &crate::ui::modal::AgentSettingsState,
+) {
+    use crate::ui::modal::AgentSettingsFocus;
+    use ratatui::style::Modifier;
+
+    render_modal_overlay(f, area);
+
+    // Calculate size based on content
+    let model_count = state.available_models.len();
+    let tool_item_count = state.visible_item_count();
+    let content_height = (model_count.max(tool_item_count) + 6) as u16;
+    let total_height = content_height.min(30);
+    let height_percent = (total_height as f32 / area.height as f32).min(0.8);
+
+    let size = ModalSize {
+        max_width: 80,
+        height_percent,
+    };
+
+    let popup_area = modal_area(area, &size);
+    render_modal_background(f, popup_area);
+
+    let inner_area = Rect::new(
+        popup_area.x,
+        popup_area.y + 1,
+        popup_area.width,
+        popup_area.height.saturating_sub(2),
+    );
+
+    // Render header
+    let title = format!("{} Settings", state.agent_name);
+    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    // Two-column layout: Model on left, Tools on right
+    let content_width = remaining.width.saturating_sub(4);
+    let left_width = content_width / 3;
+    let right_width = content_width - left_width - 1; // -1 for separator
+
+    let left_area = Rect::new(remaining.x + 2, remaining.y, left_width, remaining.height.saturating_sub(2));
+    let right_area = Rect::new(remaining.x + 3 + left_width, remaining.y, right_width, remaining.height.saturating_sub(2));
+
+    // Render Model section
+    let model_header_style = if state.focus == AgentSettingsFocus::Model {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+    let model_header = Paragraph::new("Model").style(model_header_style);
+    f.render_widget(model_header, left_area);
+
+    let model_list_area = Rect::new(left_area.x, left_area.y + 1, left_area.width, left_area.height.saturating_sub(1));
+    if state.available_models.is_empty() {
+        let no_models = Paragraph::new("No models available")
+            .style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(no_models, model_list_area);
+    } else {
+        for (i, model) in state.available_models.iter().enumerate() {
+            if i as u16 >= model_list_area.height {
+                break;
+            }
+            let is_selected = i == state.model_index;
+            let prefix = if is_selected { "● " } else { "○ " };
+            let style = if is_selected && state.focus == AgentSettingsFocus::Model {
+                Style::default().fg(theme::ACCENT_PRIMARY)
+            } else if is_selected {
+                Style::default().fg(theme::TEXT_PRIMARY)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            };
+            let model_text = Paragraph::new(format!("{}{}", prefix, model)).style(style);
+            let item_area = Rect::new(model_list_area.x, model_list_area.y + i as u16, model_list_area.width, 1);
+            f.render_widget(model_text, item_area);
+        }
+    }
+
+    // Render Tools section header
+    let tools_header_style = if state.focus == AgentSettingsFocus::Tools {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_DIM)
+    };
+    let tools_header = Paragraph::new("Tools (space toggle, a toggle all)")
+        .style(tools_header_style);
+    f.render_widget(tools_header, right_area);
+
+    // Render tool groups
+    let tools_list_area = Rect::new(right_area.x, right_area.y + 1, right_area.width, right_area.height.saturating_sub(1));
+
+    if state.tool_groups.is_empty() {
+        let no_tools = Paragraph::new("No tools available")
+            .style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(no_tools, tools_list_area);
+    } else {
+        let mut y_offset: u16 = 0;
+        let mut cursor_pos: usize = 0;
+        let visible_height = tools_list_area.height as usize;
+
+        for group in &state.tool_groups {
+            if y_offset as usize >= visible_height {
+                break;
+            }
+
+            let is_cursor_on_group = cursor_pos == state.tools_cursor;
+            let is_single_tool = group.tools.len() == 1;
+
+            // Group header or single tool
+            if is_single_tool {
+                // Single tool - show as checkbox
+                let tool = &group.tools[0];
+                let is_checked = state.selected_tools.contains(tool);
+                let prefix = if is_checked { "[x] " } else { "[ ] " };
+                let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
+                    Style::default().fg(theme::ACCENT_PRIMARY)
+                } else if is_checked {
+                    Style::default().fg(theme::TEXT_PRIMARY)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
+                };
+                let text = Paragraph::new(format!("{}{}", prefix, tool)).style(style);
+                let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                f.render_widget(text, item_area);
+            } else {
+                // Multi-tool group - show as expandable
+                let is_fully = group.is_fully_selected(&state.selected_tools);
+                let is_partial = group.is_partially_selected(&state.selected_tools);
+                let expand_icon = if group.expanded { "▼ " } else { "▶ " };
+                let check_icon = if is_fully { "[x] " } else if is_partial { "[-] " } else { "[ ] " };
+
+                let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
+                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                } else if is_fully {
+                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)
+                };
+                let text = Paragraph::new(format!("{}{}{} ({})", expand_icon, check_icon, group.name, group.tools.len())).style(style);
+                let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                f.render_widget(text, item_area);
+            }
+
+            y_offset += 1;
+            cursor_pos += 1;
+
+            // Render expanded tools
+            if group.expanded && !is_single_tool {
+                for tool in &group.tools {
+                    if y_offset as usize >= visible_height {
+                        break;
+                    }
+
+                    let is_cursor_on_tool = cursor_pos == state.tools_cursor;
+                    let is_checked = state.selected_tools.contains(tool);
+                    let prefix = if is_checked { "  [x] " } else { "  [ ] " };
+
+                    let style = if is_cursor_on_tool && state.focus == AgentSettingsFocus::Tools {
+                        Style::default().fg(theme::ACCENT_PRIMARY)
+                    } else if is_checked {
+                        Style::default().fg(theme::TEXT_PRIMARY)
+                    } else {
+                        Style::default().fg(theme::TEXT_MUTED)
+                    };
+
+                    // Show just the method name for MCP tools
+                    let display_name = if tool.starts_with("mcp__") {
+                        tool.split("__").last().unwrap_or(tool)
+                    } else {
+                        tool.as_str()
+                    };
+
+                    let text = Paragraph::new(format!("{}{}", prefix, display_name)).style(style);
+                    let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                    f.render_widget(text, item_area);
+
+                    y_offset += 1;
+                    cursor_pos += 1;
+                }
+            }
+        }
+    }
+
+    // Render hints at bottom
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("tab switch · ↑↓ navigate · space toggle · a toggle all · enter save · esc cancel")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }

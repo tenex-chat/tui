@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::ui;
+use crate::ui::layout;
 use crate::ui::views::login::{render_login, LoginStep};
 use crate::ui::{App, InputMode, View};
 
@@ -20,10 +21,10 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         return;
     }
 
-    // Chrome height varies by view
+    // Chrome height varies by view - using centralized layout constants
     let (header_height, footer_height) = match app.view {
-        View::Chat => (3, 2), // More padding for chat chrome
-        _ => (1, 1),
+        View::Chat => (layout::HEADER_HEIGHT_CHAT, layout::FOOTER_HEIGHT_CHAT),
+        _ => (layout::HEADER_HEIGHT_DEFAULT, layout::FOOTER_HEIGHT_DEFAULT),
     };
 
     let chunks = Layout::vertical([
@@ -47,13 +48,14 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         View::AgentBrowser => "TENEX - Agent Definitions".to_string(),
     };
 
-    // For chat view, center the title with padding
+    // Apply consistent padding to header
+    let padding = " ".repeat(layout::CONTENT_PADDING_H as usize);
     if app.view == View::Chat {
-        let header = Paragraph::new(format!("\n  {}", title))
+        let header = Paragraph::new(format!("\n{}{}", padding, title))
             .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
         f.render_widget(header, chunks[0]);
     } else {
-        let header = Paragraph::new(title)
+        let header = Paragraph::new(format!("{}{}", padding, title))
             .style(Style::default().fg(chrome_color));
         f.render_widget(header, chunks[0]);
     }
@@ -85,23 +87,19 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
                     .map(|id| app.data_store.borrow().is_event_busy(&id))
                     .unwrap_or(false);
                 if is_busy {
-                    "q quit · i edit · s stop".to_string()
+                    "Ctrl+T commands · . stop".to_string()
                 } else {
-                    "q quit · i edit".to_string()
+                    "Ctrl+T commands".to_string()
                 }
             }
-            (_, InputMode::Normal) => "Press 'q' to quit".to_string(),
+            (_, InputMode::Normal) => "Ctrl+T commands · q quit".to_string(),
             _ => String::new(), // Chat/Threads editing has its own input box
         };
         (text, Style::default().fg(ui::theme::TEXT_MUTED))
     };
 
-    // For chat view, add padding to footer
-    let formatted_footer = if app.view == View::Chat {
-        format!("  {}", footer_text)
-    } else {
-        footer_text
-    };
+    // Apply consistent padding to footer (same as content areas)
+    let formatted_footer = format!("{}{}", " ".repeat(layout::CONTENT_PADDING_H as usize), footer_text);
     let footer = Paragraph::new(formatted_footer)
         .style(footer_style);
     f.render_widget(footer, chunks[2]);

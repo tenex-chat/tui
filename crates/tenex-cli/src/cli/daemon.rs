@@ -364,6 +364,7 @@ fn handle_request(
                             reply_to: Some(thread_id.to_string()),
                             branch: None,
                             nudge_ids: vec![],
+                            ask_author_pubkey: None,
                         })
                         .is_ok()
                     {

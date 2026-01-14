@@ -14,6 +14,8 @@ pub struct Thread {
     pub status_label: Option<String>,
     /// Current activity from kind:513 metadata (e.g., "Writing tests...")
     pub status_current_activity: Option<String>,
+    /// Summary from kind:513 metadata (brief description of the conversation)
+    pub summary: Option<String>,
     /// Parent conversation ID from "delegation" tag (for hierarchical nesting)
     pub parent_conversation_id: Option<String>,
     /// Pubkeys mentioned in p-tags of the root event
@@ -94,6 +96,7 @@ impl Thread {
             last_activity: created_at,
             status_label: None,
             status_current_activity: None,
+            summary: None,
             parent_conversation_id,
             p_tags,
             ask_event,

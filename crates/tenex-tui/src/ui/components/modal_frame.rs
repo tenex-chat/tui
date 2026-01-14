@@ -1,3 +1,4 @@
+use crate::ui::layout;
 use crate::ui::theme;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -18,8 +19,8 @@ pub struct ModalSize {
 impl Default for ModalSize {
     fn default() -> Self {
         Self {
-            max_width: 70,
-            height_percent: 0.7,
+            max_width: layout::MODAL_DEFAULT_WIDTH,
+            height_percent: layout::MODAL_DEFAULT_HEIGHT_PERCENT,
         }
     }
 }
@@ -52,8 +53,8 @@ pub fn render_modal_header(f: &mut Frame, area: Rect, title: &str, hint: &str) -
     // Header takes 2 lines (1 for content + 1 for spacing)
     let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
 
-    // Add horizontal padding
-    let header_area = add_horizontal_padding(chunks[0], 2);
+    // Add horizontal padding using centralized layout
+    let header_area = layout::with_modal_padding(chunks[0]);
 
     let title_span = Span::styled(title, theme::modal_title());
     let hint_span = Span::styled(hint, theme::modal_hint());
@@ -85,7 +86,7 @@ pub fn render_modal_search(
 ) -> Rect {
     let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
 
-    let search_area = add_horizontal_padding(chunks[0], 2);
+    let search_area = layout::with_modal_padding(chunks[0]);
 
     if filter.is_empty() {
         // Render placeholder with first letter highlighted
@@ -155,7 +156,7 @@ impl ModalItem {
 
 /// Render modal sections with items
 pub fn render_modal_sections(f: &mut Frame, area: Rect, sections: &[ModalSection]) {
-    let content_area = add_horizontal_padding(area, 2);
+    let content_area = layout::with_modal_padding(area);
 
     let mut y_offset = 0u16;
 
@@ -235,7 +236,7 @@ fn render_modal_item(f: &mut Frame, area: Rect, item: &ModalItem) {
 
 /// Render a list of simple items (no sections)
 pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
-    let content_area = add_horizontal_padding(area, 2);
+    let content_area = layout::with_modal_padding(area);
 
     for (idx, item) in items.iter().enumerate() {
         if idx as u16 >= content_area.height {
@@ -251,16 +252,6 @@ pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
 
         render_modal_item(f, item_area, item);
     }
-}
-
-/// Add horizontal padding to a rect
-fn add_horizontal_padding(area: Rect, padding: u16) -> Rect {
-    Rect::new(
-        area.x + padding,
-        area.y,
-        area.width.saturating_sub(padding * 2),
-        area.height,
-    )
 }
 
 /// Complete modal frame that combines all elements

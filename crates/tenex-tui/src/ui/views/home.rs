@@ -9,7 +9,7 @@ use crate::ui::modal::{ConversationAction, ConversationActionsState, ModalState,
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 pub use crate::ui::views::home_helpers::HierarchicalThread;
-use crate::ui::{theme, App, HomeTab, View};
+use crate::ui::{layout, theme, App, HomeTab, View};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -48,19 +48,14 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
     // Split main area into content and sidebar (sidebar on RIGHT)
     let main_chunks = Layout::horizontal([
-        Constraint::Min(0),     // Content
-        Constraint::Length(42), // Sidebar (fixed width, on RIGHT)
+        Constraint::Min(0),                            // Content
+        Constraint::Length(layout::SIDEBAR_WIDTH_HOME), // Sidebar (fixed width, on RIGHT)
     ])
     .split(chunks[1]);
 
-    // Render content based on active tab (with left and right padding)
+    // Render content based on active tab (with consistent padding)
     let content_area = main_chunks[0];
-    let padded_content = Rect::new(
-        content_area.x + 2, // 2-char left padding
-        content_area.y,
-        content_area.width.saturating_sub(4), // 2 left + 2 right padding (gap before sidebar)
-        content_area.height,
-    );
+    let padded_content = layout::with_content_padding(content_area);
     match app.home_panel_focus {
         HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
@@ -121,6 +116,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Search modal overlay (/)
     if app.showing_search_modal {
         render_search_modal(f, app, area);
+    }
+
+    // Command palette overlay (Ctrl+T)
+    if let ModalState::CommandPalette(ref state) = app.modal_state {
+        super::render_command_palette(f, area, state);
     }
 }
 
@@ -205,20 +205,24 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships);
 
     // Helper to calculate card height
-    // Full mode: 3 lines (title+project+status, summary+author+time, spacing) + optional activity
+    // Full mode: 4 lines (title, summary, activity, reply) + spacing, but some may be hidden
     // Compact mode: 2 lines (title, spacing)
     // Selected items add 2 lines for half-block borders (top + bottom)
     let calc_card_height = |item: &HierarchicalThread, is_selected: bool| -> u16 {
         let is_compact = item.depth > 0;
+        if is_compact {
+            return if is_selected { 4 } else { 2 }; // 2 lines + optional borders
+        }
+        // Full mode: title + summary + activity (if present) + reply + spacing
+        let has_summary = item.thread.summary.is_some();
         let has_activity = item.thread.status_current_activity.is_some();
-        let base = if is_compact {
-            2
-        } else if has_activity {
-            4 // title row, summary row, activity row, spacing
-        } else {
-            3 // title row, summary row, spacing
-        };
-        if is_selected { base + 2 } else { base }
+        // Line 1: title, Line 2: summary (or skip), Line 3: activity (or skip), Line 4: reply, Line 5: spacing
+        let mut lines = 1; // title always
+        if has_summary { lines += 1; } // summary
+        if has_activity { lines += 1; } // activity
+        lines += 1; // reply preview always
+        lines += 1; // spacing
+        if is_selected { lines + 2 } else { lines }
     };
 
     // Calculate scroll offset to keep selected item visible
@@ -470,10 +474,14 @@ fn render_card_content(
         line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
         lines.push(Line::from(line2));
     } else {
-        // FULL MODE: Table-like layout (3 lines + optional activity + spacing)
+        // FULL MODE: Table-like layout
+        // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
+        // LINE 2: [summary] (if present)
+        // LINE 3: [activity] (if present)
+        // LINE 4: [reply preview]       [author]      [time]
+        // LINE 5: spacing
 
         // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
-        // Build title with spinner and nested count
         let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
         let nested_suffix = if has_children && child_count > 0 {
             format!(" {}", child_count)
@@ -527,48 +535,59 @@ fn render_card_content(
         line1.push(Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)));
         lines.push(Line::from(line1));
 
-        // LINE 2: [summary]            [author]      [time]
+        // LINE 2: [summary] (if present) - from metadata summary tag
+        if let Some(ref summary) = thread.summary {
+            let mut line_summary = Vec::new();
+            if !indent.is_empty() {
+                line_summary.push(Span::styled(indent.clone(), Style::default()));
+            }
+            line_summary.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+            let summary_truncated = truncate_with_ellipsis(summary, main_col_width + middle_col_width + right_col_width);
+            line_summary.push(Span::styled(summary_truncated, Style::default().fg(theme::TEXT_MUTED)));
+            lines.push(Line::from(line_summary));
+        }
+
+        // LINE 3: Activity (if present)
+        if let Some(ref activity) = thread.status_current_activity {
+            let mut line_activity = Vec::new();
+            if !indent.is_empty() {
+                line_activity.push(Span::styled(indent.clone(), Style::default()));
+            }
+            line_activity.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+            line_activity.push(Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)));
+            line_activity.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            lines.push(Line::from(line_activity));
+        }
+
+        // LINE 4: [reply preview]       [author]      [time]
         let preview_max = main_col_width;
         let preview_truncated = truncate_with_ellipsis(&preview, preview_max);
         let preview_len = preview_truncated.chars().count();
         let preview_padding = main_col_width.saturating_sub(preview_len);
 
-        // Author for line 2 (middle column) - show thread creator
+        // Author (middle column) - show thread creator
         let author_display = format!("@{}", thread_author_name);
         let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
         let author_len = author_truncated.chars().count();
         let author_padding = middle_col_width.saturating_sub(author_len);
 
-        // Time for line 2 (right column, right-aligned)
+        // Time (right column, right-aligned)
         let time_len = time_str.chars().count();
         let time_padding = right_col_width.saturating_sub(time_len);
 
-        let mut line2 = Vec::new();
-        // Add indent for nested items
+        let mut line_reply = Vec::new();
         if !indent.is_empty() {
-            line2.push(Span::styled(indent.clone(), Style::default()));
+            line_reply.push(Span::styled(indent.clone(), Style::default()));
         }
-        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
-        line2.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
-        line2.push(Span::styled(" ".repeat(preview_padding), Style::default()));
-        line2.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
-        line2.push(Span::styled(" ".repeat(author_padding), Style::default()));
-        line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
-        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
-        lines.push(Line::from(line2));
+        line_reply.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
+        line_reply.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
+        line_reply.push(Span::styled(" ".repeat(preview_padding), Style::default()));
+        line_reply.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
+        line_reply.push(Span::styled(" ".repeat(author_padding), Style::default()));
+        line_reply.push(Span::styled(" ".repeat(time_padding), Style::default()));
+        line_reply.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        lines.push(Line::from(line_reply));
 
-        // Line 3: Activity (if present)
-        if let Some(ref activity) = thread.status_current_activity {
-            let mut line3 = Vec::new();
-            // Add indent for nested items
-            if !indent.is_empty() {
-                line3.push(Span::styled(indent.clone(), Style::default()));
-            }
-            line3.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
-            line3.push(Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)));
-            line3.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
-            lines.push(Line::from(line3));
-        }
         // Spacing line
         lines.push(Line::from(""));
     }

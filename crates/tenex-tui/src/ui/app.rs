@@ -2,7 +2,8 @@ use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStora
 use crate::nostr::DataChange;
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
-use crate::ui::modal::ModalState;
+use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
+use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
@@ -139,7 +140,8 @@ pub struct App {
     pub scroll_offset: usize,
     /// Maximum scroll offset (set after rendering to enable proper scroll clamping)
     pub max_scroll_offset: usize,
-    pub status_message: Option<String>,
+    /// Notification queue for toast/status messages
+    pub notifications: NotificationQueue,
 
     pub creating_thread: bool,
     pub selected_branch: Option<String>,
@@ -229,9 +231,6 @@ pub struct App {
     /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
     pub show_llm_metadata: bool,
 
-    /// Prefix key mode (ctrl+t was pressed, waiting for next key)
-    pub prefix_key_active: bool,
-
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
 
@@ -264,6 +263,9 @@ pub struct App {
     pub vim_mode: VimMode,
     /// Whether to show archived conversations in Recent/Inbox
     pub show_archived: bool,
+    /// Whether user explicitly selected an agent in the current conversation
+    /// When true, don't auto-sync agent from conversation messages
+    pub user_explicitly_selected_agent: bool,
 }
 
 impl App {
@@ -287,7 +289,7 @@ impl App {
 
             scroll_offset: 0,
             max_scroll_offset: 0,
-            status_message: None,
+            notifications: NotificationQueue::new(),
 
             creating_thread: false,
             selected_branch: None,
@@ -333,7 +335,6 @@ impl App {
             search_index: 0,
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
-            prefix_key_active: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
             expanded_groups: HashSet::new(),
@@ -346,12 +347,14 @@ impl App {
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
+            user_explicitly_selected_agent: false,
         }
     }
 
-    /// Increment frame counter (call on each tick)
+    /// Increment frame counter and update notifications (call on each tick)
     pub fn tick(&mut self) {
         self.frame_counter = self.frame_counter.wrapping_add(1);
+        self.notifications.tick();
     }
 
     /// Get spinner character based on frame counter
@@ -439,23 +442,38 @@ impl App {
     }
 
     /// Restore draft for the selected thread into chat_editor
+    /// Also syncs agent/branch selection with the conversation's most recent activity
     pub fn restore_chat_draft(&mut self) {
+        // Reset explicit selection flag when switching conversations
+        self.user_explicitly_selected_agent = false;
+
         if let Some(ref thread) = self.selected_thread {
+            // Load draft for text content and branch
             if let Some(draft) = self.draft_storage.borrow().load(&thread.id) {
-                // For now, put all content in the text field
-                // (attachments will be re-created on paste if needed)
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
                 self.selected_branch = draft.selected_branch;
-                if let Some(agent_pubkey) = draft.selected_agent_pubkey {
-                    if let Some(status) = self.get_selected_project_status() {
-                        self.selected_agent = status
-                            .agents
-                            .iter()
-                            .find(|a| a.pubkey == agent_pubkey)
-                            .cloned();
-                    }
-                }
+            }
+
+            // Always sync agent selection with the conversation's most recent agent
+            // This ensures the input always reflects who you're talking to
+            self.sync_agent_with_conversation();
+        }
+    }
+
+    /// Sync selected_agent with the most recent agent in the conversation
+    /// Falls back to PM agent if no agent has responded yet
+    pub fn sync_agent_with_conversation(&mut self) {
+        // First try to get the most recent agent from the conversation
+        if let Some(recent_agent) = self.get_most_recent_agent_from_conversation() {
+            self.selected_agent = Some(recent_agent);
+            return;
+        }
+
+        // Fall back to PM agent if no agent has responded yet
+        if let Some(status) = self.get_selected_project_status() {
+            if let Some(pm) = status.pm_agent() {
+                self.selected_agent = Some(pm.clone());
             }
         }
     }
@@ -631,12 +649,25 @@ impl App {
         Ok(())
     }
 
-    pub fn set_status(&mut self, msg: &str) {
-        self.status_message = Some(msg.to_string());
+    /// Add a notification to the queue
+    pub fn notify(&mut self, notification: Notification) {
+        self.notifications.push(notification);
     }
 
-    pub fn clear_status(&mut self) {
-        self.status_message = None;
+    /// Convenience: set a warning status message (legacy compatibility)
+    /// Prefer using notify() with specific notification types for new code
+    pub fn set_status(&mut self, msg: &str) {
+        self.notifications.push(Notification::warning(msg));
+    }
+
+    /// Dismiss the current notification
+    pub fn dismiss_notification(&mut self) {
+        self.notifications.dismiss();
+    }
+
+    /// Get the current notification message (for display)
+    pub fn current_notification(&self) -> Option<&Notification> {
+        self.notifications.current()
     }
 
     /// Scroll up by the given amount, clamping to valid range
@@ -715,6 +746,54 @@ impl App {
                     .map(|s| s.branches.clone())
             })
             .unwrap_or_default()
+    }
+
+    /// Get the most recent agent that published a message in the current conversation.
+    /// Returns the agent from available_agents whose pubkey matches the most recent
+    /// non-user message in the conversation.
+    pub fn get_most_recent_agent_from_conversation(&self) -> Option<crate::models::ProjectAgent> {
+        let thread = self.selected_thread.as_ref()?;
+        let messages = self.messages();
+        let available_agents = self.available_agents();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Create a set of agent pubkeys for quick lookup
+        let agent_pubkeys: std::collections::HashSet<&str> = available_agents
+            .iter()
+            .map(|a| a.pubkey.as_str())
+            .collect();
+
+        // Find the most recent message from an agent (not the user)
+        // Messages are typically sorted by created_at, but we'll iterate and track the latest
+        let mut latest_agent_pubkey: Option<&str> = None;
+        let mut latest_timestamp: u64 = 0;
+
+        for msg in &messages {
+            // Skip messages from the user
+            if user_pubkey.as_ref().map(|pk| pk == &msg.pubkey).unwrap_or(false) {
+                continue;
+            }
+
+            // Check if this message is from a known agent
+            if agent_pubkeys.contains(msg.pubkey.as_str()) && msg.created_at >= latest_timestamp {
+                latest_timestamp = msg.created_at;
+                latest_agent_pubkey = Some(msg.pubkey.as_str());
+            }
+        }
+
+        // Also check the thread itself (the original message that started the thread)
+        // The thread author might be an agent - use last_activity as timestamp proxy
+        // Note: for the thread root, we only consider it if no messages from agents exist yet
+        if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str()) {
+            if user_pubkey.as_ref().map(|pk| pk != &thread.pubkey).unwrap_or(true) {
+                latest_agent_pubkey = Some(thread.pubkey.as_str());
+            }
+        }
+
+        // Find and return the matching agent
+        latest_agent_pubkey.and_then(|pubkey| {
+            available_agents.into_iter().find(|a| a.pubkey == pubkey)
+        })
     }
 
     /// Get agents filtered by current filter (from ModalState or empty)
@@ -806,6 +885,68 @@ impl App {
         };
     }
 
+    /// Open the command palette modal (Ctrl+T)
+    pub fn open_command_palette(&mut self) {
+        let context = self.get_palette_context();
+        self.modal_state = ModalState::CommandPalette(CommandPaletteState::new(context));
+    }
+
+    /// Get the current context for the command palette
+    fn get_palette_context(&self) -> PaletteContext {
+        match self.view {
+            View::Home => {
+                if self.sidebar_focused {
+                    // Check if selected project is online/busy using filtered_projects
+                    let (online, offline) = self.filtered_projects();
+                    let online_count = online.len();
+                    let is_online = self.sidebar_project_index < online_count;
+
+                    // Get the actual project to check busy status
+                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+                    let is_busy = all_projects.get(self.sidebar_project_index)
+                        .map(|p| self.data_store.borrow().is_project_busy(&p.a_tag()))
+                        .unwrap_or(false);
+
+                    PaletteContext::HomeSidebar { is_online, is_busy }
+                } else {
+                    match self.home_panel_focus {
+                        HomeTab::Recent => PaletteContext::HomeRecent,
+                        HomeTab::Inbox => PaletteContext::HomeInbox,
+                        HomeTab::Reports => PaletteContext::HomeReports,
+                    }
+                }
+            }
+            View::Chat => {
+                if self.input_mode == InputMode::Editing {
+                    PaletteContext::ChatEditing
+                } else {
+                    // Check context for normal mode
+                    let has_parent = self.selected_thread.as_ref()
+                        .and_then(|t| t.parent_conversation_id.as_ref())
+                        .is_some();
+
+                    // Check if selected message has trace
+                    let has_trace = false; // Simplified for now
+
+                    // Check if any agent is working on this thread
+                    let agent_working = self.selected_thread.as_ref()
+                        .map(|t| self.data_store.borrow().is_event_busy(&t.id))
+                        .unwrap_or(false);
+
+                    PaletteContext::ChatNormal { has_parent, has_trace, agent_working }
+                }
+            }
+            View::AgentBrowser => {
+                if self.agent_browser_in_detail {
+                    PaletteContext::AgentBrowserDetail
+                } else {
+                    PaletteContext::AgentBrowserList
+                }
+            }
+            _ => PaletteContext::HomeRecent, // Default fallback
+        }
+    }
+
     /// Close the branch selector modal
     pub fn close_branch_selector(&mut self) {
         if matches!(self.modal_state, ModalState::BranchSelector { .. }) {
@@ -881,9 +1022,9 @@ impl App {
             MessageAction::CopyRawEvent => {
                 if let Some(json) = get_raw_event_json(&self.db.ndb, message_id) {
                     self.copy_to_clipboard(&json);
-                    self.set_status("Raw event copied to clipboard");
+                    self.notify(Notification::success("Raw event copied to clipboard"));
                 } else {
-                    self.set_status("Failed to get raw event");
+                    self.notify(Notification::error("Failed to get raw event"));
                 }
                 self.modal_state = ModalState::None;
             }
@@ -902,7 +1043,7 @@ impl App {
                         scroll_offset: 0,
                     };
                 } else {
-                    self.set_status("Failed to get raw event");
+                    self.notify(Notification::error("Failed to get raw event"));
                     self.modal_state = ModalState::None;
                 }
             }
@@ -913,9 +1054,9 @@ impl App {
                         trace_info.trace_id, trace_info.span_id
                     );
                     self.open_url(&url);
-                    self.set_status("Opening trace in browser...");
+                    self.notify(Notification::info("Opening trace in browser..."));
                 } else {
-                    self.set_status("No trace context found for this message");
+                    self.notify(Notification::warning("No trace context found for this message"));
                 }
                 self.modal_state = ModalState::None;
             }
@@ -944,9 +1085,9 @@ impl App {
                             branch,
                             nudge_ids: vec![],
                         }) {
-                            self.set_status(&format!("Failed to create thread: {}", e));
+                            self.notify(Notification::error(format!("Failed to create thread: {}", e)));
                         } else {
-                            self.set_status("Creating new conversation...");
+                            self.notify(Notification::info("Creating new conversation..."));
                         }
                     }
                 }
@@ -1081,6 +1222,7 @@ impl App {
             self.selected_message_index = 0;
             self.subthread_root = None;
             self.subthread_root_message = None;
+            self.input_mode = InputMode::Editing; // Auto-focus input
         }
     }
 
@@ -1417,28 +1559,29 @@ impl App {
         let urls = self.get_image_urls_from_thread();
 
         if urls.is_empty() {
-            self.set_status("No images in current conversation");
+            self.notify(Notification::warning("No images in current conversation"));
             return;
         }
 
         match self.open_image_in_viewer(&urls[0]) {
             Ok(_) => {
-                self.set_status(&format!("Opening image in viewer..."));
+                self.notify(Notification::info("Opening image in viewer..."));
             }
             Err(e) => {
-                self.set_status(&e);
+                self.notify(Notification::error(e));
             }
         }
     }
 
     /// Open ask UI inline (replacing input box)
-    pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent) {
+    pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent, ask_author_pubkey: String) {
         use crate::ui::modal::AskModalState;
         let input_state = AskInputState::new(ask_event.questions.clone());
         self.modal_state = ModalState::AskModal(AskModalState {
             message_id,
             ask_event,
             input_state,
+            ask_author_pubkey,
         });
         self.input_mode = InputMode::Normal;
     }
@@ -1469,7 +1612,8 @@ impl App {
 
     /// Check for unanswered ask events in current thread
     /// Returns the first unanswered ask event found (not answered by current user)
-    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
+    /// Returns: (message_id, ask_event, author_pubkey)
+    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent, String)> {
         let messages = self.messages();
         let thread = self.selected_thread.as_ref()?;
         let thread_id = thread.id.as_str();
@@ -1493,7 +1637,7 @@ impl App {
             if let Some(ref ask_event) = thread.ask_event {
                 // Check if the thread has been replied to by current user
                 if !replied_to_by_user.contains(thread_id) {
-                    return Some((thread.id.clone(), ask_event.clone()));
+                    return Some((thread.id.clone(), ask_event.clone(), thread.pubkey.clone()));
                 }
             }
         }
@@ -1513,7 +1657,7 @@ impl App {
             if let Some(ref ask_event) = msg.ask_event {
                 // Check if this message has been replied to by current user
                 if !replied_to_by_user.contains(msg.id.as_str()) {
-                    return Some((msg.id.clone(), ask_event.clone()));
+                    return Some((msg.id.clone(), ask_event.clone(), msg.pubkey.clone()));
                 }
             }
         }
@@ -1523,10 +1667,10 @@ impl App {
         for msg in display_messages {
             for q_tag in &msg.q_tags {
                 // Check if this q-tag points to an ask event
-                if let Some((ask_event, _pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
+                if let Some((ask_event, pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
                     // Check if this ask event has been replied to by current user
                     if !replied_to_by_user.contains(q_tag.as_str()) {
-                        return Some((q_tag.clone(), ask_event));
+                        return Some((q_tag.clone(), ask_event, pubkey));
                     }
                 }
             }
@@ -2017,9 +2161,9 @@ impl App {
         self.vim_enabled = !self.vim_enabled;
         if self.vim_enabled {
             self.vim_mode = VimMode::Normal;
-            self.set_status("Vim mode enabled (Esc=normal, i/a=insert)");
+            self.notify(Notification::info("Vim mode enabled (Esc=normal, i/a=insert)"));
         } else {
-            self.set_status("Vim mode disabled");
+            self.notify(Notification::info("Vim mode disabled"));
         }
     }
 
@@ -2044,12 +2188,11 @@ impl App {
     /// Toggle visibility of archived conversations
     pub fn toggle_show_archived(&mut self) {
         self.show_archived = !self.show_archived;
-        let status = if self.show_archived {
-            "Showing archived conversations"
+        if self.show_archived {
+            self.notify(Notification::info("Showing archived conversations"));
         } else {
-            "Hiding archived conversations"
-        };
-        self.set_status(status);
+            self.notify(Notification::info("Hiding archived conversations"));
+        }
     }
 
     /// Check if a thread is archived

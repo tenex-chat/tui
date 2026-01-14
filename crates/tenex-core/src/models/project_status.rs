@@ -160,6 +160,18 @@ impl ProjectStatus {
         tools
     }
 
+    /// All unique models used by agents
+    pub fn models(&self) -> Vec<&str> {
+        let mut models: Vec<&str> = self
+            .agents
+            .iter()
+            .filter_map(|a| a.model.as_deref())
+            .collect();
+        models.sort();
+        models.dedup();
+        models
+    }
+
     /// Get the PM (project manager) agent
     pub fn pm_agent(&self) -> Option<&ProjectAgent> {
         self.agents.iter().find(|a| a.is_pm)

@@ -30,6 +30,12 @@ pub(crate) fn handle_key(
         return Ok(());
     }
 
+    // Handle command palette when open
+    if matches!(app.modal_state, ModalState::CommandPalette(_)) {
+        handle_command_palette_key(app, key);
+        return Ok(());
+    }
+
     // Handle tab modal when open
     if app.showing_tab_modal {
         handle_tab_modal_key(app, key);
@@ -48,11 +54,46 @@ pub(crate) fn handle_key(
         let agents = app.filtered_agents();
         let item_count = agents.len();
 
+        // Handle 's' key to open agent settings
+        if let KeyCode::Char('s') = code {
+            if let ModalState::AgentSelector { ref selector } = app.modal_state {
+                if let Some(agent) = agents.get(selector.index).cloned() {
+                    // Get project a_tag for the settings event
+                    if let Some(project) = &app.selected_project {
+                        // Get all available tools and models from the project status
+                        let (all_tools, all_models) = app.data_store.borrow()
+                            .get_project_status(&project.a_tag())
+                            .map(|status| {
+                                let tools = status.tools().iter().map(|s| s.to_string()).collect();
+                                let models = status.models().iter().map(|s| s.to_string()).collect();
+                                (tools, models)
+                            })
+                            .unwrap_or_default();
+
+                        let settings_state = crate::ui::modal::AgentSettingsState::new(
+                            agent.name.clone(),
+                            agent.pubkey.clone(),
+                            project.a_tag(),
+                            agent.model.clone(),
+                            agent.tools.clone(),
+                            all_models,
+                            all_tools,
+                        );
+                        app.modal_state = ModalState::AgentSettings(settings_state);
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
         if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
             match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
                 SelectorAction::Selected(agent) => {
                     let agent_name = agent.name.clone();
                     app.selected_agent = Some(agent);
+                    // Mark that user explicitly selected this agent
+                    // This prevents auto-sync from overriding their choice
+                    app.user_explicitly_selected_agent = true;
                     // Insert @agent_name into chat editor
                     let mention = format!("@{} ", agent_name);
                     for c in mention.chars() {
@@ -130,6 +171,12 @@ pub(crate) fn handle_key(
     // Handle report viewer modal when open
     if matches!(app.modal_state, ModalState::ReportViewer(_)) {
         handle_report_viewer_modal_key(app, key);
+        return Ok(());
+    }
+
+    // Handle agent settings modal when open
+    if matches!(app.modal_state, ModalState::AgentSettings(_)) {
+        handle_agent_settings_modal_key(app, key);
         return Ok(());
     }
 
@@ -226,6 +273,15 @@ pub(crate) fn handle_key(
                     }
                     return Ok(());
                 }
+                // Alt+Left = previous tab, Alt+Right = next tab
+                KeyCode::Left => {
+                    app.prev_tab();
+                    return Ok(());
+                }
+                KeyCode::Right => {
+                    app.next_tab();
+                    return Ok(());
+                }
                 _ => {}
             }
         }
@@ -296,10 +352,6 @@ pub(crate) fn handle_key(
             KeyCode::Char('q') => {
                 app.quit();
             }
-            KeyCode::Char('i') => {
-                // Just enter editing mode - ask modal auto-opens during render
-                app.input_mode = InputMode::Editing;
-            }
             KeyCode::Char('r') => {
                 if let Some(core_handle) = app.core_handle.clone() {
                     app.set_status("Syncing...");
@@ -314,8 +366,8 @@ pub(crate) fn handle_key(
                     app.open_agent_selector();
                 } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
                     app.open_agent_selector();
-                } else if c == 's' && app.view == View::Chat {
-                    // 's' stops agents working on the selected item
+                } else if c == '.' && app.view == View::Chat {
+                    // '.' stops agents working on the selected item
                     // Uses delegation thread_id if a DelegationPreview is selected
                     if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
                         let (is_busy, project_a_tag) = {
@@ -652,7 +704,7 @@ pub(crate) fn handle_key(
                                         } else {
                                             app.view = View::Home;
                                             app.load_filter_preferences();
-                                            app.clear_status();
+                                            app.dismiss_notification();
                                         }
                                     }
                                 }
@@ -684,7 +736,7 @@ pub(crate) fn handle_key(
                                         } else {
                                             app.view = View::Home;
                                             app.load_filter_preferences();
-                                            app.clear_status();
+                                            app.dismiss_notification();
                                         }
                                     }
                                 }
@@ -1734,6 +1786,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                             reply_to,
                             branch,
                             nudge_ids,
+                            ask_author_pubkey: None,
                         }) {
                             app.set_status(&format!("Failed to publish message: {}", e));
                         } else {
@@ -2323,6 +2376,7 @@ fn submit_ask_response(app: &mut App) {
 
     let response_text = modal_state.input_state.format_response();
     let message_id = modal_state.message_id;
+    let ask_author_pubkey = modal_state.ask_author_pubkey;
 
     // Send reply to the ask event
     if let (Some(ref core_handle), Some(ref thread), Some(ref project)) =
@@ -2336,6 +2390,7 @@ fn submit_ask_response(app: &mut App) {
             reply_to: Some(message_id),
             branch: None,
             nudge_ids: vec![],
+            ask_author_pubkey: Some(ask_author_pubkey),
         });
     }
 
@@ -3003,64 +3058,405 @@ fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle prefix key commands (Ctrl+T + key)
-pub(crate) fn handle_prefix_key(app: &mut App, key: KeyEvent) {
-    match key.code {
-        // m = toggle LLM metadata display
-        KeyCode::Char('m') => {
-            app.toggle_llm_metadata();
-            let status = if app.show_llm_metadata {
-                "LLM metadata: ON"
-            } else {
-                "LLM metadata: OFF"
-            };
-            app.set_status(status);
+/// Handle key events for the command palette modal (Ctrl+T)
+fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
+    if let ModalState::CommandPalette(ref mut state) = app.modal_state {
+        let commands = state.available_commands();
+        let cmd_count = commands.len();
+
+        match key.code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Up | KeyCode::Char('k') => {
+                state.move_up();
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                state.move_down(cmd_count);
+            }
+            KeyCode::Enter => {
+                // Execute selected command
+                if let Some(cmd) = commands.get(state.selected_index) {
+                    execute_palette_command(app, cmd.key);
+                }
+            }
+            KeyCode::Backspace => {
+                state.filter.pop();
+                state.selected_index = 0;
+            }
+            KeyCode::Char(c) => {
+                // Check if it's a direct shortcut key
+                if state.filter.is_empty() {
+                    // Try to find a command with this key
+                    if commands.iter().any(|cmd| cmd.key == c) {
+                        execute_palette_command(app, c);
+                        return;
+                    }
+                }
+                // Otherwise add to filter
+                state.filter.push(c);
+                state.selected_index = 0;
+            }
+            _ => {}
         }
-        // ? = show hotkey help
-        KeyCode::Char('?') => {
+    }
+}
+
+/// Execute a command from the palette by its key
+fn execute_palette_command(app: &mut App, key: char) {
+    // Close palette first
+    app.modal_state = ModalState::None;
+
+    match key {
+        // Global commands
+        '1' => {
+            app.view = View::Home;
+            app.input_mode = InputMode::Normal;
+        }
+        '/' => {
+            app.showing_search_modal = true;
+            app.search_filter.clear();
+            app.search_index = 0;
+        }
+        '?' => {
             app.modal_state = ModalState::HotkeyHelp;
         }
-        // t = toggle todo sidebar (same as plain 't' in normal mode, but available everywhere)
-        KeyCode::Char('t') => {
-            app.todo_sidebar_visible = !app.todo_sidebar_visible;
+        'q' => {
+            app.quit();
         }
-        // A = toggle show archived conversations
-        KeyCode::Char('A') => {
-            app.toggle_show_archived();
-        }
-        // v = toggle vim mode
-        KeyCode::Char('v') => {
-            app.toggle_vim_mode();
-        }
-        // e = expand to full-screen editor modal
-        KeyCode::Char('e') => {
-            app.open_expanded_editor_modal();
-        }
-        // / = open chat actions modal (when in chat view with a thread selected)
-        KeyCode::Char('/') => {
-            if app.view == View::Chat {
-                if let (Some(ref thread), Some(ref project)) = (&app.selected_thread, &app.selected_project) {
-                    // Try thread's parent_conversation_id first, fallback to checking messages
-                    let parent_id = thread.parent_conversation_id.clone()
-                        .or_else(|| {
-                            app.data_store.borrow()
-                                .get_parent_conversation_from_messages(&thread.id)
-                        });
-
-                    app.modal_state = ModalState::ChatActions(
-                        ui::modal::ChatActionsState::new(
-                            thread.id.clone(),
-                            thread.title.clone(),
-                            project.a_tag(),
-                            parent_id,
-                        )
-                    );
+        'r' => {
+            if let Some(core_handle) = app.core_handle.clone() {
+                app.set_status("Syncing...");
+                if let Err(e) = core_handle.send(NostrCommand::Sync) {
+                    app.set_status(&format!("Sync request failed: {}", e));
                 }
             }
         }
-        // Unknown prefix command - ignore
+
+        // New conversation (context-dependent)
+        'n' => {
+            if app.view == View::Chat {
+                // In Chat view: start new conversation keeping same project, agent, and branch
+                app.selected_thread = None;
+                app.creating_thread = true;
+                app.input_mode = InputMode::Editing;
+                app.chat_editor.clear();
+                app.set_status("New conversation (same project, agent, and branch)");
+            } else {
+                // In Home/other views: open project selector
+                app.open_projects_modal(true);
+            }
+        }
+        'o' => {
+            // Open selected (context-dependent)
+            match app.view {
+                View::Home => {
+                    // Execute open for current home tab (recent threads)
+                    let threads = app.recent_threads();
+                    if let Some((thread, project_a_tag)) = threads.get(app.selected_recent_index) {
+                        app.open_thread_from_home(thread, project_a_tag);
+                    }
+                }
+                _ => {}
+            }
+        }
+        'a' => {
+            // Archive toggle (Home view - recent threads)
+            if app.view == View::Home {
+                let threads = app.recent_threads();
+                if let Some((thread, _)) = threads.get(app.selected_recent_index) {
+                    let thread_id = thread.id.clone();
+                    let thread_title = thread.title.clone();
+                    let is_now_archived = app.toggle_thread_archived(&thread_id);
+                    let status = if is_now_archived {
+                        format!("Archived: {}", thread_title)
+                    } else {
+                        format!("Unarchived: {}", thread_title)
+                    };
+                    app.set_status(&status);
+                }
+            }
+        }
+        'e' => {
+            // Export JSONL
+            if app.view == View::Chat {
+                if let Some(thread) = &app.selected_thread {
+                    export_thread_as_jsonl(app, &thread.id.clone());
+                }
+            }
+        }
+        'p' => {
+            // Switch project
+            app.open_projects_modal(false);
+        }
+        'm' => {
+            // Toggle "by me" filter
+            app.toggle_only_by_me();
+        }
+        'f' => {
+            // Cycle time filter
+            app.cycle_time_filter();
+        }
+        'A' => {
+            // Agent browser
+            app.open_agent_browser();
+        }
+        'N' => {
+            // Create project
+            app.modal_state = ModalState::CreateProject(ui::modal::CreateProjectState::new());
+        }
+
+        // Sidebar commands
+        ' ' => {
+            // Toggle project visibility
+            toggle_project_visibility_palette(app);
+        }
+        's' => {
+            // Settings
+            open_project_settings(app);
+        }
+        'b' => {
+            // Boot project
+            boot_project(app);
+        }
+
+        // Chat commands
+        '@' => {
+            if !app.available_agents().is_empty() {
+                app.open_agent_selector();
+            }
+        }
+        '%' => {
+            app.open_branch_selector();
+        }
+        'y' => {
+            // Copy selected message
+            copy_selected_message(app);
+        }
+        'v' => {
+            // View raw event
+            view_raw_event(app);
+        }
+        't' => {
+            // Open trace
+            open_trace(app);
+        }
+        '.' => {
+            // Stop agent
+            stop_agents(app);
+        }
+        'g' => {
+            // Go to parent
+            go_to_parent(app);
+        }
+        'x' => {
+            // Close tab
+            app.close_current_tab();
+        }
+        'T' => {
+            // Toggle sidebar
+            app.todo_sidebar_visible = !app.todo_sidebar_visible;
+        }
+        'S' => {
+            // Agent settings - open settings modal for currently selected agent
+            open_agent_settings(app);
+        }
+        'E' => {
+            // Expand editor
+            app.open_expanded_editor_modal();
+        }
+
+        // Agent browser commands
+        'c' => {
+            // Clone agent
+            if app.view == View::AgentBrowser && app.agent_browser_in_detail {
+                if let Some(agent_id) = &app.viewing_agent_id {
+                    if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
+                        app.modal_state = ModalState::CreateAgent(
+                            ui::modal::CreateAgentState::clone_from(&agent)
+                        );
+                    }
+                }
+            }
+        }
+
         _ => {}
     }
+}
+
+// Helper functions for palette commands
+
+fn toggle_project_visibility_palette(app: &mut App) {
+    let (online, offline) = app.filtered_projects();
+    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+    if let Some(project) = all_projects.get(app.sidebar_project_index) {
+        let a_tag = project.a_tag();
+        if app.visible_projects.contains(&a_tag) {
+            app.visible_projects.remove(&a_tag);
+        } else {
+            app.visible_projects.insert(a_tag);
+        }
+    }
+}
+
+fn open_project_settings(app: &mut App) {
+    let (online, offline) = app.filtered_projects();
+    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+    if let Some(project) = all_projects.get(app.sidebar_project_index) {
+        let a_tag = project.a_tag();
+        let project_name = project.name.clone();
+        // Get agent_ids from the Project struct
+        let agent_ids = project.agent_ids.clone();
+        app.modal_state = ModalState::ProjectSettings(
+            ui::modal::ProjectSettingsState::new(a_tag, project_name, agent_ids)
+        );
+    }
+}
+
+fn boot_project(app: &mut App) {
+    let (online, offline) = app.filtered_projects();
+    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+    if let Some(project) = all_projects.get(app.sidebar_project_index) {
+        if let Some(core_handle) = app.core_handle.clone() {
+            let _ = core_handle.send(NostrCommand::BootProject {
+                project_a_tag: project.a_tag(),
+                project_pubkey: Some(project.pubkey.clone()),
+            });
+        }
+    }
+}
+
+fn copy_selected_message(app: &mut App) {
+    use crate::store::get_raw_event_json;
+    let messages = app.messages();
+    if let Some(msg) = messages.get(app.selected_message_index) {
+        if let Some(json) = get_raw_event_json(&app.db.ndb, &msg.id) {
+            if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(&json)) {
+                app.set_status(&format!("Failed to copy: {}", e));
+            } else {
+                app.set_status("Raw event copied to clipboard");
+            }
+        }
+    }
+}
+
+fn view_raw_event(app: &mut App) {
+    use crate::store::get_raw_event_json;
+    let messages = app.messages();
+    if let Some(msg) = messages.get(app.selected_message_index) {
+        if let Some(json) = get_raw_event_json(&app.db.ndb, &msg.id) {
+            // Pretty print the JSON
+            let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                serde_json::to_string_pretty(&value).unwrap_or(json)
+            } else {
+                json
+            };
+            app.modal_state = ModalState::ViewRawEvent {
+                message_id: msg.id.clone(),
+                json: pretty_json,
+                scroll_offset: 0,
+            };
+        }
+    }
+}
+
+fn open_trace(app: &mut App) {
+    use crate::store::get_trace_context;
+    let messages = app.messages();
+    if let Some(msg) = messages.get(app.selected_message_index) {
+        if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &msg.id) {
+            let url = format!("http://localhost:16686/trace/{}", trace_ctx.trace_id);
+            #[cfg(target_os = "macos")]
+            let _ = std::process::Command::new("open").arg(&url).spawn();
+            #[cfg(target_os = "linux")]
+            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        }
+    }
+}
+
+fn stop_agents(app: &mut App) {
+    if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
+        let (is_busy, project_a_tag) = {
+            let store = app.data_store.borrow();
+            let is_busy = store.is_event_busy(&stop_thread_id);
+            let project_a_tag = store.find_project_for_thread(&stop_thread_id);
+            (is_busy, project_a_tag)
+        };
+        if is_busy {
+            if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
+                let working_agents = app.data_store.borrow().get_working_agents(&stop_thread_id);
+                if let Err(e) = core_handle.send(NostrCommand::StopOperations {
+                    project_a_tag: a_tag,
+                    event_ids: vec![stop_thread_id.clone()],
+                    agent_pubkeys: working_agents,
+                }) {
+                    app.set_status(&format!("Failed to stop: {}", e));
+                } else {
+                    app.set_status("Stop command sent");
+                }
+            }
+        }
+    }
+}
+
+fn go_to_parent(app: &mut App) {
+    if let Some(thread) = &app.selected_thread {
+        if let Some(parent_id) = &thread.parent_conversation_id {
+            // Get project for current thread first
+            let project_a_tag = app.data_store.borrow().find_project_for_thread(&thread.id);
+            if let Some(a_tag) = project_a_tag {
+                // Find parent thread in same project
+                let parent_thread = app.data_store.borrow()
+                    .get_threads(&a_tag)
+                    .iter()
+                    .find(|t| t.id == *parent_id)
+                    .cloned();
+                if let Some(parent) = parent_thread {
+                    app.open_thread_from_home(&parent, &a_tag);
+                }
+            }
+        }
+    }
+}
+
+fn open_agent_settings(app: &mut App) {
+    // Need selected agent and selected project to open settings
+    let agent = match &app.selected_agent {
+        Some(a) => a.clone(),
+        None => {
+            app.set_status("No agent selected");
+            return;
+        }
+    };
+
+    let project = match &app.selected_project {
+        Some(p) => p.clone(),
+        None => {
+            app.set_status("No project selected");
+            return;
+        }
+    };
+
+    // Get all available tools and models from the project status
+    let (all_tools, all_models) = app.data_store.borrow()
+        .get_project_status(&project.a_tag())
+        .map(|status| {
+            let tools = status.tools().iter().map(|s| s.to_string()).collect();
+            let models = status.models().iter().map(|s| s.to_string()).collect();
+            (tools, models)
+        })
+        .unwrap_or_default();
+
+    let settings_state = ui::modal::AgentSettingsState::new(
+        agent.name.clone(),
+        agent.pubkey.clone(),
+        project.a_tag(),
+        agent.model.clone(),
+        agent.tools.clone(),
+        all_models,
+        all_tools,
+    );
+    app.modal_state = ModalState::AgentSettings(settings_state);
 }
 
 /// Handle key events for the hotkey help modal
@@ -3251,6 +3647,84 @@ fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                 if state.focus == ReportViewerFocus::Threads || state.show_threads {
                     app.set_status("Thread creation not yet implemented");
                 }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Handle key events for the agent settings modal
+fn handle_agent_settings_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::AgentSettingsFocus;
+
+    if let ModalState::AgentSettings(ref mut state) = app.modal_state {
+        match key.code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Tab => {
+                // Toggle focus between model and tools
+                state.focus = match state.focus {
+                    AgentSettingsFocus::Model => AgentSettingsFocus::Tools,
+                    AgentSettingsFocus::Tools => AgentSettingsFocus::Model,
+                };
+            }
+            KeyCode::Up => {
+                match state.focus {
+                    AgentSettingsFocus::Model => {
+                        if state.model_index > 0 {
+                            state.model_index -= 1;
+                        }
+                    }
+                    AgentSettingsFocus::Tools => {
+                        state.move_cursor_up();
+                    }
+                }
+            }
+            KeyCode::Down => {
+                match state.focus {
+                    AgentSettingsFocus::Model => {
+                        if state.model_index < state.available_models.len().saturating_sub(1) {
+                            state.model_index += 1;
+                        }
+                    }
+                    AgentSettingsFocus::Tools => {
+                        state.move_cursor_down();
+                    }
+                }
+            }
+            KeyCode::Char(' ') => {
+                // Toggle tool/group at cursor when in tools focus
+                if state.focus == AgentSettingsFocus::Tools {
+                    state.toggle_at_cursor();
+                }
+            }
+            KeyCode::Char('a') => {
+                // Bulk toggle all tools in the current group
+                if state.focus == AgentSettingsFocus::Tools {
+                    state.toggle_group_all();
+                }
+            }
+            KeyCode::Enter => {
+                // Publish the config update
+                let project_a_tag = state.project_a_tag.clone();
+                let agent_pubkey = state.agent_pubkey.clone();
+                let model = state.selected_model().map(|s| s.to_string());
+                let tools = state.selected_tools_vec();
+
+                if let Some(ref core_handle) = app.core_handle {
+                    if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
+                        project_a_tag,
+                        agent_pubkey,
+                        model,
+                        tools,
+                    }) {
+                        app.set_status(&format!("Failed to update agent config: {}", e));
+                    } else {
+                        app.set_status("Agent config update sent");
+                    }
+                }
+                app.modal_state = ModalState::None;
             }
             _ => {}
         }

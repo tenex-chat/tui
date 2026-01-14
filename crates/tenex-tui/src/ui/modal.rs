@@ -9,6 +9,8 @@ pub struct AskModalState {
     pub message_id: String,
     pub ask_event: AskEvent,
     pub input_state: AskInputState,
+    /// Pubkey of the ask event author (for p-tagging in response)
+    pub ask_author_pubkey: String,
 }
 
 /// State for nudge selector modal (multi-select nudges for messages)
@@ -523,6 +525,417 @@ impl ReportViewerState {
     }
 }
 
+/// Focus area in agent settings modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentSettingsFocus {
+    Model,
+    Tools,
+}
+
+/// A group of related tools (MCP server or common prefix)
+#[derive(Debug, Clone)]
+pub struct ToolGroup {
+    pub name: String,
+    pub tools: Vec<String>,
+    pub expanded: bool,
+}
+
+impl ToolGroup {
+    /// Check if all tools in the group are selected
+    pub fn is_fully_selected(&self, selected: &std::collections::HashSet<String>) -> bool {
+        self.tools.iter().all(|t| selected.contains(t))
+    }
+
+    /// Check if some (but not all) tools in the group are selected
+    pub fn is_partially_selected(&self, selected: &std::collections::HashSet<String>) -> bool {
+        let count = self.tools.iter().filter(|t| selected.contains(*t)).count();
+        count > 0 && count < self.tools.len()
+    }
+}
+
+/// State for the agent settings modal
+#[derive(Debug, Clone)]
+pub struct AgentSettingsState {
+    pub agent_name: String,
+    pub agent_pubkey: String,
+    pub project_a_tag: String,
+    pub focus: AgentSettingsFocus,
+    /// Available models to choose from (from project status)
+    pub available_models: Vec<String>,
+    /// Index of selected model in available_models
+    pub model_index: usize,
+    /// Tool groups (grouped by MCP server or common prefix)
+    pub tool_groups: Vec<ToolGroup>,
+    /// Selected tools by name
+    pub selected_tools: std::collections::HashSet<String>,
+    /// Current cursor position in flat list (groups + expanded tools)
+    pub tools_cursor: usize,
+    /// Scroll offset for tools list
+    pub tools_scroll: usize,
+}
+
+impl AgentSettingsState {
+    pub fn new(
+        agent_name: String,
+        agent_pubkey: String,
+        project_a_tag: String,
+        current_model: Option<String>,
+        current_tools: Vec<String>,
+        available_models: Vec<String>,
+        all_available_tools: Vec<String>,
+    ) -> Self {
+        // Find index of current model (default to 0 if not found)
+        let model_index = current_model
+            .as_ref()
+            .and_then(|m| available_models.iter().position(|am| am == m))
+            .unwrap_or(0);
+
+        // Build tool groups using intelligent grouping (like Svelte)
+        let tool_groups = Self::build_tool_groups(all_available_tools);
+
+        // Build selected tools set from current tools
+        let selected_tools: std::collections::HashSet<String> = current_tools.into_iter().collect();
+
+        Self {
+            agent_name,
+            agent_pubkey,
+            project_a_tag,
+            focus: AgentSettingsFocus::Model,
+            available_models,
+            model_index,
+            tool_groups,
+            selected_tools,
+            tools_cursor: 0,
+            tools_scroll: 0,
+        }
+    }
+
+    /// Build tool groups from a flat list of tools
+    /// Groups by: MCP server (mcp__<server>__<method>) or common prefix
+    fn build_tool_groups(tools: Vec<String>) -> Vec<ToolGroup> {
+        use std::collections::HashMap;
+
+        let mut groups: HashMap<String, Vec<String>> = HashMap::new();
+        let mut ungrouped: Vec<String> = Vec::new();
+
+        for tool in &tools {
+            // MCP tools: mcp__<server>__<method>
+            if tool.starts_with("mcp__") {
+                let parts: Vec<&str> = tool.split("__").collect();
+                if parts.len() >= 3 {
+                    let group_key = format!("MCP: {}", parts[1]);
+                    groups.entry(group_key).or_default().push(tool.clone());
+                    continue;
+                }
+            }
+
+            // Find common prefixes (underscore-separated)
+            if let Some(prefix_match) = tool.find('_') {
+                let prefix = &tool[..prefix_match];
+                // Only group if there are at least 2 tools with this prefix
+                let similar_count = tools.iter().filter(|t| t.starts_with(&format!("{}_", prefix))).count();
+                if similar_count >= 2 {
+                    let group_key = prefix.to_uppercase();
+                    groups.entry(group_key).or_default().push(tool.clone());
+                    continue;
+                }
+            }
+
+            // No group found - add to ungrouped
+            ungrouped.push(tool.clone());
+        }
+
+        // Convert to Vec<ToolGroup>
+        let mut result: Vec<ToolGroup> = Vec::new();
+
+        // Add grouped tools
+        for (name, mut tools) in groups {
+            tools.sort();
+            tools.dedup();
+            result.push(ToolGroup {
+                name,
+                tools,
+                expanded: false,
+            });
+        }
+
+        // Add ungrouped tools as single-item groups
+        for tool in ungrouped {
+            result.push(ToolGroup {
+                name: tool.clone(),
+                tools: vec![tool],
+                expanded: false,
+            });
+        }
+
+        // Sort groups by name
+        result.sort_by(|a, b| a.name.cmp(&b.name));
+        result
+    }
+
+    pub fn selected_model(&self) -> Option<&str> {
+        self.available_models.get(self.model_index).map(|s| s.as_str())
+    }
+
+    pub fn selected_tools_vec(&self) -> Vec<String> {
+        self.selected_tools.iter().cloned().collect()
+    }
+
+    /// Get total number of visible items (groups + expanded tools)
+    pub fn visible_item_count(&self) -> usize {
+        let mut count = 0;
+        for group in &self.tool_groups {
+            count += 1; // Group header
+            if group.expanded {
+                count += group.tools.len();
+            }
+        }
+        count
+    }
+
+    /// Get the item at a given cursor position
+    /// Returns (group_index, Some(tool_index)) if cursor is on a tool,
+    /// or (group_index, None) if cursor is on a group header
+    pub fn item_at_cursor(&self, cursor: usize) -> Option<(usize, Option<usize>)> {
+        let mut pos = 0;
+        for (group_idx, group) in self.tool_groups.iter().enumerate() {
+            if pos == cursor {
+                return Some((group_idx, None));
+            }
+            pos += 1;
+            if group.expanded {
+                for tool_idx in 0..group.tools.len() {
+                    if pos == cursor {
+                        return Some((group_idx, Some(tool_idx)));
+                    }
+                    pos += 1;
+                }
+            }
+        }
+        None
+    }
+
+    /// Toggle expansion of group at cursor, or toggle tool selection
+    pub fn toggle_at_cursor(&mut self) {
+        if let Some((group_idx, tool_idx)) = self.item_at_cursor(self.tools_cursor) {
+            match tool_idx {
+                None => {
+                    // On group header - toggle expansion if multi-tool group,
+                    // otherwise toggle the single tool
+                    let group = &self.tool_groups[group_idx];
+                    if group.tools.len() == 1 {
+                        // Single tool group - toggle the tool
+                        let tool = &group.tools[0];
+                        if self.selected_tools.contains(tool) {
+                            self.selected_tools.remove(tool);
+                        } else {
+                            self.selected_tools.insert(tool.clone());
+                        }
+                    } else {
+                        // Multi-tool group - toggle expansion
+                        self.tool_groups[group_idx].expanded = !self.tool_groups[group_idx].expanded;
+                    }
+                }
+                Some(tool_idx) => {
+                    // On a tool - toggle its selection
+                    let tool = &self.tool_groups[group_idx].tools[tool_idx];
+                    if self.selected_tools.contains(tool) {
+                        self.selected_tools.remove(tool);
+                    } else {
+                        self.selected_tools.insert(tool.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// Toggle all tools in the group at cursor (bulk toggle)
+    pub fn toggle_group_all(&mut self) {
+        if let Some((group_idx, _)) = self.item_at_cursor(self.tools_cursor) {
+            let group = &self.tool_groups[group_idx];
+            let is_fully_selected = group.is_fully_selected(&self.selected_tools);
+
+            if is_fully_selected {
+                // Deselect all tools in group
+                for tool in &group.tools {
+                    self.selected_tools.remove(tool);
+                }
+            } else {
+                // Select all tools in group
+                for tool in &group.tools {
+                    self.selected_tools.insert(tool.clone());
+                }
+            }
+        }
+    }
+
+    pub fn move_cursor_up(&mut self) {
+        if self.tools_cursor > 0 {
+            self.tools_cursor -= 1;
+        }
+    }
+
+    pub fn move_cursor_down(&mut self) {
+        let max = self.visible_item_count();
+        if self.tools_cursor + 1 < max {
+            self.tools_cursor += 1;
+        }
+    }
+}
+
+/// Context for command palette - determines which commands are shown
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteContext {
+    HomeRecent,
+    HomeInbox,
+    HomeReports,
+    HomeSidebar { is_online: bool, is_busy: bool },
+    ChatNormal { has_parent: bool, has_trace: bool, agent_working: bool },
+    ChatEditing,
+    AgentBrowserList,
+    AgentBrowserDetail,
+}
+
+/// A command available in the palette
+#[derive(Debug, Clone)]
+pub struct PaletteCommand {
+    pub key: char,
+    pub label: &'static str,
+    pub section: &'static str,
+}
+
+impl PaletteCommand {
+    pub const fn new(key: char, label: &'static str, section: &'static str) -> Self {
+        Self { key, label, section }
+    }
+}
+
+/// State for command palette modal (Ctrl+T)
+#[derive(Debug, Clone)]
+pub struct CommandPaletteState {
+    pub filter: String,
+    pub selected_index: usize,
+    pub context: PaletteContext,
+}
+
+impl CommandPaletteState {
+    pub fn new(context: PaletteContext) -> Self {
+        Self {
+            filter: String::new(),
+            selected_index: 0,
+            context,
+        }
+    }
+
+    /// Get commands available for the current context
+    pub fn available_commands(&self) -> Vec<PaletteCommand> {
+        let mut commands = Vec::new();
+
+        // Global commands (always available)
+        commands.push(PaletteCommand::new('1', "Go to Home", "Navigation"));
+        commands.push(PaletteCommand::new('/', "Search", "Navigation"));
+        commands.push(PaletteCommand::new('?', "Help", "Navigation"));
+        commands.push(PaletteCommand::new('q', "Quit", "System"));
+        commands.push(PaletteCommand::new('r', "Refresh", "System"));
+
+        // Context-specific commands
+        match self.context {
+            PaletteContext::HomeRecent => {
+                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
+                commands.push(PaletteCommand::new('o', "Open selected", "Conversation"));
+                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
+                commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
+                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
+                commands.push(PaletteCommand::new('m', "Toggle 'by me'", "Filter"));
+                commands.push(PaletteCommand::new('f', "Time filter", "Filter"));
+                commands.push(PaletteCommand::new('A', "Agent Browser", "Other"));
+                commands.push(PaletteCommand::new('N', "Create project", "Other"));
+            }
+            PaletteContext::HomeInbox => {
+                commands.push(PaletteCommand::new('o', "Open selected", "Inbox"));
+                commands.push(PaletteCommand::new('R', "Mark as read", "Inbox"));
+                commands.push(PaletteCommand::new('M', "Mark all read", "Inbox"));
+                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
+                commands.push(PaletteCommand::new('m', "Toggle 'by me'", "Filter"));
+            }
+            PaletteContext::HomeReports => {
+                commands.push(PaletteCommand::new('o', "View report", "Reports"));
+                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
+            }
+            PaletteContext::HomeSidebar { is_online, is_busy } => {
+                commands.push(PaletteCommand::new(' ', "Toggle visibility", "Project"));
+                commands.push(PaletteCommand::new('n', "New conversation", "Project"));
+                commands.push(PaletteCommand::new('s', "Settings", "Project"));
+                if !is_online {
+                    commands.push(PaletteCommand::new('b', "Boot project", "Project"));
+                }
+                if is_busy {
+                    commands.push(PaletteCommand::new('.', "Stop all agents", "Project"));
+                }
+            }
+            PaletteContext::ChatNormal { has_parent, has_trace, agent_working } => {
+                commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
+                commands.push(PaletteCommand::new('%', "Select branch", "Input"));
+                commands.push(PaletteCommand::new('y', "Copy message", "Message"));
+                commands.push(PaletteCommand::new('v', "View raw event", "Message"));
+                if has_trace {
+                    commands.push(PaletteCommand::new('t', "Open trace", "Message"));
+                }
+                commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
+                if agent_working {
+                    commands.push(PaletteCommand::new('.', "Stop agent", "Agent"));
+                }
+                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
+                if has_parent {
+                    commands.push(PaletteCommand::new('g', "Go to parent", "Conversation"));
+                }
+                commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
+                commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
+                commands.push(PaletteCommand::new('T', "Toggle sidebar", "View"));
+            }
+            PaletteContext::ChatEditing => {
+                commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
+                commands.push(PaletteCommand::new('%', "Select branch", "Input"));
+                commands.push(PaletteCommand::new('E', "Expand editor", "Input"));
+                commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
+                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
+                commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
+            }
+            PaletteContext::AgentBrowserList => {
+                commands.push(PaletteCommand::new('o', "View agent", "Agent"));
+                commands.push(PaletteCommand::new('n', "Create new agent", "Agent"));
+            }
+            PaletteContext::AgentBrowserDetail => {
+                commands.push(PaletteCommand::new('f', "Fork agent", "Agent"));
+                commands.push(PaletteCommand::new('c', "Clone agent", "Agent"));
+            }
+        }
+
+        // Filter by search if applicable
+        if !self.filter.is_empty() {
+            let filter_lower = self.filter.to_lowercase();
+            commands.retain(|cmd| {
+                cmd.label.to_lowercase().contains(&filter_lower)
+                    || cmd.key.to_string().to_lowercase() == filter_lower
+            });
+        }
+
+        commands
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+}
+
 /// Copy menu options for report viewer
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReportCopyOption {
@@ -551,6 +964,8 @@ impl ReportCopyOption {
 #[derive(Debug, Clone)]
 pub enum ModalState {
     None,
+    /// Command palette (Ctrl+T) - context-sensitive command menu
+    CommandPalette(CommandPaletteState),
     AttachmentEditor {
         editor: TextEditor,
     },
@@ -599,6 +1014,8 @@ pub enum ModalState {
     ExpandedEditor {
         editor: TextEditor,
     },
+    /// Agent settings modal (model and tools configuration)
+    AgentSettings(AgentSettingsState),
 }
 
 impl Default for ModalState {
