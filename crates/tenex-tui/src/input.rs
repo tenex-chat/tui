@@ -770,11 +770,11 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         match code {
             KeyCode::Char(c) => {
                 app.report_search_filter.push(c);
-                app.selected_report_index = 0;
+                app.tab_selection.insert(HomeTab::Reports, 0);
             }
             KeyCode::Backspace => {
                 app.report_search_filter.pop();
-                app.selected_report_index = 0;
+                app.tab_selection.insert(HomeTab::Reports, 0);
             }
             KeyCode::Esc | KeyCode::Enter => {
                 app.input_mode = InputMode::Normal;
@@ -814,11 +814,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.modal_state = ModalState::None;
 
                     if for_new_thread {
-                        // Navigate to chat view to create new thread
-                        app.selected_thread = None;
-                        app.creating_thread = true;
-                        app.view = View::Chat;
-                        app.input_mode = InputMode::Editing;
+                        // Create draft tab and navigate to chat view
+                        let project_name = app.selected_project.as_ref()
+                            .map(|p| p.title.clone())
+                            .unwrap_or_else(|| "New".to_string());
+                        let tab_idx = app.open_draft_tab(&a_tag, &project_name);
+                        app.switch_to_tab(tab_idx);
                         app.chat_editor.clear();
                     } else {
                         // Set filter to show only this project (existing behavior)
@@ -857,7 +858,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             } else if app.home_panel_focus == HomeTab::Recent {
                 // Open conversation actions modal for selected thread
                 let hierarchy = get_hierarchical_threads(app);
-                if let Some(item) = hierarchy.get(app.selected_recent_index) {
+                if let Some(item) = hierarchy.get(app.current_selection()) {
                     let thread_id = item.thread.id.clone();
                     let thread_title = item.thread.title.clone();
                     let project_a_tag = item.a_tag.clone();
@@ -869,7 +870,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             } else if app.home_panel_focus == HomeTab::Inbox {
                 // Open conversation actions modal for selected inbox item
                 let items = app.inbox_items();
-                if let Some(item) = items.get(app.selected_inbox_index) {
+                if let Some(item) = items.get(app.current_selection()) {
                     if let Some(ref thread_id) = item.thread_id {
                         let project_a_tag = item.project_a_tag.clone();
                         // Find thread to get title
@@ -922,15 +923,17 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Recent => HomeTab::Inbox,
                 HomeTab::Inbox => HomeTab::Reports,
-                HomeTab::Reports => HomeTab::Recent,
+                HomeTab::Reports => HomeTab::Status,
+                HomeTab::Status => HomeTab::Recent,
             };
         }
         KeyCode::BackTab if has_shift => {
             // Shift+Tab switches tabs (backward)
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Reports,
+                HomeTab::Recent => HomeTab::Status,
                 HomeTab::Inbox => HomeTab::Recent,
                 HomeTab::Reports => HomeTab::Inbox,
+                HomeTab::Status => HomeTab::Reports,
             };
         }
         KeyCode::Right => {
@@ -948,23 +951,10 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.sidebar_project_index -= 1;
                 }
             } else {
-                // Navigate content
-                match app.home_panel_focus {
-                    HomeTab::Inbox => {
-                        if app.selected_inbox_index > 0 {
-                            app.selected_inbox_index -= 1;
-                        }
-                    }
-                    HomeTab::Recent => {
-                        if app.selected_recent_index > 0 {
-                            app.selected_recent_index -= 1;
-                        }
-                    }
-                    HomeTab::Reports => {
-                        if app.selected_report_index > 0 {
-                            app.selected_report_index -= 1;
-                        }
-                    }
+                // Navigate content using consolidated state
+                let current = app.current_selection();
+                if current > 0 {
+                    app.set_current_selection(current - 1);
                 }
             }
         }
@@ -977,28 +967,16 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.sidebar_project_index += 1;
                 }
             } else {
-                // Navigate content
-                match app.home_panel_focus {
-                    HomeTab::Inbox => {
-                        let max = app.inbox_items().len().saturating_sub(1);
-                        if app.selected_inbox_index < max {
-                            app.selected_inbox_index += 1;
-                        }
-                    }
-                    HomeTab::Recent => {
-                        // Use hierarchy for navigation (respects collapsed state)
-                        let hierarchy = get_hierarchical_threads(app);
-                        let max = hierarchy.len().saturating_sub(1);
-                        if app.selected_recent_index < max {
-                            app.selected_recent_index += 1;
-                        }
-                    }
-                    HomeTab::Reports => {
-                        let count = app.reports().len();
-                        if app.selected_report_index + 1 < count {
-                            app.selected_report_index += 1;
-                        }
-                    }
+                // Navigate content using consolidated state
+                let current = app.current_selection();
+                let max = match app.home_panel_focus {
+                    HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
+                    HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                    HomeTab::Reports => app.reports().len().saturating_sub(1),
+                    HomeTab::Status => app.status_threads().len().saturating_sub(1),
+                };
+                if current < max {
+                    app.set_current_selection(current + 1);
                 }
             }
         }
@@ -1103,10 +1081,11 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             } else {
                 // Open selected item
+                let idx = app.current_selection();
                 match app.home_panel_focus {
                     HomeTab::Inbox => {
                         let items = app.inbox_items();
-                        if let Some(item) = items.get(app.selected_inbox_index) {
+                        if let Some(item) = items.get(idx) {
                             // Mark as read
                             let item_id = item.id.clone();
                             app.data_store.borrow_mut().mark_inbox_read(&item_id);
@@ -1130,7 +1109,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Recent => {
                         // Use hierarchy for selection (respects collapsed state)
                         let hierarchy = get_hierarchical_threads(app);
-                        if let Some(item) = hierarchy.get(app.selected_recent_index) {
+                        if let Some(item) = hierarchy.get(idx) {
                             let thread = item.thread.clone();
                             let a_tag = item.a_tag.clone();
                             app.open_thread_from_home(&thread, &a_tag);
@@ -1138,10 +1117,16 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                     HomeTab::Reports => {
                         let reports = app.reports();
-                        if let Some(report) = reports.get(app.selected_report_index) {
+                        if let Some(report) = reports.get(idx) {
                             app.modal_state = ModalState::ReportViewer(
                                 ui::modal::ReportViewerState::new(report.clone())
                             );
+                        }
+                    }
+                    HomeTab::Status => {
+                        let status_items = app.status_threads();
+                        if let Some((thread, a_tag)) = status_items.get(idx) {
+                            app.open_thread_from_home(thread, a_tag);
                         }
                     }
                 }
@@ -1150,7 +1135,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('r') if app.home_panel_focus == HomeTab::Inbox => {
             // Mark current inbox item as read
             let items = app.inbox_items();
-            if let Some(item) = items.get(app.selected_inbox_index) {
+            if let Some(item) = items.get(app.current_selection()) {
                 let item_id = item.id.clone();
                 app.data_store.borrow_mut().mark_inbox_read(&item_id);
             }
@@ -1158,7 +1143,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char(' ') if app.home_panel_focus == HomeTab::Recent => {
             // Toggle collapse for threads with children
             let hierarchy = get_hierarchical_threads(app);
-            if let Some(item) = hierarchy.get(app.selected_recent_index) {
+            if let Some(item) = hierarchy.get(app.current_selection()) {
                 if item.has_children {
                     app.toggle_thread_collapse(&item.thread.id);
                 }
@@ -1167,7 +1152,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('x') if app.home_panel_focus == HomeTab::Recent && !app.sidebar_focused => {
             // Quick archive - press x to archive selected thread
             let hierarchy = get_hierarchical_threads(app);
-            if let Some(item) = hierarchy.get(app.selected_recent_index) {
+            if let Some(item) = hierarchy.get(app.current_selection()) {
                 let thread_id = item.thread.id.clone();
                 let thread_title = item.thread.title.clone();
                 let is_now_archived = app.toggle_thread_archived(&thread_id);
@@ -1182,7 +1167,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('x') if app.home_panel_focus == HomeTab::Inbox && !app.sidebar_focused => {
             // Quick archive - press x to archive selected inbox item's thread
             let items = app.inbox_items();
-            if let Some(item) = items.get(app.selected_inbox_index) {
+            if let Some(item) = items.get(app.current_selection()) {
                 if let Some(ref thread_id) = item.thread_id {
                     let thread_id = thread_id.clone();
                     // Find thread title
@@ -1201,54 +1186,45 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
         }
+        KeyCode::Char('x') if app.home_panel_focus == HomeTab::Status && !app.sidebar_focused => {
+            // Quick archive - press x to archive selected status thread
+            let status_items = app.status_threads();
+            if let Some((thread, _)) = status_items.get(app.current_selection()) {
+                let thread_id = thread.id.clone();
+                let thread_title = thread.title.clone();
+                let is_now_archived = app.toggle_thread_archived(&thread_id);
+                let status = if is_now_archived {
+                    format!("Archived: {}", thread_title)
+                } else {
+                    format!("Unarchived: {}", thread_title)
+                };
+                app.set_status(&status);
+            }
+        }
         // Vim-style navigation (j/k)
         KeyCode::Char('k') if !app.sidebar_focused => {
-            match app.home_panel_focus {
-                HomeTab::Inbox => {
-                    if app.selected_inbox_index > 0 {
-                        app.selected_inbox_index -= 1;
-                    }
-                }
-                HomeTab::Recent => {
-                    if app.selected_recent_index > 0 {
-                        app.selected_recent_index -= 1;
-                    }
-                }
-                HomeTab::Reports => {
-                    if app.selected_report_index > 0 {
-                        app.selected_report_index -= 1;
-                    }
-                }
+            let current = app.current_selection();
+            if current > 0 {
+                app.set_current_selection(current - 1);
             }
         }
         KeyCode::Char('j') if !app.sidebar_focused => {
-            match app.home_panel_focus {
-                HomeTab::Inbox => {
-                    let max = app.inbox_items().len().saturating_sub(1);
-                    if app.selected_inbox_index < max {
-                        app.selected_inbox_index += 1;
-                    }
-                }
-                HomeTab::Recent => {
-                    let hierarchy = get_hierarchical_threads(app);
-                    let max = hierarchy.len().saturating_sub(1);
-                    if app.selected_recent_index < max {
-                        app.selected_recent_index += 1;
-                    }
-                }
-                HomeTab::Reports => {
-                    let count = app.reports().len();
-                    if app.selected_report_index + 1 < count {
-                        app.selected_report_index += 1;
-                    }
-                }
+            let current = app.current_selection();
+            let max = match app.home_panel_focus {
+                HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
+                HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                HomeTab::Reports => app.reports().len().saturating_sub(1),
+                HomeTab::Status => app.status_threads().len().saturating_sub(1),
+            };
+            if current < max {
+                app.set_current_selection(current + 1);
             }
         }
         // Esc to clear Reports search filter
         KeyCode::Esc if app.home_panel_focus == HomeTab::Reports => {
             if !app.report_search_filter.is_empty() {
                 app.report_search_filter.clear();
-                app.selected_report_index = 0;
+                app.tab_selection.insert(HomeTab::Reports, 0);
             }
         }
         // Number keys for tab switching (1 = stay on Home, 2-9 = tabs)
@@ -1796,6 +1772,11 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                     } else {
                         // Create new thread (kind:1)
                         let title = content.lines().next().unwrap_or("New Thread").to_string();
+
+                        // Capture the draft_id before sending (if we're in a draft tab)
+                        let draft_id = app.find_draft_tab(&project_a_tag)
+                            .map(|(_, id)| id.to_string());
+
                         if let Err(e) = core_handle.send(NostrCommand::PublishThread {
                             project_a_tag: project_a_tag.clone(),
                             title,
@@ -1808,6 +1789,7 @@ fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                         } else {
                             // Navigate to it once it arrives via subscription
                             app.pending_new_thread_project = Some(project_a_tag.clone());
+                            app.pending_new_thread_draft_id = draft_id;
                             app.selected_nudge_ids.clear();
                         }
                     }
@@ -2844,10 +2826,17 @@ fn execute_chat_action(
     match action {
         ChatAction::NewConversation => {
             // Start a new conversation keeping the same project, agent, and branch context
+            // Create a draft tab so it persists in the tab bar
+            let project_name = state.project_name.clone();
+            let project_a_tag = state.project_a_tag.clone();
+
             app.modal_state = ModalState::None;
-            app.selected_thread = None;
-            app.creating_thread = true;
-            app.input_mode = InputMode::Editing;
+            app.save_chat_draft(); // Save current draft before switching
+
+            // Create draft tab and switch to it
+            let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+            app.switch_to_tab(tab_idx);
+
             app.chat_editor.clear();
             app.set_status("New conversation (same project, agent, and branch)");
         }
@@ -2983,6 +2972,7 @@ fn execute_project_action(
 
             if let Some(project) = project {
                 let a_tag = project.a_tag();
+                let project_name = state.project_name.clone();
                 app.selected_project = Some(project);
 
                 // Auto-select PM agent and default branch from status
@@ -2995,12 +2985,10 @@ fn execute_project_action(
                     }
                 }
 
-                // Navigate to chat view to create new thread
+                // Create draft tab and switch to it
                 app.modal_state = ModalState::None;
-                app.selected_thread = None;
-                app.creating_thread = true;
-                app.view = View::Chat;
-                app.input_mode = InputMode::Editing;
+                let tab_idx = app.open_draft_tab(&a_tag, &project_name);
+                app.switch_to_tab(tab_idx);
                 app.chat_editor.clear();
             } else {
                 app.modal_state = ModalState::None;
@@ -3137,11 +3125,16 @@ fn execute_palette_command(app: &mut App, key: char) {
         'n' => {
             if app.view == View::Chat {
                 // In Chat view: start new conversation keeping same project, agent, and branch
-                app.selected_thread = None;
-                app.creating_thread = true;
-                app.input_mode = InputMode::Editing;
-                app.chat_editor.clear();
-                app.set_status("New conversation (same project, agent, and branch)");
+                if let Some(ref project) = app.selected_project {
+                    let project_a_tag = project.a_tag();
+                    let project_name = project.title.clone();
+
+                    app.save_chat_draft(); // Save current draft before switching
+                    let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+                    app.switch_to_tab(tab_idx);
+                    app.chat_editor.clear();
+                    app.set_status("New conversation (same project, agent, and branch)");
+                }
             } else {
                 // In Home/other views: open project selector
                 app.open_projects_modal(true);
@@ -3153,7 +3146,7 @@ fn execute_palette_command(app: &mut App, key: char) {
                 View::Home => {
                     // Execute open for current home tab (recent threads)
                     let threads = app.recent_threads();
-                    if let Some((thread, project_a_tag)) = threads.get(app.selected_recent_index) {
+                    if let Some((thread, project_a_tag)) = threads.get(app.current_selection()) {
                         app.open_thread_from_home(thread, project_a_tag);
                     }
                 }
@@ -3164,7 +3157,7 @@ fn execute_palette_command(app: &mut App, key: char) {
             // Archive toggle (Home view - recent threads)
             if app.view == View::Home {
                 let threads = app.recent_threads();
-                if let Some((thread, _)) = threads.get(app.selected_recent_index) {
+                if let Some((thread, _)) = threads.get(app.current_selection()) {
                     let thread_id = thread.id.clone();
                     let thread_title = thread.title.clone();
                     let is_now_archived = app.toggle_thread_archived(&thread_id);

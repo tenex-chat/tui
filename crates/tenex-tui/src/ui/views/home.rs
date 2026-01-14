@@ -60,6 +60,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
         HomeTab::Reports => render_reports_list(f, app, padded_content),
+        HomeTab::Status => render_status_list(f, app, padded_content),
     }
 
     // Render sidebar on the right
@@ -126,6 +127,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let inbox_count = app.inbox_items().iter().filter(|i| !i.is_read).count();
+    let status_count = app.status_threads().iter().filter(|(t, _)| t.status_current_activity.is_some()).count();
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
@@ -153,6 +155,15 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Reports", tab_style(HomeTab::Reports)));
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Status", tab_style(HomeTab::Status)));
+
+    if status_count > 0 {
+        spans.push(Span::styled(
+            format!(" ({})", status_count),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ));
+    }
 
     // Show archived mode indicator
     if app.show_archived {
@@ -177,6 +188,10 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
             if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::Status { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::Status { accent } else { blank }),
+        Span::styled(if status_count > 0 { "    " } else { "" }, blank),
     ];
     let indicator_line = Line::from(indicator_spans);
 
@@ -226,7 +241,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     };
 
     // Calculate scroll offset to keep selected item visible
-    let selected_idx = app.selected_recent_index;
+    let selected_idx = app.current_selection();
     let mut scroll_offset: u16 = 0;
 
     // Calculate cumulative height up to and including selected item
@@ -642,11 +657,12 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let selected_idx = app.current_selection();
     let items: Vec<ListItem> = inbox_items
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let is_selected = i == app.selected_inbox_index;
+            let is_selected = i == selected_idx;
             render_inbox_card(app, item, is_selected)
         })
         .collect();
@@ -655,7 +671,7 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).highlight_style(Style::default());
 
     let mut state = ListState::default();
-    state.select(Some(app.selected_inbox_index));
+    state.select(Some(selected_idx));
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -756,8 +772,9 @@ fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
 
     // Render report cards
     let mut y_offset = 0u16;
+    let selected_idx = app.current_selection();
     for (i, report) in reports.iter().enumerate() {
-        let is_selected = i == app.selected_report_index;
+        let is_selected = i == selected_idx;
         let card_height = 3u16; // title, summary, spacing
 
         if y_offset + card_height > chunks[1].height {
@@ -828,6 +845,126 @@ fn render_report_card(
     let line3 = Line::from("");
 
     let content = Paragraph::new(vec![line1, line2, line3]);
+
+    if is_selected {
+        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
+    } else {
+        f.render_widget(content, area);
+    }
+}
+
+/// Render the Status tab - conversations with status metadata
+fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
+    let status_threads = app.status_threads();
+
+    if status_threads.is_empty() {
+        let empty = Paragraph::new("No conversations with status updates")
+            .style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, area);
+        return;
+    }
+
+    let selected_idx = app.current_selection();
+    let mut y_offset = 0u16;
+
+    for (i, (thread, a_tag)) in status_threads.iter().enumerate() {
+        let is_selected = i == selected_idx;
+        let card_height = 4u16; // title, summary, activity, spacing
+
+        if y_offset + card_height > area.height {
+            break;
+        }
+
+        let card_area = Rect::new(
+            area.x,
+            area.y + y_offset,
+            area.width,
+            card_height,
+        );
+
+        render_status_card(f, app, thread, a_tag, is_selected, card_area);
+        y_offset += card_height;
+    }
+}
+
+/// Render a single status card
+fn render_status_card(
+    f: &mut Frame,
+    app: &App,
+    thread: &Thread,
+    a_tag: &str,
+    is_selected: bool,
+    area: Rect,
+) {
+    let store = app.data_store.borrow();
+    let project_name = store.get_project_name(a_tag);
+    drop(store);
+
+    let time_str = crate::ui::format::format_relative_time(thread.last_activity);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let bullet = if is_selected { card::BULLET } else { card::SPACER };
+    let has_activity = thread.status_current_activity.is_some();
+
+    // Line 1: Title + status badge + project + timestamp
+    let title_max = area.width as usize - 40;
+    let title = crate::ui::format::truncate_with_ellipsis(&thread.title, title_max);
+
+    let mut line1_spans = vec![
+        Span::styled(bullet, Style::default().fg(if has_activity { theme::ACCENT_SUCCESS } else { theme::ACCENT_PRIMARY })),
+        Span::styled(title, title_style),
+    ];
+
+    // Status label badge
+    if let Some(ref label) = thread.status_label {
+        line1_spans.push(Span::styled("  [", Style::default().fg(theme::TEXT_MUTED)));
+        line1_spans.push(Span::styled(label.as_str(), Style::default().fg(theme::ACCENT_WARNING)));
+        line1_spans.push(Span::styled("]", Style::default().fg(theme::TEXT_MUTED)));
+    }
+
+    line1_spans.push(Span::styled("  ", Style::default()));
+    line1_spans.push(Span::styled(&project_name, Style::default().fg(theme::project_color(a_tag))));
+    line1_spans.push(Span::styled(format!("  {}", time_str), Style::default().fg(theme::TEXT_MUTED)));
+
+    let line1 = Line::from(line1_spans);
+
+    // Line 2: Summary (if present)
+    let line2 = if let Some(ref summary) = thread.summary {
+        let summary_max = area.width as usize - 4;
+        let summary_text = crate::ui::format::truncate_with_ellipsis(summary, summary_max);
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(summary_text, Style::default().fg(theme::TEXT_MUTED)),
+        ])
+    } else {
+        Line::from("")
+    };
+
+    // Line 3: Current activity (if present) with pulsing indicator
+    let line3 = if let Some(ref activity) = thread.status_current_activity {
+        let activity_max = area.width as usize - 6;
+        let activity_text = crate::ui::format::truncate_with_ellipsis(activity, activity_max);
+        // Pulsing indicator using frame counter
+        let indicator = if app.frame_counter % 4 < 2 { "◉" } else { "○" };
+        Line::from(vec![
+            Span::styled("  ", Style::default()),
+            Span::styled(indicator, Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(" ", Style::default()),
+            Span::styled(activity_text, Style::default().fg(theme::ACCENT_SUCCESS)),
+        ])
+    } else {
+        Line::from("")
+    };
+
+    // Line 4: Spacing
+    let line4 = Line::from("");
+
+    let content = Paragraph::new(vec![line1, line2, line3, line4]);
 
     if is_selected {
         f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
@@ -1061,6 +1198,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · A agents · q quit",
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
             HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
+            HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",
         }
     };
 

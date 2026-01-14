@@ -87,20 +87,31 @@ pub enum InputMode {
     Editing,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HomeTab {
     Recent,
     Inbox,
     Reports,
+    Status,
 }
 
-/// An open tab representing a thread
+/// An open tab representing a thread or draft conversation
 #[derive(Debug, Clone)]
 pub struct OpenTab {
+    /// Thread ID (empty string for draft tabs)
     pub thread_id: String,
     pub thread_title: String,
     pub project_a_tag: String,
     pub has_unread: bool,
+    /// Draft ID for new conversations not yet sent (None for real threads)
+    pub draft_id: Option<String>,
+}
+
+impl OpenTab {
+    /// Check if this is a draft tab (no thread created yet)
+    pub fn is_draft(&self) -> bool {
+        self.draft_id.is_some()
+    }
 }
 
 /// Maximum number of open tabs (matches 1-9 shortcuts)
@@ -190,10 +201,9 @@ pub struct App {
 
     // Home view state
     pub home_panel_focus: HomeTab,
-    pub selected_inbox_index: usize,
-    pub selected_report_index: usize,
+    /// Per-tab selection index (preserves position when switching tabs)
+    pub tab_selection: HashMap<HomeTab, usize>,
     pub report_search_filter: String,
-    pub selected_recent_index: usize,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
     /// Selected index in sidebar project list
@@ -243,6 +253,8 @@ pub struct App {
 
     /// Project a_tag when waiting for a newly created thread to appear
     pub pending_new_thread_project: Option<String>,
+    /// Draft ID when waiting for a newly created thread (to convert draft tab)
+    pub pending_new_thread_draft_id: Option<String>,
 
     /// Selected nudge IDs for the current conversation
     pub selected_nudge_ids: Vec<String>,
@@ -313,10 +325,8 @@ impl App {
             showing_tab_modal: false,
             tab_modal_index: 0,
             home_panel_focus: HomeTab::Recent,
-            selected_inbox_index: 0,
-            selected_report_index: 0,
+            tab_selection: HashMap::new(),
             report_search_filter: String::new(),
-            selected_recent_index: 0,
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
@@ -339,6 +349,7 @@ impl App {
             collapsed_threads: HashSet::new(),
             expanded_groups: HashSet::new(),
             pending_new_thread_project: None,
+            pending_new_thread_draft_id: None,
             selected_nudge_ids: Vec::new(),
             frame_counter: 0,
             message_history: Vec::new(),
@@ -448,16 +459,16 @@ impl App {
         self.user_explicitly_selected_agent = false;
 
         if let Some(ref thread) = self.selected_thread {
-            // Load draft for text content and branch
+            // Load draft for text content only
             if let Some(draft) = self.draft_storage.borrow().load(&thread.id) {
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
-                self.selected_branch = draft.selected_branch;
             }
 
-            // Always sync agent selection with the conversation's most recent agent
-            // This ensures the input always reflects who you're talking to
+            // Always sync agent and branch with the conversation's most recent activity
+            // This ensures the input always reflects who you're talking to and what branch they used
             self.sync_agent_with_conversation();
+            self.sync_branch_with_conversation();
         }
     }
 
@@ -796,6 +807,49 @@ impl App {
         })
     }
 
+    /// Get the most recent branch from conversation messages.
+    /// Returns the branch tag from the most recent message that has one.
+    pub fn get_most_recent_branch_from_conversation(&self) -> Option<String> {
+        let messages = self.messages();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Find the most recent message with a branch tag (not from the user)
+        let mut latest_branch: Option<String> = None;
+        let mut latest_timestamp: u64 = 0;
+
+        for msg in &messages {
+            // Skip messages from the user
+            if user_pubkey.as_ref().map(|pk| pk == &msg.pubkey).unwrap_or(false) {
+                continue;
+            }
+
+            // Check if this message has a branch and is more recent
+            if msg.branch.is_some() && msg.created_at >= latest_timestamp {
+                latest_timestamp = msg.created_at;
+                latest_branch = msg.branch.clone();
+            }
+        }
+
+        latest_branch
+    }
+
+    /// Sync selected_branch with the most recent branch in the conversation
+    /// Falls back to default branch if no branch found in messages
+    pub fn sync_branch_with_conversation(&mut self) {
+        // First try to get the most recent branch from the conversation
+        if let Some(recent_branch) = self.get_most_recent_branch_from_conversation() {
+            self.selected_branch = Some(recent_branch);
+            return;
+        }
+
+        // Fall back to default branch if no branch found in messages
+        if let Some(status) = self.get_selected_project_status() {
+            if let Some(default_branch) = status.default_branch() {
+                self.selected_branch = Some(default_branch.to_string());
+            }
+        }
+    }
+
     /// Get agents filtered by current filter (from ModalState or empty)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
@@ -913,6 +967,7 @@ impl App {
                         HomeTab::Recent => PaletteContext::HomeRecent,
                         HomeTab::Inbox => PaletteContext::HomeInbox,
                         HomeTab::Reports => PaletteContext::HomeReports,
+                        HomeTab::Status => PaletteContext::HomeRecent, // Reuse Recent context for Status
                     }
                 }
             }
@@ -1145,6 +1200,7 @@ impl App {
             thread_title: thread.title.clone(),
             project_a_tag: project_a_tag.to_string(),
             has_unread: false,
+            draft_id: None,
         };
 
         // If at max capacity, remove the oldest (leftmost) tab
@@ -1159,6 +1215,74 @@ impl App {
         self.open_tabs.push(tab);
         self.active_tab_index = self.open_tabs.len() - 1;
         self.active_tab_index
+    }
+
+    /// Open a draft tab for a new conversation (before thread is created)
+    /// Returns the tab index
+    pub fn open_draft_tab(&mut self, project_a_tag: &str, project_name: &str) -> usize {
+        // Generate unique draft ID
+        let draft_id = format!("draft-{}", chrono::Utc::now().timestamp_millis());
+
+        // Check if we already have a draft for this project
+        if let Some(idx) = self.open_tabs.iter().position(|t| {
+            t.is_draft() && t.project_a_tag == project_a_tag
+        }) {
+            // Switch to existing draft
+            self.active_tab_index = idx;
+            return idx;
+        }
+
+        // Create new draft tab
+        let tab = OpenTab {
+            thread_id: String::new(), // Empty - no thread yet
+            thread_title: format!("New: {}", project_name),
+            project_a_tag: project_a_tag.to_string(),
+            has_unread: false,
+            draft_id: Some(draft_id),
+        };
+
+        // If at max capacity, remove the oldest (leftmost) non-draft tab, or oldest draft
+        if self.open_tabs.len() >= MAX_TABS {
+            // Prefer removing non-draft tabs first
+            if let Some(idx) = self.open_tabs.iter().position(|t| !t.is_draft()) {
+                self.open_tabs.remove(idx);
+                if self.active_tab_index > 0 && self.active_tab_index >= idx {
+                    self.active_tab_index -= 1;
+                }
+            } else {
+                // All tabs are drafts, remove oldest
+                self.open_tabs.remove(0);
+                if self.active_tab_index > 0 {
+                    self.active_tab_index -= 1;
+                }
+            }
+        }
+
+        self.open_tabs.push(tab);
+        self.active_tab_index = self.open_tabs.len() - 1;
+        self.active_tab_index
+    }
+
+    /// Convert a draft tab to a real tab when thread is created
+    pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
+        if let Some(tab) = self.open_tabs.iter_mut().find(|t| {
+            t.draft_id.as_ref() == Some(&draft_id.to_string())
+        }) {
+            tab.thread_id = thread.id.clone();
+            tab.thread_title = thread.title.clone();
+            tab.draft_id = None;
+        }
+    }
+
+    /// Find if there's an active draft tab for a project
+    pub fn find_draft_tab(&self, project_a_tag: &str) -> Option<(usize, &str)> {
+        self.open_tabs.iter().enumerate().find_map(|(idx, t)| {
+            if t.is_draft() && t.project_a_tag == project_a_tag {
+                t.draft_id.as_ref().map(|id| (idx, id.as_str()))
+            } else {
+                None
+            }
+        })
     }
 
     /// Close the current tab
@@ -1203,26 +1327,64 @@ impl App {
         self.active_tab_index = index;
 
         // Extract data we need before mutating
+        let is_draft = self.open_tabs[index].is_draft();
         let thread_id = self.open_tabs[index].thread_id.clone();
         let project_a_tag = self.open_tabs[index].project_a_tag.clone();
 
         // Clear unread for this tab
         self.open_tabs[index].has_unread = false;
 
-        // Find the thread in data store
-        let thread = self.data_store.borrow().get_threads(&project_a_tag)
-            .iter()
-            .find(|t| t.id == thread_id)
-            .cloned();
+        if is_draft {
+            // Draft tab - set up for new conversation
+            self.selected_thread = None;
+            self.creating_thread = true;
 
-        if let Some(thread) = thread {
-            self.selected_thread = Some(thread);
+            // Set the project for this draft
+            let project = self.data_store.borrow()
+                .get_projects()
+                .iter()
+                .find(|p| p.a_tag() == project_a_tag)
+                .cloned();
+
+            if let Some(project) = project {
+                let a_tag = project.a_tag();
+                self.selected_project = Some(project);
+
+                // Auto-select PM agent and default branch from status
+                if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+                    if let Some(pm) = status.pm_agent() {
+                        self.selected_agent = Some(pm.clone());
+                    }
+                    if self.selected_branch.is_none() {
+                        self.selected_branch = status.default_branch().map(String::from);
+                    }
+                }
+            }
+
             self.restore_chat_draft();
-            self.scroll_offset = usize::MAX; // Scroll to bottom
+            self.scroll_offset = 0;
             self.selected_message_index = 0;
             self.subthread_root = None;
             self.subthread_root_message = None;
-            self.input_mode = InputMode::Editing; // Auto-focus input
+            self.input_mode = InputMode::Editing;
+            self.view = View::Chat;
+        } else {
+            // Real tab - find the thread in data store
+            let thread = self.data_store.borrow().get_threads(&project_a_tag)
+                .iter()
+                .find(|t| t.id == thread_id)
+                .cloned();
+
+            if let Some(thread) = thread {
+                self.selected_thread = Some(thread);
+                self.creating_thread = false;
+                self.restore_chat_draft();
+                self.scroll_offset = usize::MAX; // Scroll to bottom
+                self.selected_message_index = 0;
+                self.subthread_root = None;
+                self.subthread_root_message = None;
+                self.input_mode = InputMode::Editing; // Auto-focus input
+            }
         }
     }
 
@@ -1369,6 +1531,75 @@ impl App {
     }
 
     // ===== Home View Methods =====
+
+    /// Get the selection index for the current home tab
+    pub fn current_selection(&self) -> usize {
+        *self.tab_selection.get(&self.home_panel_focus).unwrap_or(&0)
+    }
+
+    /// Set the selection index for the current home tab
+    pub fn set_current_selection(&mut self, index: usize) {
+        self.tab_selection.insert(self.home_panel_focus, index);
+    }
+
+    /// Get threads with status metadata, sorted by activity
+    /// Returns threads that have status_label OR status_current_activity
+    pub fn status_threads(&self) -> Vec<(Thread, String)> {
+        // Empty visible_projects = show nothing
+        if self.visible_projects.is_empty() {
+            return vec![];
+        }
+
+        let threads = self.data_store.borrow().get_all_recent_threads(100);
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let prefs = self.preferences.borrow();
+
+        let mut status_threads: Vec<(Thread, String)> = threads.into_iter()
+            // Project filter
+            .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
+            // Must have status metadata (label or current activity)
+            .filter(|(thread, _)| {
+                thread.status_label.is_some() || thread.status_current_activity.is_some()
+            })
+            // Archive filter
+            .filter(|(thread, _)| {
+                self.show_archived || !prefs.is_thread_archived(&thread.id)
+            })
+            // "Only by me" filter
+            .filter(|(thread, _)| {
+                if !self.only_by_me {
+                    return true;
+                }
+                user_pubkey.as_ref().map_or(false, |pk| thread.involves_user(pk))
+            })
+            // Time filter
+            .filter(|(thread, _)| {
+                if let Some(ref tf) = self.time_filter {
+                    let cutoff = now.saturating_sub(tf.seconds());
+                    thread.last_activity >= cutoff
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        // Sort: threads with current_activity first, then by last_activity descending
+        status_threads.sort_by(|(a, _), (b, _)| {
+            let a_has_activity = a.status_current_activity.is_some();
+            let b_has_activity = b.status_current_activity.is_some();
+            match (a_has_activity, b_has_activity) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b.last_activity.cmp(&a.last_activity),
+            }
+        });
+
+        status_threads
+    }
 
     /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
