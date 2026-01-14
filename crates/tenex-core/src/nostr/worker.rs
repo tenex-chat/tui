@@ -9,10 +9,9 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, info};
 
+use crate::constants::RELAY_URL;
 use crate::store::ingest_events;
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
-
-const RELAY_URL: &str = "wss://tenex.chat";
 
 fn debug_log(msg: &str) {
     if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
@@ -315,9 +314,13 @@ impl NostrWorker {
     }
 
     fn spawn_notification_handler(&self) {
-        let client = self.client.as_ref().unwrap().clone();
+        let client = self.client.as_ref()
+            .expect("spawn_notification_handler called before Connect")
+            .clone();
         let ndb = self.ndb.clone();
-        let rt_handle = self.rt_handle.as_ref().unwrap().clone();
+        let rt_handle = self.rt_handle.as_ref()
+            .expect("spawn_notification_handler called before runtime initialized")
+            .clone();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();

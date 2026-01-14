@@ -1,5 +1,7 @@
 use nostrdb::Note;
 
+use crate::constants::{DEFAULT_AGENT_NAME, DEFAULT_AGENT_ROLE};
+
 /// Agent Definition - kind:4199 events describing AI agents
 #[derive(Debug, Clone)]
 pub struct AgentDefinition {
@@ -68,9 +70,9 @@ impl AgentDefinition {
             id,
             pubkey,
             d_tag: d_tag.unwrap_or_default(),
-            name: name.unwrap_or_else(|| "Unnamed Agent".to_string()),
+            name: name.unwrap_or_else(|| DEFAULT_AGENT_NAME.to_string()),
             description: description.unwrap_or_default(),
-            role: role.unwrap_or_else(|| "assistant".to_string()),
+            role: role.unwrap_or_else(|| DEFAULT_AGENT_ROLE.to_string()),
             instructions,
             picture,
             version,

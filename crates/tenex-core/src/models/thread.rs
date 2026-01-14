@@ -1,5 +1,6 @@
 use nostrdb::Note;
 
+use crate::constants::DEFAULT_THREAD_TITLE;
 use super::message::{AskEvent, Message};
 
 #[derive(Debug, Clone)]
@@ -90,7 +91,7 @@ impl Thread {
 
         Some(Thread {
             id,
-            title: title.unwrap_or_else(|| "Untitled".to_string()),
+            title: title.unwrap_or_else(|| DEFAULT_THREAD_TITLE.to_string()),
             content,
             pubkey,
             last_activity: created_at,

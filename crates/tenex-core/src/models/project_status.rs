@@ -2,8 +2,7 @@ use nostrdb::Note;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Staleness threshold in seconds - status older than this is considered offline
-const STALENESS_THRESHOLD_SECS: u64 = 5 * 60; // 5 minutes
+use crate::constants::STALENESS_THRESHOLD_SECS;
 
 /// Represents an agent within a project status
 #[derive(Debug, Clone)]
