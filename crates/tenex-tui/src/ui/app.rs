@@ -499,6 +499,10 @@ impl App {
         // Reset explicit selection flag when switching conversations
         self.user_explicitly_selected_agent = false;
 
+        // Always clear editor first - each conversation has its own draft
+        self.chat_editor.text.clear();
+        self.chat_editor.cursor = 0;
+
         // Determine the draft key - use thread id or draft_id from active tab
         let draft_key = if let Some(ref thread) = self.selected_thread {
             Some(thread.id.clone())
