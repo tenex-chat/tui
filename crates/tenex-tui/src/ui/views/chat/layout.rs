@@ -153,16 +153,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::home::render_tab_modal(f, app, area);
     }
 
-    // Render message actions modal if showing
-    if let ModalState::MessageActions {
-        selected_index,
-        has_trace,
-        ..
-    } = &app.modal_state
-    {
-        actions::render_message_actions_modal(f, *selected_index, *has_trace, area);
-    }
-
     // Render view raw event modal if showing
     if let ModalState::ViewRawEvent {
         json,

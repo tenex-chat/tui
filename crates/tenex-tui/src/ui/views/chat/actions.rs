@@ -1,8 +1,6 @@
 use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_items, ModalItem,
-    ModalSize,
+    modal_area, render_modal_background, render_modal_header, ModalSize,
 };
-use crate::ui::modal::MessageAction;
 use crate::ui::theme;
 use ratatui::{
     layout::Rect,
@@ -11,63 +9,6 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
-
-/// Render the message actions modal
-pub fn render_message_actions_modal(
-    f: &mut Frame,
-    selected_index: usize,
-    has_trace: bool,
-    area: Rect,
-) {
-    // Calculate dynamic height based on content
-    let item_count = if has_trace { 4 } else { 3 };
-    let content_height = (item_count as u16 + 4).min(12); // +4 for header, padding
-    let height_percent = (content_height as f32 / area.height as f32).min(0.4);
-
-    let size = ModalSize {
-        max_width: 45,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header
-    let remaining = render_modal_header(f, inner_area, "Message Actions", "esc");
-
-    // Build items
-    let items: Vec<ModalItem> = MessageAction::ALL
-        .iter()
-        .enumerate()
-        .filter(|(_, action)| has_trace || !matches!(action, MessageAction::OpenTrace))
-        .map(|(i, action)| {
-            ModalItem::new(action.label())
-                .with_shortcut(&action.hotkey().to_string())
-                .selected(i == selected_index)
-        })
-        .collect();
-
-    render_modal_items(f, remaining, &items);
-
-    // Render hints at bottom
-    let hints_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + popup_area.height.saturating_sub(2),
-        popup_area.width.saturating_sub(4),
-        1,
-    );
-    let hints = Paragraph::new("enter select · esc cancel")
-        .style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(hints, hints_area);
-}
 
 /// Render the view raw event modal
 pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usize, area: Rect) {
@@ -188,7 +129,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
             ("o", "Open first image"),
             ("x", "Close current tab"),
             (".", "Stop agent"),
-            ("y", "Copy message"),
+            ("y", "Copy content"),
             ("v", "View raw event"),
         ]),
         ("Home View", vec![

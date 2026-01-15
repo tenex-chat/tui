@@ -236,12 +236,10 @@ fn boot_project(app: &mut App) {
 fn copy_selected_message(app: &mut App) {
     let messages = app.messages();
     if let Some(msg) = messages.get(app.selected_message_index) {
-        if let Some(json) = get_raw_event_json(&app.db.ndb, &msg.id) {
-            if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(&json)) {
-                app.set_status(&format!("Failed to copy: {}", e));
-            } else {
-                app.set_status("Raw event copied to clipboard");
-            }
+        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(&msg.content)) {
+            app.set_status(&format!("Failed to copy: {}", e));
+        } else {
+            app.set_status("Content copied to clipboard");
         }
     }
 }

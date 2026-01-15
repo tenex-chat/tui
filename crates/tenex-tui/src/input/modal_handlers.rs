@@ -61,12 +61,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle message actions modal when open
-    if matches!(app.modal_state, ModalState::MessageActions { .. }) {
-        handle_message_actions_modal_key(app, key);
-        return Ok(true);
-    }
-
     // Handle view raw event modal when open
     if matches!(app.modal_state, ModalState::ViewRawEvent { .. }) {
         handle_view_raw_event_modal_key(app, key);
@@ -271,10 +265,10 @@ fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
                 app.modal_state = ModalState::None;
                 app.next_tab();
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            KeyCode::Up => {
                 state.move_up();
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            KeyCode::Down => {
                 state.move_down(cmd_count);
             }
             KeyCode::Enter => {
@@ -282,17 +276,11 @@ fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
                     super::palette::execute_palette_command(app, cmd.key);
                 }
             }
-            KeyCode::Backspace => {
-                state.filter.pop();
-                state.selected_index = 0;
-            }
             KeyCode::Char(c) => {
-                if state.filter.is_empty() && commands.iter().any(|cmd| cmd.key == c) {
+                // Execute command directly if it matches a hotkey
+                if commands.iter().any(|cmd| cmd.key == c) {
                     super::palette::execute_palette_command(app, c);
-                    return;
                 }
-                state.filter.push(c);
-                state.selected_index = 0;
             }
             _ => {}
         }
@@ -497,77 +485,6 @@ fn handle_branch_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
     }
     Ok(())
-}
-
-// =============================================================================
-// MESSAGE ACTIONS MODAL
-// =============================================================================
-
-fn handle_message_actions_modal_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::MessageAction;
-
-    let (message_id, selected_index, has_trace) = match &app.modal_state {
-        ModalState::MessageActions {
-            message_id,
-            selected_index,
-            has_trace,
-        } => (message_id.clone(), *selected_index, *has_trace),
-        _ => return,
-    };
-
-    let action_count = if has_trace { 4 } else { 3 };
-
-    match key.code {
-        KeyCode::Esc => {
-            app.modal_state = ModalState::None;
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            if selected_index > 0 {
-                if let ModalState::MessageActions {
-                    selected_index: ref mut idx,
-                    ..
-                } = app.modal_state
-                {
-                    *idx -= 1;
-                }
-            }
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            if selected_index + 1 < action_count {
-                if let ModalState::MessageActions {
-                    selected_index: ref mut idx,
-                    ..
-                } = app.modal_state
-                {
-                    *idx += 1;
-                }
-            }
-        }
-        KeyCode::Enter => {
-            let actions: Vec<MessageAction> = MessageAction::ALL
-                .iter()
-                .filter(|a| has_trace || !matches!(a, MessageAction::OpenTrace))
-                .copied()
-                .collect();
-
-            if let Some(action) = actions.get(selected_index) {
-                app.execute_message_action(&message_id, *action);
-            }
-        }
-        KeyCode::Char('c') => {
-            app.execute_message_action(&message_id, MessageAction::CopyRawEvent);
-        }
-        KeyCode::Char('s') => {
-            app.execute_message_action(&message_id, MessageAction::SendAgain);
-        }
-        KeyCode::Char('v') => {
-            app.execute_message_action(&message_id, MessageAction::ViewRawEvent);
-        }
-        KeyCode::Char('t') if has_trace => {
-            app.execute_message_action(&message_id, MessageAction::OpenTrace);
-        }
-        _ => {}
-    }
 }
 
 // =============================================================================

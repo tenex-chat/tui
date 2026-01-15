@@ -1,6 +1,6 @@
 use crate::ui::components::{
     modal_area, render_modal_background, render_modal_header, render_modal_overlay,
-    render_modal_search, render_modal_sections, ModalItem, ModalSection, ModalSize,
+    render_modal_sections, ModalItem, ModalSection, ModalSize,
 };
 use crate::ui::modal::CommandPaletteState;
 use ratatui::{layout::Rect, Frame};
@@ -27,7 +27,6 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteS
     );
 
     let remaining = render_modal_header(f, inner_area, "Commands", "esc");
-    let remaining = render_modal_search(f, remaining, &state.filter, "Type to filter...");
 
     // Get available commands and group by section
     let commands = state.available_commands();

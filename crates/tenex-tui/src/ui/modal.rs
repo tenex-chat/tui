@@ -383,42 +383,6 @@ impl ChatActionsState {
     }
 }
 
-/// Message action types
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageAction {
-    CopyRawEvent,
-    SendAgain,
-    ViewRawEvent,
-    OpenTrace,
-}
-
-impl MessageAction {
-    pub const ALL: [MessageAction; 4] = [
-        MessageAction::CopyRawEvent,
-        MessageAction::SendAgain,
-        MessageAction::ViewRawEvent,
-        MessageAction::OpenTrace,
-    ];
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            MessageAction::CopyRawEvent => "Copy Raw Event",
-            MessageAction::SendAgain => "Send Again (New Conversation)",
-            MessageAction::ViewRawEvent => "View Raw Event",
-            MessageAction::OpenTrace => "Open Trace in Jaeger",
-        }
-    }
-
-    pub fn hotkey(&self) -> char {
-        match self {
-            MessageAction::CopyRawEvent => 'c',
-            MessageAction::SendAgain => 's',
-            MessageAction::ViewRawEvent => 'v',
-            MessageAction::OpenTrace => 't',
-        }
-    }
-}
-
 /// Project action types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectAction {
@@ -822,7 +786,6 @@ impl PaletteCommand {
 /// State for command palette modal (Ctrl+T)
 #[derive(Debug, Clone)]
 pub struct CommandPaletteState {
-    pub filter: String,
     pub selected_index: usize,
     pub context: PaletteContext,
 }
@@ -830,7 +793,6 @@ pub struct CommandPaletteState {
 impl CommandPaletteState {
     pub fn new(context: PaletteContext) -> Self {
         Self {
-            filter: String::new(),
             selected_index: 0,
             context,
         }
@@ -887,7 +849,7 @@ impl CommandPaletteState {
             PaletteContext::ChatNormal { has_parent, has_trace, agent_working } => {
                 commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
                 commands.push(PaletteCommand::new('%', "Select branch", "Input"));
-                commands.push(PaletteCommand::new('y', "Copy message", "Message"));
+                commands.push(PaletteCommand::new('y', "Copy content", "Message"));
                 commands.push(PaletteCommand::new('v', "View raw event", "Message"));
                 if has_trace {
                     commands.push(PaletteCommand::new('t', "Open trace", "Message"));
@@ -920,15 +882,6 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('f', "Fork agent", "Agent"));
                 commands.push(PaletteCommand::new('c', "Clone agent", "Agent"));
             }
-        }
-
-        // Filter by search if applicable
-        if !self.filter.is_empty() {
-            let filter_lower = self.filter.to_lowercase();
-            commands.retain(|cmd| {
-                cmd.label.to_lowercase().contains(&filter_lower)
-                    || cmd.key.to_string().to_lowercase() == filter_lower
-            });
         }
 
         commands
@@ -997,12 +950,6 @@ pub enum ModalState {
     CreateProject(CreateProjectState),
     /// Nudge selector for adding nudges to messages
     NudgeSelector(NudgeSelectorState),
-    /// Message action menu - shows available actions for selected message (via Ctrl+T)
-    MessageActions {
-        message_id: String,
-        selected_index: usize,
-        has_trace: bool,
-    },
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
     ConversationActions(ConversationActionsState),
     /// Chat action menu in Chat view - shows actions for current conversation (via Ctrl+T)
