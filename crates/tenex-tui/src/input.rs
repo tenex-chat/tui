@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::nostr;
 use crate::nostr::NostrCommand;
 use crate::ui;
+use crate::ui::hotkeys::{resolve_hotkey, HotkeyContext, HotkeyId};
 use crate::ui::notifications::Notification;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::views::chat::{group_messages, DisplayItem};
@@ -18,6 +19,40 @@ pub(crate) fn handle_key(
     pending_nsec: &mut Option<String>,
 ) -> Result<()> {
     let code = key.code;
+    let modifiers = key.modifiers;
+
+    // =========================================================================
+    // HIGH-PRIORITY GLOBAL HOTKEYS (work from anywhere, including within modals)
+    // =========================================================================
+    // These are resolved first using the centralized hotkey registry.
+    // Only the highest-priority hotkeys should be here (e.g., Ctrl+T for command palette).
+
+    // Don't intercept hotkeys during login or when typing in text inputs
+    if app.view != View::Login && app.input_mode != InputMode::Editing {
+        // Check for high-priority global hotkeys using the registry
+        let context = app.hotkey_context();
+        if let Some(hotkey_id) = resolve_hotkey(code, modifiers, context) {
+            match hotkey_id {
+                // Ctrl+T opens command palette (always works, high priority)
+                HotkeyId::CommandPalette => {
+                    // Don't open another command palette if one is already open
+                    if !matches!(app.modal_state, ModalState::CommandPalette(_)) {
+                        app.open_command_palette();
+                    }
+                    return Ok(());
+                }
+                // Help modal
+                HotkeyId::Help => {
+                    if !matches!(app.modal_state, ModalState::HotkeyHelp) {
+                        app.modal_state = ModalState::HotkeyHelp;
+                    }
+                    return Ok(());
+                }
+                // Other global hotkeys are handled later in their respective sections
+                _ => {}
+            }
+        }
+    }
 
     // Handle attachment modal when open
     if app.is_attachment_modal_open() {
@@ -208,7 +243,6 @@ pub(crate) fn handle_key(
     // Global tab navigation with Alt key (works in all views except Login)
     // These bindings work regardless of input mode
     if app.view != View::Login {
-        let modifiers = key.modifiers;
         let has_alt = modifiers.contains(KeyModifiers::ALT);
         let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
@@ -301,7 +335,6 @@ pub(crate) fn handle_key(
 
     // Handle tab navigation in Chat view (Normal mode)
     if app.view == View::Chat && app.input_mode == InputMode::Normal {
-        let modifiers = key.modifiers;
         let has_shift = modifiers.contains(KeyModifiers::SHIFT);
         let has_alt = modifiers.contains(KeyModifiers::ALT);
 
@@ -3233,19 +3266,37 @@ fn execute_palette_command(app: &mut App, key: char) {
             }
         }
         'a' => {
-            // Archive toggle (Home view - recent threads)
+            // Archive toggle (Home view - context-dependent)
             if app.view == View::Home {
-                let threads = app.recent_threads();
-                if let Some((thread, _)) = threads.get(app.current_selection()) {
-                    let thread_id = thread.id.clone();
-                    let thread_title = thread.title.clone();
-                    let is_now_archived = app.toggle_thread_archived(&thread_id);
-                    let status = if is_now_archived {
-                        format!("Archived: {}", thread_title)
-                    } else {
-                        format!("Unarchived: {}", thread_title)
-                    };
-                    app.set_status(&status);
+                if app.sidebar_focused {
+                    // Archive project when sidebar is focused
+                    let (online, offline) = app.filtered_projects();
+                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+                    if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                        let a_tag = project.a_tag();
+                        let project_name = project.name.clone();
+                        let is_now_archived = app.toggle_project_archived(&a_tag);
+                        let status = if is_now_archived {
+                            format!("Archived: {}", project_name)
+                        } else {
+                            format!("Unarchived: {}", project_name)
+                        };
+                        app.set_status(&status);
+                    }
+                } else {
+                    // Archive thread when main panel is focused
+                    let threads = app.recent_threads();
+                    if let Some((thread, _)) = threads.get(app.current_selection()) {
+                        let thread_id = thread.id.clone();
+                        let thread_title = thread.title.clone();
+                        let is_now_archived = app.toggle_thread_archived(&thread_id);
+                        let status = if is_now_archived {
+                            format!("Archived: {}", thread_title)
+                        } else {
+                            format!("Unarchived: {}", thread_title)
+                        };
+                        app.set_status(&status);
+                    }
                 }
             }
         }

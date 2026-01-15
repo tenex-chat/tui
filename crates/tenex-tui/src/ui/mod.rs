@@ -3,6 +3,7 @@ pub mod ask_input;
 pub mod card;
 pub mod components;
 pub mod format;
+pub mod hotkeys;
 pub mod layout;
 pub mod markdown;
 pub mod modal;
@@ -16,5 +17,9 @@ pub mod tool_calls;
 pub mod views;
 
 pub use app::{App, HomeTab, InputMode, View};
+pub use hotkeys::{
+    HotkeyContext, HotkeyId, HotkeyBinding, HotkeyResolver,
+    resolver as hotkey_resolver, resolve_hotkey, get_binding, get_bindings_for_context,
+};
 pub use modal::ModalState;
 pub use terminal::{init as init_terminal, restore as restore_terminal, Tui};

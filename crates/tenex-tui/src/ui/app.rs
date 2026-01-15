@@ -960,6 +960,18 @@ impl App {
         }
     }
 
+    /// Get the current hotkey context based on application state.
+    /// Used by the hotkey registry to determine which hotkeys are active.
+    pub fn hotkey_context(&self) -> super::hotkeys::HotkeyContext {
+        super::hotkeys::HotkeyContext::from_app_state(
+            &self.view,
+            &self.input_mode,
+            &self.modal_state,
+            &self.home_panel_focus,
+            self.sidebar_focused,
+        )
+    }
+
     /// Get branches filtered by current filter (from ModalState)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_branches(&self) -> Vec<String> {
@@ -1017,13 +1029,19 @@ impl App {
                     let online_count = online.len();
                     let is_online = self.sidebar_project_index < online_count;
 
-                    // Get the actual project to check busy status
+                    // Get the actual project to check busy and archived status
                     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-                    let is_busy = all_projects.get(self.sidebar_project_index)
-                        .map(|p| self.data_store.borrow().is_project_busy(&p.a_tag()))
-                        .unwrap_or(false);
+                    let (is_busy, is_archived) = all_projects.get(self.sidebar_project_index)
+                        .map(|p| {
+                            let a_tag = p.a_tag();
+                            (
+                                self.data_store.borrow().is_project_busy(&a_tag),
+                                self.is_project_archived(&a_tag),
+                            )
+                        })
+                        .unwrap_or((false, false));
 
-                    PaletteContext::HomeSidebar { is_online, is_busy }
+                    PaletteContext::HomeSidebar { is_online, is_busy, is_archived }
                 } else {
                     match self.home_panel_focus {
                         HomeTab::Recent => PaletteContext::HomeRecent,

@@ -798,7 +798,7 @@ pub enum PaletteContext {
     HomeRecent,
     HomeInbox,
     HomeReports,
-    HomeSidebar { is_online: bool, is_busy: bool },
+    HomeSidebar { is_online: bool, is_busy: bool, is_archived: bool },
     ChatNormal { has_parent: bool, has_trace: bool, agent_working: bool },
     ChatEditing,
     AgentBrowserList,
@@ -854,7 +854,6 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
-                commands.push(PaletteCommand::new('m', "Toggle 'by me'", "Filter"));
                 commands.push(PaletteCommand::new('f', "Time filter", "Filter"));
                 commands.push(PaletteCommand::new('A', "Agent Browser", "Other"));
                 commands.push(PaletteCommand::new('N', "Create project", "Other"));
@@ -864,13 +863,12 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('R', "Mark as read", "Inbox"));
                 commands.push(PaletteCommand::new('M', "Mark all read", "Inbox"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
-                commands.push(PaletteCommand::new('m', "Toggle 'by me'", "Filter"));
             }
             PaletteContext::HomeReports => {
                 commands.push(PaletteCommand::new('o', "View report", "Reports"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
             }
-            PaletteContext::HomeSidebar { is_online, is_busy } => {
+            PaletteContext::HomeSidebar { is_online, is_busy, is_archived } => {
                 commands.push(PaletteCommand::new(' ', "Toggle visibility", "Project"));
                 commands.push(PaletteCommand::new('n', "New conversation", "Project"));
                 commands.push(PaletteCommand::new('s', "Settings", "Project"));
@@ -879,6 +877,11 @@ impl CommandPaletteState {
                 }
                 if is_busy {
                     commands.push(PaletteCommand::new('.', "Stop all agents", "Project"));
+                }
+                if is_archived {
+                    commands.push(PaletteCommand::new('a', "Unarchive", "Project"));
+                } else {
+                    commands.push(PaletteCommand::new('a', "Archive", "Project"));
                 }
             }
             PaletteContext::ChatNormal { has_parent, has_trace, agent_working } => {
