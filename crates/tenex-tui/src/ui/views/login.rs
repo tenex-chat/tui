@@ -1,3 +1,4 @@
+use crate::ui::notifications::NotificationLevel;
 use crate::ui::{theme, App, InputMode};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -68,10 +69,16 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
         );
     f.render_widget(input_widget, chunks[1]);
 
-    // Status
-    if let Some(ref msg) = app.status_message {
-        let status = Paragraph::new(msg.as_str())
-            .style(Style::default().fg(theme::ACCENT_ERROR))
+    // Status notification
+    if let Some(notification) = app.current_notification() {
+        let color = match notification.level {
+            NotificationLevel::Info => theme::ACCENT_PRIMARY,
+            NotificationLevel::Success => theme::ACCENT_SUCCESS,
+            NotificationLevel::Warning => theme::ACCENT_WARNING,
+            NotificationLevel::Error => theme::ACCENT_ERROR,
+        };
+        let status = Paragraph::new(format!("{} {}", notification.level.icon(), notification.message))
+            .style(Style::default().fg(color))
             .alignment(Alignment::Center);
         f.render_widget(status, chunks[2]);
     }

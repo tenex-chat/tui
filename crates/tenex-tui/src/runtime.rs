@@ -8,7 +8,7 @@ use tenex_core::events::CoreEvent;
 use tenex_core::runtime::CoreRuntime;
 
 use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadResult};
-use crate::input::{handle_key, handle_prefix_key};
+use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, Tui, View};
@@ -60,21 +60,15 @@ pub(crate) async fn run_app(
                             } else if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
                                 // Ctrl+V - check clipboard for image
                                 app.pending_quit = false;
-                                app.prefix_key_active = false;
                                 if app.view == View::Chat && app.input_mode == InputMode::Editing {
                                     if let Some(keys) = app.keys.clone() {
                                         handle_clipboard_paste(app, &keys, upload_tx.clone());
                                     }
                                 }
                             } else if key.code == KeyCode::Char('t') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                                // Ctrl+T - activate prefix key mode (tmux-style)
+                                // Ctrl+T - open command palette
                                 app.pending_quit = false;
-                                app.prefix_key_active = true;
-                            } else if app.prefix_key_active {
-                                // Handle prefix key commands (Ctrl+T + key)
-                                app.prefix_key_active = false;
-                                app.pending_quit = false;
-                                handle_prefix_key(app, key);
+                                app.open_command_palette();
                             } else {
                                 // Any other key clears pending quit state
                                 app.pending_quit = false;
@@ -156,7 +150,7 @@ pub(crate) async fn run_app(
                             app.chat_editor.insert_char(c);
                         }
                         app.save_chat_draft();
-                        app.clear_status();
+                        app.dismiss_notification();
                     }
                     UploadResult::Error(msg) => {
                         app.set_status(&msg);
@@ -172,7 +166,8 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
     for event in events {
         match event {
             CoreEvent::Message(message) => {
-                let thread_id = message.thread_id;
+                let thread_id = message.thread_id.clone();
+                let message_pubkey = message.pubkey.clone();
 
                 // Mark tab as unread if it's not the active one
                 app.mark_tab_unread(&thread_id);
@@ -181,9 +176,24 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                 // This ensures streaming content is replaced by the final message
                 app.clear_local_stream_buffer(&thread_id);
 
-                // Scroll to bottom if it's the current thread
+                // If this message is in the current thread...
                 if app.selected_thread.as_ref().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {
+                    // Scroll to bottom
                     app.scroll_offset = usize::MAX;
+
+                    // Sync agent selection if user hasn't explicitly picked one
+                    // This ensures the input box reflects the agent who just responded
+                    if !app.user_explicitly_selected_agent {
+                        // Check if this message is from an agent (not the user)
+                        let is_from_agent = app.data_store.borrow().user_pubkey
+                            .as_ref()
+                            .map(|pk| pk != &message_pubkey)
+                            .unwrap_or(true);
+
+                        if is_from_agent {
+                            app.sync_agent_with_conversation();
+                        }
+                    }
                 }
             }
             CoreEvent::ProjectStatus(status) => {
@@ -223,8 +233,18 @@ fn check_pending_new_thread(app: &mut App) {
     };
 
     if let Some(thread) = thread {
+        // If we have a draft_id, convert the draft tab to a real tab
+        if let Some(draft_id) = app.pending_new_thread_draft_id.take() {
+            app.convert_draft_to_tab(&draft_id, &thread);
+        }
+
         app.pending_new_thread_project = None;
         app.creating_thread = false;
-        app.open_thread_from_home(&thread, &project_a_tag);
+
+        // Update selected_thread and open the tab
+        app.selected_thread = Some(thread.clone());
+        app.open_tab(&thread, &project_a_tag);
+        app.scroll_offset = usize::MAX; // Scroll to bottom
+        app.input_mode = InputMode::Editing;
     }
 }

@@ -1,5 +1,7 @@
 use nostrdb::Note;
 
+use crate::constants::DEFAULT_NUDGE_TITLE;
+
 /// Nudge - kind:4201 events for agent nudges/prompts
 #[derive(Debug, Clone)]
 pub struct Nudge {
@@ -46,7 +48,7 @@ impl Nudge {
         Some(Nudge {
             id,
             pubkey,
-            title: title.unwrap_or_else(|| "Untitled".to_string()),
+            title: title.unwrap_or_else(|| DEFAULT_NUDGE_TITLE.to_string()),
             description: description.unwrap_or_default(),
             content,
             hashtags,

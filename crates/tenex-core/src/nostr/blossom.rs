@@ -9,7 +9,7 @@ use sha2::{Sha256, Digest};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const BLOSSOM_SERVER: &str = "https://blossom.primal.net";
+use crate::constants::BLOSSOM_SERVER;
 
 /// Upload an image to Blossom and return the URL
 pub async fn upload_image(data: &[u8], keys: &Keys, mime_type: &str) -> anyhow::Result<String> {

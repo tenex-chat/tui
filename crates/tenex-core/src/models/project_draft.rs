@@ -69,13 +69,13 @@ pub struct Preferences {
     #[serde(default)]
     pub selected_projects: Vec<String>,
     #[serde(default)]
-    pub only_by_me: bool,
-    #[serde(default)]
     pub time_filter: Option<TimeFilter>,
     #[serde(default)]
     pub show_llm_metadata: bool,
     #[serde(default)]
     pub archived_thread_ids: HashSet<String>,
+    #[serde(default)]
+    pub archived_project_ids: HashSet<String>,
 }
 
 pub struct PreferencesStorage {
@@ -119,15 +119,6 @@ impl PreferencesStorage {
         self.save_to_file();
     }
 
-    pub fn only_by_me(&self) -> bool {
-        self.prefs.only_by_me
-    }
-
-    pub fn set_only_by_me(&mut self, value: bool) {
-        self.prefs.only_by_me = value;
-        self.save_to_file();
-    }
-
     pub fn time_filter(&self) -> Option<TimeFilter> {
         self.prefs.time_filter
     }
@@ -160,6 +151,26 @@ impl PreferencesStorage {
             false
         } else {
             self.prefs.archived_thread_ids.insert(thread_id.to_string());
+            true
+        };
+        self.save_to_file();
+        is_now_archived
+    }
+
+    pub fn archived_project_ids(&self) -> &HashSet<String> {
+        &self.prefs.archived_project_ids
+    }
+
+    pub fn is_project_archived(&self, project_a_tag: &str) -> bool {
+        self.prefs.archived_project_ids.contains(project_a_tag)
+    }
+
+    pub fn toggle_project_archived(&mut self, project_a_tag: &str) -> bool {
+        let is_now_archived = if self.prefs.archived_project_ids.contains(project_a_tag) {
+            self.prefs.archived_project_ids.remove(project_a_tag);
+            false
+        } else {
+            self.prefs.archived_project_ids.insert(project_a_tag.to_string());
             true
         };
         self.save_to_file();

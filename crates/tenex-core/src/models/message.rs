@@ -53,6 +53,9 @@ pub struct Message {
     /// Delegation tag value - parent conversation ID if this message has a delegation tag
     /// Format: ["delegation", "<parent-conversation-id>"]
     pub delegation_tag: Option<String>,
+    /// Branch tag value - git branch associated with this message
+    /// Format: ["branch", "<branch-name>"]
+    pub branch: Option<String>,
 }
 
 impl Message {
@@ -81,6 +84,7 @@ impl Message {
         let mut tool_args: Option<String> = None;
         let mut llm_metadata: Vec<(String, String)> = Vec::new();
         let mut delegation_tag: Option<String> = None;
+        let mut branch: Option<String> = None;
 
         // Parse tags
         for tag in note.tags() {
@@ -163,6 +167,10 @@ impl Message {
                     // Delegation tag format: ["delegation", "<parent-conversation-id>"]
                     delegation_tag = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
                 }
+                Some("branch") => {
+                    // Branch tag format: ["branch", "<branch-name>"]
+                    branch = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 _ => {}
             }
         }
@@ -188,6 +196,7 @@ impl Message {
             tool_args,
             llm_metadata,
             delegation_tag,
+            branch,
         })
     }
 
@@ -211,6 +220,7 @@ impl Message {
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
         let mut llm_metadata: Vec<(String, String)> = Vec::new();
+        let mut branch: Option<String> = None;
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -249,6 +259,9 @@ impl Message {
                         q_tags.push(hex::encode(id_bytes));
                     }
                 }
+                Some("branch") => {
+                    branch = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 _ => {}
             }
         }
@@ -275,6 +288,7 @@ impl Message {
             tool_args,
             llm_metadata,
             delegation_tag: None, // Thread root doesn't have delegation tag (use Thread.parent_conversation_id)
+            branch,
         })
     }
 
