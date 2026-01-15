@@ -5,7 +5,7 @@
 use crate::nostr::NostrCommand;
 use crate::store::get_raw_event_json;
 use crate::ui;
-use crate::ui::{App, InputMode, ModalState, View};
+use crate::ui::{App, InputMode, ModalState, UndoAction, View};
 
 use super::modal_handlers::export_thread_as_jsonl;
 
@@ -148,7 +148,7 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
             go_to_parent(app);
         }
         'x' => {
-            app.close_current_tab();
+            archive_toggle(app);
         }
         'T' => {
             app.todo_sidebar_visible = !app.todo_sidebar_visible;
@@ -158,6 +158,10 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
         }
         'E' => {
             app.open_expanded_editor_modal();
+        }
+
+        'u' => {
+            undo_last_action(app);
         }
 
         // Agent browser commands
@@ -351,4 +355,202 @@ fn open_agent_settings(app: &mut App) {
         all_tools,
     );
     app.modal_state = ModalState::AgentSettings(settings_state);
+}
+
+fn archive_toggle(app: &mut App) {
+    use crate::ui::views::home::get_hierarchical_threads;
+    use crate::ui::HomeTab;
+
+    if app.view == View::Home {
+        if app.sidebar_focused {
+            // Archive/unarchive project
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                let a_tag = project.a_tag();
+                let project_name = project.name.clone();
+                let is_now_archived = app.toggle_project_archived(&a_tag);
+
+                // Store undo action
+                app.last_undo_action = Some(if is_now_archived {
+                    UndoAction::ProjectArchived {
+                        project_a_tag: a_tag,
+                        project_name: project_name.clone(),
+                    }
+                } else {
+                    UndoAction::ProjectUnarchived {
+                        project_a_tag: a_tag,
+                        project_name: project_name.clone(),
+                    }
+                });
+
+                let status = if is_now_archived {
+                    format!("Archived: {} (Ctrl+T u to undo)", project_name)
+                } else {
+                    format!("Unarchived: {} (Ctrl+T u to undo)", project_name)
+                };
+                app.set_status(&status);
+            }
+        } else {
+            // Archive/unarchive thread based on current home tab
+            match app.home_panel_focus {
+                HomeTab::Recent => {
+                    let hierarchy = get_hierarchical_threads(app);
+                    if let Some(item) = hierarchy.get(app.current_selection()) {
+                        let thread_id = item.thread.id.clone();
+                        let thread_title = item.thread.title.clone();
+                        let is_now_archived = app.toggle_thread_archived(&thread_id);
+
+                        // Store undo action
+                        app.last_undo_action = Some(if is_now_archived {
+                            UndoAction::ThreadArchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        } else {
+                            UndoAction::ThreadUnarchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        });
+
+                        let status = if is_now_archived {
+                            format!("Archived: {} (Ctrl+T u to undo)", thread_title)
+                        } else {
+                            format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
+                        };
+                        app.set_status(&status);
+                    }
+                }
+                HomeTab::Inbox => {
+                    let items = app.inbox_items();
+                    if let Some(item) = items.get(app.current_selection()) {
+                        if let Some(ref thread_id) = item.thread_id {
+                            let thread_id = thread_id.clone();
+                            let thread_title = app
+                                .data_store
+                                .borrow()
+                                .get_threads(&item.project_a_tag)
+                                .iter()
+                                .find(|t| t.id == thread_id)
+                                .map(|t| t.title.clone())
+                                .unwrap_or_else(|| "Conversation".to_string());
+                            let is_now_archived = app.toggle_thread_archived(&thread_id);
+
+                            // Store undo action
+                            app.last_undo_action = Some(if is_now_archived {
+                                UndoAction::ThreadArchived {
+                                    thread_id,
+                                    thread_title: thread_title.clone(),
+                                }
+                            } else {
+                                UndoAction::ThreadUnarchived {
+                                    thread_id,
+                                    thread_title: thread_title.clone(),
+                                }
+                            });
+
+                            let status = if is_now_archived {
+                                format!("Archived: {} (Ctrl+T u to undo)", thread_title)
+                            } else {
+                                format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
+                            };
+                            app.set_status(&status);
+                        }
+                    }
+                }
+                HomeTab::Status => {
+                    let status_items = app.status_threads();
+                    if let Some((thread, _)) = status_items.get(app.current_selection()) {
+                        let thread_id = thread.id.clone();
+                        let thread_title = thread.title.clone();
+                        let is_now_archived = app.toggle_thread_archived(&thread_id);
+
+                        // Store undo action
+                        app.last_undo_action = Some(if is_now_archived {
+                            UndoAction::ThreadArchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        } else {
+                            UndoAction::ThreadUnarchived {
+                                thread_id,
+                                thread_title: thread_title.clone(),
+                            }
+                        });
+
+                        let status = if is_now_archived {
+                            format!("Archived: {} (Ctrl+T u to undo)", thread_title)
+                        } else {
+                            format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
+                        };
+                        app.set_status(&status);
+                    }
+                }
+                _ => {
+                    app.set_status("Archive not available in this tab");
+                }
+            }
+        }
+    } else if app.view == View::Chat {
+        // In chat view, archive the current conversation
+        if let Some(ref thread) = app.selected_thread {
+            let thread_id = thread.id.clone();
+            let thread_title = thread.title.clone();
+            let is_now_archived = app.toggle_thread_archived(&thread_id);
+
+            // Store undo action
+            app.last_undo_action = Some(if is_now_archived {
+                UndoAction::ThreadArchived {
+                    thread_id,
+                    thread_title: thread_title.clone(),
+                }
+            } else {
+                UndoAction::ThreadUnarchived {
+                    thread_id,
+                    thread_title: thread_title.clone(),
+                }
+            });
+
+            let status = if is_now_archived {
+                format!("Archived: {} (Ctrl+T u to undo)", thread_title)
+            } else {
+                format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
+            };
+            app.set_status(&status);
+        }
+    }
+}
+
+fn undo_last_action(app: &mut App) {
+    let action = match app.last_undo_action.take() {
+        Some(a) => a,
+        None => {
+            app.set_status("Nothing to undo");
+            return;
+        }
+    };
+
+    match action {
+        UndoAction::ThreadArchived { thread_id, thread_title } => {
+            // Undo archive = unarchive
+            app.toggle_thread_archived(&thread_id);
+            app.set_status(&format!("Undone: unarchived {}", thread_title));
+        }
+        UndoAction::ThreadUnarchived { thread_id, thread_title } => {
+            // Undo unarchive = archive
+            app.toggle_thread_archived(&thread_id);
+            app.set_status(&format!("Undone: archived {}", thread_title));
+        }
+        UndoAction::ProjectArchived { project_a_tag, project_name } => {
+            // Undo archive = unarchive
+            app.toggle_project_archived(&project_a_tag);
+            app.set_status(&format!("Undone: unarchived {}", project_name));
+        }
+        UndoAction::ProjectUnarchived { project_a_tag, project_name } => {
+            // Undo unarchive = archive
+            app.toggle_project_archived(&project_a_tag);
+            app.set_status(&format!("Undone: archived {}", project_name));
+        }
+    }
 }

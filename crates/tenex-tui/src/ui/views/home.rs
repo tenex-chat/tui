@@ -23,7 +23,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
     f.render_widget(bg_block, area);
 
-    let has_tabs = !app.open_tabs.is_empty();
+    let has_tabs = !app.open_tabs().is_empty();
 
     // Layout: Header tabs | Main area | Help bar | Optional tab bar
     let chunks = if has_tabs {
@@ -111,7 +111,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tab modal overlay (Alt+/)
-    if app.showing_tab_modal {
+    if app.showing_tab_modal() {
         render_tab_modal(f, app, area);
     }
 
@@ -1647,7 +1647,7 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     render_modal_overlay(f, area);
 
     // Calculate modal dimensions - dynamic based on tab count (+1 for Home entry)
-    let tab_count = app.open_tabs.len() + 1; // +1 for Home
+    let tab_count = app.open_tabs().len() + 1; // +1 for Home
     let content_height = (tab_count + 2) as u16; // +2 for header spacing
     let total_height = content_height + 4; // +4 for padding and hints
     let height_percent = (total_height as f32 / area.height as f32).min(0.7);
@@ -1673,10 +1673,10 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
 
     // Build items list - Home is always first (option 1)
     let data_store = app.data_store.borrow();
-    let mut items: Vec<ModalItem> = Vec::with_capacity(app.open_tabs.len() + 1);
+    let mut items: Vec<ModalItem> = Vec::with_capacity(app.open_tabs().len() + 1);
 
     // Home entry (option 1)
-    let home_selected = app.tab_modal_index == 0 && app.open_tabs.is_empty();
+    let home_selected = app.tab_modal_index() == 0 && app.open_tabs().is_empty();
     let home_active = app.view == View::Home;
     let home_marker = if home_active { card::BULLET } else { card::SPACER };
     items.push(
@@ -1686,9 +1686,9 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     );
 
     // Tab entries (options 2-9)
-    for (i, tab) in app.open_tabs.iter().enumerate() {
-        let is_selected = i == app.tab_modal_index;
-        let is_active = i == app.active_tab_index && app.view == View::Chat;
+    for (i, tab) in app.open_tabs().iter().enumerate() {
+        let is_selected = i == app.tab_modal_index();
+        let is_active = i == app.active_tab_index() && app.view == View::Chat;
 
         let project_name = data_store.get_project_name(&tab.project_a_tag);
         let title_display = truncate_with_ellipsis(&tab.thread_title, 30);

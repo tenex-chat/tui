@@ -110,9 +110,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('p') => {
             app.open_projects_modal(false);
         }
-        KeyCode::Char('n') => {
-            app.open_projects_modal(true);
-        }
         KeyCode::Char('f') => {
             app.cycle_time_filter();
         }
@@ -347,72 +344,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
         }
-        KeyCode::Char('x') if app.home_panel_focus == HomeTab::Recent && !app.sidebar_focused => {
-            let hierarchy = get_hierarchical_threads(app);
-            if let Some(item) = hierarchy.get(app.current_selection()) {
-                let thread_id = item.thread.id.clone();
-                let thread_title = item.thread.title.clone();
-                let is_now_archived = app.toggle_thread_archived(&thread_id);
-                let status = if is_now_archived {
-                    format!("Archived: {}", thread_title)
-                } else {
-                    format!("Unarchived: {}", thread_title)
-                };
-                app.set_status(&status);
-            }
-        }
-        KeyCode::Char('x') if app.home_panel_focus == HomeTab::Inbox && !app.sidebar_focused => {
-            let items = app.inbox_items();
-            if let Some(item) = items.get(app.current_selection()) {
-                if let Some(ref thread_id) = item.thread_id {
-                    let thread_id = thread_id.clone();
-                    let thread_title = app
-                        .data_store
-                        .borrow()
-                        .get_threads(&item.project_a_tag)
-                        .iter()
-                        .find(|t| t.id == thread_id)
-                        .map(|t| t.title.clone())
-                        .unwrap_or_else(|| "Conversation".to_string());
-                    let is_now_archived = app.toggle_thread_archived(&thread_id);
-                    let status = if is_now_archived {
-                        format!("Archived: {}", thread_title)
-                    } else {
-                        format!("Unarchived: {}", thread_title)
-                    };
-                    app.set_status(&status);
-                }
-            }
-        }
-        KeyCode::Char('x') if app.home_panel_focus == HomeTab::Status && !app.sidebar_focused => {
-            let status_items = app.status_threads();
-            if let Some((thread, _)) = status_items.get(app.current_selection()) {
-                let thread_id = thread.id.clone();
-                let thread_title = thread.title.clone();
-                let is_now_archived = app.toggle_thread_archived(&thread_id);
-                let status = if is_now_archived {
-                    format!("Archived: {}", thread_title)
-                } else {
-                    format!("Unarchived: {}", thread_title)
-                };
-                app.set_status(&status);
-            }
-        }
-        KeyCode::Char('x') if app.sidebar_focused => {
-            let (online, offline) = app.filtered_projects();
-            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-            if let Some(project) = all_projects.get(app.sidebar_project_index) {
-                let a_tag = project.a_tag();
-                let project_name = project.name.clone();
-                let is_now_archived = app.toggle_project_archived(&a_tag);
-                let status = if is_now_archived {
-                    format!("Archived: {}", project_name)
-                } else {
-                    format!("Unarchived: {}", project_name)
-                };
-                app.set_status(&status);
-            }
-        }
         // Vim-style navigation (j/k)
         KeyCode::Char('k') if !app.sidebar_focused => {
             let current = app.current_selection();
@@ -446,7 +377,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
             let tab_index = (c as usize) - ('2' as usize);
-            if tab_index < app.open_tabs.len() {
+            if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
                 app.view = View::Chat;
             }
@@ -757,7 +688,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
         }
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
             let tab_index = (c as usize) - ('2' as usize);
-            if tab_index < app.open_tabs.len() {
+            if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
             }
             return Ok(true);

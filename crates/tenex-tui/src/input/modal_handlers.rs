@@ -32,7 +32,7 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     // Handle tab modal when open
-    if app.showing_tab_modal {
+    if app.showing_tab_modal() {
         handle_tab_modal_key(app, key);
         return Ok(true);
     }
@@ -307,28 +307,28 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => app.close_tab_modal(),
         KeyCode::Up => {
-            if app.tab_modal_index > 0 {
-                app.tab_modal_index -= 1;
+            if app.tab_modal_index() > 0 {
+                app.set_tab_modal_index(app.tab_modal_index() - 1);
             }
         }
         KeyCode::Down => {
-            if app.tab_modal_index + 1 < app.open_tabs.len() {
-                app.tab_modal_index += 1;
+            if app.tab_modal_index() + 1 < app.open_tabs().len() {
+                app.set_tab_modal_index(app.tab_modal_index() + 1);
             }
         }
         KeyCode::Enter => {
-            let idx = app.tab_modal_index;
+            let idx = app.tab_modal_index();
             app.close_tab_modal();
-            if idx < app.open_tabs.len() {
+            if idx < app.open_tabs().len() {
                 app.switch_to_tab(idx);
                 app.view = View::Chat;
             }
         }
         KeyCode::Char('x') => {
-            if !app.open_tabs.is_empty() {
-                let idx = app.tab_modal_index;
+            if !app.open_tabs().is_empty() {
+                let idx = app.tab_modal_index();
                 app.close_tab_at(idx);
-                if app.open_tabs.is_empty() {
+                if app.open_tabs().is_empty() {
                     app.close_tab_modal();
                 }
             }
@@ -341,7 +341,7 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
             let tab_index = (c as usize) - ('2' as usize);
             app.close_tab_modal();
-            if tab_index < app.open_tabs.len() {
+            if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
                 app.view = View::Chat;
             }

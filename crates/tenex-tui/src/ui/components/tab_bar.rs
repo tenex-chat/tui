@@ -47,13 +47,13 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     project_spans.push(Span::styled("    ", Style::default())); // Same width as "Home"
 
     // Separator after home
-    if !app.open_tabs.is_empty() {
+    if !app.open_tabs().is_empty() {
         title_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
         project_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
     }
 
-    for (i, tab) in app.open_tabs.iter().enumerate() {
-        let is_active = i == app.active_tab_index;
+    for (i, tab) in app.open_tabs().iter().enumerate() {
+        let is_active = i == app.active_tab_index();
         let tab_num = i + 2; // Start from 2 since 1 is Home
 
         // Tab number (Option+N shortcut hint)
@@ -111,7 +111,7 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         project_spans.push(Span::styled(padded_project, project_style));
 
         // Separator between tabs
-        if i < app.open_tabs.len() - 1 {
+        if i < app.open_tabs().len() - 1 {
             title_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
             project_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
         }

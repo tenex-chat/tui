@@ -5,10 +5,7 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{
-    AgentBrowserState, ChatSearchMatch, ChatSearchState,
-    MessageHistoryState, NudgeState,
-};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, OpenTab, TabManager};
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -100,29 +97,8 @@ pub enum HomeTab {
     Search,
 }
 
-// ChatSearchState and ChatSearchMatch are now in ui::state module
-
-/// An open tab representing a thread or draft conversation
-#[derive(Debug, Clone)]
-pub struct OpenTab {
-    /// Thread ID (empty string for draft tabs)
-    pub thread_id: String,
-    pub thread_title: String,
-    pub project_a_tag: String,
-    pub has_unread: bool,
-    /// Draft ID for new conversations not yet sent (None for real threads)
-    pub draft_id: Option<String>,
-}
-
-impl OpenTab {
-    /// Check if this is a draft tab (no thread created yet)
-    pub fn is_draft(&self) -> bool {
-        self.draft_id.is_some()
-    }
-}
-
-/// Maximum number of open tabs (matches 1-9 shortcuts)
-pub const MAX_TABS: usize = 9;
+// ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState
+// are now in ui::state module
 
 /// Buffer for local streaming content (per conversation)
 #[derive(Default, Clone)]
@@ -139,6 +115,19 @@ pub enum VimMode {
     #[default]
     Normal,
     Insert,
+}
+
+/// Actions that can be undone
+#[derive(Debug, Clone)]
+pub enum UndoAction {
+    /// Thread was archived (store thread_id to unarchive)
+    ThreadArchived { thread_id: String, thread_title: String },
+    /// Thread was unarchived (store thread_id to re-archive)
+    ThreadUnarchived { thread_id: String, thread_title: String },
+    /// Project was archived
+    ProjectArchived { project_a_tag: String, project_name: String },
+    /// Project was unarchived
+    ProjectUnarchived { project_a_tag: String, project_name: String },
 }
 
 pub struct App {
@@ -195,16 +184,8 @@ pub struct App {
     /// Index of selected message in chat view (for navigation)
     pub selected_message_index: usize,
 
-    /// Open tabs (max 9, LRU eviction)
-    pub open_tabs: Vec<OpenTab>,
-    /// Index of the active tab
-    pub active_tab_index: usize,
-    /// Tab visit history for Alt+Tab cycling (most recent last)
-    pub tab_history: Vec<usize>,
-    /// Whether the tab modal is showing
-    pub showing_tab_modal: bool,
-    /// Selected index in tab modal
-    pub tab_modal_index: usize,
+    /// Tab management (open tabs, history, modal state)
+    pub tabs: TabManager,
 
     // Home view state
     pub home_panel_focus: HomeTab,
@@ -290,6 +271,8 @@ pub struct App {
     pub user_explicitly_selected_agent: bool,
     /// Ask event IDs that user dismissed (ESC) without answering - prevents auto-reopen
     pub dismissed_ask_ids: HashSet<String>,
+    /// Last action that can be undone (Ctrl+T + u)
+    pub last_undo_action: Option<UndoAction>,
 }
 
 impl App {
@@ -331,11 +314,7 @@ impl App {
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,
-            open_tabs: Vec::new(),
-            active_tab_index: 0,
-            tab_history: Vec::new(),
-            showing_tab_modal: false,
-            tab_modal_index: 0,
+            tabs: TabManager::new(),
             home_panel_focus: HomeTab::Recent,
             tab_selection: HashMap::new(),
             report_search_filter: String::new(),
@@ -373,7 +352,56 @@ impl App {
             show_archived_projects: false,
             user_explicitly_selected_agent: false,
             dismissed_ask_ids: HashSet::new(),
+            last_undo_action: None,
         }
+    }
+
+    // =============================================================================
+    // TAB ACCESSOR METHODS (backward compatibility)
+    // =============================================================================
+    // These methods delegate to TabManager for backward compatibility with code
+    // that accesses app.open_tabs, app.active_tab_index, etc. directly.
+
+    /// Get reference to open tabs (delegates to TabManager)
+    #[inline]
+    pub fn open_tabs(&self) -> &[OpenTab] {
+        self.tabs.tabs()
+    }
+
+    /// Get mutable reference to open tabs (delegates to TabManager)
+    #[inline]
+    pub fn open_tabs_mut(&mut self) -> &mut Vec<OpenTab> {
+        self.tabs.tabs_mut()
+    }
+
+    /// Get active tab index (delegates to TabManager)
+    #[inline]
+    pub fn active_tab_index(&self) -> usize {
+        self.tabs.active_index()
+    }
+
+    /// Get whether tab modal is showing (delegates to TabManager)
+    #[inline]
+    pub fn showing_tab_modal(&self) -> bool {
+        self.tabs.modal_open
+    }
+
+    /// Set whether tab modal is showing (delegates to TabManager)
+    #[inline]
+    pub fn set_showing_tab_modal(&mut self, showing: bool) {
+        self.tabs.modal_open = showing;
+    }
+
+    /// Get tab modal index (delegates to TabManager)
+    #[inline]
+    pub fn tab_modal_index(&self) -> usize {
+        self.tabs.modal_index
+    }
+
+    /// Set tab modal index (delegates to TabManager)
+    #[inline]
+    pub fn set_tab_modal_index(&mut self, index: usize) {
+        self.tabs.modal_index = index;
     }
 
     /// Increment frame counter and update notifications (call on each tick)
@@ -454,11 +482,9 @@ impl App {
         // Determine the draft key - use thread id or draft_id from active tab
         let draft_key = if let Some(ref thread) = self.selected_thread {
             Some(thread.id.clone())
-        } else if self.active_tab_index < self.open_tabs.len() {
-            // Check if current tab is a draft tab
-            self.open_tabs[self.active_tab_index].draft_id.clone()
         } else {
-            None
+            // Check if current tab is a draft tab
+            self.tabs.active_tab().and_then(|t| t.draft_id.clone())
         };
 
         if let Some(conversation_id) = draft_key {
@@ -489,11 +515,9 @@ impl App {
         // Determine the draft key - use thread id or draft_id from active tab
         let draft_key = if let Some(ref thread) = self.selected_thread {
             Some(thread.id.clone())
-        } else if self.active_tab_index < self.open_tabs.len() {
-            // Check if current tab is a draft tab
-            self.open_tabs[self.active_tab_index].draft_id.clone()
         } else {
-            None
+            // Check if current tab is a draft tab
+            self.tabs.active_tab().and_then(|t| t.draft_id.clone())
         };
 
         if let Some(key) = draft_key {
@@ -1250,138 +1274,53 @@ impl App {
     /// Open a thread in a tab (or switch to it if already open)
     /// Returns the tab index
     pub fn open_tab(&mut self, thread: &Thread, project_a_tag: &str) -> usize {
-        // Check if already open
-        if let Some(idx) = self.open_tabs.iter().position(|t| t.thread_id == thread.id) {
-            // Clear unread since we're switching to it
-            self.open_tabs[idx].has_unread = false;
-            self.active_tab_index = idx;
-            return idx;
-        }
-
-        // Create new tab
-        let tab = OpenTab {
-            thread_id: thread.id.clone(),
-            thread_title: thread.title.clone(),
-            project_a_tag: project_a_tag.to_string(),
-            has_unread: false,
-            draft_id: None,
-        };
-
-        // If at max capacity, remove the oldest (leftmost) tab
-        if self.open_tabs.len() >= MAX_TABS {
-            self.open_tabs.remove(0);
-            // Adjust active index if needed
-            if self.active_tab_index > 0 {
-                self.active_tab_index -= 1;
-            }
-        }
-
-        self.open_tabs.push(tab);
-        self.active_tab_index = self.open_tabs.len() - 1;
-        self.active_tab_index
+        self.tabs.open_thread(
+            thread.id.clone(),
+            thread.title.clone(),
+            project_a_tag.to_string(),
+        )
     }
 
     /// Open a draft tab for a new conversation (before thread is created)
     /// Returns the tab index
     pub fn open_draft_tab(&mut self, project_a_tag: &str, project_name: &str) -> usize {
-        // Generate unique draft ID
-        let draft_id = format!("draft-{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis());
-
-        // Check if we already have a draft for this project
-        if let Some(idx) = self.open_tabs.iter().position(|t| {
-            t.is_draft() && t.project_a_tag == project_a_tag
-        }) {
-            // Switch to existing draft
-            self.active_tab_index = idx;
-            return idx;
-        }
-
-        // Create new draft tab
-        let tab = OpenTab {
-            thread_id: String::new(), // Empty - no thread yet
-            thread_title: format!("New: {}", project_name),
-            project_a_tag: project_a_tag.to_string(),
-            has_unread: false,
-            draft_id: Some(draft_id),
-        };
-
-        // If at max capacity, remove the oldest (leftmost) non-draft tab, or oldest draft
-        if self.open_tabs.len() >= MAX_TABS {
-            // Prefer removing non-draft tabs first
-            if let Some(idx) = self.open_tabs.iter().position(|t| !t.is_draft()) {
-                self.open_tabs.remove(idx);
-                if self.active_tab_index > 0 && self.active_tab_index >= idx {
-                    self.active_tab_index -= 1;
-                }
-            } else {
-                // All tabs are drafts, remove oldest
-                self.open_tabs.remove(0);
-                if self.active_tab_index > 0 {
-                    self.active_tab_index -= 1;
-                }
-            }
-        }
-
-        self.open_tabs.push(tab);
-        self.active_tab_index = self.open_tabs.len() - 1;
-        self.active_tab_index
+        self.tabs.open_draft(project_a_tag.to_string(), project_name.to_string())
     }
 
     /// Convert a draft tab to a real tab when thread is created
     pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
-        if let Some(tab) = self.open_tabs.iter_mut().find(|t| {
-            t.draft_id.as_ref() == Some(&draft_id.to_string())
-        }) {
-            tab.thread_id = thread.id.clone();
-            tab.thread_title = thread.title.clone();
-            tab.draft_id = None;
-        }
+        self.tabs.convert_draft(draft_id, thread.id.clone(), thread.title.clone());
     }
 
     /// Find if there's an active draft tab for a project
     pub fn find_draft_tab(&self, project_a_tag: &str) -> Option<(usize, &str)> {
-        self.open_tabs.iter().enumerate().find_map(|(idx, t)| {
-            if t.is_draft() && t.project_a_tag == project_a_tag {
-                t.draft_id.as_ref().map(|id| (idx, id.as_str()))
-            } else {
-                None
-            }
-        })
+        self.tabs.find_draft_for_project(project_a_tag)
     }
 
     /// Close the current tab
     pub fn close_current_tab(&mut self) {
-        if self.open_tabs.is_empty() {
+        if self.tabs.is_empty() {
             return;
         }
 
-        let removed_index = self.active_tab_index;
-        self.open_tabs.remove(removed_index);
-        self.cleanup_tab_history(removed_index);
+        // Close and get the new active index
+        let new_active = self.tabs.close_current();
 
-        if self.open_tabs.is_empty() {
+        if new_active.is_none() {
             // No more tabs - go back to home view
             self.save_chat_draft();
             self.chat_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
-            self.active_tab_index = 0;
         } else {
-            // Move to next tab (or previous if we were at the end)
-            if self.active_tab_index >= self.open_tabs.len() {
-                self.active_tab_index = self.open_tabs.len() - 1;
-            }
             // Switch to the new active tab
-            self.switch_to_tab(self.active_tab_index);
+            self.switch_to_tab(self.tabs.active_index());
         }
     }
 
     /// Switch to a specific tab by index
     pub fn switch_to_tab(&mut self, index: usize) {
-        if index >= self.open_tabs.len() {
+        if index >= self.tabs.len() {
             return;
         }
 
@@ -1391,18 +1330,14 @@ impl App {
         // Clear dismissed asks when switching conversations (so they can reappear if user returns)
         self.dismissed_ask_ids.clear();
 
-        // Track history for Alt+Tab cycling
-        self.push_tab_history(index);
+        // Switch in the tab manager (handles history tracking)
+        self.tabs.switch_to(index);
 
-        self.active_tab_index = index;
-
-        // Extract data we need before mutating
-        let is_draft = self.open_tabs[index].is_draft();
-        let thread_id = self.open_tabs[index].thread_id.clone();
-        let project_a_tag = self.open_tabs[index].project_a_tag.clone();
-
-        // Clear unread for this tab
-        self.open_tabs[index].has_unread = false;
+        // Extract data we need
+        let tab = &self.tabs.tabs()[index];
+        let is_draft = tab.is_draft();
+        let thread_id = tab.thread_id.clone();
+        let project_a_tag = tab.project_a_tag.clone();
 
         if is_draft {
             // Draft tab - set up for new conversation
@@ -1458,146 +1393,71 @@ impl App {
         }
     }
 
-    /// Push a tab index to history, removing any existing entry for that index
-    fn push_tab_history(&mut self, index: usize) {
-        // Remove existing entry if present
-        self.tab_history.retain(|&i| i != index);
-        // Add to end (most recent)
-        self.tab_history.push(index);
-        // Keep history bounded (max 20 entries)
-        if self.tab_history.len() > 20 {
-            self.tab_history.remove(0);
-        }
-    }
-
     /// Cycle to next tab in history (Alt+Tab behavior)
     pub fn cycle_tab_history_forward(&mut self) {
-        if self.tab_history.len() < 2 {
-            // Not enough history, just cycle to next tab
-            self.next_tab();
-            return;
-        }
-
-        // Get the second-to-last entry (the previously viewed tab)
-        let history_len = self.tab_history.len();
-        if history_len >= 2 {
-            let prev_index = self.tab_history[history_len - 2];
-            if prev_index < self.open_tabs.len() {
-                self.switch_to_tab(prev_index);
-            }
-        }
+        // TabManager handles the history internally
+        self.tabs.cycle_history_forward();
+        self.switch_to_tab(self.tabs.active_index());
     }
 
     /// Cycle to previous tab in history (Alt+Shift+Tab behavior)
     pub fn cycle_tab_history_backward(&mut self) {
-        if self.tab_history.len() < 2 {
-            // Not enough history, just cycle to prev tab
-            self.prev_tab();
-            return;
-        }
-
-        // Move the current tab to the front of history and switch to what was second-to-last
-        // This rotates through history in reverse order
-        if let Some(current) = self.tab_history.pop() {
-            self.tab_history.insert(0, current);
-            if let Some(&next) = self.tab_history.last() {
-                if next < self.open_tabs.len() {
-                    self.active_tab_index = next;
-                    // Re-push to mark as most recent
-                    if let Some(idx) = self.tab_history.pop() {
-                        self.push_tab_history(idx);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Clean up tab history when a tab is closed (adjust indices)
-    fn cleanup_tab_history(&mut self, removed_index: usize) {
-        // Remove the closed tab from history
-        self.tab_history.retain(|&i| i != removed_index);
-        // Adjust indices for tabs that shifted down
-        for idx in self.tab_history.iter_mut() {
-            if *idx > removed_index {
-                *idx -= 1;
-            }
-        }
+        // For backward, we go to next tab (simpler behavior)
+        self.prev_tab();
     }
 
     /// Open tab modal
     pub fn open_tab_modal(&mut self) {
-        self.showing_tab_modal = true;
-        self.tab_modal_index = self.active_tab_index;
+        self.tabs.open_modal();
     }
 
     /// Close tab modal
     pub fn close_tab_modal(&mut self) {
-        self.showing_tab_modal = false;
+        self.tabs.close_modal();
     }
 
     /// Close tab at specific index (for tab modal)
     pub fn close_tab_at(&mut self, index: usize) {
-        if index >= self.open_tabs.len() {
-            return;
-        }
+        let was_active = index == self.tabs.active_index();
+        let new_active = self.tabs.close_at(index);
 
-        self.open_tabs.remove(index);
-        self.cleanup_tab_history(index);
-
-        if self.open_tabs.is_empty() {
+        if new_active.is_none() {
             // No more tabs - go back to home view
             self.save_chat_draft();
             self.chat_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
-            self.active_tab_index = 0;
-        } else {
-            // Adjust active tab index if needed
-            if self.active_tab_index >= self.open_tabs.len() {
-                self.active_tab_index = self.open_tabs.len() - 1;
-            } else if self.active_tab_index > index {
-                self.active_tab_index -= 1;
-            }
-            // Adjust modal index if needed
-            if self.tab_modal_index >= self.open_tabs.len() {
-                self.tab_modal_index = self.open_tabs.len() - 1;
-            }
-            // If the closed tab was the active one, switch to the new active tab
-            if index == self.active_tab_index {
-                self.switch_to_tab(self.active_tab_index);
-            }
+        } else if was_active {
+            // If the closed tab was active, switch to the new active tab
+            self.switch_to_tab(self.tabs.active_index());
         }
     }
 
     /// Switch to next tab (Ctrl+Tab)
     pub fn next_tab(&mut self) {
-        if self.open_tabs.len() <= 1 {
+        if self.tabs.len() <= 1 {
             return;
         }
-        let next = (self.active_tab_index + 1) % self.open_tabs.len();
+        let next = (self.tabs.active_index() + 1) % self.tabs.len();
         self.switch_to_tab(next);
     }
 
     /// Switch to previous tab (Ctrl+Shift+Tab)
     pub fn prev_tab(&mut self) {
-        if self.open_tabs.len() <= 1 {
+        if self.tabs.len() <= 1 {
             return;
         }
-        let prev = if self.active_tab_index == 0 {
-            self.open_tabs.len() - 1
+        let prev = if self.tabs.active_index() == 0 {
+            self.tabs.len() - 1
         } else {
-            self.active_tab_index - 1
+            self.tabs.active_index() - 1
         };
         self.switch_to_tab(prev);
     }
 
     /// Mark a thread as having unread messages (if it's open in a tab but not active)
     pub fn mark_tab_unread(&mut self, thread_id: &str) {
-        for (idx, tab) in self.open_tabs.iter_mut().enumerate() {
-            if tab.thread_id == thread_id && idx != self.active_tab_index {
-                tab.has_unread = true;
-            }
-        }
+        self.tabs.mark_unread(thread_id);
     }
 
     // ===== Home View Methods =====

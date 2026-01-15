@@ -173,7 +173,7 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
                 'ª' => 7, // Option+9 -> tab 7
                 _ => return Ok(false),
             };
-            if tab_index < app.open_tabs.len() {
+            if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
                 app.view = View::Chat;
             }
@@ -193,7 +193,7 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
             // Alt+2..9 = jump directly to tab N-1 (since 1 is Home)
             KeyCode::Char(c) if c >= '2' && c <= '9' => {
                 let tab_index = (c as usize) - ('2' as usize); // '2' -> 0, '3' -> 1, etc.
-                if tab_index < app.open_tabs.len() {
+                if tab_index < app.open_tabs().len() {
                     app.switch_to_tab(tab_index);
                     app.view = View::Chat;
                 }

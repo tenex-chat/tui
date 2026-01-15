@@ -17,8 +17,8 @@ pub mod todo;
 pub mod tool_calls;
 pub mod views;
 
-pub use app::{App, HomeTab, InputMode, View};
-pub use state::{ChatSearchState, ChatSearchMatch, MessageHistoryState, NudgeState, AgentBrowserState};
+pub use app::{App, HomeTab, InputMode, UndoAction, View};
+// State types are accessed via app.tabs or crate::ui::state::{...}
 // Hotkey registry - used for centralized hotkey resolution and help generation
 #[allow(unused_imports)]
 pub use hotkeys::{

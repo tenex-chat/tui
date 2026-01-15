@@ -83,7 +83,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let input_height = input::input_height(app);
     let has_attachments = input::has_attachments(app);
     let has_status = input::has_status(app);
-    let has_tabs = !app.open_tabs.is_empty();
+    let has_tabs = !app.open_tabs().is_empty();
 
     // Build layout based on whether we have attachments, status, and tabs
     // Context line is now INSIDE the input card, not separate
@@ -149,7 +149,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Render tab modal if showing (Alt+/)
-    if app.showing_tab_modal {
+    if app.showing_tab_modal() {
         super::super::home::render_tab_modal(f, app, area);
     }
 
