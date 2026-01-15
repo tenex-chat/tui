@@ -42,9 +42,18 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
                     let project_a_tag = project.a_tag();
                     let project_name = project.name.clone();
 
+                    // Capture current agent and branch to inherit into new conversation
+                    let inherited_agent = app.selected_agent.clone();
+                    let inherited_branch = app.selected_branch.clone();
+
                     app.save_chat_draft();
                     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
+
+                    // Restore inherited agent and branch (switch_to_tab defaults to PM)
+                    app.selected_agent = inherited_agent;
+                    app.selected_branch = inherited_branch;
+
                     app.chat_editor.clear();
                     app.set_status("New conversation (same project, agent, and branch)");
                 }
