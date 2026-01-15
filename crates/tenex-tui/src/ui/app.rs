@@ -2,8 +2,10 @@ use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStora
 use crate::nostr::DataChange;
 use crate::store::{AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
-use crate::ui::modal::ModalState;
+use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
+use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, OpenTab, TabManager};
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -33,6 +35,44 @@ pub fn fuzzy_matches(target: &str, pattern: &str) -> bool {
     false
 }
 
+/// Fuzzy match score: lower is better (0 = exact prefix match)
+/// Returns None if no match, Some(score) if match
+/// Scoring: prefix matches get 0, then +1 per position after start, +1 per gap
+pub fn fuzzy_score(target: &str, pattern: &str) -> Option<usize> {
+    if pattern.is_empty() {
+        return Some(0);
+    }
+    let target_lower = target.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+    let target_chars: Vec<char> = target_lower.chars().collect();
+    let pattern_chars: Vec<char> = pattern_lower.chars().collect();
+
+    let mut pattern_idx = 0;
+    let mut first_match_pos = None;
+    let mut total_gaps = 0;
+    let mut last_match_pos: Option<usize> = None;
+
+    for (i, &c) in target_chars.iter().enumerate() {
+        if pattern_idx < pattern_chars.len() && c == pattern_chars[pattern_idx] {
+            if first_match_pos.is_none() {
+                first_match_pos = Some(i);
+            }
+            if let Some(last) = last_match_pos {
+                total_gaps += i - last - 1;
+            }
+            last_match_pos = Some(i);
+            pattern_idx += 1;
+        }
+    }
+
+    if pattern_idx == pattern_chars.len() {
+        // Score: position of first match + total gaps between matches
+        Some(first_match_pos.unwrap_or(0) + total_gaps)
+    } else {
+        None
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -48,24 +88,17 @@ pub enum InputMode {
     Editing,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HomeTab {
     Recent,
     Inbox,
     Reports,
+    Status,
+    Search,
 }
 
-/// An open tab representing a thread
-#[derive(Debug, Clone)]
-pub struct OpenTab {
-    pub thread_id: String,
-    pub thread_title: String,
-    pub project_a_tag: String,
-    pub has_unread: bool,
-}
-
-/// Maximum number of open tabs (matches 1-9 shortcuts)
-pub const MAX_TABS: usize = 9;
+// ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState
+// are now in ui::state module
 
 /// Buffer for local streaming content (per conversation)
 #[derive(Default, Clone)]
@@ -82,6 +115,19 @@ pub enum VimMode {
     #[default]
     Normal,
     Insert,
+}
+
+/// Actions that can be undone
+#[derive(Debug, Clone)]
+pub enum UndoAction {
+    /// Thread was archived (store thread_id to unarchive)
+    ThreadArchived { thread_id: String, thread_title: String },
+    /// Thread was unarchived (store thread_id to re-archive)
+    ThreadUnarchived { thread_id: String, thread_title: String },
+    /// Project was archived
+    ProjectArchived { project_a_tag: String, project_name: String },
+    /// Project was unarchived
+    ProjectUnarchived { project_a_tag: String, project_name: String },
 }
 
 pub struct App {
@@ -101,7 +147,8 @@ pub struct App {
     pub scroll_offset: usize,
     /// Maximum scroll offset (set after rendering to enable proper scroll clamping)
     pub max_scroll_offset: usize,
-    pub status_message: Option<String>,
+    /// Notification queue for toast/status messages
+    pub notifications: NotificationQueue,
 
     pub creating_thread: bool,
     pub selected_branch: Option<String>,
@@ -124,6 +171,9 @@ pub struct App {
     /// Editor for the attachment modal content
     pub attachment_modal_editor: TextEditor,
 
+    /// Current wrap width for chat input (updated during rendering for visual line navigation)
+    pub chat_input_wrap_width: usize,
+
     /// Single source of truth for app data
     pub data_store: Rc<RefCell<AppDataStore>>,
 
@@ -134,31 +184,20 @@ pub struct App {
     /// Index of selected message in chat view (for navigation)
     pub selected_message_index: usize,
 
-    /// Open tabs (max 9, LRU eviction)
-    pub open_tabs: Vec<OpenTab>,
-    /// Index of the active tab
-    pub active_tab_index: usize,
-    /// Tab visit history for Alt+Tab cycling (most recent last)
-    pub tab_history: Vec<usize>,
-    /// Whether the tab modal is showing
-    pub showing_tab_modal: bool,
-    /// Selected index in tab modal
-    pub tab_modal_index: usize,
+    /// Tab management (open tabs, history, modal state)
+    pub tabs: TabManager,
 
     // Home view state
     pub home_panel_focus: HomeTab,
-    pub selected_inbox_index: usize,
-    pub selected_report_index: usize,
+    /// Per-tab selection index (preserves position when switching tabs)
+    pub tab_selection: HashMap<HomeTab, usize>,
     pub report_search_filter: String,
-    pub selected_recent_index: usize,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
     /// Selected index in sidebar project list
     pub sidebar_project_index: usize,
     /// Projects to show in Recent/Inbox (empty = none)
     pub visible_projects: HashSet<String>,
-    /// Filter to show only threads created by or p-tagging current user
-    pub only_by_me: bool,
     /// Filter by time since last activity
     pub time_filter: Option<TimeFilter>,
 
@@ -177,19 +216,19 @@ pub struct App {
     pub agent_browser_in_detail: bool,
     pub viewing_agent_id: Option<String>,
 
-    // Search modal state
+    // Search modal state (deprecated - replaced by Search tab)
     pub showing_search_modal: bool,
     pub search_filter: String,
     pub search_index: usize,
+
+    /// In-conversation search state
+    pub chat_search: ChatSearchState,
 
     /// Local streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
 
     /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
     pub show_llm_metadata: bool,
-
-    /// Prefix key mode (ctrl+t was pressed, waiting for next key)
-    pub prefix_key_active: bool,
 
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
@@ -203,6 +242,8 @@ pub struct App {
 
     /// Project a_tag when waiting for a newly created thread to appear
     pub pending_new_thread_project: Option<String>,
+    /// Draft ID when waiting for a newly created thread (to convert draft tab)
+    pub pending_new_thread_draft_id: Option<String>,
 
     /// Selected nudge IDs for the current conversation
     pub selected_nudge_ids: Vec<String>,
@@ -223,6 +264,15 @@ pub struct App {
     pub vim_mode: VimMode,
     /// Whether to show archived conversations in Recent/Inbox
     pub show_archived: bool,
+    /// Whether to show archived projects in the sidebar
+    pub show_archived_projects: bool,
+    /// Whether user explicitly selected an agent in the current conversation
+    /// When true, don't auto-sync agent from conversation messages
+    pub user_explicitly_selected_agent: bool,
+    /// Ask event IDs that user dismissed (ESC) without answering - prevents auto-reopen
+    pub dismissed_ask_ids: HashSet<String>,
+    /// Last action that can be undone (Ctrl+T + u)
+    pub last_undo_action: Option<UndoAction>,
 }
 
 impl App {
@@ -246,7 +296,7 @@ impl App {
 
             scroll_offset: 0,
             max_scroll_offset: 0,
-            status_message: None,
+            notifications: NotificationQueue::new(),
 
             creating_thread: false,
             selected_branch: None,
@@ -259,24 +309,18 @@ impl App {
             chat_editor: TextEditor::new(),
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
+            chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,
-            open_tabs: Vec::new(),
-            active_tab_index: 0,
-            tab_history: Vec::new(),
-            showing_tab_modal: false,
-            tab_modal_index: 0,
+            tabs: TabManager::new(),
             home_panel_focus: HomeTab::Recent,
-            selected_inbox_index: 0,
-            selected_report_index: 0,
+            tab_selection: HashMap::new(),
             report_search_filter: String::new(),
-            selected_recent_index: 0,
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
-            only_by_me: false,
             time_filter: None,
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
             modal_state: ModalState::None,
@@ -289,13 +333,14 @@ impl App {
             showing_search_modal: false,
             search_filter: String::new(),
             search_index: 0,
+            chat_search: ChatSearchState::default(),
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
-            prefix_key_active: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
             expanded_groups: HashSet::new(),
             pending_new_thread_project: None,
+            pending_new_thread_draft_id: None,
             selected_nudge_ids: Vec::new(),
             frame_counter: 0,
             message_history: Vec::new(),
@@ -304,12 +349,65 @@ impl App {
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
+            show_archived_projects: false,
+            user_explicitly_selected_agent: false,
+            dismissed_ask_ids: HashSet::new(),
+            last_undo_action: None,
         }
     }
 
-    /// Increment frame counter (call on each tick)
+    // =============================================================================
+    // TAB ACCESSOR METHODS (backward compatibility)
+    // =============================================================================
+    // These methods delegate to TabManager for backward compatibility with code
+    // that accesses app.open_tabs, app.active_tab_index, etc. directly.
+
+    /// Get reference to open tabs (delegates to TabManager)
+    #[inline]
+    pub fn open_tabs(&self) -> &[OpenTab] {
+        self.tabs.tabs()
+    }
+
+    /// Get mutable reference to open tabs (delegates to TabManager)
+    #[inline]
+    pub fn open_tabs_mut(&mut self) -> &mut Vec<OpenTab> {
+        self.tabs.tabs_mut()
+    }
+
+    /// Get active tab index (delegates to TabManager)
+    #[inline]
+    pub fn active_tab_index(&self) -> usize {
+        self.tabs.active_index()
+    }
+
+    /// Get whether tab modal is showing (delegates to TabManager)
+    #[inline]
+    pub fn showing_tab_modal(&self) -> bool {
+        self.tabs.modal_open
+    }
+
+    /// Set whether tab modal is showing (delegates to TabManager)
+    #[inline]
+    pub fn set_showing_tab_modal(&mut self, showing: bool) {
+        self.tabs.modal_open = showing;
+    }
+
+    /// Get tab modal index (delegates to TabManager)
+    #[inline]
+    pub fn tab_modal_index(&self) -> usize {
+        self.tabs.modal_index
+    }
+
+    /// Set tab modal index (delegates to TabManager)
+    #[inline]
+    pub fn set_tab_modal_index(&mut self, index: usize) {
+        self.tabs.modal_index = index;
+    }
+
+    /// Increment frame counter and update notifications (call on each tick)
     pub fn tick(&mut self) {
         self.frame_counter = self.frame_counter.wrapping_add(1);
+        self.notifications.tick();
     }
 
     /// Get spinner character based on frame counter
@@ -359,6 +457,33 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Get the count of display items in the current chat view.
+    /// Used for navigation bounds checking.
+    pub fn display_item_count(&self) -> usize {
+        use crate::ui::views::chat::group_messages;
+
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Filter messages based on current view (subthread or main thread)
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| {
+                    Some(m.id.as_str()) == thread_id
+                        || m.reply_to.is_none()
+                        || m.reply_to.as_deref() == thread_id
+                })
+                .collect()
+        };
+
+        group_messages(&display_messages, user_pubkey.as_deref()).len()
+    }
+
     /// Enter a subthread view rooted at the given message
     pub fn enter_subthread(&mut self, message: Message) {
         self.subthread_root = Some(message.id.clone());
@@ -379,11 +504,19 @@ impl App {
         self.subthread_root.is_some()
     }
 
-    /// Save current chat editor content as draft for the selected thread
+    /// Save current chat editor content as draft for the selected thread or draft tab
     pub fn save_chat_draft(&self) {
-        if let Some(ref thread) = self.selected_thread {
+        // Determine the draft key - use thread id or draft_id from active tab
+        let draft_key = if let Some(ref thread) = self.selected_thread {
+            Some(thread.id.clone())
+        } else {
+            // Check if current tab is a draft tab
+            self.tabs.active_tab().and_then(|t| t.draft_id.clone())
+        };
+
+        if let Some(conversation_id) = draft_key {
             let draft = ChatDraft {
-                conversation_id: thread.id.clone(),
+                conversation_id,
                 text: self.chat_editor.build_full_content(),
                 selected_agent_pubkey: self.selected_agent.as_ref().map(|a| a.pubkey.clone()),
                 selected_branch: self.selected_branch.clone(),
@@ -396,24 +529,52 @@ impl App {
         }
     }
 
-    /// Restore draft for the selected thread into chat_editor
+    /// Restore draft for the selected thread or draft tab into chat_editor
+    /// Also syncs agent/branch selection with the conversation's most recent activity
     pub fn restore_chat_draft(&mut self) {
-        if let Some(ref thread) = self.selected_thread {
-            if let Some(draft) = self.draft_storage.borrow().load(&thread.id) {
-                // For now, put all content in the text field
-                // (attachments will be re-created on paste if needed)
+        // Reset explicit selection flag when switching conversations
+        self.user_explicitly_selected_agent = false;
+
+        // Always clear editor first - each conversation has its own draft
+        self.chat_editor.text.clear();
+        self.chat_editor.cursor = 0;
+
+        // Determine the draft key - use thread id or draft_id from active tab
+        let draft_key = if let Some(ref thread) = self.selected_thread {
+            Some(thread.id.clone())
+        } else {
+            // Check if current tab is a draft tab
+            self.tabs.active_tab().and_then(|t| t.draft_id.clone())
+        };
+
+        if let Some(key) = draft_key {
+            // Load draft for text content only
+            if let Some(draft) = self.draft_storage.borrow().load(&key) {
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
-                self.selected_branch = draft.selected_branch;
-                if let Some(agent_pubkey) = draft.selected_agent_pubkey {
-                    if let Some(status) = self.get_selected_project_status() {
-                        self.selected_agent = status
-                            .agents
-                            .iter()
-                            .find(|a| a.pubkey == agent_pubkey)
-                            .cloned();
-                    }
-                }
+            }
+        }
+
+        // For real threads, sync agent and branch with the conversation's most recent activity
+        if self.selected_thread.is_some() {
+            self.sync_agent_with_conversation();
+            self.sync_branch_with_conversation();
+        }
+    }
+
+    /// Sync selected_agent with the most recent agent in the conversation
+    /// Falls back to PM agent if no agent has responded yet
+    pub fn sync_agent_with_conversation(&mut self) {
+        // First try to get the most recent agent from the conversation
+        if let Some(recent_agent) = self.get_most_recent_agent_from_conversation() {
+            self.selected_agent = Some(recent_agent);
+            return;
+        }
+
+        // Fall back to PM agent if no agent has responded yet
+        if let Some(status) = self.get_selected_project_status() {
+            if let Some(pm) = status.pm_agent() {
+                self.selected_agent = Some(pm.clone());
             }
         }
     }
@@ -503,19 +664,32 @@ impl App {
     }
 
     /// Get filtered projects based on current filter (from ModalState)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
+    /// Archived projects are hidden unless show_archived_projects is true
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
+        let prefs = self.preferences.borrow();
 
-        let matching: Vec<&Project> = projects
+        let mut matching: Vec<_> = projects
             .iter()
-            .filter(|p| fuzzy_matches(&p.name, filter))
+            .filter(|p| {
+                // Filter out archived projects unless showing archived
+                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
+            })
+            .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
 
-        // Separate into online and offline
+        // Sort by score (lower = better match), then alphabetically for ties
+        matching.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+        });
+
+        // Separate into online and offline, preserving sort order
         let (online, offline): (Vec<_>, Vec<_>) = matching
             .into_iter()
+            .map(|(p, _)| p)
             .partition(|p| store.is_project_online(&p.a_tag()));
 
         (online.into_iter().cloned().collect(), offline.into_iter().cloned().collect())
@@ -582,12 +756,25 @@ impl App {
         Ok(())
     }
 
-    pub fn set_status(&mut self, msg: &str) {
-        self.status_message = Some(msg.to_string());
+    /// Add a notification to the queue
+    pub fn notify(&mut self, notification: Notification) {
+        self.notifications.push(notification);
     }
 
-    pub fn clear_status(&mut self) {
-        self.status_message = None;
+    /// Convenience: set a warning status message (legacy compatibility)
+    /// Prefer using notify() with specific notification types for new code
+    pub fn set_status(&mut self, msg: &str) {
+        self.notifications.push(Notification::warning(msg));
+    }
+
+    /// Dismiss the current notification
+    pub fn dismiss_notification(&mut self) {
+        self.notifications.dismiss();
+    }
+
+    /// Get the current notification message (for display)
+    pub fn current_notification(&self) -> Option<&Notification> {
+        self.notifications.current()
     }
 
     /// Scroll up by the given amount, clamping to valid range
@@ -668,16 +855,113 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Get the most recent agent that published a message in the current conversation.
+    /// Returns the agent from available_agents whose pubkey matches the most recent
+    /// non-user message in the conversation.
+    pub fn get_most_recent_agent_from_conversation(&self) -> Option<crate::models::ProjectAgent> {
+        let thread = self.selected_thread.as_ref()?;
+        let messages = self.messages();
+        let available_agents = self.available_agents();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Create a set of agent pubkeys for quick lookup
+        let agent_pubkeys: std::collections::HashSet<&str> = available_agents
+            .iter()
+            .map(|a| a.pubkey.as_str())
+            .collect();
+
+        // Find the most recent message from an agent (not the user)
+        // Messages are typically sorted by created_at, but we'll iterate and track the latest
+        let mut latest_agent_pubkey: Option<&str> = None;
+        let mut latest_timestamp: u64 = 0;
+
+        for msg in &messages {
+            // Skip messages from the user
+            if user_pubkey.as_ref().map(|pk| pk == &msg.pubkey).unwrap_or(false) {
+                continue;
+            }
+
+            // Check if this message is from a known agent
+            if agent_pubkeys.contains(msg.pubkey.as_str()) && msg.created_at >= latest_timestamp {
+                latest_timestamp = msg.created_at;
+                latest_agent_pubkey = Some(msg.pubkey.as_str());
+            }
+        }
+
+        // Also check the thread itself (the original message that started the thread)
+        // The thread author might be an agent - use last_activity as timestamp proxy
+        // Note: for the thread root, we only consider it if no messages from agents exist yet
+        if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str()) {
+            if user_pubkey.as_ref().map(|pk| pk != &thread.pubkey).unwrap_or(true) {
+                latest_agent_pubkey = Some(thread.pubkey.as_str());
+            }
+        }
+
+        // Find and return the matching agent
+        latest_agent_pubkey.and_then(|pubkey| {
+            available_agents.into_iter().find(|a| a.pubkey == pubkey)
+        })
+    }
+
+    /// Get the most recent branch from conversation messages.
+    /// Returns the branch tag from the most recent message that has one.
+    pub fn get_most_recent_branch_from_conversation(&self) -> Option<String> {
+        let messages = self.messages();
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Find the most recent message with a branch tag (not from the user)
+        let mut latest_branch: Option<String> = None;
+        let mut latest_timestamp: u64 = 0;
+
+        for msg in &messages {
+            // Skip messages from the user
+            if user_pubkey.as_ref().map(|pk| pk == &msg.pubkey).unwrap_or(false) {
+                continue;
+            }
+
+            // Check if this message has a branch and is more recent
+            if msg.branch.is_some() && msg.created_at >= latest_timestamp {
+                latest_timestamp = msg.created_at;
+                latest_branch = msg.branch.clone();
+            }
+        }
+
+        latest_branch
+    }
+
+    /// Sync selected_branch with the most recent branch in the conversation
+    /// Falls back to default branch if no branch found in messages
+    pub fn sync_branch_with_conversation(&mut self) {
+        // First try to get the most recent branch from the conversation
+        if let Some(recent_branch) = self.get_most_recent_branch_from_conversation() {
+            self.selected_branch = Some(recent_branch);
+            return;
+        }
+
+        // Fall back to default branch if no branch found in messages
+        if let Some(status) = self.get_selected_project_status() {
+            if let Some(default_branch) = status.default_branch() {
+                self.selected_branch = Some(default_branch.to_string());
+            }
+        }
+    }
+
     /// Get agents filtered by current filter (from ModalState or empty)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
         let filter = match &self.modal_state {
             ModalState::AgentSelector { selector } => &selector.filter,
             _ => "",
         };
-        self.available_agents()
+        let mut agents_with_scores: Vec<_> = self.available_agents()
             .into_iter()
-            .filter(|a| fuzzy_matches(&a.name, filter))
-            .collect()
+            .filter_map(|a| fuzzy_score(&a.name, filter).map(|score| (a, score)))
+            .collect();
+        // Sort by score (lower = better match), then alphabetically for ties
+        agents_with_scores.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+        });
+        agents_with_scores.into_iter().map(|(a, _)| a).collect()
     }
 
     /// Get agent selector index (from ModalState)
@@ -710,16 +994,34 @@ impl App {
         }
     }
 
+    /// Get the current hotkey context based on application state.
+    /// Used by the hotkey registry to determine which hotkeys are active.
+    pub fn hotkey_context(&self) -> super::hotkeys::HotkeyContext {
+        super::hotkeys::HotkeyContext::from_app_state(
+            &self.view,
+            &self.input_mode,
+            &self.modal_state,
+            &self.home_panel_focus,
+            self.sidebar_focused,
+        )
+    }
+
     /// Get branches filtered by current filter (from ModalState)
+    /// Results are sorted by match quality (prefix matches first, then by gap count)
     pub fn filtered_branches(&self) -> Vec<String> {
         let filter = match &self.modal_state {
             ModalState::BranchSelector { selector } => &selector.filter,
             _ => "",
         };
-        self.available_branches()
+        let mut branches_with_scores: Vec<_> = self.available_branches()
             .into_iter()
-            .filter(|b| fuzzy_matches(b, filter))
-            .collect()
+            .filter_map(|b| fuzzy_score(&b, filter).map(|score| (b, score)))
+            .collect();
+        // Sort by score (lower = better match), then alphabetically for ties
+        branches_with_scores.sort_by(|(a, score_a), (b, score_b)| {
+            score_a.cmp(score_b).then_with(|| a.cmp(b))
+        });
+        branches_with_scores.into_iter().map(|(b, _)| b).collect()
     }
 
     /// Get branch selector index (from ModalState or legacy)
@@ -743,6 +1045,76 @@ impl App {
         self.modal_state = ModalState::BranchSelector {
             selector: SelectorState::new(),
         };
+    }
+
+    /// Open the command palette modal (Ctrl+T)
+    pub fn open_command_palette(&mut self) {
+        let context = self.get_palette_context();
+        self.modal_state = ModalState::CommandPalette(CommandPaletteState::new(context));
+    }
+
+    /// Get the current context for the command palette
+    fn get_palette_context(&self) -> PaletteContext {
+        match self.view {
+            View::Home => {
+                if self.sidebar_focused {
+                    // Check if selected project is online/busy using filtered_projects
+                    let (online, offline) = self.filtered_projects();
+                    let online_count = online.len();
+                    let is_online = self.sidebar_project_index < online_count;
+
+                    // Get the actual project to check busy and archived status
+                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+                    let (is_busy, is_archived) = all_projects.get(self.sidebar_project_index)
+                        .map(|p| {
+                            let a_tag = p.a_tag();
+                            (
+                                self.data_store.borrow().is_project_busy(&a_tag),
+                                self.is_project_archived(&a_tag),
+                            )
+                        })
+                        .unwrap_or((false, false));
+
+                    PaletteContext::HomeSidebar { is_online, is_busy, is_archived }
+                } else {
+                    match self.home_panel_focus {
+                        HomeTab::Recent => PaletteContext::HomeRecent,
+                        HomeTab::Inbox => PaletteContext::HomeInbox,
+                        HomeTab::Reports => PaletteContext::HomeReports,
+                        HomeTab::Status => PaletteContext::HomeRecent, // Reuse Recent context for Status
+                        HomeTab::Search => PaletteContext::HomeRecent, // Reuse Recent context for Search
+                    }
+                }
+            }
+            View::Chat => {
+                if self.input_mode == InputMode::Editing {
+                    PaletteContext::ChatEditing
+                } else {
+                    // Check context for normal mode
+                    let has_parent = self.selected_thread.as_ref()
+                        .and_then(|t| t.parent_conversation_id.as_ref())
+                        .is_some();
+
+                    // Check if selected message has trace
+                    let has_trace = false; // Simplified for now
+
+                    // Check if any agent is working on this thread
+                    let agent_working = self.selected_thread.as_ref()
+                        .map(|t| self.data_store.borrow().is_event_busy(&t.id))
+                        .unwrap_or(false);
+
+                    PaletteContext::ChatNormal { has_parent, has_trace, agent_working }
+                }
+            }
+            View::AgentBrowser => {
+                if self.agent_browser_in_detail {
+                    PaletteContext::AgentBrowserDetail
+                } else {
+                    PaletteContext::AgentBrowserList
+                }
+            }
+            _ => PaletteContext::HomeRecent, // Default fallback
+        }
     }
 
     /// Close the branch selector modal
@@ -820,9 +1192,9 @@ impl App {
             MessageAction::CopyRawEvent => {
                 if let Some(json) = get_raw_event_json(&self.db.ndb, message_id) {
                     self.copy_to_clipboard(&json);
-                    self.set_status("Raw event copied to clipboard");
+                    self.notify(Notification::success("Raw event copied to clipboard"));
                 } else {
-                    self.set_status("Failed to get raw event");
+                    self.notify(Notification::error("Failed to get raw event"));
                 }
                 self.modal_state = ModalState::None;
             }
@@ -841,7 +1213,7 @@ impl App {
                         scroll_offset: 0,
                     };
                 } else {
-                    self.set_status("Failed to get raw event");
+                    self.notify(Notification::error("Failed to get raw event"));
                     self.modal_state = ModalState::None;
                 }
             }
@@ -852,9 +1224,9 @@ impl App {
                         trace_info.trace_id, trace_info.span_id
                     );
                     self.open_url(&url);
-                    self.set_status("Opening trace in browser...");
+                    self.notify(Notification::info("Opening trace in browser..."));
                 } else {
-                    self.set_status("No trace context found for this message");
+                    self.notify(Notification::warning("No trace context found for this message"));
                 }
                 self.modal_state = ModalState::None;
             }
@@ -883,9 +1255,9 @@ impl App {
                             branch,
                             nudge_ids: vec![],
                         }) {
-                            self.set_status(&format!("Failed to create thread: {}", e));
+                            self.notify(Notification::error(format!("Failed to create thread: {}", e)));
                         } else {
-                            self.set_status("Creating new conversation...");
+                            self.notify(Notification::info("Creating new conversation..."));
                         }
                     }
                 }
@@ -929,245 +1301,256 @@ impl App {
     /// Open a thread in a tab (or switch to it if already open)
     /// Returns the tab index
     pub fn open_tab(&mut self, thread: &Thread, project_a_tag: &str) -> usize {
-        // Check if already open
-        if let Some(idx) = self.open_tabs.iter().position(|t| t.thread_id == thread.id) {
-            // Clear unread since we're switching to it
-            self.open_tabs[idx].has_unread = false;
-            self.active_tab_index = idx;
-            return idx;
-        }
+        self.tabs.open_thread(
+            thread.id.clone(),
+            thread.title.clone(),
+            project_a_tag.to_string(),
+        )
+    }
 
-        // Create new tab
-        let tab = OpenTab {
-            thread_id: thread.id.clone(),
-            thread_title: thread.title.clone(),
-            project_a_tag: project_a_tag.to_string(),
-            has_unread: false,
-        };
+    /// Open a draft tab for a new conversation (before thread is created)
+    /// Returns the tab index
+    pub fn open_draft_tab(&mut self, project_a_tag: &str, project_name: &str) -> usize {
+        self.tabs.open_draft(project_a_tag.to_string(), project_name.to_string())
+    }
 
-        // If at max capacity, remove the oldest (leftmost) tab
-        if self.open_tabs.len() >= MAX_TABS {
-            self.open_tabs.remove(0);
-            // Adjust active index if needed
-            if self.active_tab_index > 0 {
-                self.active_tab_index -= 1;
-            }
-        }
+    /// Convert a draft tab to a real tab when thread is created
+    pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
+        self.tabs.convert_draft(draft_id, thread.id.clone(), thread.title.clone());
+    }
 
-        self.open_tabs.push(tab);
-        self.active_tab_index = self.open_tabs.len() - 1;
-        self.active_tab_index
+    /// Find if there's an active draft tab for a project
+    pub fn find_draft_tab(&self, project_a_tag: &str) -> Option<(usize, &str)> {
+        self.tabs.find_draft_for_project(project_a_tag)
     }
 
     /// Close the current tab
     pub fn close_current_tab(&mut self) {
-        if self.open_tabs.is_empty() {
+        if self.tabs.is_empty() {
             return;
         }
 
-        let removed_index = self.active_tab_index;
-        self.open_tabs.remove(removed_index);
-        self.cleanup_tab_history(removed_index);
+        // Close and get the new active index
+        let new_active = self.tabs.close_current();
 
-        if self.open_tabs.is_empty() {
+        if new_active.is_none() {
             // No more tabs - go back to home view
             self.save_chat_draft();
             self.chat_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
-            self.active_tab_index = 0;
         } else {
-            // Move to next tab (or previous if we were at the end)
-            if self.active_tab_index >= self.open_tabs.len() {
-                self.active_tab_index = self.open_tabs.len() - 1;
-            }
             // Switch to the new active tab
-            self.switch_to_tab(self.active_tab_index);
+            self.switch_to_tab(self.tabs.active_index());
         }
     }
 
     /// Switch to a specific tab by index
     pub fn switch_to_tab(&mut self, index: usize) {
-        if index >= self.open_tabs.len() {
+        if index >= self.tabs.len() {
             return;
         }
 
         // Save current draft before switching
         self.save_chat_draft();
 
-        // Track history for Alt+Tab cycling
-        self.push_tab_history(index);
+        // Clear dismissed asks when switching conversations (so they can reappear if user returns)
+        self.dismissed_ask_ids.clear();
 
-        self.active_tab_index = index;
+        // Switch in the tab manager (handles history tracking)
+        self.tabs.switch_to(index);
 
-        // Extract data we need before mutating
-        let thread_id = self.open_tabs[index].thread_id.clone();
-        let project_a_tag = self.open_tabs[index].project_a_tag.clone();
+        // Extract data we need
+        let tab = &self.tabs.tabs()[index];
+        let is_draft = tab.is_draft();
+        let thread_id = tab.thread_id.clone();
+        let project_a_tag = tab.project_a_tag.clone();
 
-        // Clear unread for this tab
-        self.open_tabs[index].has_unread = false;
+        if is_draft {
+            // Draft tab - set up for new conversation
+            self.selected_thread = None;
+            self.creating_thread = true;
 
-        // Find the thread in data store
-        let thread = self.data_store.borrow().get_threads(&project_a_tag)
-            .iter()
-            .find(|t| t.id == thread_id)
-            .cloned();
+            // Set the project for this draft
+            let project = self.data_store.borrow()
+                .get_projects()
+                .iter()
+                .find(|p| p.a_tag() == project_a_tag)
+                .cloned();
 
-        if let Some(thread) = thread {
-            self.selected_thread = Some(thread);
+            if let Some(project) = project {
+                let a_tag = project.a_tag();
+                self.selected_project = Some(project);
+
+                // Auto-select PM agent and default branch from status
+                if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+                    if let Some(pm) = status.pm_agent() {
+                        self.selected_agent = Some(pm.clone());
+                    }
+                    if self.selected_branch.is_none() {
+                        self.selected_branch = status.default_branch().map(String::from);
+                    }
+                }
+            }
+
             self.restore_chat_draft();
-            self.scroll_offset = usize::MAX; // Scroll to bottom
+            self.scroll_offset = 0;
             self.selected_message_index = 0;
             self.subthread_root = None;
             self.subthread_root_message = None;
-        }
-    }
+            self.input_mode = InputMode::Editing;
+            self.view = View::Chat;
+        } else {
+            // Real tab - find the thread in data store
+            let thread = self.data_store.borrow().get_threads(&project_a_tag)
+                .iter()
+                .find(|t| t.id == thread_id)
+                .cloned();
 
-    /// Push a tab index to history, removing any existing entry for that index
-    fn push_tab_history(&mut self, index: usize) {
-        // Remove existing entry if present
-        self.tab_history.retain(|&i| i != index);
-        // Add to end (most recent)
-        self.tab_history.push(index);
-        // Keep history bounded (max 20 entries)
-        if self.tab_history.len() > 20 {
-            self.tab_history.remove(0);
+            if let Some(thread) = thread {
+                self.selected_thread = Some(thread);
+                self.creating_thread = false;
+                self.restore_chat_draft();
+                self.scroll_offset = usize::MAX; // Scroll to bottom
+                self.selected_message_index = 0;
+                self.subthread_root = None;
+                self.subthread_root_message = None;
+                self.input_mode = InputMode::Editing; // Auto-focus input
+            }
         }
     }
 
     /// Cycle to next tab in history (Alt+Tab behavior)
     pub fn cycle_tab_history_forward(&mut self) {
-        if self.tab_history.len() < 2 {
-            // Not enough history, just cycle to next tab
-            self.next_tab();
-            return;
-        }
-
-        // Get the second-to-last entry (the previously viewed tab)
-        let history_len = self.tab_history.len();
-        if history_len >= 2 {
-            let prev_index = self.tab_history[history_len - 2];
-            if prev_index < self.open_tabs.len() {
-                self.switch_to_tab(prev_index);
-            }
-        }
+        // TabManager handles the history internally
+        self.tabs.cycle_history_forward();
+        self.switch_to_tab(self.tabs.active_index());
     }
 
     /// Cycle to previous tab in history (Alt+Shift+Tab behavior)
     pub fn cycle_tab_history_backward(&mut self) {
-        if self.tab_history.len() < 2 {
-            // Not enough history, just cycle to prev tab
-            self.prev_tab();
-            return;
-        }
-
-        // Move the current tab to the front of history and switch to what was second-to-last
-        // This rotates through history in reverse order
-        if let Some(current) = self.tab_history.pop() {
-            self.tab_history.insert(0, current);
-            if let Some(&next) = self.tab_history.last() {
-                if next < self.open_tabs.len() {
-                    self.active_tab_index = next;
-                    // Re-push to mark as most recent
-                    if let Some(idx) = self.tab_history.pop() {
-                        self.push_tab_history(idx);
-                    }
-                }
-            }
-        }
-    }
-
-    /// Clean up tab history when a tab is closed (adjust indices)
-    fn cleanup_tab_history(&mut self, removed_index: usize) {
-        // Remove the closed tab from history
-        self.tab_history.retain(|&i| i != removed_index);
-        // Adjust indices for tabs that shifted down
-        for idx in self.tab_history.iter_mut() {
-            if *idx > removed_index {
-                *idx -= 1;
-            }
-        }
+        // For backward, we go to next tab (simpler behavior)
+        self.prev_tab();
     }
 
     /// Open tab modal
     pub fn open_tab_modal(&mut self) {
-        self.showing_tab_modal = true;
-        self.tab_modal_index = self.active_tab_index;
+        self.tabs.open_modal();
     }
 
     /// Close tab modal
     pub fn close_tab_modal(&mut self) {
-        self.showing_tab_modal = false;
+        self.tabs.close_modal();
     }
 
     /// Close tab at specific index (for tab modal)
     pub fn close_tab_at(&mut self, index: usize) {
-        if index >= self.open_tabs.len() {
-            return;
-        }
+        let was_active = index == self.tabs.active_index();
+        let new_active = self.tabs.close_at(index);
 
-        self.open_tabs.remove(index);
-        self.cleanup_tab_history(index);
-
-        if self.open_tabs.is_empty() {
+        if new_active.is_none() {
             // No more tabs - go back to home view
             self.save_chat_draft();
             self.chat_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
-            self.active_tab_index = 0;
-        } else {
-            // Adjust active tab index if needed
-            if self.active_tab_index >= self.open_tabs.len() {
-                self.active_tab_index = self.open_tabs.len() - 1;
-            } else if self.active_tab_index > index {
-                self.active_tab_index -= 1;
-            }
-            // Adjust modal index if needed
-            if self.tab_modal_index >= self.open_tabs.len() {
-                self.tab_modal_index = self.open_tabs.len() - 1;
-            }
-            // If the closed tab was the active one, switch to the new active tab
-            if index == self.active_tab_index {
-                self.switch_to_tab(self.active_tab_index);
-            }
+        } else if was_active {
+            // If the closed tab was active, switch to the new active tab
+            self.switch_to_tab(self.tabs.active_index());
         }
     }
 
     /// Switch to next tab (Ctrl+Tab)
     pub fn next_tab(&mut self) {
-        if self.open_tabs.len() <= 1 {
+        if self.tabs.len() <= 1 {
             return;
         }
-        let next = (self.active_tab_index + 1) % self.open_tabs.len();
+        let next = (self.tabs.active_index() + 1) % self.tabs.len();
         self.switch_to_tab(next);
     }
 
     /// Switch to previous tab (Ctrl+Shift+Tab)
     pub fn prev_tab(&mut self) {
-        if self.open_tabs.len() <= 1 {
+        if self.tabs.len() <= 1 {
             return;
         }
-        let prev = if self.active_tab_index == 0 {
-            self.open_tabs.len() - 1
+        let prev = if self.tabs.active_index() == 0 {
+            self.tabs.len() - 1
         } else {
-            self.active_tab_index - 1
+            self.tabs.active_index() - 1
         };
         self.switch_to_tab(prev);
     }
 
     /// Mark a thread as having unread messages (if it's open in a tab but not active)
     pub fn mark_tab_unread(&mut self, thread_id: &str) {
-        for (idx, tab) in self.open_tabs.iter_mut().enumerate() {
-            if tab.thread_id == thread_id && idx != self.active_tab_index {
-                tab.has_unread = true;
-            }
-        }
+        self.tabs.mark_unread(thread_id);
     }
 
     // ===== Home View Methods =====
 
-    /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
+    /// Get the selection index for the current home tab
+    pub fn current_selection(&self) -> usize {
+        *self.tab_selection.get(&self.home_panel_focus).unwrap_or(&0)
+    }
+
+    /// Set the selection index for the current home tab
+    pub fn set_current_selection(&mut self, index: usize) {
+        self.tab_selection.insert(self.home_panel_focus, index);
+    }
+
+    /// Get threads with status metadata, sorted by activity
+    /// Returns threads that have status_label OR status_current_activity
+    pub fn status_threads(&self) -> Vec<(Thread, String)> {
+        // Empty visible_projects = show nothing
+        if self.visible_projects.is_empty() {
+            return vec![];
+        }
+
+        let threads = self.data_store.borrow().get_all_recent_threads(100);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let prefs = self.preferences.borrow();
+
+        let mut status_threads: Vec<(Thread, String)> = threads.into_iter()
+            // Project filter
+            .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
+            // Must have status metadata (label or current activity)
+            .filter(|(thread, _)| {
+                thread.status_label.is_some() || thread.status_current_activity.is_some()
+            })
+            // Archive filter
+            .filter(|(thread, _)| {
+                self.show_archived || !prefs.is_thread_archived(&thread.id)
+            })
+            // Time filter
+            .filter(|(thread, _)| {
+                if let Some(ref tf) = self.time_filter {
+                    let cutoff = now.saturating_sub(tf.seconds());
+                    thread.last_activity >= cutoff
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        // Sort: threads with current_activity first, then by last_activity descending
+        status_threads.sort_by(|(a, _), (b, _)| {
+            let a_has_activity = a.status_current_activity.is_some();
+            let b_has_activity = b.status_current_activity.is_some();
+            match (a_has_activity, b_has_activity) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b.last_activity.cmp(&a.last_activity),
+            }
+        });
+
+        status_threads
+    }
+
+    /// Get recent threads across all projects for Home view (filtered by visible_projects, time_filter, archived)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1175,7 +1558,6 @@ impl App {
         }
 
         let threads = self.data_store.borrow().get_all_recent_threads(50);
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1189,13 +1571,6 @@ impl App {
             .filter(|(thread, _)| {
                 self.show_archived || !prefs.is_thread_archived(&thread.id)
             })
-            // "Only by me" filter
-            .filter(|(thread, _)| {
-                if !self.only_by_me {
-                    return true;
-                }
-                user_pubkey.as_ref().map_or(false, |pk| thread.involves_user(pk))
-            })
             // Time filter
             .filter(|(thread, _)| {
                 if let Some(ref tf) = self.time_filter {
@@ -1208,7 +1583,7 @@ impl App {
             .collect()
     }
 
-    /// Get inbox items for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
+    /// Get inbox items for Home view (filtered by visible_projects, time_filter, archived)
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1216,7 +1591,6 @@ impl App {
         }
 
         let items = self.data_store.borrow().get_inbox_items().to_vec();
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1233,13 +1607,6 @@ impl App {
                 } else {
                     true  // Keep items without thread_id
                 }
-            })
-            // "Only by me" filter - based on author_pubkey
-            .filter(|item| {
-                if !self.only_by_me {
-                    return true;
-                }
-                user_pubkey.as_ref().map_or(false, |pk| &item.author_pubkey == pk)
             })
             // Time filter
             .filter(|item| {
@@ -1300,6 +1667,24 @@ impl App {
         }
     }
 
+    /// Start a new thread for a specific project (navigates to chat without a thread selected)
+    pub fn start_new_thread_for_project(&mut self, project_a_tag: &str) {
+        // Find and set selected project
+        let project = self.data_store.borrow().get_projects()
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .cloned();
+
+        if let Some(project) = project {
+            self.selected_project = Some(project);
+            self.selected_thread = None;
+            self.creating_thread = true;
+            self.view = View::Chat;
+            self.input_mode = InputMode::Editing;
+            self.chat_editor.clear();
+        }
+    }
+
     /// Get all image URLs from messages in the current thread
     pub fn get_image_urls_from_thread(&self) -> Vec<String> {
         let messages = self.messages();
@@ -1338,37 +1723,41 @@ impl App {
         let urls = self.get_image_urls_from_thread();
 
         if urls.is_empty() {
-            self.set_status("No images in current conversation");
+            self.notify(Notification::warning("No images in current conversation"));
             return;
         }
 
         match self.open_image_in_viewer(&urls[0]) {
             Ok(_) => {
-                self.set_status(&format!("Opening image in viewer..."));
+                self.notify(Notification::info("Opening image in viewer..."));
             }
             Err(e) => {
-                self.set_status(&e);
+                self.notify(Notification::error(e));
             }
         }
     }
 
     /// Open ask UI inline (replacing input box)
-    pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent) {
+    pub fn open_ask_modal(&mut self, message_id: String, ask_event: AskEvent, ask_author_pubkey: String) {
         use crate::ui::modal::AskModalState;
         let input_state = AskInputState::new(ask_event.questions.clone());
         self.modal_state = ModalState::AskModal(AskModalState {
             message_id,
             ask_event,
             input_state,
+            ask_author_pubkey,
         });
         self.input_mode = InputMode::Normal;
     }
 
     /// Close ask UI and return to normal input
+    /// Tracks the dismissed ask ID so it won't auto-reopen
     pub fn close_ask_modal(&mut self) {
-        if matches!(self.modal_state, ModalState::AskModal(_)) {
-            self.modal_state = ModalState::None;
+        if let ModalState::AskModal(state) = &self.modal_state {
+            // Track this ask as dismissed so it doesn't auto-reopen
+            self.dismissed_ask_ids.insert(state.message_id.clone());
         }
+        self.modal_state = ModalState::None;
         self.input_mode = InputMode::Editing;
     }
 
@@ -1390,7 +1779,8 @@ impl App {
 
     /// Check for unanswered ask events in current thread
     /// Returns the first unanswered ask event found (not answered by current user)
-    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent)> {
+    /// Returns: (message_id, ask_event, author_pubkey)
+    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent, String)> {
         let messages = self.messages();
         let thread = self.selected_thread.as_ref()?;
         let thread_id = thread.id.as_str();
@@ -1412,9 +1802,9 @@ impl App {
         // First check the thread root itself (if not in subthread view)
         if self.subthread_root.is_none() {
             if let Some(ref ask_event) = thread.ask_event {
-                // Check if the thread has been replied to by current user
-                if !replied_to_by_user.contains(thread_id) {
-                    return Some((thread.id.clone(), ask_event.clone()));
+                // Check if the thread has been replied to by current user or dismissed
+                if !replied_to_by_user.contains(thread_id) && !self.dismissed_ask_ids.contains(&thread.id) {
+                    return Some((thread.id.clone(), ask_event.clone(), thread.pubkey.clone()));
                 }
             }
         }
@@ -1432,9 +1822,9 @@ impl App {
 
         for msg in &display_messages {
             if let Some(ref ask_event) = msg.ask_event {
-                // Check if this message has been replied to by current user
-                if !replied_to_by_user.contains(msg.id.as_str()) {
-                    return Some((msg.id.clone(), ask_event.clone()));
+                // Check if this message has been replied to by current user or dismissed
+                if !replied_to_by_user.contains(msg.id.as_str()) && !self.dismissed_ask_ids.contains(&msg.id) {
+                    return Some((msg.id.clone(), ask_event.clone(), msg.pubkey.clone()));
                 }
             }
         }
@@ -1444,10 +1834,10 @@ impl App {
         for msg in display_messages {
             for q_tag in &msg.q_tags {
                 // Check if this q-tag points to an ask event
-                if let Some((ask_event, _pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
-                    // Check if this ask event has been replied to by current user
-                    if !replied_to_by_user.contains(q_tag.as_str()) {
-                        return Some((q_tag.clone(), ask_event));
+                if let Some((ask_event, pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
+                    // Check if this ask event has been replied to by current user or dismissed
+                    if !replied_to_by_user.contains(q_tag.as_str()) && !self.dismissed_ask_ids.contains(q_tag) {
+                        return Some((q_tag.clone(), ask_event, pubkey));
                     }
                 }
             }
@@ -1530,7 +1920,6 @@ impl App {
     pub fn load_filter_preferences(&mut self) {
         let prefs = self.preferences.borrow();
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
-        self.only_by_me = prefs.only_by_me();
         self.time_filter = prefs.time_filter();
         self.show_llm_metadata = prefs.show_llm_metadata();
     }
@@ -1539,12 +1928,6 @@ impl App {
     pub fn save_selected_projects(&self) {
         let projects: Vec<String> = self.visible_projects.iter().cloned().collect();
         self.preferences.borrow_mut().set_selected_projects(projects);
-    }
-
-    /// Toggle "only by me" filter and persist
-    pub fn toggle_only_by_me(&mut self) {
-        self.only_by_me = !self.only_by_me;
-        self.preferences.borrow_mut().set_only_by_me(self.only_by_me);
     }
 
     /// Cycle through time filter options and persist
@@ -1719,6 +2102,115 @@ impl App {
         } else {
             // Fallback: just take first 60 chars
             content.chars().take(60).collect::<String>().replace('\n', " ")
+        }
+    }
+
+    // ===== Chat Search Methods (in-conversation search) =====
+
+    /// Enter chat search mode
+    pub fn enter_chat_search(&mut self) {
+        self.chat_search.active = true;
+        self.chat_search.query.clear();
+        self.chat_search.current_match = 0;
+        self.chat_search.total_matches = 0;
+        self.chat_search.match_locations.clear();
+    }
+
+    /// Exit chat search mode
+    pub fn exit_chat_search(&mut self) {
+        self.chat_search.active = false;
+        self.chat_search.query.clear();
+        self.chat_search.match_locations.clear();
+    }
+
+    /// Update chat search results based on current query
+    pub fn update_chat_search(&mut self) {
+        self.chat_search.match_locations.clear();
+        self.chat_search.current_match = 0;
+        self.chat_search.total_matches = 0;
+
+        if self.chat_search.query.trim().is_empty() {
+            return;
+        }
+
+        let query_lower = self.chat_search.query.to_lowercase();
+        let messages = self.messages();
+
+        for msg in &messages {
+            let content_lower = msg.content.to_lowercase();
+            let mut start = 0;
+
+            while let Some(pos) = content_lower[start..].find(&query_lower) {
+                let absolute_pos = start + pos;
+                self.chat_search.match_locations.push(ChatSearchMatch {
+                    message_id: msg.id.clone(),
+                    start_offset: absolute_pos,
+                    length: self.chat_search.query.len(),
+                });
+                start = absolute_pos + 1;
+            }
+        }
+
+        self.chat_search.total_matches = self.chat_search.match_locations.len();
+    }
+
+    /// Navigate to next search match
+    pub fn chat_search_next(&mut self) {
+        if self.chat_search.total_matches > 0 {
+            self.chat_search.current_match =
+                (self.chat_search.current_match + 1) % self.chat_search.total_matches;
+            self.scroll_to_current_search_match();
+        }
+    }
+
+    /// Navigate to previous search match
+    pub fn chat_search_prev(&mut self) {
+        if self.chat_search.total_matches > 0 {
+            if self.chat_search.current_match == 0 {
+                self.chat_search.current_match = self.chat_search.total_matches - 1;
+            } else {
+                self.chat_search.current_match -= 1;
+            }
+            self.scroll_to_current_search_match();
+        }
+    }
+
+    /// Scroll to make the current search match visible
+    fn scroll_to_current_search_match(&mut self) {
+        if let Some(match_loc) = self.chat_search.match_locations.get(self.chat_search.current_match) {
+            let messages = self.messages();
+            // Find the message index
+            if let Some((msg_idx, _)) = messages.iter().enumerate()
+                .find(|(_, m)| m.id == match_loc.message_id)
+            {
+                self.selected_message_index = msg_idx;
+                // Scroll will happen naturally in render
+            }
+        }
+    }
+
+    /// Check if a message ID has search matches
+    pub fn message_has_search_match(&self, message_id: &str) -> bool {
+        self.chat_search.active &&
+            self.chat_search.match_locations.iter().any(|m| m.message_id == message_id)
+    }
+
+    /// Get search matches for a specific message
+    pub fn get_message_search_matches(&self, message_id: &str) -> Vec<&ChatSearchMatch> {
+        if !self.chat_search.active {
+            return vec![];
+        }
+        self.chat_search.match_locations.iter()
+            .filter(|m| m.message_id == message_id)
+            .collect()
+    }
+
+    /// Check if a match is the currently focused one
+    pub fn is_current_search_match(&self, message_id: &str, start_offset: usize) -> bool {
+        if let Some(current) = self.chat_search.match_locations.get(self.chat_search.current_match) {
+            current.message_id == message_id && current.start_offset == start_offset
+        } else {
+            false
         }
     }
 
@@ -1938,9 +2430,9 @@ impl App {
         self.vim_enabled = !self.vim_enabled;
         if self.vim_enabled {
             self.vim_mode = VimMode::Normal;
-            self.set_status("Vim mode enabled (Esc=normal, i/a=insert)");
+            self.notify(Notification::info("Vim mode enabled (Esc=normal, i/a=insert)"));
         } else {
-            self.set_status("Vim mode disabled");
+            self.notify(Notification::info("Vim mode disabled"));
         }
     }
 
@@ -1965,12 +2457,11 @@ impl App {
     /// Toggle visibility of archived conversations
     pub fn toggle_show_archived(&mut self) {
         self.show_archived = !self.show_archived;
-        let status = if self.show_archived {
-            "Showing archived conversations"
+        if self.show_archived {
+            self.notify(Notification::info("Showing archived conversations"));
         } else {
-            "Hiding archived conversations"
-        };
-        self.set_status(status);
+            self.notify(Notification::info("Hiding archived conversations"));
+        }
     }
 
     /// Check if a thread is archived
@@ -1981,6 +2472,26 @@ impl App {
     /// Toggle archive status of a thread
     pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
         self.preferences.borrow_mut().toggle_thread_archived(thread_id)
+    }
+
+    /// Toggle visibility of archived projects
+    pub fn toggle_show_archived_projects(&mut self) {
+        self.show_archived_projects = !self.show_archived_projects;
+        if self.show_archived_projects {
+            self.notify(Notification::info("Showing archived projects"));
+        } else {
+            self.notify(Notification::info("Hiding archived projects"));
+        }
+    }
+
+    /// Check if a project is archived
+    pub fn is_project_archived(&self, project_a_tag: &str) -> bool {
+        self.preferences.borrow().is_project_archived(project_a_tag)
+    }
+
+    /// Toggle archive status of a project
+    pub fn toggle_project_archived(&mut self, project_a_tag: &str) -> bool {
+        self.preferences.borrow_mut().toggle_project_archived(project_a_tag)
     }
 }
 

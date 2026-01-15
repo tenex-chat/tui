@@ -32,6 +32,11 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::CreateAgent(ref state) = app.modal_state {
         super::render_create_agent(f, area, state);
     }
+
+    // Command palette overlay (Ctrl+T)
+    if let ModalState::CommandPalette(ref state) = app.modal_state {
+        super::render_command_palette(f, area, state);
+    }
 }
 
 /// Render the agent list with search filter

@@ -401,6 +401,7 @@ impl AppDataStore {
                     }
                     thread.status_label = metadata.status_label;
                     thread.status_current_activity = metadata.status_current_activity;
+                    thread.summary = metadata.summary;
                     thread.last_activity = metadata.created_at;
                     break;
                 }
@@ -656,6 +657,7 @@ impl AppDataStore {
             let title = metadata.title.clone();
             let status_label = metadata.status_label;
             let status_current_activity = metadata.status_current_activity;
+            let summary = metadata.summary;
             let created_at = metadata.created_at;
 
             tracing::debug!(
@@ -681,6 +683,7 @@ impl AppDataStore {
                     // Update status fields
                     thread.status_label = status_label;
                     thread.status_current_activity = status_current_activity;
+                    thread.summary = summary;
                     // Update last_activity and maintain sort order
                     thread.last_activity = created_at;
                     // Re-sort to maintain order by last_activity (most recent first)

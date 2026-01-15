@@ -2,7 +2,7 @@ use anyhow::Result;
 use nostr_sdk::prelude::*;
 use std::time::Duration;
 
-const RELAY_URL: &str = "wss://tenex.chat";
+use tenex_core::constants::RELAY_URL;
 
 #[tokio::main]
 async fn main() -> Result<()> {

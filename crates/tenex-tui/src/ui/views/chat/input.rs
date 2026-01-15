@@ -1,4 +1,6 @@
 use crate::ui::card;
+use crate::ui::layout;
+use crate::ui::notifications::NotificationLevel;
 use crate::ui::{theme, App, InputMode, ModalState};
 use ratatui::{
     layout::Rect,
@@ -8,10 +10,15 @@ use ratatui::{
     Frame,
 };
 
+/// Maximum number of visible content lines before scrolling kicks in
+pub(crate) const MAX_VISIBLE_LINES: usize = 15;
+
 pub(crate) fn input_height(app: &App) -> u16 {
     // +5 = 1 for padding top, 1 for context line at bottom, 2 for half-block borders, 1 extra
     let line_count = app.chat_editor.line_count().max(1);
-    (line_count as u16 + 5).clamp(6, 14)
+    // Allow up to MAX_VISIBLE_LINES (15) content lines, then scroll
+    // Min height 6 (1 line + chrome), max height 20 (15 lines + chrome)
+    (line_count as u16 + 5).clamp(6, MAX_VISIBLE_LINES as u16 + 5)
 }
 
 pub(crate) fn has_attachments(app: &App) -> bool {
@@ -19,17 +26,28 @@ pub(crate) fn has_attachments(app: &App) -> bool {
 }
 
 pub(crate) fn has_status(app: &App) -> bool {
-    app.status_message.is_some()
+    app.current_notification().is_some()
 }
 
 pub(crate) fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
-    if let Some(ref msg) = app.status_message {
+    if let Some(notification) = app.current_notification() {
+        // Choose color based on notification level
+        let color = match notification.level {
+            NotificationLevel::Info => theme::ACCENT_PRIMARY,
+            NotificationLevel::Success => theme::ACCENT_SUCCESS,
+            NotificationLevel::Warning => theme::ACCENT_WARNING,
+            NotificationLevel::Error => theme::ACCENT_ERROR,
+        };
+
         let status_line = Line::from(vec![
-            Span::styled("⏳ ", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(
-                msg.as_str(),
+                format!("{} ", notification.level.icon()),
+                Style::default().fg(color),
+            ),
+            Span::styled(
+                notification.message.as_str(),
                 Style::default()
-                    .fg(theme::ACCENT_WARNING)
+                    .fg(color)
                     .add_modifier(ratatui::style::Modifier::BOLD),
             ),
         ]);
@@ -88,7 +106,11 @@ pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(attachments, area);
 }
 
-pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
+pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
+    // Update wrap width for visual line navigation - use consistent padding
+    let input_padding = layout::CONTENT_PADDING_H as usize;
+    let input_content_width_val = area.width.saturating_sub((1 + input_padding * 2) as u16) as usize;
+    app.chat_input_wrap_width = input_content_width_val;
     // Normal chat input - deterministic color border based on user's pubkey
     let is_input_active =
         app.input_mode == InputMode::Editing && !matches!(app.modal_state, ModalState::AskModal(_));
@@ -128,40 +150,42 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
 
     // Build input card with padding and context line at bottom
     let input_text = app.chat_editor.text.as_str();
-    let mut lines: Vec<Line> = Vec::new();
-    let input_content_width = area.width.saturating_sub(5) as usize; // -5 for "│  " left and "  " right padding
+    let input_content_width = input_content_width_val;
 
-    // Top padding line
-    lines.push(Line::from(vec![
-        Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-        Span::styled(
-            " ".repeat(area.width.saturating_sub(1) as usize),
-            Style::default().bg(input_bg),
-        ),
-    ]));
+    // First, calculate cursor's visual row for scrolling
+    let cursor_pos = app.chat_editor.cursor;
+    let before_cursor = &input_text[..cursor_pos.min(input_text.len())];
+    let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
+    let col_in_last_line = cursor_pos - last_line_start;
+    let cursor_visual_row =
+        before_cursor.matches('\n').count() + col_in_last_line / input_content_width.max(1);
+    let visual_col = col_in_last_line % input_content_width.max(1);
+
+    // Build all content lines first (without top padding)
+    let mut content_lines: Vec<Line> = Vec::new();
 
     if input_text.is_empty() {
         // Placeholder text when empty
         let placeholder = if is_input_active { "Type your message..." } else { "" };
         let pad = input_content_width.saturating_sub(placeholder.len());
-        lines.push(Line::from(vec![
+        content_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-            Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
+            Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
             Span::styled(
                 placeholder,
                 Style::default().fg(theme::TEXT_DIM).bg(input_bg),
             ),
             Span::styled(
-                " ".repeat(pad + 2),
+                " ".repeat(pad + input_padding),
                 Style::default().bg(input_bg),
-            ), // +2 right padding
+            ),
         ]));
     } else {
         // Render each line of input with padding, wrapping long lines
         for line in input_text.lines() {
             // Wrap long lines to fit within content width
             let mut remaining = line;
-            while !remaining.is_empty() {
+            loop {
                 let (chunk, rest) = if remaining.len() > input_content_width {
                     // Find a safe UTF-8 boundary
                     let mut split_at = input_content_width;
@@ -177,24 +201,28 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
                 };
 
                 let pad = input_content_width.saturating_sub(chunk.len());
-                lines.push(Line::from(vec![
+                content_lines.push(Line::from(vec![
                     Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-                    Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
+                    Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
                     Span::styled(
                         chunk.to_string(),
                         Style::default().fg(text_color).bg(input_bg),
                     ),
                     Span::styled(
-                        " ".repeat(pad + 2),
+                        " ".repeat(pad + input_padding),
                         Style::default().bg(input_bg),
-                    ), // +2 right padding
+                    ),
                 ]));
+
+                if rest.is_empty() {
+                    break;
+                }
                 remaining = rest;
             }
         }
-        // Handle case where input ends with newline or is single line
-        if input_text.ends_with('\n') || lines.len() == 1 {
-            lines.push(Line::from(vec![
+        // Handle case where input ends with newline
+        if input_text.ends_with('\n') {
+            content_lines.push(Line::from(vec![
                 Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
                 Span::styled(
                     " ".repeat(area.width.saturating_sub(1) as usize),
@@ -204,9 +232,46 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Reserve last line for context - pad middle lines to fill space
-    // Content area is area.height - 2 (for half-block borders), minus 1 for context line
-    let target_height = area.height.saturating_sub(3) as usize;
+    // Calculate visible window for scrolling
+    // Available height for content: area.height - 2 (half-block borders) - 1 (top padding) - 1 (context line)
+    let available_content_lines = area.height.saturating_sub(4) as usize;
+    let total_content_lines = content_lines.len();
+
+    // Determine scroll offset to keep cursor visible
+    let scroll_offset = if total_content_lines <= available_content_lines {
+        0
+    } else {
+        // Keep cursor roughly centered, but clamp to valid range
+        let half_visible = available_content_lines / 2;
+        if cursor_visual_row < half_visible {
+            0
+        } else if cursor_visual_row + half_visible >= total_content_lines {
+            total_content_lines.saturating_sub(available_content_lines)
+        } else {
+            cursor_visual_row.saturating_sub(half_visible)
+        }
+    };
+
+    // Build final lines with scrolling applied
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Top padding line
+    lines.push(Line::from(vec![
+        Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
+        Span::styled(
+            " ".repeat(area.width.saturating_sub(1) as usize),
+            Style::default().bg(input_bg),
+        ),
+    ]));
+
+    // Add visible content lines
+    let visible_end = (scroll_offset + available_content_lines).min(total_content_lines);
+    for line in content_lines.into_iter().skip(scroll_offset).take(visible_end - scroll_offset) {
+        lines.push(line);
+    }
+
+    // Pad to fill available space if needed
+    let target_height = area.height.saturating_sub(3) as usize; // -2 for borders, -1 for context line
     while lines.len() < target_height {
         lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
@@ -230,13 +295,20 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
     };
 
     // Context line at bottom: @agent on %branch [nudges]
-    let context_str = format!("@{}{}{}", agent_display, branch_display, nudge_display);
+    // Add scroll indicator if we're scrolling
+    let scroll_indicator = if total_content_lines > available_content_lines {
+        let current_line = cursor_visual_row + 1;
+        format!(" [{}/{}]", current_line, total_content_lines)
+    } else {
+        String::new()
+    };
+    let context_str = format!("@{}{}{}{}", agent_display, branch_display, nudge_display, scroll_indicator);
     let context_pad =
-        area.width.saturating_sub(context_str.len() as u16 + 4) as usize; // +4 for "│  " and " "
+        area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
     let mut context_spans = vec![
         Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
-        Span::styled("  ", Style::default().bg(input_bg)), // 2-char left padding
+        Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
         Span::styled(
             format!("@{}", agent_display),
             Style::default()
@@ -254,6 +326,14 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
         context_spans.push(Span::styled(
             nudge_display,
             Style::default().fg(theme::ACCENT_WARNING).bg(input_bg),
+        ));
+    }
+
+    // Add scroll indicator if scrolling
+    if !scroll_indicator.is_empty() {
+        context_spans.push(Span::styled(
+            scroll_indicator,
+            Style::default().fg(theme::TEXT_MUTED).bg(input_bg),
         ));
     }
 
@@ -287,23 +367,14 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(bottom_line, bottom_area);
 
     // Show cursor in input mode (but not when ask modal is active)
-    // +2 for half-block top + top padding line, +3 for "│  " prefix
+    // Cursor row is relative to the visible window now
     if is_input_active && !app.is_attachment_modal_open() {
-        // Calculate visual cursor position accounting for line wrapping
-        let cursor_pos = app.chat_editor.cursor;
-        let text = app.chat_editor.text.as_str();
-        let before_cursor = &text[..cursor_pos.min(text.len())];
-
-        // Handle cursor at end of text with trailing content
-        let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
-        let col_in_last_line = cursor_pos - last_line_start;
-        let visual_row =
-            before_cursor.matches('\n').count() + col_in_last_line / input_content_width.max(1);
-        let visual_col = col_in_last_line % input_content_width.max(1);
+        // Adjust cursor row for scroll offset
+        let visible_cursor_row = cursor_visual_row.saturating_sub(scroll_offset);
 
         f.set_cursor_position((
-            area.x + visual_col as u16 + 3, // +3 for "│  "
-            area.y + visual_row as u16 + 2, // +2 for half-block top + top padding
+            area.x + visual_col as u16 + (1 + input_padding) as u16, // +1 for "│" + padding
+            area.y + visible_cursor_row as u16 + 2, // +2 for half-block top + top padding
         ));
     }
 }

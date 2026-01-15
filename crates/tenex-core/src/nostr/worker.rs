@@ -9,10 +9,9 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 use tracing::{debug, error, info};
 
+use crate::constants::RELAY_URL;
 use crate::store::ingest_events;
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
-
-const RELAY_URL: &str = "wss://tenex.chat";
 
 fn debug_log(msg: &str) {
     if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
@@ -39,6 +38,8 @@ pub enum NostrCommand {
         reply_to: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
+        /// Pubkey of the ask event author (for p-tagging when replying to ask events)
+        ask_author_pubkey: Option<String>,
     },
     #[allow(dead_code)]
     BootProject {
@@ -70,6 +71,13 @@ pub enum NostrCommand {
         project_a_tag: String,
         event_ids: Vec<String>,
         agent_pubkeys: Vec<String>,
+    },
+    /// Update agent configuration (kind:24020)
+    UpdateAgentConfig {
+        project_a_tag: String,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
     },
     Shutdown,
 }
@@ -169,9 +177,9 @@ impl NostrWorker {
                             error!("Failed to publish thread: {}", e);
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids } => {
+                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey } => {
                         info!("Worker: Publishing message");
-                        if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids)) {
+                        if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
                             error!("Failed to publish message: {}", e);
                         }
                     }
@@ -203,6 +211,12 @@ impl NostrWorker {
                         info!("Worker: Sending stop command for {} events", event_ids.len());
                         if let Err(e) = rt.block_on(self.handle_stop_operations(project_a_tag, event_ids, agent_pubkeys)) {
                             error!("Failed to send stop command: {}", e);
+                        }
+                    }
+                    NostrCommand::UpdateAgentConfig { project_a_tag, agent_pubkey, model, tools } => {
+                        info!("Worker: Updating agent config for {}", &agent_pubkey[..8]);
+                        if let Err(e) = rt.block_on(self.handle_update_agent_config(project_a_tag, agent_pubkey, model, tools)) {
+                            error!("Failed to update agent config: {}", e);
                         }
                     }
                     NostrCommand::Shutdown => {
@@ -300,9 +314,13 @@ impl NostrWorker {
     }
 
     fn spawn_notification_handler(&self) {
-        let client = self.client.as_ref().unwrap().clone();
+        let client = self.client.as_ref()
+            .expect("spawn_notification_handler called before Connect")
+            .clone();
         let ndb = self.ndb.clone();
-        let rt_handle = self.rt_handle.as_ref().unwrap().clone();
+        let rt_handle = self.rt_handle.as_ref()
+            .expect("spawn_notification_handler called before runtime initialized")
+            .clone();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
@@ -612,6 +630,7 @@ impl NostrWorker {
         reply_to: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
+        ask_author_pubkey: Option<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
@@ -644,6 +663,13 @@ impl NostrWorker {
         // Agent p-tag for routing
         if let Some(agent_pk) = agent_pubkey {
             if let Ok(pk) = PublicKey::parse(&agent_pk) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
+
+        // Ask author p-tag (when replying to ask events)
+        if let Some(ask_pk) = ask_author_pubkey {
+            if let Ok(pk) = PublicKey::parse(&ask_pk) {
                 event = event.tag(Tag::public_key(pk));
             }
         }
@@ -960,6 +986,65 @@ impl NostrWorker {
             Ok(Ok(output)) => info!("Sent stop command: {}", output.id()),
             Ok(Err(e)) => error!("Failed to send stop command to relay: {}", e),
             Err(_) => error!("Timeout sending stop command to relay"),
+        }
+
+        Ok(())
+    }
+
+    async fn handle_update_agent_config(
+        &self,
+        project_a_tag: String,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Parse project coordinate for a-tag
+        let coordinate = Coordinate::parse(&project_a_tag)
+            .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
+
+        // Build kind:24020 agent config update event
+        let mut event = EventBuilder::new(Kind::Custom(24020), "")
+            .tag(Tag::coordinate(coordinate))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        // Add p-tag for the agent being configured
+        if let Ok(pk) = PublicKey::parse(&agent_pubkey) {
+            event = event.tag(Tag::public_key(pk));
+        }
+
+        // Add model tag if specified
+        if let Some(m) = model {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("model")),
+                vec![m],
+            ));
+        }
+
+        // Add tool tags (exhaustive list - empty means no tools)
+        for tool in &tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
+                vec![tool.clone()],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => info!("Sent agent config update: {}", output.id()),
+            Ok(Err(e)) => error!("Failed to send agent config update to relay: {}", e),
+            Err(_) => error!("Timeout sending agent config update to relay"),
         }
 
         Ok(())

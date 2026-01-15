@@ -626,6 +626,204 @@ impl TextEditor {
         (row, col)
     }
 
+    /// Get visual cursor position accounting for line wrapping at given width
+    pub fn visual_cursor_position(&self, wrap_width: usize) -> (usize, usize) {
+        if wrap_width == 0 {
+            return self.cursor_position();
+        }
+        let before_cursor = &self.text[..self.cursor];
+        let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col_in_last_line = self.cursor - last_line_start;
+
+        // Count visual rows from logical lines + wrapping within lines
+        let mut visual_row = 0;
+        for (i, line) in self.text.split('\n').enumerate() {
+            let line_start = if i == 0 {
+                0
+            } else {
+                self.text[..self.cursor]
+                    .match_indices('\n')
+                    .nth(i - 1)
+                    .map(|(idx, _)| idx + 1)
+                    .unwrap_or(0)
+            };
+
+            // Check if cursor is on this logical line
+            if self.cursor >= line_start && self.cursor <= line_start + line.len() {
+                // Cursor is on this line - add wrapped rows before cursor position
+                visual_row += col_in_last_line / wrap_width;
+                break;
+            } else {
+                // Add all visual rows from this logical line
+                visual_row += if line.is_empty() {
+                    1
+                } else {
+                    (line.len() + wrap_width - 1) / wrap_width
+                };
+            }
+        }
+
+        let visual_col = col_in_last_line % wrap_width;
+        (visual_row, visual_col)
+    }
+
+    /// Move to beginning of visual line (accounting for wrap width)
+    pub fn move_to_visual_line_start(&mut self, wrap_width: usize) {
+        if wrap_width == 0 {
+            self.move_to_line_start();
+            return;
+        }
+
+        // Find start of current logical line
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let col_in_line = self.cursor - logical_line_start;
+
+        // Which visual line within this logical line are we on?
+        let visual_line_in_logical = col_in_line / wrap_width;
+
+        // Go to start of that visual line
+        self.cursor = logical_line_start + (visual_line_in_logical * wrap_width);
+    }
+
+    /// Move to end of visual line (accounting for wrap width)
+    pub fn move_to_visual_line_end(&mut self, wrap_width: usize) {
+        if wrap_width == 0 {
+            self.move_to_line_end();
+            return;
+        }
+
+        // Find start and end of current logical line
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let logical_line_end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        let logical_line_len = logical_line_end - logical_line_start;
+
+        let col_in_line = self.cursor - logical_line_start;
+
+        // Which visual line within this logical line are we on?
+        let visual_line_in_logical = col_in_line / wrap_width;
+
+        // Calculate end of this visual line
+        let visual_line_end = ((visual_line_in_logical + 1) * wrap_width).min(logical_line_len);
+
+        self.cursor = logical_line_start + visual_line_end;
+    }
+
+    /// Move up one visual line (accounting for wrap width)
+    pub fn move_up_visual(&mut self, wrap_width: usize) {
+        self.clear_selection();
+        if wrap_width == 0 {
+            self.move_up();
+            return;
+        }
+
+        // Find current logical line
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let col_in_line = self.cursor - logical_line_start;
+        let visual_line_in_logical = col_in_line / wrap_width;
+        let col_in_visual_line = col_in_line % wrap_width;
+
+        if visual_line_in_logical > 0 {
+            // Move up within the same logical line
+            let target_col = ((visual_line_in_logical - 1) * wrap_width) + col_in_visual_line;
+            self.cursor = logical_line_start + target_col;
+        } else {
+            // Need to move to previous logical line
+            if logical_line_start == 0 {
+                // Already at first line, move to start
+                self.cursor = 0;
+                return;
+            }
+
+            // Find previous logical line
+            let prev_line_end = logical_line_start - 1; // The '\n' character
+            let prev_line_start = self.text[..prev_line_end]
+                .rfind('\n')
+                .map(|i| i + 1)
+                .unwrap_or(0);
+            let prev_line_len = prev_line_end - prev_line_start;
+
+            // How many visual lines does prev line have?
+            let prev_visual_lines = if prev_line_len == 0 {
+                1
+            } else {
+                (prev_line_len + wrap_width - 1) / wrap_width
+            };
+
+            // Go to last visual line of prev logical line, same column
+            let last_visual_line_start = (prev_visual_lines - 1) * wrap_width;
+            let target_col = (last_visual_line_start + col_in_visual_line).min(prev_line_len);
+            self.cursor = prev_line_start + target_col;
+        }
+    }
+
+    /// Move down one visual line (accounting for wrap width)
+    pub fn move_down_visual(&mut self, wrap_width: usize) {
+        self.clear_selection();
+        if wrap_width == 0 {
+            self.move_down();
+            return;
+        }
+
+        // Find current logical line
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let logical_line_end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        let logical_line_len = logical_line_end - logical_line_start;
+
+        let col_in_line = self.cursor - logical_line_start;
+        let visual_line_in_logical = col_in_line / wrap_width;
+        let col_in_visual_line = col_in_line % wrap_width;
+
+        // How many visual lines does current logical line have?
+        let current_visual_lines = if logical_line_len == 0 {
+            1
+        } else {
+            (logical_line_len + wrap_width - 1) / wrap_width
+        };
+
+        if visual_line_in_logical < current_visual_lines - 1 {
+            // Move down within the same logical line
+            let target_col = ((visual_line_in_logical + 1) * wrap_width) + col_in_visual_line;
+            self.cursor = logical_line_start + target_col.min(logical_line_len);
+        } else {
+            // Need to move to next logical line
+            if logical_line_end >= self.text.len() {
+                // Already at last line, move to end
+                self.cursor = self.text.len();
+                return;
+            }
+
+            // Find next logical line
+            let next_line_start = logical_line_end + 1; // After the '\n'
+            let next_line_end = self.text[next_line_start..]
+                .find('\n')
+                .map(|i| next_line_start + i)
+                .unwrap_or(self.text.len());
+            let next_line_len = next_line_end - next_line_start;
+
+            // Go to first visual line of next logical line, same column
+            let target_col = col_in_visual_line.min(next_line_len);
+            self.cursor = next_line_start + target_col;
+        }
+    }
+
     /// Total number of attachments (images + pastes)
     pub fn total_attachments(&self) -> usize {
         self.image_attachments.len() + self.attachments.len()

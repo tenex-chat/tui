@@ -227,6 +227,8 @@ mod tests {
             tool_name: None,
             tool_args: None,
             llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
         }
     }
 
@@ -245,6 +247,8 @@ mod tests {
             tool_name: Some(tool_name.to_string()),
             tool_args: Some(tool_args.to_string()),
             llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
         }
     }
 

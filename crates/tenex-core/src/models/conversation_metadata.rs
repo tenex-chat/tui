@@ -7,6 +7,7 @@ pub struct ConversationMetadata {
     pub created_at: u64,
     pub status_label: Option<String>,
     pub status_current_activity: Option<String>,
+    pub summary: Option<String>,
 }
 
 impl ConversationMetadata {
@@ -21,6 +22,7 @@ impl ConversationMetadata {
         let mut title: Option<String> = None;
         let mut status_label: Option<String> = None;
         let mut status_current_activity: Option<String> = None;
+        let mut summary: Option<String> = None;
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -41,6 +43,9 @@ impl ConversationMetadata {
                 Some("status-current-activity") => {
                     status_current_activity = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
                 }
+                Some("summary") => {
+                    summary = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                }
                 _ => {}
             }
         }
@@ -53,6 +58,7 @@ impl ConversationMetadata {
             created_at,
             status_label,
             status_current_activity,
+            summary,
         })
     }
 }

@@ -10,6 +10,7 @@ pub mod project;
 pub mod project_draft;
 pub mod project_status;
 pub mod report;
+pub mod tag_utils;
 pub mod thread;
 pub mod time_filter;
 

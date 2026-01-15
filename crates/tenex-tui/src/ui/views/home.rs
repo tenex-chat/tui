@@ -9,7 +9,7 @@ use crate::ui::modal::{ConversationAction, ConversationActionsState, ModalState,
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 pub use crate::ui::views::home_helpers::HierarchicalThread;
-use crate::ui::{theme, App, HomeTab};
+use crate::ui::{layout, theme, App, HomeTab, View};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -23,7 +23,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
     f.render_widget(bg_block, area);
 
-    let has_tabs = !app.open_tabs.is_empty();
+    let has_tabs = !app.open_tabs().is_empty();
 
     // Layout: Header tabs | Main area | Help bar | Optional tab bar
     let chunks = if has_tabs {
@@ -31,7 +31,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(2), // Tab header
             Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Help bar
-            Constraint::Length(1), // Open tabs bar
+            Constraint::Length(2), // Open tabs bar (2 lines: title + project)
         ])
         .split(area)
     } else {
@@ -48,23 +48,20 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
     // Split main area into content and sidebar (sidebar on RIGHT)
     let main_chunks = Layout::horizontal([
-        Constraint::Min(0),     // Content
-        Constraint::Length(42), // Sidebar (fixed width, on RIGHT)
+        Constraint::Min(0),                            // Content
+        Constraint::Length(layout::SIDEBAR_WIDTH_HOME), // Sidebar (fixed width, on RIGHT)
     ])
     .split(chunks[1]);
 
-    // Render content based on active tab (with left and right padding)
+    // Render content based on active tab (with consistent padding)
     let content_area = main_chunks[0];
-    let padded_content = Rect::new(
-        content_area.x + 2, // 2-char left padding
-        content_area.y,
-        content_area.width.saturating_sub(4), // 2 left + 2 right padding (gap before sidebar)
-        content_area.height,
-    );
+    let padded_content = layout::with_content_padding(content_area);
     match app.home_panel_focus {
         HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
         HomeTab::Reports => render_reports_list(f, app, padded_content),
+        HomeTab::Status => render_status_list(f, app, padded_content),
+        HomeTab::Search => render_search_tab(f, app, padded_content),
     }
 
     // Render sidebar on the right
@@ -114,7 +111,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Tab modal overlay (Alt+/)
-    if app.showing_tab_modal {
+    if app.showing_tab_modal() {
         render_tab_modal(f, app, area);
     }
 
@@ -122,10 +119,16 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     if app.showing_search_modal {
         render_search_modal(f, app, area);
     }
+
+    // Command palette overlay (Ctrl+T)
+    if let ModalState::CommandPalette(ref state) = app.modal_state {
+        super::render_command_palette(f, area, state);
+    }
 }
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let inbox_count = app.inbox_items().iter().filter(|i| !i.is_read).count();
+    let status_count = app.status_threads().iter().filter(|(t, _)| t.status_current_activity.is_some()).count();
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
@@ -153,6 +156,18 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Reports", tab_style(HomeTab::Reports)));
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Status", tab_style(HomeTab::Status)));
+
+    if status_count > 0 {
+        spans.push(Span::styled(
+            format!(" ({})", status_count),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ));
+    }
+
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Search", tab_style(HomeTab::Search)));
 
     // Show archived mode indicator
     if app.show_archived {
@@ -177,6 +192,13 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
             if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::Status { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::Status { accent } else { blank }),
+        Span::styled(if status_count > 0 { "    " } else { "" }, blank),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::Search { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::Search { accent } else { blank }),
     ];
     let indicator_line = Line::from(indicator_spans);
 
@@ -205,24 +227,28 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships);
 
     // Helper to calculate card height
-    // Full mode: 3 lines (title+project+status, summary+author+time, spacing) + optional activity
+    // Full mode: 4 lines (title, summary, activity, reply) + spacing, but some may be hidden
     // Compact mode: 2 lines (title, spacing)
     // Selected items add 2 lines for half-block borders (top + bottom)
     let calc_card_height = |item: &HierarchicalThread, is_selected: bool| -> u16 {
         let is_compact = item.depth > 0;
+        if is_compact {
+            return if is_selected { 4 } else { 2 }; // 2 lines + optional borders
+        }
+        // Full mode: title + summary + activity (if present) + reply + spacing
+        let has_summary = item.thread.summary.is_some();
         let has_activity = item.thread.status_current_activity.is_some();
-        let base = if is_compact {
-            2
-        } else if has_activity {
-            4 // title row, summary row, activity row, spacing
-        } else {
-            3 // title row, summary row, spacing
-        };
-        if is_selected { base + 2 } else { base }
+        // Line 1: title, Line 2: summary (or skip), Line 3: activity (or skip), Line 4: reply, Line 5: spacing
+        let mut lines = 1; // title always
+        if has_summary { lines += 1; } // summary
+        if has_activity { lines += 1; } // activity
+        lines += 1; // reply preview always
+        lines += 1; // spacing
+        if is_selected { lines + 2 } else { lines }
     };
 
     // Calculate scroll offset to keep selected item visible
-    let selected_idx = app.selected_recent_index;
+    let selected_idx = app.current_selection();
     let mut scroll_offset: u16 = 0;
 
     // Calculate cumulative height up to and including selected item
@@ -470,10 +496,14 @@ fn render_card_content(
         line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
         lines.push(Line::from(line2));
     } else {
-        // FULL MODE: Table-like layout (3 lines + optional activity + spacing)
+        // FULL MODE: Table-like layout
+        // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
+        // LINE 2: [summary] (if present)
+        // LINE 3: [activity] (if present)
+        // LINE 4: [reply preview]       [author]      [time]
+        // LINE 5: spacing
 
         // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
-        // Build title with spinner and nested count
         let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
         let nested_suffix = if has_children && child_count > 0 {
             format!(" {}", child_count)
@@ -527,48 +557,59 @@ fn render_card_content(
         line1.push(Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)));
         lines.push(Line::from(line1));
 
-        // LINE 2: [summary]            [author]      [time]
+        // LINE 2: [summary] (if present) - from metadata summary tag
+        if let Some(ref summary) = thread.summary {
+            let mut line_summary = Vec::new();
+            if !indent.is_empty() {
+                line_summary.push(Span::styled(indent.clone(), Style::default()));
+            }
+            line_summary.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+            let summary_truncated = truncate_with_ellipsis(summary, main_col_width + middle_col_width + right_col_width);
+            line_summary.push(Span::styled(summary_truncated, Style::default().fg(theme::TEXT_MUTED)));
+            lines.push(Line::from(line_summary));
+        }
+
+        // LINE 3: Activity (if present)
+        if let Some(ref activity) = thread.status_current_activity {
+            let mut line_activity = Vec::new();
+            if !indent.is_empty() {
+                line_activity.push(Span::styled(indent.clone(), Style::default()));
+            }
+            line_activity.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+            line_activity.push(Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)));
+            line_activity.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            lines.push(Line::from(line_activity));
+        }
+
+        // LINE 4: [reply preview]       [author]      [time]
         let preview_max = main_col_width;
         let preview_truncated = truncate_with_ellipsis(&preview, preview_max);
         let preview_len = preview_truncated.chars().count();
         let preview_padding = main_col_width.saturating_sub(preview_len);
 
-        // Author for line 2 (middle column) - show thread creator
+        // Author (middle column) - show thread creator
         let author_display = format!("@{}", thread_author_name);
         let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
         let author_len = author_truncated.chars().count();
         let author_padding = middle_col_width.saturating_sub(author_len);
 
-        // Time for line 2 (right column, right-aligned)
+        // Time (right column, right-aligned)
         let time_len = time_str.chars().count();
         let time_padding = right_col_width.saturating_sub(time_len);
 
-        let mut line2 = Vec::new();
-        // Add indent for nested items
+        let mut line_reply = Vec::new();
         if !indent.is_empty() {
-            line2.push(Span::styled(indent.clone(), Style::default()));
+            line_reply.push(Span::styled(indent.clone(), Style::default()));
         }
-        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
-        line2.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
-        line2.push(Span::styled(" ".repeat(preview_padding), Style::default()));
-        line2.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
-        line2.push(Span::styled(" ".repeat(author_padding), Style::default()));
-        line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
-        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
-        lines.push(Line::from(line2));
+        line_reply.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
+        line_reply.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
+        line_reply.push(Span::styled(" ".repeat(preview_padding), Style::default()));
+        line_reply.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
+        line_reply.push(Span::styled(" ".repeat(author_padding), Style::default()));
+        line_reply.push(Span::styled(" ".repeat(time_padding), Style::default()));
+        line_reply.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        lines.push(Line::from(line_reply));
 
-        // Line 3: Activity (if present)
-        if let Some(ref activity) = thread.status_current_activity {
-            let mut line3 = Vec::new();
-            // Add indent for nested items
-            if !indent.is_empty() {
-                line3.push(Span::styled(indent.clone(), Style::default()));
-            }
-            line3.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
-            line3.push(Span::styled(card::ACTIVITY_GLYPH, Style::default().fg(theme::ACCENT_PRIMARY)));
-            line3.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
-            lines.push(Line::from(line3));
-        }
         // Spacing line
         lines.push(Line::from(""));
     }
@@ -623,11 +664,12 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    let selected_idx = app.current_selection();
     let items: Vec<ListItem> = inbox_items
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let is_selected = i == app.selected_inbox_index;
+            let is_selected = i == selected_idx;
             render_inbox_card(app, item, is_selected)
         })
         .collect();
@@ -636,7 +678,7 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     let list = List::new(items).highlight_style(Style::default());
 
     let mut state = ListState::default();
-    state.select(Some(app.selected_inbox_index));
+    state.select(Some(selected_idx));
     f.render_stateful_widget(list, area, &mut state);
 }
 
@@ -737,8 +779,9 @@ fn render_reports_list(f: &mut Frame, app: &App, area: Rect) {
 
     // Render report cards
     let mut y_offset = 0u16;
+    let selected_idx = app.current_selection();
     for (i, report) in reports.iter().enumerate() {
-        let is_selected = i == app.selected_report_index;
+        let is_selected = i == selected_idx;
         let card_height = 3u16; // title, summary, spacing
 
         if y_offset + card_height > chunks[1].height {
@@ -817,6 +860,427 @@ fn render_report_card(
     }
 }
 
+/// Render the Status tab - conversations with status metadata
+fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
+    let status_threads = app.status_threads();
+
+    if status_threads.is_empty() {
+        let empty = Paragraph::new("No conversations with status updates")
+            .style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, area);
+        return;
+    }
+
+    let selected_idx = app.current_selection();
+    let mut y_offset = 0u16;
+
+    for (i, (thread, a_tag)) in status_threads.iter().enumerate() {
+        let is_selected = i == selected_idx;
+        let card_height = 4u16; // title, summary, activity, spacing
+
+        if y_offset + card_height > area.height {
+            break;
+        }
+
+        let card_area = Rect::new(
+            area.x,
+            area.y + y_offset,
+            area.width,
+            card_height,
+        );
+
+        render_status_card(f, app, thread, a_tag, is_selected, card_area);
+        y_offset += card_height;
+    }
+}
+
+/// Render a single status card with table-aligned columns
+/// Layout matches Recent tab:
+/// [bullet] [title]                    [project]       [status]
+///          [summary/activity]         [author]        [time]
+fn render_status_card(
+    f: &mut Frame,
+    app: &App,
+    thread: &Thread,
+    a_tag: &str,
+    is_selected: bool,
+    area: Rect,
+) {
+    let store = app.data_store.borrow();
+    let project_name = store.get_project_name(a_tag);
+    let author_name = store.get_profile_name(&thread.pubkey);
+    drop(store);
+
+    let time_str = crate::ui::format::format_relative_time(thread.last_activity);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let has_activity = thread.status_current_activity.is_some();
+
+    // Column widths for table layout (matching Recent tab)
+    let middle_col_width = 22;
+    let right_col_width = 14;
+    let total_width = area.width as usize;
+    let fixed_cols_width = middle_col_width + right_col_width + 2; // +2 for spacing
+    let bullet_width = 2; // "● " or "  "
+    let main_col_width = total_width.saturating_sub(fixed_cols_width + bullet_width);
+
+    // Status text for right column
+    let status_text = thread.status_label.as_ref()
+        .map(|s| format!("{} {}", status_label_to_symbol(s), s))
+        .unwrap_or_default();
+
+    let mut lines: Vec<Line> = Vec::new();
+
+    // LINE 1: [bullet] [title]          [project]       [status]
+    let bullet = if is_selected || has_activity { card::BULLET } else { card::SPACER };
+    let bullet_color = if has_activity { theme::ACCENT_SUCCESS } else { theme::ACCENT_PRIMARY };
+
+    let title_max = main_col_width;
+    let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
+    let title_len = title_truncated.chars().count();
+    let title_padding = main_col_width.saturating_sub(title_len);
+
+    // Project (middle column)
+    let project_truncated = truncate_with_ellipsis(&project_name, middle_col_width.saturating_sub(2));
+    let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
+    let project_len = project_display.chars().count();
+    let project_padding = middle_col_width.saturating_sub(project_len);
+
+    // Status (right column, right-aligned)
+    let status_truncated = truncate_with_ellipsis(&status_text, right_col_width);
+    let status_len = status_truncated.chars().count();
+    let status_padding = right_col_width.saturating_sub(status_len);
+
+    let line1 = Line::from(vec![
+        Span::styled(bullet, Style::default().fg(bullet_color)),
+        Span::styled(title_truncated, title_style),
+        Span::styled(" ".repeat(title_padding), Style::default()),
+        Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))),
+        Span::styled(" ".repeat(project_padding), Style::default()),
+        Span::styled(" ".repeat(status_padding), Style::default()),
+        Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)),
+    ]);
+    lines.push(line1);
+
+    // LINE 2: Summary or activity indicator  [author]        [time]
+    let line2_content = if let Some(ref activity) = thread.status_current_activity {
+        // Show activity with pulsing indicator
+        let indicator = if app.frame_counter % 4 < 2 { "◉" } else { "○" };
+        let activity_max = main_col_width.saturating_sub(3); // Space for indicator
+        let activity_text = truncate_with_ellipsis(activity, activity_max);
+        format!("{} {}", indicator, activity_text)
+    } else if let Some(ref summary) = thread.summary {
+        truncate_with_ellipsis(summary, main_col_width)
+    } else {
+        String::new()
+    };
+
+    let line2_style = if thread.status_current_activity.is_some() {
+        Style::default().fg(theme::ACCENT_SUCCESS)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let line2_len = line2_content.chars().count();
+    let line2_padding = main_col_width.saturating_sub(line2_len);
+
+    // Author (middle column)
+    let author_display = format!("@{}", author_name);
+    let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
+    let author_len = author_truncated.chars().count();
+    let author_padding = middle_col_width.saturating_sub(author_len);
+
+    // Time (right column, right-aligned)
+    let time_len = time_str.chars().count();
+    let time_padding = right_col_width.saturating_sub(time_len);
+
+    let line2 = Line::from(vec![
+        Span::styled("  ", Style::default()), // Align with title (after bullet)
+        Span::styled(line2_content, line2_style),
+        Span::styled(" ".repeat(line2_padding), Style::default()),
+        Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)),
+        Span::styled(" ".repeat(author_padding), Style::default()),
+        Span::styled(" ".repeat(time_padding), Style::default()),
+        Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
+    ]);
+    lines.push(line2);
+
+    // LINE 3: Additional activity line if we have both summary and activity
+    if thread.status_current_activity.is_some() && thread.summary.is_some() {
+        if let Some(ref summary) = thread.summary {
+            let summary_max = main_col_width + middle_col_width + right_col_width;
+            let summary_text = truncate_with_ellipsis(summary, summary_max);
+            let line3 = Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(summary_text, Style::default().fg(theme::TEXT_MUTED)),
+            ]);
+            lines.push(line3);
+        }
+    }
+
+    // LINE 4: Spacing
+    lines.push(Line::from(""));
+
+    let content = Paragraph::new(lines);
+
+    if is_selected {
+        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
+    } else {
+        f.render_widget(content, area);
+    }
+}
+
+/// Render the Search tab content - full search with message display
+fn render_search_tab(f: &mut Frame, app: &App, area: Rect) {
+    use crate::ui::app::SearchMatchType;
+
+    // Layout: Search bar + Results
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // Search bar
+        Constraint::Min(0),    // Results
+    ])
+    .split(area);
+
+    // Render search bar
+    let search_style = if !app.search_filter.is_empty() {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let search_text = if app.search_filter.is_empty() {
+        "/ Search threads and messages...".to_string()
+    } else {
+        format!("/ {}", app.search_filter)
+    };
+
+    let search_line = Paragraph::new(search_text).style(search_style);
+    f.render_widget(search_line, chunks[0]);
+
+    // Get search results
+    let results = app.search_results();
+    let selected_idx = app.current_selection();
+
+    if results.is_empty() {
+        // Show placeholder or "no results" message
+        let msg = if app.search_filter.is_empty() {
+            "Type to search threads and messages"
+        } else {
+            "No results found"
+        };
+        let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    // Render search results with full message content
+    let mut y_offset = 0u16;
+    let store = app.data_store.borrow();
+
+    for (i, result) in results.iter().enumerate() {
+        let is_selected = i == selected_idx;
+
+        // Calculate card height based on content
+        // Line 1: Title + project + time
+        // Line 2: Match type indicator
+        // Lines 3+: Message content (if message match)
+        // Spacing line
+        let base_height = 3u16;
+        let content_lines = if let SearchMatchType::Message { ref message_id } = result.match_type {
+            // Get the message and show more content
+            let messages = store.get_messages(&result.thread.id);
+            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
+                // Show up to 5 lines of content
+                let content_preview: String = msg.content.chars().take(400).collect();
+                let line_count = content_preview.lines().count().min(5) as u16;
+                line_count.max(2)
+            } else {
+                2
+            }
+        } else {
+            2
+        };
+        let card_height = base_height + content_lines;
+
+        if y_offset + card_height > chunks[1].height {
+            break;
+        }
+
+        let card_area = Rect::new(
+            chunks[1].x,
+            chunks[1].y + y_offset,
+            chunks[1].width,
+            card_height,
+        );
+
+        render_search_result_card(f, app, result, is_selected, card_area, &store);
+        y_offset += card_height;
+    }
+}
+
+/// Render a single search result card with full message content
+fn render_search_result_card(
+    f: &mut Frame,
+    app: &App,
+    result: &crate::ui::app::SearchResult,
+    is_selected: bool,
+    area: Rect,
+    store: &std::cell::Ref<crate::store::AppDataStore>,
+) {
+    use crate::ui::app::SearchMatchType;
+
+    let time_str = crate::ui::format::format_relative_time(result.thread.last_activity);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let bullet = if is_selected { card::BULLET } else { card::SPACER };
+
+    // Line 1: Title + match type indicator + project + timestamp
+    let title_max = area.width as usize - 40;
+    let title = crate::ui::format::truncate_with_ellipsis(&result.thread.title, title_max);
+
+    let (type_indicator, type_color) = match &result.match_type {
+        SearchMatchType::Thread => ("[T]", theme::ACCENT_PRIMARY),
+        SearchMatchType::ConversationId => ("[I]", theme::ACCENT_WARNING),
+        SearchMatchType::Message { .. } => ("[M]", theme::ACCENT_SUCCESS),
+    };
+
+    let line1 = Line::from(vec![
+        Span::styled(bullet, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(type_indicator, Style::default().fg(type_color)),
+        Span::styled(" ", Style::default()),
+        Span::styled(title, title_style),
+        Span::styled("  ", Style::default()),
+        Span::styled(&result.project_name, Style::default().fg(theme::project_color(&result.project_a_tag))),
+        Span::styled(format!("  {}", time_str), Style::default().fg(theme::TEXT_MUTED)),
+    ]);
+
+    let mut lines = vec![line1];
+
+    // Line 2+: Show full message content if this is a message match
+    match &result.match_type {
+        SearchMatchType::Message { message_id } => {
+            let messages = store.get_messages(&result.thread.id);
+            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
+                // Get author name
+                let author_name = store.get_profile_name(&msg.pubkey);
+                let author_color = theme::user_color(&msg.pubkey);
+
+                // Author line
+                lines.push(Line::from(vec![
+                    Span::styled("  @", Style::default().fg(theme::TEXT_MUTED)),
+                    Span::styled(author_name, Style::default().fg(author_color)),
+                    Span::styled(":", Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+
+                // Message content (limited to a few lines)
+                let content_preview: String = msg.content.chars().take(400).collect();
+                let content_width = area.width as usize - 4;
+
+                // Highlight the search term in the content
+                let filter_lower = app.search_filter.to_lowercase();
+
+                for line in content_preview.lines().take(4) {
+                    let mut spans = vec![Span::styled("    ", Style::default())];
+
+                    // Check if this line contains the search term
+                    let line_lower = line.to_lowercase();
+                    if let Some(match_start) = line_lower.find(&filter_lower) {
+                        let match_end = match_start + app.search_filter.len();
+
+                        // Before match
+                        if match_start > 0 {
+                            let before = &line[..match_start];
+                            let truncated = crate::ui::format::truncate_with_ellipsis(before, content_width / 2);
+                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                        }
+
+                        // Highlighted match
+                        let match_text = &line[match_start..match_end.min(line.len())];
+                        spans.push(Span::styled(
+                            match_text.to_string(),
+                            Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING),
+                        ));
+
+                        // After match
+                        if match_end < line.len() {
+                            let after = &line[match_end..];
+                            let truncated = crate::ui::format::truncate_with_ellipsis(after, content_width / 2);
+                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                        }
+                    } else {
+                        // No match on this line, render normally
+                        let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
+                        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                    }
+
+                    lines.push(Line::from(spans));
+                }
+
+                // Show "..." if content was truncated
+                if content_preview.lines().count() > 4 || msg.content.len() > 400 {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ...", Style::default().fg(theme::TEXT_MUTED)),
+                    ]));
+                }
+            } else if let Some(excerpt) = &result.excerpt {
+                // Fallback to excerpt if message not found
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+            }
+        }
+        SearchMatchType::Thread => {
+            // Show thread summary or content excerpt
+            if let Some(ref summary) = result.thread.summary {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(
+                        crate::ui::format::truncate_with_ellipsis(summary, area.width as usize - 4),
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ),
+                ]));
+            } else if let Some(excerpt) = &result.excerpt {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+            }
+        }
+        SearchMatchType::ConversationId => {
+            // Show the ID
+            lines.push(Line::from(vec![
+                Span::styled("  ID: ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(
+                    crate::ui::format::truncate_with_ellipsis(&result.thread.id, 40),
+                    Style::default().fg(theme::ACCENT_SPECIAL),
+                ),
+            ]));
+        }
+    }
+
+    // Spacing line
+    lines.push(Line::from(""));
+
+    let content = Paragraph::new(lines);
+
+    if is_selected {
+        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
+    } else {
+        f.render_widget(content, area);
+    }
+}
+
 /// Render the project sidebar with checkboxes for filtering
 fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // Split sidebar into projects list and filter section
@@ -857,11 +1321,17 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(i);
         let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        // Reserve space for spinner (2 chars: spinner + space)
-        let name_max = if is_busy { 18 } else { 20 };
+        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+        let name_max = match (is_busy, is_archived) {
+            (true, true) => 8,   // Both spinner and archived
+            (true, false) => 18, // Just spinner
+            (false, true) => 10, // Just archived
+            (false, false) => 20, // Neither
+        };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
@@ -881,6 +1351,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
+
+        // Add archived tag if project is archived
+        if is_archived {
+            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
 
         // Add spinner if project is busy
         if is_busy {
@@ -916,10 +1391,17 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(online_count + i);
         let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let name_max = if is_busy { 18 } else { 20 };
+        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+        let name_max = match (is_busy, is_archived) {
+            (true, true) => 8,   // Both spinner and archived
+            (true, false) => 18, // Just spinner
+            (false, true) => 10, // Just archived
+            (false, false) => 20, // Neither
+        };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
@@ -939,6 +1421,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
+
+        // Add archived tag if project is archived
+        if is_archived {
+            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
 
         // Add spinner if project is busy (unlikely for offline, but for consistency)
         if is_busy {
@@ -977,19 +1464,6 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
         "─ Filters ─",
         Style::default().fg(theme::TEXT_MUTED),
     )));
-
-    // "Only by me" filter
-    let only_by_me_checkbox = if app.only_by_me { card::CHECKBOX_ON } else { card::CHECKBOX_OFF };
-    let only_by_me_style = if app.only_by_me {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    lines.push(Line::from(vec![
-        Span::styled("[m] ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(only_by_me_checkbox, only_by_me_style),
-        Span::styled(" By me", only_by_me_style),
-    ]));
 
     // Time filter
     let time_label = app.time_filter
@@ -1042,6 +1516,8 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · A agents · q quit",
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
             HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
+            HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",
+            HomeTab::Search => "/ search · ↑↓ navigate · Enter open conversation · Esc clear · A agents · q quit",
         }
     };
 
@@ -1170,8 +1646,8 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     // Dim the background
     render_modal_overlay(f, area);
 
-    // Calculate modal dimensions - dynamic based on tab count
-    let tab_count = app.open_tabs.len();
+    // Calculate modal dimensions - dynamic based on tab count (+1 for Home entry)
+    let tab_count = app.open_tabs().len() + 1; // +1 for Home
     let content_height = (tab_count + 2) as u16; // +2 for header spacing
     let total_height = content_height + 4; // +4 for padding and hints
     let height_percent = (total_height as f32 / area.height as f32).min(0.7);
@@ -1195,27 +1671,40 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     // Render header with title and hint
     let remaining = render_modal_header(f, inner_area, "Open Tabs", "esc");
 
-    // Build items list
+    // Build items list - Home is always first (option 1)
     let data_store = app.data_store.borrow();
-    let items: Vec<ModalItem> = app
-        .open_tabs
-        .iter()
-        .enumerate()
-        .map(|(i, tab)| {
-            let is_selected = i == app.tab_modal_index;
-            let is_active = i == app.active_tab_index;
+    let mut items: Vec<ModalItem> = Vec::with_capacity(app.open_tabs().len() + 1);
 
-            let project_name = data_store.get_project_name(&tab.project_a_tag);
-            let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
+    // Home entry (option 1)
+    let home_selected = app.tab_modal_index() == 0 && app.open_tabs().is_empty();
+    let home_active = app.view == View::Home;
+    let home_marker = if home_active { card::BULLET } else { card::SPACER };
+    items.push(
+        ModalItem::new(format!("{}Home (Dashboard)", home_marker))
+            .with_shortcut("1".to_string())
+            .selected(home_selected),
+    );
 
-            let active_marker = if is_active { card::BULLET } else { card::SPACER };
-            let text = format!("{}{} · {}", active_marker, project_name, title_display);
+    // Tab entries (options 2-9)
+    for (i, tab) in app.open_tabs().iter().enumerate() {
+        let is_selected = i == app.tab_modal_index();
+        let is_active = i == app.active_tab_index() && app.view == View::Chat;
 
-            ModalItem::new(text)
-                .with_shortcut(format!("{}", i + 1))
-                .selected(is_selected)
-        })
-        .collect();
+        let project_name = data_store.get_project_name(&tab.project_a_tag);
+        let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
+
+        let active_marker = if is_active { card::BULLET } else { card::SPACER };
+        let text = format!("{}{} · {}", active_marker, project_name, title_display);
+
+        // Tab number is i+2 (since 1 is Home)
+        let shortcut = if i + 2 <= 9 {
+            format!("{}", i + 2)
+        } else {
+            String::new()
+        };
+
+        items.push(ModalItem::new(text).with_shortcut(shortcut).selected(is_selected));
+    }
     drop(data_store);
 
     // Render the items
@@ -1228,7 +1717,7 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("↑↓ navigate · enter switch · x close · 0-9 jump")
+    let hints = Paragraph::new("↑↓ navigate · enter switch · x close · 1=Home 2-9=tabs")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
@@ -1369,7 +1858,7 @@ fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectAction
         .enumerate()
         .map(|(i, action)| {
             let is_selected = i == state.selected_index;
-            ModalItem::new(action.label())
+            ModalItem::new(action.label(state.is_archived))
                 .with_shortcut(action.hotkey().to_string())
                 .selected(is_selected)
         })

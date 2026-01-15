@@ -14,7 +14,7 @@ use ratatui::{
 use std::collections::{HashMap, HashSet};
 use tracing::info_span;
 
-use super::cards::{author_line, dot_line, llm_metadata_line, markdown_lines, pad_line};
+use super::cards::{author_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines};
 use super::grouping::{group_messages, DisplayItem};
 
 pub(crate) fn render_messages_panel(
@@ -151,8 +151,26 @@ pub(crate) fn render_messages_panel(
                     let group_key = group_messages.first().map(|m| m.id.as_str()).unwrap_or("");
                     let is_expanded = app.is_group_expanded(group_key);
 
-                    // Use selected background when this group is selected
-                    let bg = if is_selected { card_bg_selected } else { card_bg };
+                    // Check if any message in this group has a search match
+                    let has_search_match = app.chat_search.active &&
+                        group_messages.iter().any(|m| app.message_has_search_match(&m.id));
+                    let is_current_search = app.chat_search.active &&
+                        group_messages.iter().any(|m| {
+                            app.chat_search.match_locations.get(app.chat_search.current_match)
+                                .map(|loc| loc.message_id == m.id)
+                                .unwrap_or(false)
+                        });
+
+                    // Use appropriate background: current search match > any search match > selected > normal
+                    let bg = if is_current_search {
+                        theme::BG_SEARCH_CURRENT
+                    } else if has_search_match {
+                        theme::BG_SEARCH_MATCH
+                    } else if is_selected {
+                        card_bg_selected
+                    } else {
+                        card_bg
+                    };
 
                     // Show header only if not consecutive (first in a sequence from this author)
                     if !is_consecutive {
@@ -207,6 +225,25 @@ pub(crate) fn render_messages_panel(
                                     ),
                                 ]));
                             }
+                        } else if msg.is_reasoning {
+                            // Reasoning/thinking message: muted style, no background
+                            let parsed = parse_message_content(&msg.content);
+                            let content_text = match &parsed {
+                                MessageContent::PlainText(text) => text.clone(),
+                                MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
+                            };
+                            let rendered = render_markdown(&content_text);
+
+                            // Show dot for consecutive messages within group
+                            if msg_is_consecutive && !is_first_visible {
+                                messages_text.push(reasoning_dot_line(indicator_color));
+                            }
+
+                            messages_text.extend(reasoning_lines(
+                                &rendered,
+                                indicator_color,
+                                content_width,
+                            ));
                         } else {
                             // Non-tool message: full content with background
                             let parsed = parse_message_content(&msg.content);
@@ -284,7 +321,23 @@ pub(crate) fn render_messages_panel(
                     let indicator_color = theme::user_color(&msg.pubkey);
                     let card_bg = theme::BG_CARD;
                     let card_bg_selected = theme::BG_SELECTED;
-                    let bg = if is_selected { card_bg_selected } else { card_bg };
+
+                    // Check if this message has a search match
+                    let has_search_match = app.message_has_search_match(&msg.id);
+                    let is_current_search = app.chat_search.active &&
+                        app.chat_search.match_locations.get(app.chat_search.current_match)
+                            .map(|loc| loc.message_id == msg.id)
+                            .unwrap_or(false);
+
+                    let bg = if is_current_search {
+                        theme::BG_SEARCH_CURRENT
+                    } else if has_search_match {
+                        theme::BG_SEARCH_MATCH
+                    } else if is_selected {
+                        card_bg_selected
+                    } else {
+                        card_bg
+                    };
 
                     // Check if this is a tool use message (has tool tag) or delegation (has q_tags)
                     let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
@@ -319,6 +372,28 @@ pub(crate) fn render_messages_panel(
                                 ),
                             ]));
                         }
+                    } else if msg.is_reasoning {
+                        // Reasoning/thinking message: muted style, no background
+                        if *is_consecutive {
+                            messages_text.push(reasoning_dot_line(indicator_color));
+                        } else {
+                            messages_text.push(reasoning_author_line(&author, indicator_color));
+                        }
+
+                        // Content with markdown (muted style)
+                        let parsed = parse_message_content(&msg.content);
+                        let content_text = match &parsed {
+                            MessageContent::PlainText(text) => text.clone(),
+                            MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
+                        };
+                        let rendered = render_markdown(&content_text);
+
+                        // Content lines: muted style, no background
+                        messages_text.extend(reasoning_lines(
+                            &rendered,
+                            indicator_color,
+                            content_width,
+                        ));
                     } else {
                         // Non-tool message: render full card with background
 

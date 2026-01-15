@@ -245,6 +245,70 @@ fn llm_label(key: &str) -> &str {
     }
 }
 
+/// Render markdown content for reasoning/thinking messages
+/// Uses muted text color and no background
+pub(crate) fn reasoning_lines(
+    markdown_lines: &[Line],
+    indicator_color: Color,
+    width: usize,
+) -> Vec<Line<'static>> {
+    let content_width = width.saturating_sub(PREFIX_WIDTH);
+    let mut out = Vec::new();
+    let muted_style = Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC);
+
+    for md_line in markdown_lines {
+        // Wrap the content spans first
+        let wrapped = wrap_spans(&md_line.spans, content_width);
+
+        for wrapped_line in wrapped {
+            let mut spans = vec![
+                Span::styled("│", Style::default().fg(indicator_color)),
+                Span::styled("  ", Style::default()), // 2 spaces padding, no bg
+            ];
+
+            for span in wrapped_line {
+                // Apply muted style to all content
+                spans.push(Span::styled(span.content.to_string(), muted_style));
+            }
+
+            // No padding to full width (no background fill needed)
+            out.push(Line::from(spans));
+        }
+    }
+    out
+}
+
+/// Render author line for reasoning/thinking messages (muted style, no bg)
+pub(crate) fn reasoning_author_line(
+    author: &str,
+    indicator_color: Color,
+) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("│", Style::default().fg(indicator_color)),
+        Span::styled("  ", Style::default()), // 2 spaces for consistent padding
+        Span::styled(
+            author.to_string(),
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
+        Span::styled(
+            " (thinking)",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::ITALIC),
+        ),
+    ])
+}
+
+/// Render dot line for consecutive reasoning messages (muted style, no bg)
+pub(crate) fn reasoning_dot_line(indicator_color: Color) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("·", Style::default().fg(indicator_color)),
+        Span::styled("  ", Style::default()), // 2 spaces for consistent padding
+    ])
+}
+
 /// Render LLM metadata line (id and token info) for a selected message
 pub(crate) fn llm_metadata_line(
     message_id: &str,

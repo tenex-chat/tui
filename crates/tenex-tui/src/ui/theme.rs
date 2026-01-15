@@ -16,6 +16,12 @@ pub const BG_CARD: Color = Color::Rgb(18, 18, 18);
 /// Selected item background - subtle highlight (like bg-neutral-800)
 pub const BG_SELECTED: Color = Color::Rgb(32, 32, 32);
 
+/// Search match highlight background - subtle yellow tint
+pub const BG_SEARCH_MATCH: Color = Color::Rgb(60, 55, 30);
+
+/// Current search match highlight - brighter yellow tint
+pub const BG_SEARCH_CURRENT: Color = Color::Rgb(80, 70, 25);
+
 /// Sidebar background - very dark, almost black
 pub const BG_SIDEBAR: Color = Color::Rgb(12, 12, 12);
 
