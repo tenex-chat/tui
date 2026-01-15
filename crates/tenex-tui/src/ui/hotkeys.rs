@@ -521,33 +521,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     ),
 
     // === Tab Management ===
-    HotkeyBinding::alt(
-        HotkeyId::NextTab,
-        KeyCode::Right,
-        "Next Tab",
-        "Tabs",
-        &[HotkeyContext::ChatNormal, HotkeyContext::HomeRecent],
-    ),
-    HotkeyBinding::alt(
-        HotkeyId::PrevTab,
-        KeyCode::Left,
-        "Previous Tab",
-        "Tabs",
-        &[HotkeyContext::ChatNormal, HotkeyContext::HomeRecent],
-    ),
+    // Tab navigation is done via Ctrl+T + Left/Right (handled in command palette)
+    // These are documented here but not used for direct key resolution
     HotkeyBinding::new(
         HotkeyId::CloseTab,
         KeyCode::Char('x'),
         "Close Tab",
         "Tabs",
         &[HotkeyContext::ChatNormal],
-    ),
-    HotkeyBinding::alt(
-        HotkeyId::TabModal,
-        KeyCode::Tab,
-        "Tab Switcher",
-        "Tabs",
-        &[HotkeyContext::ChatNormal, HotkeyContext::HomeRecent],
     ),
 
     // === Home View - Recent Tab ===

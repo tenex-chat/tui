@@ -5,6 +5,10 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
+use crate::ui::state::{
+    AgentBrowserState, ChatSearchMatch, ChatSearchState,
+    MessageHistoryState, NudgeState,
+};
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -96,31 +100,7 @@ pub enum HomeTab {
     Search,
 }
 
-/// State for in-conversation search mode
-#[derive(Debug, Clone, Default)]
-pub struct ChatSearchState {
-    /// Whether search mode is active
-    pub active: bool,
-    /// Current search query
-    pub query: String,
-    /// Index of current match being viewed (0-based)
-    pub current_match: usize,
-    /// Total number of matches found
-    pub total_matches: usize,
-    /// Message IDs that contain matches, with match positions
-    pub match_locations: Vec<ChatSearchMatch>,
-}
-
-/// A single search match location in a conversation
-#[derive(Debug, Clone)]
-pub struct ChatSearchMatch {
-    /// Message ID containing the match
-    pub message_id: String,
-    /// Character offset where match starts in the message content
-    pub start_offset: usize,
-    /// Length of the match
-    pub length: usize,
-}
+// ChatSearchState and ChatSearchMatch are now in ui::state module
 
 /// An open tab representing a thread or draft conversation
 #[derive(Debug, Clone)]
@@ -308,6 +288,8 @@ pub struct App {
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
+    /// Ask event IDs that user dismissed (ESC) without answering - prevents auto-reopen
+    pub dismissed_ask_ids: HashSet<String>,
 }
 
 impl App {
@@ -390,6 +372,7 @@ impl App {
             show_archived: false,
             show_archived_projects: false,
             user_explicitly_selected_agent: false,
+            dismissed_ask_ids: HashSet::new(),
         }
     }
 
@@ -1405,6 +1388,9 @@ impl App {
         // Save current draft before switching
         self.save_chat_draft();
 
+        // Clear dismissed asks when switching conversations (so they can reappear if user returns)
+        self.dismissed_ask_ids.clear();
+
         // Track history for Alt+Tab cycling
         self.push_tab_history(index);
 
@@ -1878,10 +1864,13 @@ impl App {
     }
 
     /// Close ask UI and return to normal input
+    /// Tracks the dismissed ask ID so it won't auto-reopen
     pub fn close_ask_modal(&mut self) {
-        if matches!(self.modal_state, ModalState::AskModal(_)) {
-            self.modal_state = ModalState::None;
+        if let ModalState::AskModal(state) = &self.modal_state {
+            // Track this ask as dismissed so it doesn't auto-reopen
+            self.dismissed_ask_ids.insert(state.message_id.clone());
         }
+        self.modal_state = ModalState::None;
         self.input_mode = InputMode::Editing;
     }
 
@@ -1926,8 +1915,8 @@ impl App {
         // First check the thread root itself (if not in subthread view)
         if self.subthread_root.is_none() {
             if let Some(ref ask_event) = thread.ask_event {
-                // Check if the thread has been replied to by current user
-                if !replied_to_by_user.contains(thread_id) {
+                // Check if the thread has been replied to by current user or dismissed
+                if !replied_to_by_user.contains(thread_id) && !self.dismissed_ask_ids.contains(&thread.id) {
                     return Some((thread.id.clone(), ask_event.clone(), thread.pubkey.clone()));
                 }
             }
@@ -1946,8 +1935,8 @@ impl App {
 
         for msg in &display_messages {
             if let Some(ref ask_event) = msg.ask_event {
-                // Check if this message has been replied to by current user
-                if !replied_to_by_user.contains(msg.id.as_str()) {
+                // Check if this message has been replied to by current user or dismissed
+                if !replied_to_by_user.contains(msg.id.as_str()) && !self.dismissed_ask_ids.contains(&msg.id) {
                     return Some((msg.id.clone(), ask_event.clone(), msg.pubkey.clone()));
                 }
             }
@@ -1959,8 +1948,8 @@ impl App {
             for q_tag in &msg.q_tags {
                 // Check if this q-tag points to an ask event
                 if let Some((ask_event, pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
-                    // Check if this ask event has been replied to by current user
-                    if !replied_to_by_user.contains(q_tag.as_str()) {
+                    // Check if this ask event has been replied to by current user or dismissed
+                    if !replied_to_by_user.contains(q_tag.as_str()) && !self.dismissed_ask_ids.contains(q_tag) {
                         return Some((q_tag.clone(), ask_event, pubkey));
                     }
                 }

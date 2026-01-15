@@ -9,6 +9,7 @@ pub mod markdown;
 pub mod modal;
 pub mod notifications;
 pub mod selector;
+pub mod state;
 pub mod terminal;
 pub mod text_editor;
 pub mod theme;
@@ -17,6 +18,9 @@ pub mod tool_calls;
 pub mod views;
 
 pub use app::{App, HomeTab, InputMode, View};
+pub use state::{ChatSearchState, ChatSearchMatch, MessageHistoryState, NudgeState, AgentBrowserState};
+// Hotkey registry - used for centralized hotkey resolution and help generation
+#[allow(unused_imports)]
 pub use hotkeys::{
     HotkeyContext, HotkeyId, HotkeyBinding, HotkeyResolver,
     resolver as hotkey_resolver, resolve_hotkey, get_binding, get_bindings_for_context,

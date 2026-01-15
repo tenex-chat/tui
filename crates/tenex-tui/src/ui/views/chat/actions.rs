@@ -137,7 +137,7 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
     f.render_widget(hints, hints_area);
 }
 
-/// Render the hotkey help modal (Ctrl+T+?)
+/// Render the hotkey help modal (?)
 pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     let size = ModalSize {
         max_width: 60,
@@ -159,44 +159,47 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     let remaining = render_modal_header(f, inner_area, "Keyboard Shortcuts", "esc");
 
     // Define hotkey sections
+    // NOTE: These should eventually be auto-generated from the hotkey registry
+    // For now, manually curated for clarity
     let sections = vec![
-        ("Prefix Commands (Ctrl+T + key)", vec![
-            ("e", "Expand to full-screen editor"),
-            ("m", "Toggle LLM metadata display"),
-            ("t", "Toggle todo sidebar"),
-            ("v", "Toggle vim mode"),
-            ("A", "Toggle show archived"),
+        ("Global", vec![
+            ("Ctrl+T", "Open command palette"),
             ("?", "Show this help"),
+            ("q", "Quit"),
+            ("r", "Refresh / Sync"),
         ]),
         ("Navigation", vec![
-            ("Alt+0", "Go to home/dashboard"),
-            ("Alt+1-9", "Jump to tab 1-9"),
-            ("Alt+Tab", "Cycle through recent tabs"),
-            ("Alt+/", "Open tab picker"),
+            ("1", "Go to home/dashboard"),
+            ("2-9", "Jump to tab 2-9 (Normal mode)"),
+            ("Alt+1-9", "Jump to tab (any mode)"),
+            ("Ctrl+T ←", "Previous tab (works everywhere)"),
+            ("Ctrl+T →", "Next tab (works everywhere)"),
             ("Tab", "Next tab (Chat) / Switch panel (Home)"),
             ("Shift+Tab", "Previous tab"),
             ("↑/↓", "Navigate messages/items"),
             ("Enter", "Open item / Enter subthread"),
             ("Esc", "Back / Exit subthread"),
         ]),
-        ("Chat View", vec![
+        ("Chat View (Normal)", vec![
             ("i", "Enter edit mode"),
             ("@", "Open agent selector"),
             ("%", "Open branch selector"),
             ("t", "Toggle todo sidebar"),
             ("o", "Open first image"),
-            ("/", "Open message actions"),
             ("x", "Close current tab"),
+            (".", "Stop agent"),
+            ("y", "Copy message"),
+            ("v", "View raw event"),
         ]),
         ("Home View", vec![
             ("p", "Open projects modal"),
             ("n", "New thread in project"),
             ("f", "Cycle time filter"),
-            ("/", "Search threads"),
-            ("Space", "Toggle project visibility"),
+            ("/", "Enter search filter (Reports/Search tabs)"),
+            ("Space", "Toggle project visibility (Sidebar)"),
         ]),
         ("Input Mode", vec![
-            ("Enter", "Send message"),
+            ("Ctrl+Enter", "Send message"),
             ("Shift/Alt+Enter", "New line"),
             ("Ctrl+A/E", "Line start/end"),
             ("Ctrl+K/U", "Kill to end/start of line"),
@@ -205,10 +208,12 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
             ("Ctrl+Z", "Undo"),
             ("Ctrl+Shift+Z", "Redo"),
             ("Ctrl+C/X", "Copy/Cut selection"),
+            ("Ctrl+N", "Open nudge selector"),
             ("Home/End", "Line start/end"),
             ("Alt+←/→", "Word left/right"),
             ("Alt+Backspace", "Delete word backward"),
             ("Shift+←/→", "Extend selection"),
+            ("Esc", "Exit edit mode"),
         ]),
     ];
 

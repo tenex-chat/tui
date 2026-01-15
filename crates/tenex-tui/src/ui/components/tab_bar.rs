@@ -1,6 +1,6 @@
 use crate::ui::card;
 use crate::ui::format::{truncate_plain, truncate_with_ellipsis};
-use crate::ui::{theme, App};
+use crate::ui::{theme, App, View};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::Style,
@@ -23,7 +23,8 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     let mut project_spans: Vec<Span> = Vec::new();
 
     // First tab is always "Home" (Option+1)
-    let home_active = app.open_tabs.is_empty() || app.active_tab_index == usize::MAX;
+    // Home is active when viewing the Home view
+    let home_active = app.view == View::Home;
     let home_num_style = if home_active {
         Style::default().fg(theme::ACCENT_PRIMARY)
     } else {
@@ -118,7 +119,7 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // Add hint at the end of title line
     title_spans.push(Span::styled("  ", Style::default()));
-    title_spans.push(Span::styled("Tab:cycle x:close", Style::default().fg(theme::TEXT_MUTED)));
+    title_spans.push(Span::styled("^T←/→:nav x:close", Style::default().fg(theme::TEXT_MUTED)));
 
     // Render both lines
     let title_line = Line::from(title_spans);
