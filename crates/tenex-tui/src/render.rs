@@ -43,6 +43,7 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         View::Home => "TENEX - Home".to_string(), // Won't reach here
         View::Chat => app.selected_thread.as_ref()
             .map(|t| t.title.clone())
+            .or_else(|| app.open_tabs().get(app.active_tab_index()).map(|tab| tab.thread_title.clone()))
             .unwrap_or_else(|| "Chat".to_string()),
         View::LessonViewer => "TENEX - Lesson".to_string(),
         View::AgentBrowser => "TENEX - Agent Definitions".to_string(),

@@ -457,6 +457,33 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Get the count of display items in the current chat view.
+    /// Used for navigation bounds checking.
+    pub fn display_item_count(&self) -> usize {
+        use crate::ui::views::chat::group_messages;
+
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
+
+        // Filter messages based on current view (subthread or main thread)
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| {
+                    Some(m.id.as_str()) == thread_id
+                        || m.reply_to.is_none()
+                        || m.reply_to.as_deref() == thread_id
+                })
+                .collect()
+        };
+
+        group_messages(&display_messages, user_pubkey.as_deref()).len()
+    }
+
     /// Enter a subthread view rooted at the given message
     pub fn enter_subthread(&mut self, message: Message) {
         self.subthread_root = Some(message.id.clone());

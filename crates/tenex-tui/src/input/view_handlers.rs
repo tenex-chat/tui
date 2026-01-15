@@ -784,30 +784,8 @@ pub(super) fn handle_normal_mode(
                 }
             }
             View::Chat => {
-                let messages = app.messages();
-                let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-                let user_pubkey = app.data_store.borrow().user_pubkey.clone();
-
-                let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root
-                {
-                    messages
-                        .iter()
-                        .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                        .collect()
-                } else {
-                    messages
-                        .iter()
-                        .filter(|m| {
-                            Some(m.id.as_str()) == thread_id
-                                || m.reply_to.is_none()
-                                || m.reply_to.as_deref() == thread_id
-                        })
-                        .collect()
-                };
-
-                let grouped = group_messages(&display_messages, user_pubkey.as_deref());
-
-                if app.selected_message_index < grouped.len().saturating_sub(1) {
+                let count = app.display_item_count();
+                if app.selected_message_index < count.saturating_sub(1) {
                     app.selected_message_index += 1;
                 }
             }
