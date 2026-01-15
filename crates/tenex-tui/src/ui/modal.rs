@@ -305,7 +305,7 @@ impl ConversationActionsState {
     }
 }
 
-/// Chat action types (for Chat view input - Ctrl+T /)
+/// Chat action types (for Chat view - accessible via Ctrl+T command palette)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChatAction {
     NewConversation,
@@ -344,7 +344,7 @@ impl ChatAction {
     }
 }
 
-/// State for chat actions modal (opened from chat input with Ctrl+T /)
+/// State for chat actions modal (accessible via Ctrl+T command palette)
 #[derive(Debug, Clone)]
 pub struct ChatActionsState {
     pub thread_id: String,
@@ -425,14 +425,18 @@ pub enum ProjectAction {
     NewConversation,
     Boot,
     Settings,
+    ToggleArchive,
 }
 
 impl ProjectAction {
-    pub fn label(&self) -> &'static str {
+    pub fn label(&self, is_archived: bool) -> &'static str {
         match self {
             ProjectAction::NewConversation => "New Conversation",
             ProjectAction::Boot => "Boot Project",
             ProjectAction::Settings => "Settings",
+            ProjectAction::ToggleArchive => {
+                if is_archived { "Unarchive" } else { "Archive" }
+            }
         }
     }
 
@@ -441,6 +445,7 @@ impl ProjectAction {
             ProjectAction::NewConversation => 'n',
             ProjectAction::Boot => 'b',
             ProjectAction::Settings => 's',
+            ProjectAction::ToggleArchive => 'a',
         }
     }
 }
@@ -452,26 +457,30 @@ pub struct ProjectActionsState {
     pub project_name: String,
     pub project_pubkey: String,
     pub is_online: bool,
+    pub is_archived: bool,
     pub selected_index: usize,
 }
 
 impl ProjectActionsState {
-    pub fn new(project_a_tag: String, project_name: String, project_pubkey: String, is_online: bool) -> Self {
+    pub fn new(project_a_tag: String, project_name: String, project_pubkey: String, is_online: bool, is_archived: bool) -> Self {
         Self {
             project_a_tag,
             project_name,
             project_pubkey,
             is_online,
+            is_archived,
             selected_index: 0,
         }
     }
 
     pub fn available_actions(&self) -> Vec<ProjectAction> {
-        if self.is_online {
+        let mut actions = if self.is_online {
             vec![ProjectAction::NewConversation, ProjectAction::Settings]
         } else {
             vec![ProjectAction::Boot, ProjectAction::Settings]
-        }
+        };
+        actions.push(ProjectAction::ToggleArchive);
+        actions
     }
 
     pub fn selected_action(&self) -> Option<ProjectAction> {
@@ -833,7 +842,6 @@ impl CommandPaletteState {
 
         // Global commands (always available)
         commands.push(PaletteCommand::new('1', "Go to Home", "Navigation"));
-        commands.push(PaletteCommand::new('/', "Search", "Navigation"));
         commands.push(PaletteCommand::new('?', "Help", "Navigation"));
         commands.push(PaletteCommand::new('q', "Quit", "System"));
         commands.push(PaletteCommand::new('r', "Refresh", "System"));
@@ -986,15 +994,15 @@ pub enum ModalState {
     CreateProject(CreateProjectState),
     /// Nudge selector for adding nudges to messages
     NudgeSelector(NudgeSelectorState),
-    /// Message action menu (/) - shows available actions for selected message
+    /// Message action menu - shows available actions for selected message (via Ctrl+T)
     MessageActions {
         message_id: String,
         selected_index: usize,
         has_trace: bool,
     },
-    /// Conversation action menu (/) in Home view - shows actions for selected conversation
+    /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
     ConversationActions(ConversationActionsState),
-    /// Chat action menu (Ctrl+T /) in Chat view - shows actions for current conversation
+    /// Chat action menu in Chat view - shows actions for current conversation (via Ctrl+T)
     ChatActions(ChatActionsState),
     /// View raw event JSON in a scrollable modal
     ViewRawEvent {

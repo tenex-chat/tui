@@ -1321,11 +1321,17 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(i);
         let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        // Reserve space for spinner (2 chars: spinner + space)
-        let name_max = if is_busy { 18 } else { 20 };
+        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+        let name_max = match (is_busy, is_archived) {
+            (true, true) => 8,   // Both spinner and archived
+            (true, false) => 18, // Just spinner
+            (false, true) => 10, // Just archived
+            (false, false) => 20, // Neither
+        };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
@@ -1345,6 +1351,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
+
+        // Add archived tag if project is archived
+        if is_archived {
+            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
 
         // Add spinner if project is busy
         if is_busy {
@@ -1380,10 +1391,17 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(online_count + i);
         let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
         let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let name_max = if is_busy { 18 } else { 20 };
+        // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
+        let name_max = match (is_busy, is_archived) {
+            (true, true) => 8,   // Both spinner and archived
+            (true, false) => 18, // Just spinner
+            (false, true) => 10, // Just archived
+            (false, false) => 20, // Neither
+        };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
@@ -1403,6 +1421,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
             Span::styled(checkbox, checkbox_style),
             Span::styled(name, name_style),
         ];
+
+        // Add archived tag if project is archived
+        if is_archived {
+            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+        }
 
         // Add spinner if project is busy (unlikely for offline, but for consistency)
         if is_busy {
@@ -1835,7 +1858,7 @@ fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectAction
         .enumerate()
         .map(|(i, action)| {
             let is_selected = i == state.selected_index;
-            ModalItem::new(action.label())
+            ModalItem::new(action.label(state.is_archived))
                 .with_shortcut(action.hotkey().to_string())
                 .selected(is_selected)
         })

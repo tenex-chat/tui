@@ -70,8 +70,10 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
         title_spans.push(Span::styled(shortcut.clone(), num_style));
 
-        // Unread indicator
-        if tab.has_unread && !is_active {
+        // Unread indicator or draft indicator
+        if tab.is_draft() {
+            title_spans.push(Span::styled("+", Style::default().fg(theme::ACCENT_SUCCESS)));
+        } else if tab.has_unread && !is_active {
             title_spans.push(Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_ERROR)));
         } else {
             title_spans.push(Span::raw(" "));

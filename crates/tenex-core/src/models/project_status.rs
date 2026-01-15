@@ -21,6 +21,8 @@ pub struct ProjectStatus {
     pub project_coordinate: String,
     pub agents: Vec<ProjectAgent>,
     pub branches: Vec<String>,
+    /// All available models from model tags (including unassigned ones)
+    pub all_models: Vec<String>,
     pub created_at: u64,
 }
 
@@ -55,9 +57,10 @@ impl ProjectStatus {
         let mut project_coordinate: Option<String> = None;
         let mut agent_map: HashMap<String, ProjectAgent> = HashMap::new();
         let mut branches: Vec<String> = Vec::new();
+        let mut all_models: Vec<String> = Vec::new();
         let mut is_first_agent = true;
 
-        // First pass: collect project coordinate, agents, and branches
+        // First pass: collect project coordinate, agents, branches, and all models
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -87,11 +90,21 @@ impl ProjectStatus {
                         branches.push(tag[1].clone());
                     }
                 }
+                "model" => {
+                    // Collect model name (tag[1]) regardless of agent assignments
+                    if tag.len() >= 2 {
+                        all_models.push(tag[1].clone());
+                    }
+                }
                 _ => {}
             }
         }
 
-        // Second pass: apply model and tool tags
+        // Deduplicate and sort models
+        all_models.sort();
+        all_models.dedup();
+
+        // Second pass: apply model and tool tags to agents
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -129,6 +142,7 @@ impl ProjectStatus {
             project_coordinate,
             agents,
             branches,
+            all_models,
             created_at,
         })
     }
@@ -159,16 +173,9 @@ impl ProjectStatus {
         tools
     }
 
-    /// All unique models used by agents
+    /// All available models from the project (including unassigned ones)
     pub fn models(&self) -> Vec<&str> {
-        let mut models: Vec<&str> = self
-            .agents
-            .iter()
-            .filter_map(|a| a.model.as_deref())
-            .collect();
-        models.sort();
-        models.dedup();
-        models
+        self.all_models.iter().map(|s| s.as_str()).collect()
     }
 
     /// Get the PM (project manager) agent

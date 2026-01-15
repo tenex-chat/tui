@@ -4,6 +4,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::nostr;
 use crate::nostr::NostrCommand;
 use crate::ui;
+use crate::ui::notifications::Notification;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;

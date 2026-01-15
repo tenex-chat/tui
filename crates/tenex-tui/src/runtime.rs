@@ -233,8 +233,18 @@ fn check_pending_new_thread(app: &mut App) {
     };
 
     if let Some(thread) = thread {
+        // If we have a draft_id, convert the draft tab to a real tab
+        if let Some(draft_id) = app.pending_new_thread_draft_id.take() {
+            app.convert_draft_to_tab(&draft_id, &thread);
+        }
+
         app.pending_new_thread_project = None;
         app.creating_thread = false;
-        app.open_thread_from_home(&thread, &project_a_tag);
+
+        // Update selected_thread and open the tab
+        app.selected_thread = Some(thread.clone());
+        app.open_tab(&thread, &project_a_tag);
+        app.scroll_offset = usize::MAX; // Scroll to bottom
+        app.input_mode = InputMode::Editing;
     }
 }
