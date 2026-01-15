@@ -61,6 +61,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
         HomeTab::Reports => render_reports_list(f, app, padded_content),
         HomeTab::Status => render_status_list(f, app, padded_content),
+        HomeTab::Search => render_search_tab(f, app, padded_content),
     }
 
     // Render sidebar on the right
@@ -165,6 +166,9 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         ));
     }
 
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Search", tab_style(HomeTab::Search)));
+
     // Show archived mode indicator
     if app.show_archived {
         spans.push(Span::styled("   ", Style::default()));
@@ -192,6 +196,9 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(if app.home_panel_focus == HomeTab::Status { "──────" } else { "      " },
             if app.home_panel_focus == HomeTab::Status { accent } else { blank }),
         Span::styled(if status_count > 0 { "    " } else { "" }, blank),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::Search { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::Search { accent } else { blank }),
     ];
     let indicator_line = Line::from(indicator_spans);
 
@@ -887,7 +894,10 @@ fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Render a single status card
+/// Render a single status card with table-aligned columns
+/// Layout matches Recent tab:
+/// [bullet] [title]                    [project]       [status]
+///          [summary/activity]         [author]        [time]
 fn render_status_card(
     f: &mut Frame,
     app: &App,
@@ -898,6 +908,7 @@ fn render_status_card(
 ) {
     let store = app.data_store.borrow();
     let project_name = store.get_project_name(a_tag);
+    let author_name = store.get_profile_name(&thread.pubkey);
     drop(store);
 
     let time_str = crate::ui::format::format_relative_time(thread.last_activity);
@@ -908,63 +919,360 @@ fn render_status_card(
         Style::default().fg(theme::TEXT_PRIMARY)
     };
 
-    let bullet = if is_selected { card::BULLET } else { card::SPACER };
     let has_activity = thread.status_current_activity.is_some();
 
-    // Line 1: Title + status badge + project + timestamp
-    let title_max = area.width as usize - 40;
-    let title = crate::ui::format::truncate_with_ellipsis(&thread.title, title_max);
+    // Column widths for table layout (matching Recent tab)
+    let middle_col_width = 22;
+    let right_col_width = 14;
+    let total_width = area.width as usize;
+    let fixed_cols_width = middle_col_width + right_col_width + 2; // +2 for spacing
+    let bullet_width = 2; // "● " or "  "
+    let main_col_width = total_width.saturating_sub(fixed_cols_width + bullet_width);
 
-    let mut line1_spans = vec![
-        Span::styled(bullet, Style::default().fg(if has_activity { theme::ACCENT_SUCCESS } else { theme::ACCENT_PRIMARY })),
-        Span::styled(title, title_style),
-    ];
+    // Status text for right column
+    let status_text = thread.status_label.as_ref()
+        .map(|s| format!("{} {}", status_label_to_symbol(s), s))
+        .unwrap_or_default();
 
-    // Status label badge
-    if let Some(ref label) = thread.status_label {
-        line1_spans.push(Span::styled("  [", Style::default().fg(theme::TEXT_MUTED)));
-        line1_spans.push(Span::styled(label.as_str(), Style::default().fg(theme::ACCENT_WARNING)));
-        line1_spans.push(Span::styled("]", Style::default().fg(theme::TEXT_MUTED)));
+    let mut lines: Vec<Line> = Vec::new();
+
+    // LINE 1: [bullet] [title]          [project]       [status]
+    let bullet = if is_selected || has_activity { card::BULLET } else { card::SPACER };
+    let bullet_color = if has_activity { theme::ACCENT_SUCCESS } else { theme::ACCENT_PRIMARY };
+
+    let title_max = main_col_width;
+    let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
+    let title_len = title_truncated.chars().count();
+    let title_padding = main_col_width.saturating_sub(title_len);
+
+    // Project (middle column)
+    let project_truncated = truncate_with_ellipsis(&project_name, middle_col_width.saturating_sub(2));
+    let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
+    let project_len = project_display.chars().count();
+    let project_padding = middle_col_width.saturating_sub(project_len);
+
+    // Status (right column, right-aligned)
+    let status_truncated = truncate_with_ellipsis(&status_text, right_col_width);
+    let status_len = status_truncated.chars().count();
+    let status_padding = right_col_width.saturating_sub(status_len);
+
+    let line1 = Line::from(vec![
+        Span::styled(bullet, Style::default().fg(bullet_color)),
+        Span::styled(title_truncated, title_style),
+        Span::styled(" ".repeat(title_padding), Style::default()),
+        Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))),
+        Span::styled(" ".repeat(project_padding), Style::default()),
+        Span::styled(" ".repeat(status_padding), Style::default()),
+        Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)),
+    ]);
+    lines.push(line1);
+
+    // LINE 2: Summary or activity indicator  [author]        [time]
+    let line2_content = if let Some(ref activity) = thread.status_current_activity {
+        // Show activity with pulsing indicator
+        let indicator = if app.frame_counter % 4 < 2 { "◉" } else { "○" };
+        let activity_max = main_col_width.saturating_sub(3); // Space for indicator
+        let activity_text = truncate_with_ellipsis(activity, activity_max);
+        format!("{} {}", indicator, activity_text)
+    } else if let Some(ref summary) = thread.summary {
+        truncate_with_ellipsis(summary, main_col_width)
+    } else {
+        String::new()
+    };
+
+    let line2_style = if thread.status_current_activity.is_some() {
+        Style::default().fg(theme::ACCENT_SUCCESS)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let line2_len = line2_content.chars().count();
+    let line2_padding = main_col_width.saturating_sub(line2_len);
+
+    // Author (middle column)
+    let author_display = format!("@{}", author_name);
+    let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
+    let author_len = author_truncated.chars().count();
+    let author_padding = middle_col_width.saturating_sub(author_len);
+
+    // Time (right column, right-aligned)
+    let time_len = time_str.chars().count();
+    let time_padding = right_col_width.saturating_sub(time_len);
+
+    let line2 = Line::from(vec![
+        Span::styled("  ", Style::default()), // Align with title (after bullet)
+        Span::styled(line2_content, line2_style),
+        Span::styled(" ".repeat(line2_padding), Style::default()),
+        Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)),
+        Span::styled(" ".repeat(author_padding), Style::default()),
+        Span::styled(" ".repeat(time_padding), Style::default()),
+        Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
+    ]);
+    lines.push(line2);
+
+    // LINE 3: Additional activity line if we have both summary and activity
+    if thread.status_current_activity.is_some() && thread.summary.is_some() {
+        if let Some(ref summary) = thread.summary {
+            let summary_max = main_col_width + middle_col_width + right_col_width;
+            let summary_text = truncate_with_ellipsis(summary, summary_max);
+            let line3 = Line::from(vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(summary_text, Style::default().fg(theme::TEXT_MUTED)),
+            ]);
+            lines.push(line3);
+        }
     }
 
-    line1_spans.push(Span::styled("  ", Style::default()));
-    line1_spans.push(Span::styled(&project_name, Style::default().fg(theme::project_color(a_tag))));
-    line1_spans.push(Span::styled(format!("  {}", time_str), Style::default().fg(theme::TEXT_MUTED)));
+    // LINE 4: Spacing
+    lines.push(Line::from(""));
 
-    let line1 = Line::from(line1_spans);
+    let content = Paragraph::new(lines);
 
-    // Line 2: Summary (if present)
-    let line2 = if let Some(ref summary) = thread.summary {
-        let summary_max = area.width as usize - 4;
-        let summary_text = crate::ui::format::truncate_with_ellipsis(summary, summary_max);
-        Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(summary_text, Style::default().fg(theme::TEXT_MUTED)),
-        ])
+    if is_selected {
+        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
     } else {
-        Line::from("")
+        f.render_widget(content, area);
+    }
+}
+
+/// Render the Search tab content - full search with message display
+fn render_search_tab(f: &mut Frame, app: &App, area: Rect) {
+    use crate::ui::app::SearchMatchType;
+
+    // Layout: Search bar + Results
+    let chunks = Layout::vertical([
+        Constraint::Length(2), // Search bar
+        Constraint::Min(0),    // Results
+    ])
+    .split(area);
+
+    // Render search bar
+    let search_style = if !app.search_filter.is_empty() {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
-    // Line 3: Current activity (if present) with pulsing indicator
-    let line3 = if let Some(ref activity) = thread.status_current_activity {
-        let activity_max = area.width as usize - 6;
-        let activity_text = crate::ui::format::truncate_with_ellipsis(activity, activity_max);
-        // Pulsing indicator using frame counter
-        let indicator = if app.frame_counter % 4 < 2 { "◉" } else { "○" };
-        Line::from(vec![
-            Span::styled("  ", Style::default()),
-            Span::styled(indicator, Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled(" ", Style::default()),
-            Span::styled(activity_text, Style::default().fg(theme::ACCENT_SUCCESS)),
-        ])
+    let search_text = if app.search_filter.is_empty() {
+        "/ Search threads and messages...".to_string()
     } else {
-        Line::from("")
+        format!("/ {}", app.search_filter)
     };
 
-    // Line 4: Spacing
-    let line4 = Line::from("");
+    let search_line = Paragraph::new(search_text).style(search_style);
+    f.render_widget(search_line, chunks[0]);
 
-    let content = Paragraph::new(vec![line1, line2, line3, line4]);
+    // Get search results
+    let results = app.search_results();
+    let selected_idx = app.current_selection();
+
+    if results.is_empty() {
+        // Show placeholder or "no results" message
+        let msg = if app.search_filter.is_empty() {
+            "Type to search threads and messages"
+        } else {
+            "No results found"
+        };
+        let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, chunks[1]);
+        return;
+    }
+
+    // Render search results with full message content
+    let mut y_offset = 0u16;
+    let store = app.data_store.borrow();
+
+    for (i, result) in results.iter().enumerate() {
+        let is_selected = i == selected_idx;
+
+        // Calculate card height based on content
+        // Line 1: Title + project + time
+        // Line 2: Match type indicator
+        // Lines 3+: Message content (if message match)
+        // Spacing line
+        let base_height = 3u16;
+        let content_lines = if let SearchMatchType::Message { ref message_id } = result.match_type {
+            // Get the message and show more content
+            let messages = store.get_messages(&result.thread.id);
+            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
+                // Show up to 5 lines of content
+                let content_preview: String = msg.content.chars().take(400).collect();
+                let line_count = content_preview.lines().count().min(5) as u16;
+                line_count.max(2)
+            } else {
+                2
+            }
+        } else {
+            2
+        };
+        let card_height = base_height + content_lines;
+
+        if y_offset + card_height > chunks[1].height {
+            break;
+        }
+
+        let card_area = Rect::new(
+            chunks[1].x,
+            chunks[1].y + y_offset,
+            chunks[1].width,
+            card_height,
+        );
+
+        render_search_result_card(f, app, result, is_selected, card_area, &store);
+        y_offset += card_height;
+    }
+}
+
+/// Render a single search result card with full message content
+fn render_search_result_card(
+    f: &mut Frame,
+    app: &App,
+    result: &crate::ui::app::SearchResult,
+    is_selected: bool,
+    area: Rect,
+    store: &std::cell::Ref<crate::store::AppDataStore>,
+) {
+    use crate::ui::app::SearchMatchType;
+
+    let time_str = crate::ui::format::format_relative_time(result.thread.last_activity);
+
+    let title_style = if is_selected {
+        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_PRIMARY)
+    };
+
+    let bullet = if is_selected { card::BULLET } else { card::SPACER };
+
+    // Line 1: Title + match type indicator + project + timestamp
+    let title_max = area.width as usize - 40;
+    let title = crate::ui::format::truncate_with_ellipsis(&result.thread.title, title_max);
+
+    let (type_indicator, type_color) = match &result.match_type {
+        SearchMatchType::Thread => ("[T]", theme::ACCENT_PRIMARY),
+        SearchMatchType::ConversationId => ("[I]", theme::ACCENT_WARNING),
+        SearchMatchType::Message { .. } => ("[M]", theme::ACCENT_SUCCESS),
+    };
+
+    let line1 = Line::from(vec![
+        Span::styled(bullet, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(type_indicator, Style::default().fg(type_color)),
+        Span::styled(" ", Style::default()),
+        Span::styled(title, title_style),
+        Span::styled("  ", Style::default()),
+        Span::styled(&result.project_name, Style::default().fg(theme::project_color(&result.project_a_tag))),
+        Span::styled(format!("  {}", time_str), Style::default().fg(theme::TEXT_MUTED)),
+    ]);
+
+    let mut lines = vec![line1];
+
+    // Line 2+: Show full message content if this is a message match
+    match &result.match_type {
+        SearchMatchType::Message { message_id } => {
+            let messages = store.get_messages(&result.thread.id);
+            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
+                // Get author name
+                let author_name = store.get_profile_name(&msg.pubkey);
+                let author_color = theme::user_color(&msg.pubkey);
+
+                // Author line
+                lines.push(Line::from(vec![
+                    Span::styled("  @", Style::default().fg(theme::TEXT_MUTED)),
+                    Span::styled(author_name, Style::default().fg(author_color)),
+                    Span::styled(":", Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+
+                // Message content (limited to a few lines)
+                let content_preview: String = msg.content.chars().take(400).collect();
+                let content_width = area.width as usize - 4;
+
+                // Highlight the search term in the content
+                let filter_lower = app.search_filter.to_lowercase();
+
+                for line in content_preview.lines().take(4) {
+                    let mut spans = vec![Span::styled("    ", Style::default())];
+
+                    // Check if this line contains the search term
+                    let line_lower = line.to_lowercase();
+                    if let Some(match_start) = line_lower.find(&filter_lower) {
+                        let match_end = match_start + app.search_filter.len();
+
+                        // Before match
+                        if match_start > 0 {
+                            let before = &line[..match_start];
+                            let truncated = crate::ui::format::truncate_with_ellipsis(before, content_width / 2);
+                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                        }
+
+                        // Highlighted match
+                        let match_text = &line[match_start..match_end.min(line.len())];
+                        spans.push(Span::styled(
+                            match_text.to_string(),
+                            Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING),
+                        ));
+
+                        // After match
+                        if match_end < line.len() {
+                            let after = &line[match_end..];
+                            let truncated = crate::ui::format::truncate_with_ellipsis(after, content_width / 2);
+                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                        }
+                    } else {
+                        // No match on this line, render normally
+                        let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
+                        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                    }
+
+                    lines.push(Line::from(spans));
+                }
+
+                // Show "..." if content was truncated
+                if content_preview.lines().count() > 4 || msg.content.len() > 400 {
+                    lines.push(Line::from(vec![
+                        Span::styled("    ...", Style::default().fg(theme::TEXT_MUTED)),
+                    ]));
+                }
+            } else if let Some(excerpt) = &result.excerpt {
+                // Fallback to excerpt if message not found
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+            }
+        }
+        SearchMatchType::Thread => {
+            // Show thread summary or content excerpt
+            if let Some(ref summary) = result.thread.summary {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(
+                        crate::ui::format::truncate_with_ellipsis(summary, area.width as usize - 4),
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ),
+                ]));
+            } else if let Some(excerpt) = &result.excerpt {
+                lines.push(Line::from(vec![
+                    Span::styled("  ", Style::default()),
+                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
+                ]));
+            }
+        }
+        SearchMatchType::ConversationId => {
+            // Show the ID
+            lines.push(Line::from(vec![
+                Span::styled("  ID: ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(
+                    crate::ui::format::truncate_with_ellipsis(&result.thread.id, 40),
+                    Style::default().fg(theme::ACCENT_SPECIAL),
+                ),
+            ]));
+        }
+    }
+
+    // Spacing line
+    lines.push(Line::from(""));
+
+    let content = Paragraph::new(lines);
 
     if is_selected {
         f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
@@ -1134,19 +1442,6 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(theme::TEXT_MUTED),
     )));
 
-    // "Only by me" filter
-    let only_by_me_checkbox = if app.only_by_me { card::CHECKBOX_ON } else { card::CHECKBOX_OFF };
-    let only_by_me_style = if app.only_by_me {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    lines.push(Line::from(vec![
-        Span::styled("[m] ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(only_by_me_checkbox, only_by_me_style),
-        Span::styled(" By me", only_by_me_style),
-    ]));
-
     // Time filter
     let time_label = app.time_filter
         .map(|tf| tf.label())
@@ -1199,6 +1494,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
             HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
             HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",
+            HomeTab::Search => "/ search · ↑↓ navigate · Enter open conversation · Esc clear · A agents · q quit",
         }
     };
 

@@ -93,6 +93,33 @@ pub enum HomeTab {
     Inbox,
     Reports,
     Status,
+    Search,
+}
+
+/// State for in-conversation search mode
+#[derive(Debug, Clone, Default)]
+pub struct ChatSearchState {
+    /// Whether search mode is active
+    pub active: bool,
+    /// Current search query
+    pub query: String,
+    /// Index of current match being viewed (0-based)
+    pub current_match: usize,
+    /// Total number of matches found
+    pub total_matches: usize,
+    /// Message IDs that contain matches, with match positions
+    pub match_locations: Vec<ChatSearchMatch>,
+}
+
+/// A single search match location in a conversation
+#[derive(Debug, Clone)]
+pub struct ChatSearchMatch {
+    /// Message ID containing the match
+    pub message_id: String,
+    /// Character offset where match starts in the message content
+    pub start_offset: usize,
+    /// Length of the match
+    pub length: usize,
 }
 
 /// An open tab representing a thread or draft conversation
@@ -210,8 +237,6 @@ pub struct App {
     pub sidebar_project_index: usize,
     /// Projects to show in Recent/Inbox (empty = none)
     pub visible_projects: HashSet<String>,
-    /// Filter to show only threads created by or p-tagging current user
-    pub only_by_me: bool,
     /// Filter by time since last activity
     pub time_filter: Option<TimeFilter>,
 
@@ -230,10 +255,13 @@ pub struct App {
     pub agent_browser_in_detail: bool,
     pub viewing_agent_id: Option<String>,
 
-    // Search modal state
+    // Search modal state (deprecated - replaced by Search tab)
     pub showing_search_modal: bool,
     pub search_filter: String,
     pub search_index: usize,
+
+    /// In-conversation search state
+    pub chat_search: ChatSearchState,
 
     /// Local streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
@@ -275,6 +303,8 @@ pub struct App {
     pub vim_mode: VimMode,
     /// Whether to show archived conversations in Recent/Inbox
     pub show_archived: bool,
+    /// Whether to show archived projects in the sidebar
+    pub show_archived_projects: bool,
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
@@ -330,7 +360,6 @@ impl App {
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
-            only_by_me: false,
             time_filter: None,
             preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
             modal_state: ModalState::None,
@@ -343,6 +372,7 @@ impl App {
             showing_search_modal: false,
             search_filter: String::new(),
             search_index: 0,
+            chat_search: ChatSearchState::default(),
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
             todo_sidebar_visible: true,
@@ -358,6 +388,7 @@ impl App {
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
+            show_archived_projects: false,
             user_explicitly_selected_agent: false,
         }
     }
@@ -435,11 +466,21 @@ impl App {
         self.subthread_root.is_some()
     }
 
-    /// Save current chat editor content as draft for the selected thread
+    /// Save current chat editor content as draft for the selected thread or draft tab
     pub fn save_chat_draft(&self) {
-        if let Some(ref thread) = self.selected_thread {
+        // Determine the draft key - use thread id or draft_id from active tab
+        let draft_key = if let Some(ref thread) = self.selected_thread {
+            Some(thread.id.clone())
+        } else if self.active_tab_index < self.open_tabs.len() {
+            // Check if current tab is a draft tab
+            self.open_tabs[self.active_tab_index].draft_id.clone()
+        } else {
+            None
+        };
+
+        if let Some(conversation_id) = draft_key {
             let draft = ChatDraft {
-                conversation_id: thread.id.clone(),
+                conversation_id,
                 text: self.chat_editor.build_full_content(),
                 selected_agent_pubkey: self.selected_agent.as_ref().map(|a| a.pubkey.clone()),
                 selected_branch: self.selected_branch.clone(),
@@ -452,21 +493,32 @@ impl App {
         }
     }
 
-    /// Restore draft for the selected thread into chat_editor
+    /// Restore draft for the selected thread or draft tab into chat_editor
     /// Also syncs agent/branch selection with the conversation's most recent activity
     pub fn restore_chat_draft(&mut self) {
         // Reset explicit selection flag when switching conversations
         self.user_explicitly_selected_agent = false;
 
-        if let Some(ref thread) = self.selected_thread {
+        // Determine the draft key - use thread id or draft_id from active tab
+        let draft_key = if let Some(ref thread) = self.selected_thread {
+            Some(thread.id.clone())
+        } else if self.active_tab_index < self.open_tabs.len() {
+            // Check if current tab is a draft tab
+            self.open_tabs[self.active_tab_index].draft_id.clone()
+        } else {
+            None
+        };
+
+        if let Some(key) = draft_key {
             // Load draft for text content only
-            if let Some(draft) = self.draft_storage.borrow().load(&thread.id) {
+            if let Some(draft) = self.draft_storage.borrow().load(&key) {
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
             }
+        }
 
-            // Always sync agent and branch with the conversation's most recent activity
-            // This ensures the input always reflects who you're talking to and what branch they used
+        // For real threads, sync agent and branch with the conversation's most recent activity
+        if self.selected_thread.is_some() {
             self.sync_agent_with_conversation();
             self.sync_branch_with_conversation();
         }
@@ -575,13 +627,19 @@ impl App {
 
     /// Get filtered projects based on current filter (from ModalState)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
+    /// Archived projects are hidden unless show_archived_projects is true
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
+        let prefs = self.preferences.borrow();
 
         let mut matching: Vec<_> = projects
             .iter()
+            .filter(|p| {
+                // Filter out archived projects unless showing archived
+                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
+            })
             .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
 
@@ -968,6 +1026,7 @@ impl App {
                         HomeTab::Inbox => PaletteContext::HomeInbox,
                         HomeTab::Reports => PaletteContext::HomeReports,
                         HomeTab::Status => PaletteContext::HomeRecent, // Reuse Recent context for Status
+                        HomeTab::Search => PaletteContext::HomeRecent, // Reuse Recent context for Search
                     }
                 }
             }
@@ -1221,7 +1280,10 @@ impl App {
     /// Returns the tab index
     pub fn open_draft_tab(&mut self, project_a_tag: &str, project_name: &str) -> usize {
         // Generate unique draft ID
-        let draft_id = format!("draft-{}", chrono::Utc::now().timestamp_millis());
+        let draft_id = format!("draft-{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis());
 
         // Check if we already have a draft for this project
         if let Some(idx) = self.open_tabs.iter().position(|t| {
@@ -1551,7 +1613,6 @@ impl App {
         }
 
         let threads = self.data_store.borrow().get_all_recent_threads(100);
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1568,13 +1629,6 @@ impl App {
             // Archive filter
             .filter(|(thread, _)| {
                 self.show_archived || !prefs.is_thread_archived(&thread.id)
-            })
-            // "Only by me" filter
-            .filter(|(thread, _)| {
-                if !self.only_by_me {
-                    return true;
-                }
-                user_pubkey.as_ref().map_or(false, |pk| thread.involves_user(pk))
             })
             // Time filter
             .filter(|(thread, _)| {
@@ -1601,7 +1655,7 @@ impl App {
         status_threads
     }
 
-    /// Get recent threads across all projects for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
+    /// Get recent threads across all projects for Home view (filtered by visible_projects, time_filter, archived)
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1609,7 +1663,6 @@ impl App {
         }
 
         let threads = self.data_store.borrow().get_all_recent_threads(50);
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1623,13 +1676,6 @@ impl App {
             .filter(|(thread, _)| {
                 self.show_archived || !prefs.is_thread_archived(&thread.id)
             })
-            // "Only by me" filter
-            .filter(|(thread, _)| {
-                if !self.only_by_me {
-                    return true;
-                }
-                user_pubkey.as_ref().map_or(false, |pk| thread.involves_user(pk))
-            })
             // Time filter
             .filter(|(thread, _)| {
                 if let Some(ref tf) = self.time_filter {
@@ -1642,7 +1688,7 @@ impl App {
             .collect()
     }
 
-    /// Get inbox items for Home view (filtered by visible_projects, only_by_me, time_filter, archived)
+    /// Get inbox items for Home view (filtered by visible_projects, time_filter, archived)
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
@@ -1650,7 +1696,6 @@ impl App {
         }
 
         let items = self.data_store.borrow().get_inbox_items().to_vec();
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1667,13 +1712,6 @@ impl App {
                 } else {
                     true  // Keep items without thread_id
                 }
-            })
-            // "Only by me" filter - based on author_pubkey
-            .filter(|item| {
-                if !self.only_by_me {
-                    return true;
-                }
-                user_pubkey.as_ref().map_or(false, |pk| &item.author_pubkey == pk)
             })
             // Time filter
             .filter(|item| {
@@ -1984,7 +2022,6 @@ impl App {
     pub fn load_filter_preferences(&mut self) {
         let prefs = self.preferences.borrow();
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
-        self.only_by_me = prefs.only_by_me();
         self.time_filter = prefs.time_filter();
         self.show_llm_metadata = prefs.show_llm_metadata();
     }
@@ -1993,12 +2030,6 @@ impl App {
     pub fn save_selected_projects(&self) {
         let projects: Vec<String> = self.visible_projects.iter().cloned().collect();
         self.preferences.borrow_mut().set_selected_projects(projects);
-    }
-
-    /// Toggle "only by me" filter and persist
-    pub fn toggle_only_by_me(&mut self) {
-        self.only_by_me = !self.only_by_me;
-        self.preferences.borrow_mut().set_only_by_me(self.only_by_me);
     }
 
     /// Cycle through time filter options and persist
@@ -2173,6 +2204,115 @@ impl App {
         } else {
             // Fallback: just take first 60 chars
             content.chars().take(60).collect::<String>().replace('\n', " ")
+        }
+    }
+
+    // ===== Chat Search Methods (in-conversation search) =====
+
+    /// Enter chat search mode
+    pub fn enter_chat_search(&mut self) {
+        self.chat_search.active = true;
+        self.chat_search.query.clear();
+        self.chat_search.current_match = 0;
+        self.chat_search.total_matches = 0;
+        self.chat_search.match_locations.clear();
+    }
+
+    /// Exit chat search mode
+    pub fn exit_chat_search(&mut self) {
+        self.chat_search.active = false;
+        self.chat_search.query.clear();
+        self.chat_search.match_locations.clear();
+    }
+
+    /// Update chat search results based on current query
+    pub fn update_chat_search(&mut self) {
+        self.chat_search.match_locations.clear();
+        self.chat_search.current_match = 0;
+        self.chat_search.total_matches = 0;
+
+        if self.chat_search.query.trim().is_empty() {
+            return;
+        }
+
+        let query_lower = self.chat_search.query.to_lowercase();
+        let messages = self.messages();
+
+        for msg in &messages {
+            let content_lower = msg.content.to_lowercase();
+            let mut start = 0;
+
+            while let Some(pos) = content_lower[start..].find(&query_lower) {
+                let absolute_pos = start + pos;
+                self.chat_search.match_locations.push(ChatSearchMatch {
+                    message_id: msg.id.clone(),
+                    start_offset: absolute_pos,
+                    length: self.chat_search.query.len(),
+                });
+                start = absolute_pos + 1;
+            }
+        }
+
+        self.chat_search.total_matches = self.chat_search.match_locations.len();
+    }
+
+    /// Navigate to next search match
+    pub fn chat_search_next(&mut self) {
+        if self.chat_search.total_matches > 0 {
+            self.chat_search.current_match =
+                (self.chat_search.current_match + 1) % self.chat_search.total_matches;
+            self.scroll_to_current_search_match();
+        }
+    }
+
+    /// Navigate to previous search match
+    pub fn chat_search_prev(&mut self) {
+        if self.chat_search.total_matches > 0 {
+            if self.chat_search.current_match == 0 {
+                self.chat_search.current_match = self.chat_search.total_matches - 1;
+            } else {
+                self.chat_search.current_match -= 1;
+            }
+            self.scroll_to_current_search_match();
+        }
+    }
+
+    /// Scroll to make the current search match visible
+    fn scroll_to_current_search_match(&mut self) {
+        if let Some(match_loc) = self.chat_search.match_locations.get(self.chat_search.current_match) {
+            let messages = self.messages();
+            // Find the message index
+            if let Some((msg_idx, _)) = messages.iter().enumerate()
+                .find(|(_, m)| m.id == match_loc.message_id)
+            {
+                self.selected_message_index = msg_idx;
+                // Scroll will happen naturally in render
+            }
+        }
+    }
+
+    /// Check if a message ID has search matches
+    pub fn message_has_search_match(&self, message_id: &str) -> bool {
+        self.chat_search.active &&
+            self.chat_search.match_locations.iter().any(|m| m.message_id == message_id)
+    }
+
+    /// Get search matches for a specific message
+    pub fn get_message_search_matches(&self, message_id: &str) -> Vec<&ChatSearchMatch> {
+        if !self.chat_search.active {
+            return vec![];
+        }
+        self.chat_search.match_locations.iter()
+            .filter(|m| m.message_id == message_id)
+            .collect()
+    }
+
+    /// Check if a match is the currently focused one
+    pub fn is_current_search_match(&self, message_id: &str, start_offset: usize) -> bool {
+        if let Some(current) = self.chat_search.match_locations.get(self.chat_search.current_match) {
+            current.message_id == message_id && current.start_offset == start_offset
+        } else {
+            false
         }
     }
 
@@ -2434,6 +2574,26 @@ impl App {
     /// Toggle archive status of a thread
     pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
         self.preferences.borrow_mut().toggle_thread_archived(thread_id)
+    }
+
+    /// Toggle visibility of archived projects
+    pub fn toggle_show_archived_projects(&mut self) {
+        self.show_archived_projects = !self.show_archived_projects;
+        if self.show_archived_projects {
+            self.notify(Notification::info("Showing archived projects"));
+        } else {
+            self.notify(Notification::info("Hiding archived projects"));
+        }
+    }
+
+    /// Check if a project is archived
+    pub fn is_project_archived(&self, project_a_tag: &str) -> bool {
+        self.preferences.borrow().is_project_archived(project_a_tag)
+    }
+
+    /// Toggle archive status of a project
+    pub fn toggle_project_archived(&mut self, project_a_tag: &str) -> bool {
+        self.preferences.borrow_mut().toggle_project_archived(project_a_tag)
     }
 }
 

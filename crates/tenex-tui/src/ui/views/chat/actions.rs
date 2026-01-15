@@ -191,7 +191,6 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         ("Home View", vec![
             ("p", "Open projects modal"),
             ("n", "New thread in project"),
-            ("m", "Toggle 'only by me' filter"),
             ("f", "Cycle time filter"),
             ("/", "Search threads"),
             ("Space", "Toggle project visibility"),

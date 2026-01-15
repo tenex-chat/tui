@@ -48,6 +48,12 @@ pub(crate) fn handle_key(
         return Ok(());
     }
 
+    // Handle in-conversation search when active
+    if app.chat_search.active {
+        handle_chat_search_key(app, key);
+        return Ok(());
+    }
+
     // Handle agent selector when open (using ModalState)
     if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
         // Get agents BEFORE mutably borrowing modal_state
@@ -186,7 +192,7 @@ pub(crate) fn handle_key(
         return Ok(());
     }
 
-    // Handle chat actions modal when open (Ctrl+T /)
+    // Handle chat actions modal when open (via Ctrl+T command palette)
     if matches!(app.modal_state, ModalState::ChatActions(_)) {
         handle_chat_actions_modal_key(app, key);
         return Ok(());
@@ -266,13 +272,6 @@ pub(crate) fn handle_key(
                     }
                     return Ok(());
                 }
-                // Alt+/ = open tab modal
-                KeyCode::Char('/') => {
-                    if !app.open_tabs.is_empty() || app.view == View::Chat || app.view == View::Home {
-                        app.open_tab_modal();
-                    }
-                    return Ok(());
-                }
                 // Alt+Left = previous tab, Alt+Right = next tab
                 KeyCode::Left => {
                     app.prev_tab();
@@ -338,9 +337,9 @@ pub(crate) fn handle_key(
                 app.close_current_tab();
                 return Ok(());
             }
-            // / = open message actions modal
-            KeyCode::Char('/') => {
-                app.open_message_actions_modal();
+            // Ctrl+F = enter in-conversation search
+            KeyCode::Char('f') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                app.enter_chat_search();
                 return Ok(());
             }
             _ => {}
@@ -784,6 +783,47 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
+    // Handle Search tab input mode
+    if app.input_mode == InputMode::Editing && app.home_panel_focus == HomeTab::Search {
+        match code {
+            KeyCode::Char(c) => {
+                app.search_filter.push(c);
+                app.tab_selection.insert(HomeTab::Search, 0);
+            }
+            KeyCode::Backspace => {
+                app.search_filter.pop();
+                app.tab_selection.insert(HomeTab::Search, 0);
+            }
+            KeyCode::Esc => {
+                app.input_mode = InputMode::Normal;
+            }
+            KeyCode::Enter => {
+                // Open selected search result
+                app.input_mode = InputMode::Normal;
+                let results = app.search_results();
+                let idx = app.current_selection();
+                if let Some(result) = results.get(idx).cloned() {
+                    app.open_thread_from_home(&result.thread, &result.project_a_tag);
+                }
+            }
+            KeyCode::Up => {
+                let current = app.current_selection();
+                if current > 0 {
+                    app.set_current_selection(current - 1);
+                }
+            }
+            KeyCode::Down => {
+                let current = app.current_selection();
+                let max = app.search_results().len().saturating_sub(1);
+                if current < max {
+                    app.set_current_selection(current + 1);
+                }
+            }
+            _ => {}
+        }
+        return Ok(());
+    }
+
     // Handle projects modal when showing (using ModalState)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         // Get projects and for_new_thread flag BEFORE mutably borrowing modal_state
@@ -816,7 +856,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     if for_new_thread {
                         // Create draft tab and navigate to chat view
                         let project_name = app.selected_project.as_ref()
-                            .map(|p| p.title.clone())
+                            .map(|p| p.name.clone())
                             .unwrap_or_else(|| "New".to_string());
                         let tab_idx = app.open_draft_tab(&a_tag, &project_name);
                         app.switch_to_tab(tab_idx);
@@ -852,46 +892,13 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     match code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char('/') => {
+            // '/' enters text filter mode in Reports and Search tabs only
             if app.home_panel_focus == HomeTab::Reports {
-                // Enter search mode for Reports tab
                 app.input_mode = InputMode::Editing;
-            } else if app.home_panel_focus == HomeTab::Recent {
-                // Open conversation actions modal for selected thread
-                let hierarchy = get_hierarchical_threads(app);
-                if let Some(item) = hierarchy.get(app.current_selection()) {
-                    let thread_id = item.thread.id.clone();
-                    let thread_title = item.thread.title.clone();
-                    let project_a_tag = item.a_tag.clone();
-                    let is_archived = app.is_thread_archived(&thread_id);
-                    app.modal_state = ModalState::ConversationActions(
-                        ui::modal::ConversationActionsState::new(thread_id, thread_title, project_a_tag, is_archived)
-                    );
-                }
-            } else if app.home_panel_focus == HomeTab::Inbox {
-                // Open conversation actions modal for selected inbox item
-                let items = app.inbox_items();
-                if let Some(item) = items.get(app.current_selection()) {
-                    if let Some(ref thread_id) = item.thread_id {
-                        let project_a_tag = item.project_a_tag.clone();
-                        // Find thread to get title
-                        let thread = app.data_store.borrow().get_threads(&project_a_tag)
-                            .iter()
-                            .find(|t| t.id == *thread_id)
-                            .cloned();
-                        if let Some(thread) = thread {
-                            let is_archived = app.is_thread_archived(thread_id);
-                            app.modal_state = ModalState::ConversationActions(
-                                ui::modal::ConversationActionsState::new(
-                                    thread_id.clone(),
-                                    thread.title.clone(),
-                                    project_a_tag,
-                                    is_archived
-                                )
-                            );
-                        }
-                    }
-                }
+            } else if app.home_panel_focus == HomeTab::Search {
+                app.input_mode = InputMode::Editing;
             }
+            // For conversation actions in Recent/Inbox tabs, use Ctrl+T command palette instead
         }
         KeyCode::Char('p') => {
             app.open_projects_modal(false);
@@ -899,10 +906,6 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('n') => {
             // Open projects modal - selecting a project navigates to chat to create new thread
             app.open_projects_modal(true);
-        }
-        KeyCode::Char('m') => {
-            // Toggle "only by me" filter
-            app.toggle_only_by_me();
         }
         KeyCode::Char('f') => {
             // Cycle through time filter options
@@ -924,16 +927,18 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Recent => HomeTab::Inbox,
                 HomeTab::Inbox => HomeTab::Reports,
                 HomeTab::Reports => HomeTab::Status,
-                HomeTab::Status => HomeTab::Recent,
+                HomeTab::Status => HomeTab::Search,
+                HomeTab::Search => HomeTab::Recent,
             };
         }
         KeyCode::BackTab if has_shift => {
             // Shift+Tab switches tabs (backward)
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Status,
+                HomeTab::Recent => HomeTab::Search,
                 HomeTab::Inbox => HomeTab::Recent,
                 HomeTab::Reports => HomeTab::Inbox,
                 HomeTab::Status => HomeTab::Reports,
+                HomeTab::Search => HomeTab::Status,
             };
         }
         KeyCode::Right => {
@@ -974,6 +979,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
+                    HomeTab::Search => app.search_results().len().saturating_sub(1),
                 };
                 if current < max {
                     app.set_current_selection(current + 1);
@@ -1070,12 +1076,15 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let is_online = app.sidebar_project_index < online_count;
                 let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
                 if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                    let a_tag = project.a_tag();
+                    let is_archived = app.is_project_archived(&a_tag);
                     app.modal_state = ui::modal::ModalState::ProjectActions(
                         ui::modal::ProjectActionsState::new(
-                            project.a_tag(),
+                            a_tag,
                             project.name.clone(),
                             project.pubkey.clone(),
                             is_online,
+                            is_archived,
                         )
                     );
                 }
@@ -1127,6 +1136,12 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         let status_items = app.status_threads();
                         if let Some((thread, a_tag)) = status_items.get(idx) {
                             app.open_thread_from_home(thread, a_tag);
+                        }
+                    }
+                    HomeTab::Search => {
+                        let results = app.search_results();
+                        if let Some(result) = results.get(idx).cloned() {
+                            app.open_thread_from_home(&result.thread, &result.project_a_tag);
                         }
                     }
                 }
@@ -1201,6 +1216,22 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.set_status(&status);
             }
         }
+        KeyCode::Char('x') if app.sidebar_focused => {
+            // Quick archive - press x to archive selected project
+            let (online, offline) = app.filtered_projects();
+            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
+            if let Some(project) = all_projects.get(app.sidebar_project_index) {
+                let a_tag = project.a_tag();
+                let project_name = project.name.clone();
+                let is_now_archived = app.toggle_project_archived(&a_tag);
+                let status = if is_now_archived {
+                    format!("Archived: {}", project_name)
+                } else {
+                    format!("Unarchived: {}", project_name)
+                };
+                app.set_status(&status);
+            }
+        }
         // Vim-style navigation (j/k)
         KeyCode::Char('k') if !app.sidebar_focused => {
             let current = app.current_selection();
@@ -1215,6 +1246,7 @@ fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
+                HomeTab::Search => app.search_results().len().saturating_sub(1),
             };
             if current < max {
                 app.set_current_selection(current + 1);
@@ -2503,7 +2535,7 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key events for the search modal (/)
+/// Handle key events for the search modal
 fn handle_search_modal_key(app: &mut App, key: KeyEvent) {
     let code = key.code;
 
@@ -2546,6 +2578,37 @@ fn handle_search_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Backspace => {
             app.search_filter.pop();
             app.search_index = 0;
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events for in-conversation search mode (Ctrl+F)
+fn handle_chat_search_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+
+    match code {
+        // Escape closes search mode
+        KeyCode::Esc => {
+            app.exit_chat_search();
+        }
+        // Enter or Down goes to next match
+        KeyCode::Enter | KeyCode::Down => {
+            app.chat_search_next();
+        }
+        // Up goes to previous match
+        KeyCode::Up => {
+            app.chat_search_prev();
+        }
+        // Character input appends to query
+        KeyCode::Char(c) => {
+            app.chat_search.query.push(c);
+            app.update_chat_search();
+        }
+        // Backspace removes last character from query
+        KeyCode::Backspace => {
+            app.chat_search.query.pop();
+            app.update_chat_search();
         }
         _ => {}
     }
@@ -2761,7 +2824,7 @@ fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
     }
 }
 
-/// Handle key events for the chat actions modal (Ctrl+T /)
+/// Handle key events for the chat actions modal (via Ctrl+T command palette)
 fn handle_chat_actions_modal_key(app: &mut App, key: KeyEvent) {
     use ui::modal::ChatAction;
 
@@ -2827,8 +2890,15 @@ fn execute_chat_action(
         ChatAction::NewConversation => {
             // Start a new conversation keeping the same project, agent, and branch context
             // Create a draft tab so it persists in the tab bar
-            let project_name = state.project_name.clone();
             let project_a_tag = state.project_a_tag.clone();
+
+            // Get the project name from the data store
+            let project_name = app.data_store.borrow()
+                .get_projects()
+                .iter()
+                .find(|p| p.a_tag() == project_a_tag)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| "New".to_string());
 
             app.modal_state = ModalState::None;
             app.save_chat_draft(); // Save current draft before switching
@@ -2915,6 +2985,9 @@ fn handle_project_actions_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('s') => {
             execute_project_action(app, &state, ProjectAction::Settings);
         }
+        KeyCode::Char('a') => {
+            execute_project_action(app, &state, ProjectAction::ToggleArchive);
+        }
         _ => {}
     }
 }
@@ -2994,6 +3067,16 @@ fn execute_project_action(
                 app.modal_state = ModalState::None;
                 app.set_status("Project not found");
             }
+        }
+        ProjectAction::ToggleArchive => {
+            let is_now_archived = app.toggle_project_archived(&state.project_a_tag);
+            let status = if is_now_archived {
+                format!("Archived: {}", state.project_name)
+            } else {
+                format!("Unarchived: {}", state.project_name)
+            };
+            app.notify(Notification::info(&status));
+            app.modal_state = ModalState::None;
         }
     }
 }
@@ -3101,11 +3184,6 @@ fn execute_palette_command(app: &mut App, key: char) {
             app.view = View::Home;
             app.input_mode = InputMode::Normal;
         }
-        '/' => {
-            app.showing_search_modal = true;
-            app.search_filter.clear();
-            app.search_index = 0;
-        }
         '?' => {
             app.modal_state = ModalState::HotkeyHelp;
         }
@@ -3127,7 +3205,7 @@ fn execute_palette_command(app: &mut App, key: char) {
                 // In Chat view: start new conversation keeping same project, agent, and branch
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
-                    let project_name = project.title.clone();
+                    let project_name = project.name.clone();
 
                     app.save_chat_draft(); // Save current draft before switching
                     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
@@ -3181,10 +3259,6 @@ fn execute_palette_command(app: &mut App, key: char) {
         'p' => {
             // Switch project
             app.open_projects_modal(false);
-        }
-        'm' => {
-            // Toggle "by me" filter
-            app.toggle_only_by_me();
         }
         'f' => {
             // Cycle time filter
