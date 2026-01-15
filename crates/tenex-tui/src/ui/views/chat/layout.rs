@@ -197,6 +197,16 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if let ModalState::CommandPalette(ref state) = app.modal_state {
         super::super::render_command_palette(f, area, state);
     }
+
+    // Global search modal overlay (/)
+    if app.showing_search_modal {
+        super::super::home::render_search_modal(f, app, area);
+    }
+
+    // In-conversation search overlay (Ctrl+F)
+    if app.chat_search.active {
+        render_chat_search_bar(f, app, area);
+    }
 }
 
 fn build_layout(
@@ -774,4 +784,64 @@ fn render_agent_settings_modal(
     let hints = Paragraph::new("tab switch · ↑↓ navigate · space toggle · a toggle all · enter save · esc cancel")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
+}
+
+/// Render the in-conversation search bar (floating at top)
+fn render_chat_search_bar(f: &mut Frame, app: &App, area: Rect) {
+    use ratatui::text::{Line, Span};
+
+    // Position at the top of the messages area, 3 lines tall
+    let search_area = Rect::new(
+        area.x + 2,
+        area.y + 1,
+        area.width.saturating_sub(4).min(60),
+        3,
+    );
+
+    // Background
+    let bg_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER_ACTIVE))
+        .style(Style::default().bg(theme::BG_CARD));
+    f.render_widget(bg_block, search_area);
+
+    // Inner area for content
+    let inner = Rect::new(
+        search_area.x + 1,
+        search_area.y + 1,
+        search_area.width.saturating_sub(2),
+        1,
+    );
+
+    // Build search line
+    let query_display = if app.chat_search.query.is_empty() {
+        Span::styled("Type to search...", Style::default().fg(theme::TEXT_MUTED))
+    } else {
+        Span::styled(&app.chat_search.query, Style::default().fg(theme::TEXT_PRIMARY))
+    };
+
+    let match_info = if app.chat_search.total_matches > 0 {
+        format!(
+            " [{}/{}]",
+            app.chat_search.current_match + 1,
+            app.chat_search.total_matches
+        )
+    } else if !app.chat_search.query.is_empty() {
+        " [0 matches]".to_string()
+    } else {
+        String::new()
+    };
+
+    let line = Line::from(vec![
+        Span::styled("🔍 ", Style::default().fg(theme::ACCENT_PRIMARY)),
+        query_display,
+        Span::styled(match_info, Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(
+            "  (Enter: next · ↑↓: navigate · Esc: close)",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
+    ]);
+
+    let search_text = Paragraph::new(line);
+    f.render_widget(search_text, inner);
 }
