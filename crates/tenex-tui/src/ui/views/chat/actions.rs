@@ -1,6 +1,4 @@
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay, ModalSize,
-};
+use crate::ui::components::{Modal, ModalSize};
 use crate::ui::theme;
 use ratatui::{
     layout::Rect,
@@ -12,38 +10,25 @@ use ratatui::{
 
 /// Render the view raw event modal
 pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usize, area: Rect) {
-    let size = ModalSize {
-        max_width: (area.width as f32 * 0.85) as u16,
-        height_percent: 0.85,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header
-    let remaining = render_modal_header(f, inner_area, "Raw Event", "esc");
+    let (popup_area, content_area) = Modal::new("Raw Event")
+        .size(ModalSize {
+            max_width: (area.width as f32 * 0.85) as u16,
+            height_percent: 0.85,
+        })
+        .render_frame(f, area);
 
     // Render JSON with syntax highlighting (simple version - just muted for keys)
-    let content_area = Rect::new(
-        remaining.x + 2,
-        remaining.y,
-        remaining.width.saturating_sub(4),
-        remaining.height,
+    let json_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height,
     );
 
     let lines: Vec<Line> = json
         .lines()
         .skip(scroll_offset)
-        .take(content_area.height as usize)
+        .take(json_area.height as usize)
         .map(|line| {
             // Simple syntax highlighting for JSON
             if line.trim().starts_with('"') && line.contains(':') {
@@ -65,7 +50,7 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
         .collect();
 
     let paragraph = Paragraph::new(lines);
-    f.render_widget(paragraph, content_area);
+    f.render_widget(paragraph, json_area);
 
     // Render hints at bottom
     let hints_area = Rect::new(
@@ -81,25 +66,12 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
 
 /// Render the hotkey help modal (?)
 pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
-    let size = ModalSize {
-        max_width: 60,
-        height_percent: 0.75,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header
-    let remaining = render_modal_header(f, inner_area, "Keyboard Shortcuts", "esc");
+    let (popup_area, content_area) = Modal::new("Keyboard Shortcuts")
+        .size(ModalSize {
+            max_width: 60,
+            height_percent: 0.75,
+        })
+        .render_frame(f, area);
 
     // Define hotkey sections
     // NOTE: These should eventually be auto-generated from the hotkey registry
@@ -161,11 +133,11 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     ];
 
     // Render content
-    let content_area = Rect::new(
-        remaining.x + 2,
-        remaining.y,
-        remaining.width.saturating_sub(4),
-        remaining.height,
+    let hotkeys_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height,
     );
 
     let mut lines: Vec<Line> = Vec::new();
@@ -188,9 +160,9 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     }
 
     // Truncate to fit
-    let visible_lines: Vec<Line> = lines.into_iter().take(content_area.height as usize).collect();
+    let visible_lines: Vec<Line> = lines.into_iter().take(hotkeys_area.height as usize).collect();
     let paragraph = Paragraph::new(visible_lines);
-    f.render_widget(paragraph, content_area);
+    f.render_widget(paragraph, hotkeys_area);
 
     // Render hints at bottom
     let hints_area = Rect::new(

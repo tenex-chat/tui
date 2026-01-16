@@ -1,33 +1,10 @@
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
-    render_modal_sections, ModalItem, ModalSection, ModalSize,
-};
+use crate::ui::components::{render_modal_sections, Modal, ModalItem, ModalSection, ModalSize};
 use crate::ui::modal::CommandPaletteState;
 use ratatui::{layout::Rect, Frame};
 use std::collections::BTreeMap;
 
 /// Render the command palette modal (Ctrl+T)
 pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteState) {
-    render_modal_overlay(f, area);
-
-    let size = ModalSize {
-        max_width: 50,
-        height_percent: 0.6,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Inner area with vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
-    let remaining = render_modal_header(f, inner_area, "Commands", "esc");
-
     // Get available commands and group by section
     let commands = state.available_commands();
 
@@ -67,5 +44,12 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteS
         sections.push(section);
     }
 
-    render_modal_sections(f, remaining, &sections);
+    Modal::new("Commands")
+        .size(ModalSize {
+            max_width: 50,
+            height_percent: 0.6,
+        })
+        .render(f, area, |f, content_area| {
+            render_modal_sections(f, content_area, &sections);
+        });
 }

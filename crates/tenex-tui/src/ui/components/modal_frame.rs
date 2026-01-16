@@ -26,6 +26,146 @@ impl Default for ModalSize {
     }
 }
 
+// =============================================================================
+// Modal Builder - Reusable modal component with guaranteed overlay
+// =============================================================================
+
+/// A reusable modal component with builder pattern.
+///
+/// This ensures consistent modal rendering across the app:
+/// - Always renders the dimmed overlay behind the modal
+/// - Always renders the modal background
+/// - Provides optional header and search components
+///
+/// # Example
+/// ```ignore
+/// Modal::new("Select Agent")
+///     .hint("esc")
+///     .size(ModalSize { max_width: 60, height_percent: 0.5 })
+///     .search(&filter, "Search agents...")
+///     .render(f, area, |f, content_area| {
+///         // Render your custom content here
+///         render_modal_items(f, content_area, &items);
+///     });
+/// ```
+pub struct Modal<'a> {
+    title: &'a str,
+    hint: &'a str,
+    size: ModalSize,
+    search: Option<(&'a str, &'a str)>, // (filter, placeholder)
+}
+
+impl<'a> Modal<'a> {
+    /// Create a new modal with the given title
+    pub fn new(title: &'a str) -> Self {
+        Self {
+            title,
+            hint: "esc",
+            size: ModalSize::default(),
+            search: None,
+        }
+    }
+
+    /// Set the hint text shown in the top-right corner (default: "esc")
+    pub fn hint(mut self, hint: &'a str) -> Self {
+        self.hint = hint;
+        self
+    }
+
+    /// Set the modal size
+    pub fn size(mut self, size: ModalSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// Add a search input field to the modal
+    pub fn search(mut self, filter: &'a str, placeholder: &'a str) -> Self {
+        self.search = Some((filter, placeholder));
+        self
+    }
+
+    /// Render the modal and call the provided closure with the content area.
+    ///
+    /// This handles:
+    /// 1. Rendering the dimmed overlay over the entire terminal
+    /// 2. Calculating and rendering the modal background
+    /// 3. Rendering the header (title + hint)
+    /// 4. Optionally rendering the search field
+    /// 5. Calling your closure with the remaining content area
+    ///
+    /// Returns the popup area (useful for cursor positioning).
+    pub fn render<F>(self, f: &mut Frame, terminal_area: Rect, content_fn: F) -> Rect
+    where
+        F: FnOnce(&mut Frame, Rect),
+    {
+        // 1. Always render the overlay first
+        render_modal_overlay(f, terminal_area);
+
+        // 2. Calculate and render modal background
+        let popup_area = modal_area(terminal_area, &self.size);
+        render_modal_background(f, popup_area);
+
+        // 3. Add vertical padding for inner content
+        let inner_area = Rect::new(
+            popup_area.x,
+            popup_area.y + 1,
+            popup_area.width,
+            popup_area.height.saturating_sub(2),
+        );
+
+        // 4. Render header
+        let remaining = render_modal_header(f, inner_area, self.title, self.hint);
+
+        // 5. Optionally render search
+        let content_area = if let Some((filter, placeholder)) = self.search {
+            render_modal_search(f, remaining, filter, placeholder)
+        } else {
+            remaining
+        };
+
+        // 6. Call the content function with remaining area
+        content_fn(f, content_area);
+
+        popup_area
+    }
+
+    /// Render the modal without a content function, returning areas for manual rendering.
+    ///
+    /// Returns (popup_area, content_area) for cases where you need more control.
+    pub fn render_frame(self, f: &mut Frame, terminal_area: Rect) -> (Rect, Rect) {
+        // 1. Always render the overlay first
+        render_modal_overlay(f, terminal_area);
+
+        // 2. Calculate and render modal background
+        let popup_area = modal_area(terminal_area, &self.size);
+        render_modal_background(f, popup_area);
+
+        // 3. Add vertical padding for inner content
+        let inner_area = Rect::new(
+            popup_area.x,
+            popup_area.y + 1,
+            popup_area.width,
+            popup_area.height.saturating_sub(2),
+        );
+
+        // 4. Render header
+        let remaining = render_modal_header(f, inner_area, self.title, self.hint);
+
+        // 5. Optionally render search
+        let content_area = if let Some((filter, placeholder)) = self.search {
+            render_modal_search(f, remaining, filter, placeholder)
+        } else {
+            remaining
+        };
+
+        (popup_area, content_area)
+    }
+}
+
+// =============================================================================
+// Legacy functions - kept for backward compatibility during migration
+// =============================================================================
+
 /// Calculate centered modal area
 pub fn modal_area(terminal_area: Rect, size: &ModalSize) -> Rect {
     let popup_width = size.max_width.min(terminal_area.width.saturating_sub(4));

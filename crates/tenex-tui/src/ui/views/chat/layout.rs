@@ -1,7 +1,6 @@
 use crate::ui::components::{
-    modal_area, render_chat_sidebar, render_modal_background, render_modal_header,
-    render_modal_items, render_modal_overlay, render_modal_search, render_tab_bar,
-    ConversationMetadata, ModalItem, ModalSize,
+    render_chat_sidebar, render_modal_items, render_tab_bar, ConversationMetadata, Modal,
+    ModalItem, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::layout;
@@ -329,40 +328,26 @@ fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) 
     let char_count = editor.text.len();
     let title = format!("Expanded Editor ({} lines, {} chars)", line_count, char_count);
 
-    // Use consistent modal sizing (large modal for editing)
-    let size = ModalSize {
-        max_width: (area.width as f32 * 0.85) as u16,
-        height_percent: 0.8,
-    };
+    let (popup_area, content_area) = Modal::new(&title)
+        .size(ModalSize {
+            max_width: (area.width as f32 * 0.85) as u16,
+            height_percent: 0.8,
+        })
+        .render_frame(f, area);
 
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header with title and hint
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
-
-    // Content area for the text editor
-    let content_area = Rect::new(
-        remaining.x + 2,
-        remaining.y,
-        remaining.width.saturating_sub(4),
-        remaining.height.saturating_sub(2),
+    // Content area for the text editor (with horizontal padding)
+    let editor_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height.saturating_sub(2),
     );
 
     // Render the text content
     let text = Paragraph::new(editor.text.as_str())
         .style(Style::default().fg(theme::TEXT_PRIMARY))
         .wrap(Wrap { trim: false });
-    f.render_widget(text, content_area);
+    f.render_widget(text, editor_area);
 
     // Render hints at bottom
     let hints_area = Rect::new(
@@ -378,8 +363,8 @@ fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) 
     // Show cursor in the modal (offset by content area position)
     let (cursor_row, cursor_col) = editor.cursor_position();
     f.set_cursor_position((
-        content_area.x + cursor_col as u16,
-        content_area.y + cursor_row as u16,
+        editor_area.x + cursor_col as u16,
+        editor_area.y + cursor_row as u16,
     ));
 }
 
@@ -394,29 +379,6 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     let item_count = agents.len().max(1);
     let content_height = (item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
-
-    let size = ModalSize {
-        max_width: 55,
-        height_percent,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header
-    let remaining = render_modal_header(f, inner_area, "Select Agent", "esc");
-
-    // Render search
-    let remaining = render_modal_search(f, remaining, selector_filter, "Search agents...");
 
     // Build items
     let items: Vec<ModalItem> = if agents.is_empty() {
@@ -444,7 +406,15 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    render_modal_items(f, remaining, &items);
+    let popup_area = Modal::new("Select Agent")
+        .size(ModalSize {
+            max_width: 55,
+            height_percent,
+        })
+        .search(selector_filter, "Search agents...")
+        .render(f, area, |f, content_area| {
+            render_modal_items(f, content_area, &items);
+        });
 
     // Render hints at bottom
     let hints_area = Rect::new(
@@ -470,25 +440,6 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     let content_height = (item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
-    let size = ModalSize {
-        max_width: 55,
-        height_percent,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    let remaining = render_modal_header(f, inner_area, "Select Branch", "esc");
-    let remaining = render_modal_search(f, remaining, selector_filter, "Search branches...");
-
     let items: Vec<ModalItem> = if branches.is_empty() {
         let msg = if all_branches.is_empty() {
             "No branches available"
@@ -504,7 +455,15 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    render_modal_items(f, remaining, &items);
+    let popup_area = Modal::new("Select Branch")
+        .size(ModalSize {
+            max_width: 55,
+            height_percent,
+        })
+        .search(selector_filter, "Search branches...")
+        .render(f, area, |f, content_area| {
+            render_modal_items(f, content_area, &items);
+        });
 
     let hints_area = Rect::new(
         popup_area.x + 2,
@@ -533,31 +492,13 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the chat actions modal (Ctrl+T /)
 fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState) {
-    render_modal_overlay(f, area);
-
     let actions = state.available_actions();
     let content_height = (actions.len() + 2) as u16;
     let total_height = content_height + 4;
     let height_percent = (total_height as f32 / area.height as f32).min(0.5);
 
-    let size = ModalSize {
-        max_width: 45,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
     // Truncate title if too long
     let title = truncate_with_ellipsis(&state.thread_title, 35);
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
 
     let items: Vec<ModalItem> = actions
         .iter()
@@ -570,7 +511,14 @@ fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState
         })
         .collect();
 
-    render_modal_items(f, remaining, &items);
+    let popup_area = Modal::new(&title)
+        .size(ModalSize {
+            max_width: 45,
+            height_percent,
+        })
+        .render(f, area, |f, content_area| {
+            render_modal_items(f, content_area, &items);
+        });
 
     let hints_area = Rect::new(
         popup_area.x + 2,
@@ -592,8 +540,6 @@ fn render_agent_settings_modal(
     use crate::ui::modal::AgentSettingsFocus;
     use ratatui::style::Modifier;
 
-    render_modal_overlay(f, area);
-
     // Calculate size based on content
     let model_count = state.available_models.len();
     let tool_item_count = state.visible_item_count();
@@ -601,32 +547,21 @@ fn render_agent_settings_modal(
     let total_height = content_height.min(30);
     let height_percent = (total_height as f32 / area.height as f32).min(0.8);
 
-    let size = ModalSize {
-        max_width: 80,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
-    // Render header
     let title = format!("{} Settings", state.agent_name);
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
+    let (popup_area, content_area) = Modal::new(&title)
+        .size(ModalSize {
+            max_width: 80,
+            height_percent,
+        })
+        .render_frame(f, area);
 
     // Two-column layout: Model on left, Tools on right
-    let content_width = remaining.width.saturating_sub(4);
+    let content_width = content_area.width.saturating_sub(4);
     let left_width = content_width / 3;
     let right_width = content_width - left_width - 1; // -1 for separator
 
-    let left_area = Rect::new(remaining.x + 2, remaining.y, left_width, remaining.height.saturating_sub(2));
-    let right_area = Rect::new(remaining.x + 3 + left_width, remaining.y, right_width, remaining.height.saturating_sub(2));
+    let left_area = Rect::new(content_area.x + 2, content_area.y, left_width, content_area.height.saturating_sub(2));
+    let right_area = Rect::new(content_area.x + 3 + left_width, content_area.y, right_width, content_area.height.saturating_sub(2));
 
     // Render Model section
     let model_header_style = if state.focus == AgentSettingsFocus::Model {
