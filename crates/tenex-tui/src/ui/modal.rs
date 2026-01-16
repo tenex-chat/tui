@@ -799,6 +799,9 @@ impl CommandPaletteState {
     }
 
     /// Get commands available for the current context
+    ///
+    /// Commands are sorted by section name to match the display order in the palette
+    /// (which uses BTreeMap for grouping). This ensures selected_index matches visually.
     pub fn available_commands(&self) -> Vec<PaletteCommand> {
         let mut commands = Vec::new();
 
@@ -862,8 +865,11 @@ impl CommandPaletteState {
                 if has_parent {
                     commands.push(PaletteCommand::new('g', "Go to parent", "Conversation"));
                 }
-                commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
+                commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
+                commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
+                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
+                commands.push(PaletteCommand::new('X', "Archive + Close", "Tab"));
                 commands.push(PaletteCommand::new('T', "Toggle sidebar", "View"));
             }
             PaletteContext::ChatEditing => {
@@ -872,7 +878,11 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('E', "Expand editor", "Input"));
                 commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
                 commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
+                commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
+                commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
+                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
+                commands.push(PaletteCommand::new('X', "Archive + Close", "Tab"));
             }
             PaletteContext::AgentBrowserList => {
                 commands.push(PaletteCommand::new('o', "View agent", "Agent"));
@@ -884,6 +894,8 @@ impl CommandPaletteState {
             }
         }
 
+        // Sort by section name to match display order (BTreeMap iterates alphabetically)
+        commands.sort_by(|a, b| a.section.cmp(b.section));
         commands
     }
 
