@@ -335,6 +335,7 @@ fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) 
         height_percent: 0.8,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
@@ -399,6 +400,7 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
         height_percent,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
@@ -473,6 +475,7 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
         height_percent,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
