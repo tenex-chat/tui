@@ -163,11 +163,11 @@ impl<'a> Modal<'a> {
 }
 
 // =============================================================================
-// Legacy functions - kept for backward compatibility during migration
+// Internal helper functions (used by Modal struct)
 // =============================================================================
 
 /// Calculate centered modal area
-pub fn modal_area(terminal_area: Rect, size: &ModalSize) -> Rect {
+fn modal_area(terminal_area: Rect, size: &ModalSize) -> Rect {
     let popup_width = size.max_width.min(terminal_area.width.saturating_sub(4));
     let popup_height = (terminal_area.height as f32 * size.height_percent) as u16;
     let popup_x = terminal_area.x + (terminal_area.width.saturating_sub(popup_width)) / 2;
@@ -199,12 +199,12 @@ impl Widget for DimOverlay {
 
 /// Render dimmed overlay over the entire terminal area
 /// This creates a semi-transparent fade effect behind modals by dimming existing content
-pub fn render_modal_overlay(f: &mut Frame, terminal_area: Rect) {
+fn render_modal_overlay(f: &mut Frame, terminal_area: Rect) {
     f.render_widget(DimOverlay, terminal_area);
 }
 
 /// Render the modal background (clears area and fills with modal bg color)
-pub fn render_modal_background(f: &mut Frame, area: Rect) {
+fn render_modal_background(f: &mut Frame, area: Rect) {
     f.render_widget(Clear, area);
     let bg_block = Block::default().style(Style::default().bg(theme::BG_MODAL));
     f.render_widget(bg_block, area);
@@ -212,7 +212,7 @@ pub fn render_modal_background(f: &mut Frame, area: Rect) {
 
 /// Render modal header with title on left and hint on right
 /// Returns the remaining area below the header
-pub fn render_modal_header(f: &mut Frame, area: Rect, title: &str, hint: &str) -> Rect {
+fn render_modal_header(f: &mut Frame, area: Rect, title: &str, hint: &str) -> Rect {
     // Header takes 2 lines (1 for content + 1 for spacing)
     let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
 
@@ -415,27 +415,4 @@ pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
 
         render_modal_item(f, item_area, item);
     }
-}
-
-/// Complete modal frame that combines all elements
-/// This is a convenience function for simple command palette-style modals
-pub fn render_command_modal(
-    f: &mut Frame,
-    terminal_area: Rect,
-    title: &str,
-    hint: &str,
-    filter: &str,
-    search_placeholder: &str,
-    sections: &[ModalSection],
-    size: ModalSize,
-) {
-    let area = modal_area(terminal_area, &size);
-    render_modal_background(f, area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
-
-    let remaining = render_modal_header(f, inner_area, title, hint);
-    let remaining = render_modal_search(f, remaining, filter, search_placeholder);
-    render_modal_sections(f, remaining, sections);
 }

@@ -1,5 +1,5 @@
 // crates/tenex-tui/src/ui/views/report_viewer.rs
-use crate::ui::components::{modal_area, render_modal_background, render_modal_overlay, ModalSize};
+use crate::ui::components::{Modal, ModalSize};
 use crate::ui::markdown::render_markdown;
 use crate::ui::modal::{ReportCopyOption, ReportViewerFocus, ReportViewerState, ReportViewMode};
 use crate::ui::{card, theme, App};
@@ -13,15 +13,16 @@ use ratatui::{
 };
 
 pub fn render_report_viewer(f: &mut Frame, app: &App, area: Rect, state: &ReportViewerState) {
-    render_modal_overlay(f, area);
-
-    let size = ModalSize {
-        max_width: 120,
-        height_percent: 0.9,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
+    // Use Modal to render overlay and background, but we need full control of content
+    let popup_area = Modal::new("")
+        .hint("")
+        .size(ModalSize {
+            max_width: 120,
+            height_percent: 0.9,
+        })
+        .render(f, area, |_, _| {
+            // We'll render content manually below
+        });
 
     // Layout: Header | Content (with optional threads sidebar) | Help
     let chunks = Layout::vertical([
