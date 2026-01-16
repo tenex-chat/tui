@@ -1,10 +1,11 @@
 use crate::ui::layout;
 use crate::ui::theme;
 use ratatui::{
+    buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::Style,
+    style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Clear, Paragraph},
+    widgets::{Block, Clear, Paragraph, Widget},
     Frame,
 };
 
@@ -34,10 +35,32 @@ pub fn modal_area(terminal_area: Rect, size: &ModalSize) -> Rect {
     Rect::new(popup_x, popup_y, popup_width, popup_height)
 }
 
+/// A widget that dims the existing content by applying a semi-transparent overlay effect
+struct DimOverlay;
+
+impl Widget for DimOverlay {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        // Apply dim modifier and darker foreground to existing cells to create fade effect
+        // This preserves the content but makes it appear dimmed/faded
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                if let Some(cell) = buf.cell_mut((x, y)) {
+                    // Apply dim modifier to fade the text
+                    cell.set_style(
+                        Style::default()
+                            .add_modifier(Modifier::DIM)
+                            .bg(theme::BG_MODAL_OVERLAY),
+                    );
+                }
+            }
+        }
+    }
+}
+
 /// Render dimmed overlay over the entire terminal area
+/// This creates a semi-transparent fade effect behind modals by dimming existing content
 pub fn render_modal_overlay(f: &mut Frame, terminal_area: Rect) {
-    let overlay = Block::default().style(Style::default().bg(theme::BG_MODAL_OVERLAY));
-    f.render_widget(overlay, terminal_area);
+    f.render_widget(DimOverlay, terminal_area);
 }
 
 /// Render the modal background (clears area and fills with modal bg color)
