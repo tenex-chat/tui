@@ -1,8 +1,5 @@
 use crate::ui::app::fuzzy_matches;
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
-    render_modal_search, ModalSize,
-};
+use crate::ui::components::{Modal, ModalSize};
 use crate::ui::modal::ProjectSettingsState;
 use crate::ui::{theme, App};
 use ratatui::{
@@ -23,25 +20,22 @@ pub fn render_project_settings(f: &mut Frame, app: &App, area: Rect, state: &Pro
 }
 
 fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSettingsState) {
-    let size = ModalSize {
-        max_width: 70,
-        height_percent: 0.7,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Header
     let title = format!("Settings: {}", state.project_name);
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    let (popup_area, content_area) = Modal::new(&title)
+        .size(ModalSize {
+            max_width: 70,
+            height_percent: 0.7,
+        })
+        .render_frame(f, area);
+
+    // Content area with horizontal padding
+    let remaining = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height,
+    );
 
     // Agents section header
     let agents_header_area = Rect::new(remaining.x, remaining.y, remaining.width, 1);
@@ -180,27 +174,21 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
 }
 
 fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSettingsState) {
-    let size = ModalSize {
-        max_width: 70,
-        height_percent: 0.8,
-    };
+    let (popup_area, content_area) = Modal::new("Add Agent")
+        .size(ModalSize {
+            max_width: 70,
+            height_percent: 0.8,
+        })
+        .search(&state.add_filter, "Search agents...")
+        .render_frame(f, area);
 
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
+    // Content area with horizontal padding
+    let remaining = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height,
     );
-
-    // Header
-    let remaining = render_modal_header(f, inner_area, "Add Agent", "esc");
-
-    // Search
-    let remaining = render_modal_search(f, remaining, &state.add_filter, "Search agents...");
 
     // Get available agents (exclude already added)
     let filter = &state.add_filter;

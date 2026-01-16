@@ -1,7 +1,6 @@
 use crate::models::{InboxEventType, InboxItem, Thread};
 use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_items,
-    render_modal_overlay, render_modal_search, render_modal_sections, render_tab_bar, ModalItem,
+    render_modal_items, render_modal_sections, render_tab_bar, Modal, ModalItem,
     ModalSection, ModalSize,
 };
 use crate::ui::card;
@@ -1545,31 +1544,15 @@ pub fn selectable_project_count(app: &App) -> usize {
 }
 
 fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
-    // Dim the background
-    render_modal_overlay(f, area);
-
-    let size = ModalSize {
-        max_width: 65,
-        height_percent: 0.7,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3), // Leave room for hints
-    );
-
-    // Render header
-    let remaining = render_modal_header(f, inner_area, "Switch Project", "esc");
-
-    // Render search
     let filter = app.projects_modal_filter();
-    let remaining = render_modal_search(f, remaining, filter, "Search projects...");
+
+    let (popup_area, remaining) = Modal::new("Switch Project")
+        .size(ModalSize {
+            max_width: 65,
+            height_percent: 0.7,
+        })
+        .search(filter, "Search projects...")
+        .render_frame(f, area);
 
     // Build sections
     let data_store = app.data_store.borrow();
@@ -1643,33 +1626,18 @@ fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the tab modal (Alt+/) showing all open tabs
 pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
-    // Dim the background
-    render_modal_overlay(f, area);
-
     // Calculate modal dimensions - dynamic based on tab count (+1 for Home entry)
     let tab_count = app.open_tabs().len() + 1; // +1 for Home
     let content_height = (tab_count + 2) as u16; // +2 for header spacing
     let total_height = content_height + 4; // +4 for padding and hints
     let height_percent = (total_height as f32 / area.height as f32).min(0.7);
 
-    let size = ModalSize {
-        max_width: 70,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
-    // Render header with title and hint
-    let remaining = render_modal_header(f, inner_area, "Open Tabs", "esc");
+    let (popup_area, remaining) = Modal::new("Open Tabs")
+        .size(ModalSize {
+            max_width: 70,
+            height_percent,
+        })
+        .render_frame(f, area);
 
     // Build items list - Home is always first (option 1)
     let data_store = app.data_store.borrow();
@@ -1726,30 +1694,13 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
 pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
     use crate::ui::app::SearchMatchType;
 
-    // Dim the background
-    render_modal_overlay(f, area);
-
-    let size = ModalSize {
-        max_width: 80,
-        height_percent: 0.8,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    // Add vertical padding
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Render header with title and hint
-    let remaining = render_modal_header(f, inner_area, "Search", "esc");
-
-    // Render search input
-    let remaining = render_modal_search(f, remaining, &app.search_filter, "Search threads and messages...");
+    let (popup_area, remaining) = Modal::new("Search")
+        .size(ModalSize {
+            max_width: 80,
+            height_percent: 0.8,
+        })
+        .search(&app.search_filter, "Search threads and messages...")
+        .render_frame(f, area);
 
     // Get search results
     let results = app.search_results();
@@ -1829,29 +1780,17 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the project actions modal (boot, settings)
 fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectActionsState) {
-    render_modal_overlay(f, area);
-
     let actions = state.available_actions();
     let content_height = (actions.len() + 2) as u16;
     let total_height = content_height + 4;
     let height_percent = (total_height as f32 / area.height as f32).min(0.5);
 
-    let size = ModalSize {
-        max_width: 40,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
-    let remaining = render_modal_header(f, inner_area, &state.project_name, "esc");
+    let (popup_area, remaining) = Modal::new(&state.project_name)
+        .size(ModalSize {
+            max_width: 40,
+            height_percent,
+        })
+        .render_frame(f, area);
 
     let items: Vec<ModalItem> = actions
         .iter()
@@ -1878,31 +1817,20 @@ fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &ProjectAction
 }
 
 fn render_conversation_actions_modal(f: &mut Frame, area: Rect, state: &ConversationActionsState) {
-    render_modal_overlay(f, area);
-
     let actions = ConversationAction::ALL;
     let content_height = (actions.len() + 2) as u16;
     let total_height = content_height + 4;
     let height_percent = (total_height as f32 / area.height as f32).min(0.5);
 
-    let size = ModalSize {
-        max_width: 45,
-        height_percent,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x,
-        popup_area.y + 1,
-        popup_area.width,
-        popup_area.height.saturating_sub(2),
-    );
-
     // Truncate title if too long
     let title = truncate_with_ellipsis(&state.thread_title, 35);
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
+
+    let (popup_area, remaining) = Modal::new(&title)
+        .size(ModalSize {
+            max_width: 45,
+            height_percent,
+        })
+        .render_frame(f, area);
 
     let items: Vec<ModalItem> = actions
         .iter()
