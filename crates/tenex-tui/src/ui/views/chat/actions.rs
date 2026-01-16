@@ -1,5 +1,5 @@
 use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, ModalSize,
+    modal_area, render_modal_background, render_modal_header, render_modal_overlay, ModalSize,
 };
 use crate::ui::theme;
 use ratatui::{
@@ -17,6 +17,7 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
         height_percent: 0.85,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
@@ -85,6 +86,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         height_percent: 0.75,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 

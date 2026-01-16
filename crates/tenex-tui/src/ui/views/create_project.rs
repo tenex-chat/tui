@@ -1,5 +1,6 @@
 use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_search, ModalSize,
+    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
+    render_modal_search, ModalSize,
 };
 use crate::ui::modal::{CreateProjectFocus, CreateProjectState, CreateProjectStep};
 use crate::ui::{theme, App};
@@ -18,6 +19,7 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
         height_percent: 0.7,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 

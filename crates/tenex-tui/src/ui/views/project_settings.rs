@@ -1,6 +1,7 @@
 use crate::ui::app::fuzzy_matches;
 use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_search, ModalSize,
+    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
+    render_modal_search, ModalSize,
 };
 use crate::ui::modal::ProjectSettingsState;
 use crate::ui::{theme, App};
@@ -27,6 +28,7 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
         height_percent: 0.7,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
@@ -183,6 +185,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         height_percent: 0.8,
     };
 
+    render_modal_overlay(f, area);
     let popup_area = modal_area(area, &size);
     render_modal_background(f, popup_area);
 
