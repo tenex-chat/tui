@@ -7,7 +7,6 @@ use std::thread::JoinHandle;
 use anyhow::Result;
 use futures::{FutureExt, StreamExt};
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream, Transaction};
-use tracing::{debug, warn};
 
 use crate::config::CoreConfig;
 use crate::events::CoreEvent;
@@ -101,19 +100,12 @@ impl CoreRuntime {
     }
 
     pub fn process_note_keys(&self, note_keys: &[NoteKey]) -> Result<Vec<CoreEvent>> {
-        let note_count = note_keys.len();
-        if note_count > 10 {
-            warn!("Processing large batch of {} notes - this may cause UI lag", note_count);
-        }
-        debug!("process_note_keys: processing {} notes", note_count);
-
         let txn = Transaction::new(&self.ndb)?;
         let mut events = Vec::with_capacity(note_keys.len());
 
-        for (idx, &note_key) in note_keys.iter().enumerate() {
+        for &note_key in note_keys.iter() {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, note_key) {
                 let kind = note.kind();
-                debug!("Processing note {}/{}: kind={}", idx + 1, note_count, kind);
 
                 self.data_store.borrow_mut().handle_event(kind, &note);
 

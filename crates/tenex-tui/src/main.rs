@@ -8,7 +8,6 @@ pub use tenex_core::models;
 pub use tenex_core::nostr;
 pub use tenex_core::store;
 pub use tenex_core::streaming;
-pub use tenex_core::tracing_setup;
 
 use anyhow::Result;
 use nostr::NostrCommand;
@@ -38,8 +37,6 @@ async fn main() -> Result<()> {
         // Call original hook
         original_hook(panic_info);
     }));
-
-    tracing_setup::init_tracing();
 
     let mut core_runtime = CoreRuntime::new(CoreConfig::default())?;
     let data_store = core_runtime.data_store();
@@ -103,9 +100,6 @@ async fn main() -> Result<()> {
     core_runtime.shutdown();
 
     ui::restore_terminal()?;
-
-    // Flush pending traces before exit
-    tracing_setup::shutdown_tracing();
 
     if let Err(err) = result {
         eprintln!("Error: {err}");

@@ -213,7 +213,7 @@ pub(crate) fn markdown_lines(
     out
 }
 
-/// Format LLM metadata value (tokens > 1000 as "6k", cost with $)
+/// Format LLM metadata value (tokens > 1000 as "6k", cost with $, runtime in seconds)
 fn format_llm_value(key: &str, value: &str) -> String {
     // Format tokens > 1000 as "14.5k"
     if key.contains("tokens") {
@@ -229,6 +229,19 @@ fn format_llm_value(key: &str, value: &str) -> String {
     if key == "cost-usd" {
         return format!("${}", value);
     }
+    // Format runtime from ms to seconds
+    if key == "runtime" {
+        if let Ok(ms) = value.parse::<f64>() {
+            let seconds = ms / 1000.0;
+            if seconds >= 60.0 {
+                // Show as minutes and seconds for longer runtimes
+                let mins = (seconds / 60.0).floor();
+                let secs = seconds % 60.0;
+                return format!("{:.0}m{:.0}s", mins, secs);
+            }
+            return format!("{:.1}s", seconds);
+        }
+    }
     value.to_string()
 }
 
@@ -241,6 +254,7 @@ fn llm_label(key: &str) -> &str {
         "prompt-tokens" => "prompt",
         "total-tokens" => "total",
         "cost-usd" => "cost",
+        "runtime" => "runtime",
         _ => key,
     }
 }
@@ -307,6 +321,51 @@ pub(crate) fn reasoning_dot_line(indicator_color: Color) -> Line<'static> {
         Span::styled("·", Style::default().fg(indicator_color)),
         Span::styled("  ", Style::default()), // 2 spaces for consistent padding
     ])
+}
+
+/// Render author line with recipient showing "[from] -> [to]" format
+pub(crate) fn author_line_with_recipient(
+    author: &str,
+    recipients: &[String],
+    indicator_color: Color,
+    bg: Color,
+    width: usize,
+) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+        Span::styled("  ", Style::default().bg(bg)), // 2 spaces for consistent padding
+        Span::styled(
+            author.to_string(),
+            Style::default()
+                .fg(indicator_color)
+                .add_modifier(Modifier::BOLD)
+                .bg(bg),
+        ),
+    ];
+    let mut current_len = 3 + author.chars().count(); // "│  " + author
+
+    // Add " -> " arrow
+    spans.push(Span::styled(
+        " -> ",
+        Style::default().fg(theme::TEXT_MUTED).bg(bg),
+    ));
+    current_len += 4;
+
+    // Add recipient names
+    for (i, recipient) in recipients.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(", ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+            current_len += 2;
+        }
+        spans.push(Span::styled(
+            format!("@{}", recipient),
+            Style::default().fg(theme::ACCENT_SPECIAL).bg(bg),
+        ));
+        current_len += 1 + recipient.len(); // "@" + name
+    }
+
+    pad_line(&mut spans, current_len, width, bg);
+    Line::from(spans)
 }
 
 /// Render LLM metadata line (id and token info) for a selected message

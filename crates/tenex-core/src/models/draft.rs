@@ -14,8 +14,12 @@ pub struct ChatDraft {
 }
 
 impl ChatDraft {
+    /// A draft is considered empty only if it has no text AND no agent/branch selection
+    /// This ensures agent selection is persisted even if user hasn't typed anything yet
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
+            && self.selected_agent_pubkey.is_none()
+            && self.selected_branch.is_none()
     }
 }
 

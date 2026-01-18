@@ -2,9 +2,7 @@ use crate::models::{ConversationMetadata, Message, Project, ProjectStatus, Threa
 use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
 use std::collections::HashMap;
-use tracing::{info_span, instrument};
 
-#[instrument(skip(ndb))]
 pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
     let txn = Transaction::new(ndb)?;
     let filter = Filter::new().kinds([31933]).build();
@@ -42,13 +40,11 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
 }
 
 /// Get threads for a project - fast version that skips expensive message activity calculation
-#[instrument(skip(ndb), fields(project = %project_a_tag))]
 pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thread>> {
     let txn = Transaction::new(ndb)?;
 
     // Get threads (kind:1 with a-tag, no e-tags)
     let mut threads: Vec<Thread> = {
-        let _span = info_span!("query_threads").entered();
         let thread_filter = Filter::new()
             .kinds([1])
             .tags([project_a_tag], 'a')
@@ -66,7 +62,6 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
 
     // Get conversation metadata
     let metadata_map: HashMap<String, ConversationMetadata> = {
-        let _span = info_span!("query_metadata").entered();
         let metadata_filter = Filter::new().kinds([513]).build();
         let metadata_results = ndb.query(&txn, &[metadata_filter], 1000)?;
 
@@ -102,18 +97,14 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
     Ok(threads)
 }
 
-#[instrument(skip(ndb), fields(thread = %thread_id))]
 pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message>> {
-    let _span_txn = info_span!("create_transaction").entered();
     let txn = Transaction::new(ndb)?;
-    drop(_span_txn);
 
     let mut messages: Vec<Message> = Vec::new();
 
     // First, get the thread root (kind:1, no e-tags) as the first message
     // The thread_id is the event ID of the kind:1 thread
     {
-        let _span = info_span!("get_thread_root").entered();
         if let Ok(thread_id_bytes) = hex::decode(thread_id) {
             if thread_id_bytes.len() == 32 {
                 let mut id_arr = [0u8; 32];
@@ -132,8 +123,6 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
     // Get all replies (kind:1) for this thread using 'e' tag (NIP-10 with "root" marker)
     // nostrdb stores 'e' tag values as 32-byte IDs, not hex strings, so we must query with bytes
     let results = {
-        let _span = info_span!("query_messages").entered();
-
         // Convert hex thread_id to bytes for the query
         let thread_id_bytes: [u8; 32] = match hex::decode(thread_id) {
             Ok(bytes) if bytes.len() == 32 => {
@@ -153,10 +142,7 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
         ndb.query(&txn, &[filter], 1000)?
     };
 
-    tracing::info!("query returned {} messages for thread", results.len());
-
     let replies: Vec<Message> = {
-        let _span = info_span!("parse_messages", total = results.len()).entered();
         results
             .iter()
             .filter_map(|r| {
@@ -169,10 +155,7 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
     messages.extend(replies);
 
     // Sort by created_at ascending (oldest first for chat)
-    {
-        let _span = info_span!("sort_messages").entered();
-        messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-    }
+    messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
     Ok(messages)
 }

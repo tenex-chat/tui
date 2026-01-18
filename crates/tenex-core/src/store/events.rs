@@ -2,11 +2,9 @@ use anyhow::Result;
 use nostrdb::{IngestMetadata, Ndb, Transaction};
 use nostr_sdk::prelude::*;
 use serde_json::json;
-use tracing::{debug, instrument};
 
 /// Ingest events into nostrdb from nostr-sdk Events
 /// - relay_url: the source relay URL (None for locally created events)
-#[instrument(skip(ndb, events), fields(event_count = events.len()))]
 pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Result<usize> {
     let mut ingested = 0;
 
@@ -23,8 +21,8 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
             ndb.process_event(&relay_json)
         };
 
-        if let Err(e) = result {
-            debug!("Failed to ingest event {}: {}", event.id, e);
+        if let Err(_e) = result {
+            // Event ingestion failed (e.g., duplicate)
         } else {
             ingested += 1;
         }

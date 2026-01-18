@@ -2,9 +2,14 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
 
 use super::LocalStreamChunk;
+
+fn debug_log(msg: &str) {
+    if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
+        eprintln!("[SOCKET] {}", msg);
+    }
+}
 
 /// Client for connecting to the local streaming socket
 pub struct SocketStreamClient {
@@ -29,17 +34,17 @@ impl SocketStreamClient {
     /// Try to connect to the socket, returns None if socket doesn't exist
     pub async fn connect(&self) -> Option<UnixStream> {
         if !self.socket_path.exists() {
-            debug!("Streaming socket not found at {:?}", self.socket_path);
+            debug_log(&format!("Streaming socket not found at {:?}", self.socket_path));
             return None;
         }
 
         match UnixStream::connect(&self.socket_path).await {
             Ok(stream) => {
-                info!("Connected to streaming socket at {:?}", self.socket_path);
+                debug_log(&format!("Connected to streaming socket at {:?}", self.socket_path));
                 Some(stream)
             }
             Err(e) => {
-                warn!("Failed to connect to streaming socket: {}", e);
+                debug_log(&format!("Failed to connect to streaming socket: {}", e));
                 None
             }
         }
@@ -51,7 +56,7 @@ impl SocketStreamClient {
         loop {
             if let Some(stream) = self.connect().await {
                 if let Err(e) = self.read_stream(stream, &chunk_tx).await {
-                    error!("Stream read error: {}", e);
+                    eprintln!("[SOCKET ERROR] Stream read error: {}", e);
                 }
             }
 
@@ -76,17 +81,17 @@ impl SocketStreamClient {
             match serde_json::from_str::<LocalStreamChunk>(&line) {
                 Ok(chunk) => {
                     if chunk_tx.send(chunk).await.is_err() {
-                        warn!("Chunk receiver dropped");
+                        debug_log("Chunk receiver dropped");
                         break;
                     }
                 }
                 Err(e) => {
-                    warn!("Failed to parse chunk: {} - line: {}", e, line);
+                    debug_log(&format!("Failed to parse chunk: {} - line: {}", e, line));
                 }
             }
         }
 
-        info!("Streaming socket disconnected");
+        debug_log("Streaming socket disconnected");
         Ok(())
     }
 }

@@ -12,9 +12,8 @@ use ratatui::{
     Frame,
 };
 use std::collections::{HashMap, HashSet};
-use tracing::info_span;
 
-use super::cards::{author_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines};
+use super::cards::{author_line, author_line_with_recipient, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines};
 use super::grouping::{group_messages, DisplayItem};
 
 pub(crate) fn render_messages_panel(
@@ -99,7 +98,6 @@ pub(crate) fn render_messages_panel(
 
     // Render display messages with card-style layout and action grouping
     {
-        let _span = info_span!("render_messages").entered();
 
         // Collect all unique pubkeys and cache profile names with single borrow
         let (user_pubkey, profile_cache) = {
@@ -253,8 +251,26 @@ pub(crate) fn render_messages_panel(
                             };
                             let rendered = render_markdown(&content_text);
 
-                            // Show dot for consecutive messages within group
-                            if msg_is_consecutive && !is_first_visible {
+                            // Check if message has p-tags (recipients)
+                            let msg_has_p_tags = !msg.p_tags.is_empty();
+
+                            // Show header with recipient if message has p-tags, otherwise dot for consecutive
+                            if msg_has_p_tags {
+                                // Resolve p-tag pubkeys to display names
+                                let recipient_names: Vec<String> = {
+                                    let store = app.data_store.borrow();
+                                    msg.p_tags.iter()
+                                        .map(|pk| store.get_profile_name(pk))
+                                        .collect()
+                                };
+                                messages_text.push(author_line_with_recipient(
+                                    &author,
+                                    &recipient_names,
+                                    indicator_color,
+                                    card_bg,
+                                    content_width,
+                                ));
+                            } else if msg_is_consecutive && !is_first_visible {
                                 messages_text.push(dot_line(indicator_color, card_bg, content_width));
                             }
 
@@ -302,7 +318,7 @@ pub(crate) fn render_messages_panel(
                     is_consecutive,
                     has_next_consecutive,
                 } => {
-                    let _msg_span = info_span!("render_message", index = group_idx).entered();
+                    let _ = group_idx; // Used for debugging
 
                     // Check if this message is selected (for navigation)
                     let is_selected =
@@ -397,8 +413,27 @@ pub(crate) fn render_messages_panel(
                     } else {
                         // Non-tool message: render full card with background
 
+                        // Check if message has p-tags (recipients)
+                        let has_p_tags = !msg.p_tags.is_empty();
+
                         // First line: author header OR dot indicator for consecutive messages
-                        if *is_consecutive {
+                        // Always show header with recipient if message has p-tags
+                        if has_p_tags {
+                            // Resolve p-tag pubkeys to display names
+                            let recipient_names: Vec<String> = {
+                                let store = app.data_store.borrow();
+                                msg.p_tags.iter()
+                                    .map(|pk| store.get_profile_name(pk))
+                                    .collect()
+                            };
+                            messages_text.push(author_line_with_recipient(
+                                &author,
+                                &recipient_names,
+                                indicator_color,
+                                bg,
+                                content_width,
+                            ));
+                        } else if *is_consecutive {
                             messages_text.push(dot_line(indicator_color, bg, content_width));
                         } else {
                             messages_text.push(author_line(
@@ -453,8 +488,11 @@ pub(crate) fn render_messages_panel(
                         }
                     }
 
-                    // LLM metadata chips (shown when selected OR when setting is enabled)
-                    if (is_selected || app.show_llm_metadata) && !msg.llm_metadata.is_empty() {
+                    // Debug info: shown when selected/setting enabled with llm_metadata
+                    let show_debug_for_llm = (is_selected || app.show_llm_metadata) && !msg.llm_metadata.is_empty();
+
+                    if show_debug_for_llm {
+                        // LLM metadata line (id + token info)
                         messages_text.push(llm_metadata_line(
                             &msg.id,
                             &msg.llm_metadata,

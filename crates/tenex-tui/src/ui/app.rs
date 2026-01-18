@@ -5,7 +5,7 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{ChatSearchMatch, ChatSearchState, OpenTab, TabManager};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager};
 use crate::ui::text_editor::TextEditor;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -530,7 +530,7 @@ impl App {
     }
 
     /// Restore draft for the selected thread or draft tab into chat_editor
-    /// Also syncs agent/branch selection with the conversation's most recent activity
+    /// Priority: draft values > conversation sync > defaults
     pub fn restore_chat_draft(&mut self) {
         // Reset explicit selection flag when switching conversations
         self.user_explicitly_selected_agent = false;
@@ -547,18 +547,44 @@ impl App {
             self.tabs.active_tab().and_then(|t| t.draft_id.clone())
         };
 
+        // Track whether draft had explicit agent/branch selections
+        let mut draft_had_agent = false;
+        let mut draft_had_branch = false;
+
         if let Some(key) = draft_key {
-            // Load draft for text content only
+            // Load draft
             if let Some(draft) = self.draft_storage.borrow().load(&key) {
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
+
+                // Restore agent from draft if one was saved (takes priority over sync)
+                if let Some(ref agent_pubkey) = draft.selected_agent_pubkey {
+                    // Find agent by pubkey in available agents
+                    let agent = self.available_agents()
+                        .into_iter()
+                        .find(|a| &a.pubkey == agent_pubkey);
+                    if let Some(agent) = agent {
+                        self.selected_agent = Some(agent);
+                        draft_had_agent = true;
+                    }
+                }
+                // Restore branch from draft if one was saved (takes priority over sync)
+                if draft.selected_branch.is_some() {
+                    self.selected_branch = draft.selected_branch;
+                    draft_had_branch = true;
+                }
             }
         }
 
-        // For real threads, sync agent and branch with the conversation's most recent activity
+        // For real threads, sync agent and branch with conversation ONLY if draft didn't have values
+        // This ensures draft selections are preserved while still providing sensible defaults
         if self.selected_thread.is_some() {
-            self.sync_agent_with_conversation();
-            self.sync_branch_with_conversation();
+            if !draft_had_agent {
+                self.sync_agent_with_conversation();
+            }
+            if !draft_had_branch {
+                self.sync_branch_with_conversation();
+            }
         }
     }
 
@@ -1246,6 +1272,12 @@ impl App {
             self.selected_thread = None;
             self.creating_thread = true;
 
+            // CRITICAL: Clear all context upfront to prevent stale state leaking
+            // if project lookup fails below
+            self.selected_project = None;
+            self.selected_agent = None;
+            self.selected_branch = None;
+
             // Set the project for this draft
             let project = self.data_store.borrow()
                 .get_projects()
@@ -1258,13 +1290,13 @@ impl App {
                 self.selected_project = Some(project);
 
                 // Auto-select PM agent and default branch from status
+                // (restore_chat_draft will override if draft has specific values)
                 if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
                     if let Some(pm) = status.pm_agent() {
                         self.selected_agent = Some(pm.clone());
                     }
-                    if self.selected_branch.is_none() {
-                        self.selected_branch = status.default_branch().map(String::from);
-                    }
+                    // Always set default branch (removed .is_none() guard to prevent stale values)
+                    self.selected_branch = status.default_branch().map(String::from);
                 }
             }
 
@@ -1285,7 +1317,53 @@ impl App {
             if let Some(thread) = thread {
                 self.selected_thread = Some(thread);
                 self.creating_thread = false;
-                self.restore_chat_draft();
+
+                // CRITICAL: Set project context from the tab's project_a_tag
+                // This ensures cross-tab contamination doesn't occur
+                let project = self.data_store.borrow()
+                    .get_projects()
+                    .iter()
+                    .find(|p| p.a_tag() == project_a_tag)
+                    .cloned();
+
+                if let Some(project) = project {
+                    let a_tag = project.a_tag();
+                    self.selected_project = Some(project);
+
+                    // Load draft once upfront to check what values it contains
+                    let draft = self.draft_storage.borrow().load(&thread_id);
+                    let draft_has_agent = draft.as_ref().map(|d| d.selected_agent_pubkey.is_some()).unwrap_or(false);
+                    let draft_has_branch = draft.as_ref().map(|d| d.selected_branch.is_some()).unwrap_or(false);
+
+                    // Set agent and branch defaults only if draft doesn't have them
+                    if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+                        if !draft_has_agent {
+                            // No draft agent, use PM as default
+                            if let Some(pm) = status.pm_agent() {
+                                self.selected_agent = Some(pm.clone());
+                            } else {
+                                // No PM available, clear to prevent stale state
+                                self.selected_agent = None;
+                            }
+                        }
+
+                        if !draft_has_branch {
+                            self.selected_branch = status.default_branch().map(String::from);
+                        }
+                    } else {
+                        // No project status, clear agent/branch to prevent stale state
+                        self.selected_agent = None;
+                        self.selected_branch = None;
+                    }
+
+                    // Now restore the draft (uses cached load if same key)
+                    self.restore_chat_draft();
+                } else {
+                    // Project lookup failed - clear all context to prevent stale state leaking
+                    self.selected_project = None;
+                    self.selected_agent = None;
+                    self.selected_branch = None;
+                }
                 self.scroll_offset = usize::MAX; // Scroll to bottom
                 self.selected_message_index = 0;
                 self.subthread_root = None;
@@ -1530,7 +1608,21 @@ impl App {
             .cloned();
 
         if let Some(project) = project {
+            let a_tag = project.a_tag();
             self.selected_project = Some(project);
+
+            // Set default agent/branch from project status
+            if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+                if let Some(pm) = status.pm_agent() {
+                    self.selected_agent = Some(pm.clone());
+                } else {
+                    self.selected_agent = None;
+                }
+                self.selected_branch = status.default_branch().map(String::from);
+            } else {
+                self.selected_agent = None;
+                self.selected_branch = None;
+            }
 
             // Open tab and switch to chat
             self.open_tab(thread, project_a_tag);
@@ -1539,7 +1631,108 @@ impl App {
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
             self.scroll_offset = usize::MAX;
+        } else {
+            // Project not found - clear state to prevent leaks
+            self.selected_project = None;
+            self.selected_agent = None;
+            self.selected_branch = None;
         }
+    }
+
+    /// Push current conversation onto the navigation stack and navigate to a delegation.
+    /// This allows drilling into delegations within the same tab.
+    pub fn push_delegation(&mut self, delegation_thread_id: &str) {
+        // Get current tab state to save
+        let current_state = self.tabs.active_tab().map(|tab| NavigationStackEntry {
+            thread_id: tab.thread_id.clone(),
+            thread_title: tab.thread_title.clone(),
+            project_a_tag: tab.project_a_tag.clone(),
+            scroll_offset: self.scroll_offset,
+            selected_message_index: self.selected_message_index,
+        });
+
+        // Find the delegation thread
+        let thread_and_project = {
+            let store = self.data_store.borrow();
+            store.get_thread_by_id(delegation_thread_id).map(|t| {
+                let project_a_tag = store
+                    .find_project_for_thread(delegation_thread_id)
+                    .unwrap_or_default();
+                (t.clone(), project_a_tag)
+            })
+        };
+
+        if let (Some(entry), Some((thread, project_a_tag))) = (current_state, thread_and_project) {
+            // Push current state onto stack
+            if let Some(tab) = self.tabs.active_tab_mut() {
+                tab.navigation_stack.push(entry);
+                // Update tab to point to new thread
+                tab.thread_id = thread.id.clone();
+                tab.thread_title = thread.title.clone();
+                tab.project_a_tag = project_a_tag.clone();
+            }
+
+            // Update app state
+            self.selected_thread = Some(thread);
+            self.scroll_offset = usize::MAX; // Start at bottom
+            self.selected_message_index = 0;
+
+            // Update project context if needed
+            let project = self.data_store.borrow().get_projects()
+                .iter()
+                .find(|p| p.a_tag() == project_a_tag)
+                .cloned();
+            if let Some(project) = project {
+                self.selected_project = Some(project);
+            }
+        }
+    }
+
+    /// Pop from the navigation stack and return to the parent conversation.
+    /// Returns true if popped successfully, false if stack was empty.
+    pub fn pop_navigation_stack(&mut self) -> bool {
+        let entry = self.tabs.active_tab_mut()
+            .and_then(|tab| tab.navigation_stack.pop());
+
+        if let Some(entry) = entry {
+            // Find the parent thread
+            let thread = self.data_store.borrow()
+                .get_thread_by_id(&entry.thread_id)
+                .cloned();
+
+            if let Some(thread) = thread {
+                // Update tab to point to parent thread
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.thread_id = entry.thread_id.clone();
+                    tab.thread_title = entry.thread_title.clone();
+                    tab.project_a_tag = entry.project_a_tag.clone();
+                }
+
+                // Restore app state
+                self.selected_thread = Some(thread);
+                self.scroll_offset = entry.scroll_offset;
+                self.selected_message_index = entry.selected_message_index;
+
+                // Update project context if needed
+                let project = self.data_store.borrow().get_projects()
+                    .iter()
+                    .find(|p| p.a_tag() == entry.project_a_tag)
+                    .cloned();
+                if let Some(project) = project {
+                    self.selected_project = Some(project);
+                }
+
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Check if the current tab has items on its navigation stack.
+    pub fn has_navigation_stack(&self) -> bool {
+        self.tabs.active_tab()
+            .map(|tab| !tab.navigation_stack.is_empty())
+            .unwrap_or(false)
     }
 
     /// Start a new thread for a specific project (navigates to chat without a thread selected)
@@ -1551,12 +1744,32 @@ impl App {
             .cloned();
 
         if let Some(project) = project {
+            let a_tag = project.a_tag();
             self.selected_project = Some(project);
+
+            // Set default agent/branch from project status
+            if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
+                if let Some(pm) = status.pm_agent() {
+                    self.selected_agent = Some(pm.clone());
+                } else {
+                    self.selected_agent = None;
+                }
+                self.selected_branch = status.default_branch().map(String::from);
+            } else {
+                self.selected_agent = None;
+                self.selected_branch = None;
+            }
+
             self.selected_thread = None;
             self.creating_thread = true;
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
             self.chat_editor.clear();
+        } else {
+            // Project not found - clear state to prevent leaks
+            self.selected_project = None;
+            self.selected_agent = None;
+            self.selected_branch = None;
         }
     }
 

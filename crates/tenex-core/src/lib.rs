@@ -6,4 +6,3 @@ pub mod nostr;
 pub mod runtime;
 pub mod store;
 pub mod streaming;
-pub mod tracing_setup;

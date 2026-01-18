@@ -2,7 +2,6 @@ use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
 use std::time::Duration;
-use tracing::{debug, info_span};
 
 use tenex_core::events::CoreEvent;
 use tenex_core::runtime::CoreRuntime;
@@ -33,18 +32,17 @@ pub(crate) async fn run_app(
     while app.running {
         loop_count += 1;
         if loop_count % 100 == 0 {
-            debug!("Event loop iteration {}", loop_count);
+            let _ = loop_count; // Used for occasional debug logging
         }
 
         // Render
-        let _span = info_span!("render").entered();
         terminal.draw(|f| render(f, app, login_step))?;
 
         // Wait for events using tokio::select!
         tokio::select! {
             // Terminal UI events
             maybe_event = event_stream.next() => {
-                debug!("Received terminal event");
+                // Received terminal event
                 if let Some(Ok(event)) = maybe_event {
                     match event {
                         Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -72,7 +70,6 @@ pub(crate) async fn run_app(
                             } else {
                                 // Any other key clears pending quit state
                                 app.pending_quit = false;
-                                let _span = info_span!("handle_key", key = ?key.code).entered();
                                 handle_key(app, key, login_step, pending_nsec)?;
                             }
                         }
@@ -122,20 +119,15 @@ pub(crate) async fn run_app(
 
             // nostrdb notifications - events are ready to query
             Some(note_keys) = core_runtime.next_note_keys() => {
-                debug!("core_runtime received {} note keys", note_keys.len());
-                let _span = info_span!("ndb_subscription", note_count = note_keys.len()).entered();
                 let events = core_runtime.process_note_keys(&note_keys)?;
                 handle_core_events(app, events);
 
                 // Check for pending new thread and navigate to it if found
                 check_pending_new_thread(app);
-
-                debug!("core_runtime processing complete");
             }
 
             // Tick for regular updates (data channel polling for non-message updates)
             _ = tick_interval.tick() => {
-                let _span = info_span!("check_data_updates").entered();
                 app.tick(); // Increment frame counter for animations
                 app.check_for_data_updates()?;
             }

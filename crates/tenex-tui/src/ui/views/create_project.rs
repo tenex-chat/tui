@@ -1,7 +1,4 @@
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
-    render_modal_search, ModalSize,
-};
+use crate::ui::components::{render_modal_search, Modal, ModalSize};
 use crate::ui::modal::{CreateProjectFocus, CreateProjectState, CreateProjectStep};
 use crate::ui::{theme, App};
 use ratatui::{
@@ -14,35 +11,33 @@ use ratatui::{
 
 /// Render the create project modal
 pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &CreateProjectState) {
-    let size = ModalSize {
-        max_width: 70,
-        height_percent: 0.7,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
-    );
-
     // Header with step indicator
     let step_indicator = match state.step {
         CreateProjectStep::Details => "Step 1/2: Details",
         CreateProjectStep::SelectAgents => "Step 2/2: Select Agents",
     };
-    let remaining = render_modal_header(f, inner_area, step_indicator, "esc");
+
+    let (popup_area, content_area) = Modal::new(step_indicator)
+        .size(ModalSize {
+            max_width: 70,
+            height_percent: 0.7,
+        })
+        .render_frame(f, area);
+
+    // Content area with horizontal padding
+    let inner_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height.saturating_sub(2),
+    );
 
     match state.step {
         CreateProjectStep::Details => {
-            render_details_step(f, remaining, state);
+            render_details_step(f, inner_area, state);
         }
         CreateProjectStep::SelectAgents => {
-            render_agents_step(f, app, remaining, state);
+            render_agents_step(f, app, inner_area, state);
         }
     }
 

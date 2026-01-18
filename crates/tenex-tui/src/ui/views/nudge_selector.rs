@@ -1,7 +1,4 @@
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay,
-    render_modal_search, ModalSize,
-};
+use crate::ui::components::{Modal, ModalSize};
 use crate::ui::modal::NudgeSelectorState;
 use crate::ui::{theme, App};
 use ratatui::{
@@ -14,22 +11,6 @@ use ratatui::{
 
 /// Render the nudge selector modal
 pub fn render_nudge_selector(f: &mut Frame, app: &App, area: Rect, state: &NudgeSelectorState) {
-    let size = ModalSize {
-        max_width: 70,
-        height_percent: 0.7,
-    };
-
-    render_modal_overlay(f, area);
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
-    );
-
     // Header with selection count
     let selected_count = state.selected_nudge_ids.len();
     let title = if selected_count > 0 {
@@ -37,20 +18,24 @@ pub fn render_nudge_selector(f: &mut Frame, app: &App, area: Rect, state: &Nudge
     } else {
         "Select Nudges".to_string()
     };
-    let remaining = render_modal_header(f, inner_area, &title, "esc");
 
-    // Search
-    let remaining = render_modal_search(f, remaining, &state.selector.filter, "Search nudges...");
+    let (popup_area, content_area) = Modal::new(&title)
+        .size(ModalSize {
+            max_width: 70,
+            height_percent: 0.7,
+        })
+        .search(&state.selector.filter, "Search nudges...")
+        .render_frame(f, area);
 
     // Get filtered nudges
     let nudges = app.filtered_nudges();
 
     // List area
     let list_area = Rect::new(
-        remaining.x,
-        remaining.y + 1,
-        remaining.width,
-        remaining.height.saturating_sub(3),
+        content_area.x,
+        content_area.y + 1,
+        content_area.width,
+        content_area.height.saturating_sub(5),
     );
 
     if nudges.is_empty() {
@@ -129,12 +114,12 @@ pub fn render_nudge_selector(f: &mut Frame, app: &App, area: Rect, state: &Nudge
         // Show content preview of cursor-selected nudge
         if let Some(nudge) = nudges.get(selected_index) {
             let preview_area = Rect::new(
-                remaining.x,
+                content_area.x,
                 list_area.y + list_area.height,
-                remaining.width,
+                content_area.width,
                 2,
             );
-            let content_preview = nudge.content_preview(remaining.width as usize * 2);
+            let content_preview = nudge.content_preview(content_area.width as usize * 2);
             let preview = Paragraph::new(content_preview)
                 .style(Style::default().fg(theme::TEXT_DIM));
             f.render_widget(preview, preview_area);
