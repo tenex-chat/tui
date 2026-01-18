@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use clap::{Parser, Subcommand};
-use tenex_cli::cli::{run_daemon, send_command, CliCommand};
+use tenex_cli::cli::{run_daemon, send_command, CliCommand, CliConfig};
 
 #[derive(Parser)]
 #[command(name = "tenex-cli")]
@@ -12,6 +14,14 @@ struct Cli {
     /// Pretty-print JSON output
     #[arg(long, short)]
     pretty: bool,
+
+    /// Path to JSON config file (contains socketPath, credentials)
+    #[arg(long, short = 'c')]
+    config: Option<PathBuf>,
+
+    /// JSON config passed internally (used when spawning daemon)
+    #[arg(long, hide = true)]
+    config_json: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -72,9 +82,12 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
+    // Load config from file or JSON string
+    let config = load_config(&cli);
+
     // Run daemon mode
     if cli.daemon {
-        if let Err(e) = run_daemon() {
+        if let Err(e) = run_daemon(config) {
             eprintln!("Daemon error: {}", e);
             std::process::exit(1);
         }
@@ -105,8 +118,33 @@ fn main() {
     };
 
     // Send command to daemon
-    if let Err(e) = send_command(command, cli.pretty) {
+    if let Err(e) = send_command(command, cli.pretty, config) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+}
+
+/// Load configuration from file or JSON string
+fn load_config(cli: &Cli) -> Option<CliConfig> {
+    // Priority: --config-json (internal) > --config (file)
+    if let Some(ref json) = cli.config_json {
+        match CliConfig::from_json(json) {
+            Ok(config) => return Some(config),
+            Err(e) => {
+                eprintln!("Warning: Failed to parse config JSON: {}", e);
+            }
+        }
+    }
+
+    if let Some(ref path) = cli.config {
+        match CliConfig::load(path) {
+            Ok(config) => return Some(config),
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    None
 }
