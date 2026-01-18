@@ -1,6 +1,4 @@
-use crate::ui::components::{
-    modal_area, render_modal_background, render_modal_header, render_modal_overlay, ModalSize,
-};
+use crate::ui::components::{Modal, ModalSize};
 use crate::ui::modal::{AgentCreateStep, AgentFormFocus, CreateAgentState};
 use crate::ui::theme;
 use ratatui::{
@@ -13,41 +11,37 @@ use ratatui::{
 
 /// Render the create/fork/clone agent modal
 pub fn render_create_agent(f: &mut Frame, area: Rect, state: &CreateAgentState) {
-    // Dim the background
-    render_modal_overlay(f, area);
-
-    let size = ModalSize {
-        max_width: 80,
-        height_percent: 0.85,
-    };
-
-    let popup_area = modal_area(area, &size);
-    render_modal_background(f, popup_area);
-
-    let inner_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
-    );
-
     // Header with mode and step indicator
     let step_indicator = match state.step {
         AgentCreateStep::Basics => format!("{} - Step 1/3: Basics", state.mode_label()),
         AgentCreateStep::Instructions => format!("{} - Step 2/3: Instructions", state.mode_label()),
         AgentCreateStep::Review => format!("{} - Step 3/3: Review", state.mode_label()),
     };
-    let remaining = render_modal_header(f, inner_area, &step_indicator, "esc");
+
+    let (popup_area, content_area) = Modal::new(&step_indicator)
+        .size(ModalSize {
+            max_width: 80,
+            height_percent: 0.85,
+        })
+        .render_frame(f, area);
+
+    // Content area with horizontal padding
+    let inner_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        content_area.width.saturating_sub(4),
+        content_area.height.saturating_sub(2),
+    );
 
     match state.step {
         AgentCreateStep::Basics => {
-            render_basics_step(f, remaining, state);
+            render_basics_step(f, inner_area, state);
         }
         AgentCreateStep::Instructions => {
-            render_instructions_step(f, remaining, state);
+            render_instructions_step(f, inner_area, state);
         }
         AgentCreateStep::Review => {
-            render_review_step(f, remaining, state);
+            render_review_step(f, inner_area, state);
         }
     }
 

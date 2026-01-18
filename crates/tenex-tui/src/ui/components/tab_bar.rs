@@ -119,7 +119,7 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // Add hint at the end of title line
     title_spans.push(Span::styled("  ", Style::default()));
-    title_spans.push(Span::styled("^T←/→:nav x:close", Style::default().fg(theme::TEXT_MUTED)));
+    title_spans.push(Span::styled("^Tx:close X:archive+close", Style::default().fg(theme::TEXT_MUTED)));
 
     // Render both lines
     let title_line = Line::from(title_spans);

@@ -329,6 +329,22 @@ impl AgentBrowserState {
 /// Maximum number of open tabs (matches 1-9 shortcuts)
 pub const MAX_TABS: usize = 9;
 
+/// Entry in the delegation navigation stack.
+/// Stores state needed to return to a parent conversation.
+#[derive(Debug, Clone)]
+pub struct NavigationStackEntry {
+    /// Thread ID of the parent conversation
+    pub thread_id: String,
+    /// Thread title
+    pub thread_title: String,
+    /// Project a_tag
+    pub project_a_tag: String,
+    /// Scroll offset when navigating away
+    pub scroll_offset: usize,
+    /// Selected message index when navigating away
+    pub selected_message_index: usize,
+}
+
 /// An open tab representing a thread or draft conversation
 #[derive(Debug, Clone)]
 pub struct OpenTab {
@@ -342,6 +358,9 @@ pub struct OpenTab {
     pub has_unread: bool,
     /// Draft ID for new conversations not yet sent (None for real threads)
     pub draft_id: Option<String>,
+    /// Navigation stack for drilling into delegations.
+    /// Each entry represents a parent conversation we can return to with Esc.
+    pub navigation_stack: Vec<NavigationStackEntry>,
 }
 
 impl OpenTab {
@@ -358,6 +377,7 @@ impl OpenTab {
             project_a_tag,
             has_unread: false,
             draft_id: None,
+            navigation_stack: Vec::new(),
         }
     }
 
@@ -376,6 +396,7 @@ impl OpenTab {
             project_a_tag,
             has_unread: false,
             draft_id: Some(draft_id),
+            navigation_stack: Vec::new(),
         }
     }
 }

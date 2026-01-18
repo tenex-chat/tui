@@ -145,21 +145,46 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     let branch_display = app
         .selected_branch
         .as_ref()
-        .map(|b| format!(" on %{}", b))
+        .map(|b| format!(" %{}", b))
+        .unwrap_or_default();
+
+    let project_display = app
+        .selected_project
+        .as_ref()
+        .map(|p| format!(" {}", p.name))
         .unwrap_or_default();
 
     // Build input card with padding and context line at bottom
     let input_text = app.chat_editor.text.as_str();
     let input_content_width = input_content_width_val;
 
-    // First, calculate cursor's visual row for scrolling
+    // Calculate cursor's visual row and column with proper wrapping
     let cursor_pos = app.chat_editor.cursor;
     let before_cursor = &input_text[..cursor_pos.min(input_text.len())];
-    let last_line_start = before_cursor.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let col_in_last_line = cursor_pos - last_line_start;
-    let cursor_visual_row =
-        before_cursor.matches('\n').count() + col_in_last_line / input_content_width.max(1);
-    let visual_col = col_in_last_line % input_content_width.max(1);
+
+    // Count visual rows by iterating through all logical lines before cursor
+    let mut cursor_visual_row = 0;
+    let mut visual_col = 0;
+
+    // Split text before cursor into logical lines (including partial last line)
+    let logical_lines: Vec<&str> = before_cursor.split('\n').collect();
+    for (i, line) in logical_lines.iter().enumerate() {
+        let is_last_line = i == logical_lines.len() - 1;
+        if is_last_line {
+            // For the last line (where cursor is), calculate position within wrapped line
+            let wrapped_rows = line.len() / input_content_width.max(1);
+            cursor_visual_row += wrapped_rows;
+            visual_col = line.len() % input_content_width.max(1);
+        } else {
+            // For complete lines, count all their visual rows (at least 1 for empty lines)
+            let line_visual_rows = if line.is_empty() {
+                1
+            } else {
+                (line.len() + input_content_width.max(1) - 1) / input_content_width.max(1)
+            };
+            cursor_visual_row += line_visual_rows;
+        }
+    }
 
     // Build all content lines first (without top padding)
     let mut content_lines: Vec<Line> = Vec::new();
@@ -302,7 +327,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         String::new()
     };
-    let context_str = format!("@{}{}{}{}", agent_display, branch_display, nudge_display, scroll_indicator);
+    let context_str = format!("@{}{}{}{}{}", agent_display, branch_display, project_display, nudge_display, scroll_indicator);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
@@ -318,6 +343,10 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(
             branch_display.clone(),
             Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg),
+        ),
+        Span::styled(
+            project_display.clone(),
+            Style::default().fg(theme::TEXT_MUTED).bg(input_bg),
         ),
     ];
 

@@ -54,6 +54,9 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.save_chat_draft();
             app.input_mode = InputMode::Normal;
+            // Set selection to last item so Up arrow works intuitively
+            let count = app.display_item_count();
+            app.selected_message_index = count.saturating_sub(1);
         }
         // Tab = cycle focus between input and attachments
         KeyCode::Tab if app.chat_editor.has_attachments() => {
@@ -357,6 +360,9 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.save_chat_draft();
             app.input_mode = InputMode::Normal;
+            // Set selection to last item so Up arrow works intuitively
+            let count = app.display_item_count();
+            app.selected_message_index = count.saturating_sub(1);
         }
 
         // Shift+Enter or Alt+Enter = newline (even in normal mode)

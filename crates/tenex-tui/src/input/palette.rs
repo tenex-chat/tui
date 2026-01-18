@@ -2,12 +2,59 @@
 //!
 //! Handles execution of commands triggered via the command palette (Ctrl+T).
 
+use crate::models::Message;
 use crate::nostr::NostrCommand;
 use crate::store::get_raw_event_json;
 use crate::ui;
+use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::{App, InputMode, ModalState, UndoAction, View};
 
 use super::modal_handlers::export_thread_as_jsonl;
+
+/// Filter and group messages based on current view (subthread vs main thread).
+/// Returns grouped display items for the current selection context.
+fn filter_and_group_messages<'a>(
+    messages: &'a [Message],
+    thread_id: Option<&str>,
+    subthread_root: Option<&str>,
+    user_pubkey: Option<&str>,
+) -> Vec<DisplayItem<'a>> {
+    let display_messages: Vec<&Message> = if let Some(root_id) = subthread_root {
+        messages
+            .iter()
+            .filter(|m| m.reply_to.as_deref() == Some(root_id))
+            .collect()
+    } else {
+        messages
+            .iter()
+            .filter(|m| {
+                Some(m.id.as_str()) == thread_id
+                    || m.reply_to.is_none()
+                    || m.reply_to.as_deref() == thread_id
+            })
+            .collect()
+    };
+
+    group_messages(&display_messages, user_pubkey)
+}
+
+/// Get the last visible message ID from a display item, respecting group collapse state.
+fn get_visible_message_id(app: &App, item: &DisplayItem<'_>) -> Option<String> {
+    match item {
+        DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
+        DisplayItem::AgentGroup { visibility, .. } => {
+            let group_key = visibility.first().map(|v| v.message.id.as_str()).unwrap_or("");
+            let is_expanded = app.is_group_expanded(group_key);
+
+            visibility
+                .iter()
+                .rev()
+                .find(|v| v.visible || is_expanded)
+                .map(|v| v.message.id.clone())
+        }
+        DisplayItem::DelegationPreview { .. } => None,
+    }
+}
 
 /// Execute a command from the palette by its key
 pub(super) fn execute_palette_command(app: &mut App, key: char) {
@@ -70,36 +117,8 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
             }
         }
         'a' => {
-            if app.view == View::Home {
-                if app.sidebar_focused {
-                    let (online, offline) = app.filtered_projects();
-                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-                    if let Some(project) = all_projects.get(app.sidebar_project_index) {
-                        let a_tag = project.a_tag();
-                        let project_name = project.name.clone();
-                        let is_now_archived = app.toggle_project_archived(&a_tag);
-                        let status = if is_now_archived {
-                            format!("Archived: {}", project_name)
-                        } else {
-                            format!("Unarchived: {}", project_name)
-                        };
-                        app.set_status(&status);
-                    }
-                } else {
-                    let threads = app.recent_threads();
-                    if let Some((thread, _)) = threads.get(app.current_selection()) {
-                        let thread_id = thread.id.clone();
-                        let thread_title = thread.title.clone();
-                        let is_now_archived = app.toggle_thread_archived(&thread_id);
-                        let status = if is_now_archived {
-                            format!("Archived: {}", thread_title)
-                        } else {
-                            format!("Unarchived: {}", thread_title)
-                        };
-                        app.set_status(&status);
-                    }
-                }
-            }
+            // Archive toggle works in both Home and Chat views
+            archive_toggle(app);
         }
         'e' => {
             if app.view == View::Chat {
@@ -157,7 +176,12 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
             go_to_parent(app);
         }
         'x' => {
-            archive_toggle(app);
+            // Close current tab (matches tab bar hint "x:close")
+            app.close_current_tab();
+        }
+        'X' => {
+            // Archive conversation AND close tab
+            archive_and_close_tab(app);
         }
         'T' => {
             app.todo_sidebar_visible = !app.todo_sidebar_visible;
@@ -175,7 +199,10 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
 
         // Agent browser commands
         'c' => {
-            if app.view == View::AgentBrowser && app.agent_browser_in_detail {
+            if app.view == View::Chat {
+                // Copy conversation ID (hex) to clipboard
+                copy_conversation_id(app);
+            } else if app.view == View::AgentBrowser && app.agent_browser_in_detail {
                 if let Some(agent_id) = &app.viewing_agent_id {
                     if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
                         app.modal_state = ModalState::CreateAgent(
@@ -235,8 +262,35 @@ fn boot_project(app: &mut App) {
 
 fn copy_selected_message(app: &mut App) {
     let messages = app.messages();
-    if let Some(msg) = messages.get(app.selected_message_index) {
-        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(&msg.content)) {
+    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+    let subthread_root = app.subthread_root.as_deref();
+
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+
+    if let Some(item) = grouped.get(app.selected_message_index) {
+        // Get the most relevant content from the display item
+        let content = match item {
+            DisplayItem::SingleMessage { message, .. } => message.content.as_str(),
+            DisplayItem::AgentGroup { visibility, .. } => {
+                // For a group, get the last VISIBLE message's content (respects collapse state)
+                let group_key = visibility.first().map(|v| v.message.id.as_str()).unwrap_or("");
+                let is_expanded = app.is_group_expanded(group_key);
+
+                visibility
+                    .iter()
+                    .rev()
+                    .find(|v| v.visible || is_expanded)
+                    .map(|v| v.message.content.as_str())
+                    .unwrap_or("")
+            }
+            DisplayItem::DelegationPreview { thread_id, .. } => {
+                // Copy the thread ID for delegation previews
+                thread_id.as_str()
+            }
+        };
+
+        if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(content)) {
             app.set_status(&format!("Failed to copy: {}", e));
         } else {
             app.set_status("Content copied to clipboard");
@@ -246,32 +300,49 @@ fn copy_selected_message(app: &mut App) {
 
 fn view_raw_event(app: &mut App) {
     let messages = app.messages();
-    if let Some(msg) = messages.get(app.selected_message_index) {
-        if let Some(json) = get_raw_event_json(&app.db.ndb, &msg.id) {
-            let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
-                serde_json::to_string_pretty(&value).unwrap_or(json)
-            } else {
-                json
-            };
-            app.modal_state = ModalState::ViewRawEvent {
-                message_id: msg.id.clone(),
-                json: pretty_json,
-                scroll_offset: 0,
-            };
+    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+    let subthread_root = app.subthread_root.as_deref();
+
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+
+    if let Some(item) = grouped.get(app.selected_message_index) {
+        if let Some(id) = get_visible_message_id(app, item) {
+            if let Some(json) = get_raw_event_json(&app.db.ndb, &id) {
+                let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                    serde_json::to_string_pretty(&value).unwrap_or(json)
+                } else {
+                    json
+                };
+                app.modal_state = ModalState::ViewRawEvent {
+                    message_id: id,
+                    json: pretty_json,
+                    scroll_offset: 0,
+                };
+            }
         }
     }
 }
 
 fn open_trace(app: &mut App) {
     use crate::store::get_trace_context;
+
     let messages = app.messages();
-    if let Some(msg) = messages.get(app.selected_message_index) {
-        if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &msg.id) {
-            let url = format!("http://localhost:16686/trace/{}", trace_ctx.trace_id);
-            #[cfg(target_os = "macos")]
-            let _ = std::process::Command::new("open").arg(&url).spawn();
-            #[cfg(target_os = "linux")]
-            let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+    let subthread_root = app.subthread_root.as_deref();
+
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+
+    if let Some(item) = grouped.get(app.selected_message_index) {
+        if let Some(id) = get_visible_message_id(app, item) {
+            if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
+                let url = format!("http://localhost:16686/trace/{}", trace_ctx.trace_id);
+                #[cfg(target_os = "macos")]
+                let _ = std::process::Command::new("open").arg(&url).spawn();
+                #[cfg(target_os = "linux")]
+                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+            }
         }
     }
 }
@@ -559,5 +630,70 @@ fn undo_last_action(app: &mut App) {
             app.toggle_project_archived(&project_a_tag);
             app.set_status(&format!("Undone: archived {}", project_name));
         }
+    }
+}
+
+fn archive_and_close_tab(app: &mut App) {
+    // Only works in chat view with an existing conversation
+    if app.view != View::Chat {
+        app.set_status("Archive+close only available in chat view");
+        return;
+    }
+
+    if let Some(ref thread) = app.selected_thread {
+        let thread_id = thread.id.clone();
+        let thread_title = thread.title.clone();
+
+        // Archive the conversation
+        let is_now_archived = app.toggle_thread_archived(&thread_id);
+
+        // Store undo action
+        app.last_undo_action = Some(if is_now_archived {
+            UndoAction::ThreadArchived {
+                thread_id,
+                thread_title: thread_title.clone(),
+            }
+        } else {
+            UndoAction::ThreadUnarchived {
+                thread_id,
+                thread_title: thread_title.clone(),
+            }
+        });
+
+        let status = if is_now_archived {
+            format!("Archived and closed: {} (Ctrl+T u to undo)", thread_title)
+        } else {
+            format!("Unarchived and closed: {} (Ctrl+T u to undo)", thread_title)
+        };
+        app.set_status(&status);
+
+        // Close the tab
+        app.close_current_tab();
+    } else {
+        // Draft tab - just close it
+        app.close_current_tab();
+    }
+}
+
+fn copy_conversation_id(app: &mut App) {
+    if let Some(ref thread) = app.selected_thread {
+        // The thread.id is the conversation's root event ID (hex format)
+        let conversation_id = &thread.id;
+
+        use arboard::Clipboard;
+        match Clipboard::new() {
+            Ok(mut clipboard) => {
+                if clipboard.set_text(conversation_id).is_ok() {
+                    app.set_status(&format!("Copied conversation ID: {}", conversation_id));
+                } else {
+                    app.set_status("Failed to copy to clipboard");
+                }
+            }
+            Err(e) => {
+                app.set_status(&format!("Clipboard error: {}", e));
+            }
+        }
+    } else {
+        app.set_status("No conversation selected");
     }
 }

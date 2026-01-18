@@ -16,7 +16,6 @@ use ratatui::{
     Frame,
 };
 use std::rc::Rc;
-use tracing::info_span;
 
 use super::{actions, input, messages};
 
@@ -26,10 +25,20 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(bg_block, area);
 
     let all_messages = app.messages();
-    let _render_span = info_span!("render_chat", message_count = all_messages.len()).entered();
 
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
+
+    // Calculate total LLM runtime across all messages in the conversation
+    let total_llm_runtime_ms: u64 = all_messages
+        .iter()
+        .filter_map(|msg| {
+            msg.llm_metadata
+                .iter()
+                .find(|(key, _)| key == "runtime")
+                .and_then(|(_, value)| value.parse::<u64>().ok())
+        })
+        .sum();
 
     // Build conversation metadata from selected thread, including work status
     let metadata = app
@@ -68,6 +77,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 status_label: thread.status_label.clone(),
                 status_current_activity: thread.status_current_activity.clone(),
                 working_agents,
+                total_llm_runtime_ms,
             }
         })
         .unwrap_or_default();

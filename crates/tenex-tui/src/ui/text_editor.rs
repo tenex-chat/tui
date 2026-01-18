@@ -612,7 +612,13 @@ impl TextEditor {
 
     /// Get the number of lines in the input
     pub fn line_count(&self) -> usize {
-        self.text.lines().count().max(1)
+        // lines() doesn't count a trailing newline, but we need to for proper height calculation
+        let base_count = self.text.lines().count().max(1);
+        if self.text.ends_with('\n') {
+            base_count + 1
+        } else {
+            base_count
+        }
     }
 
     /// Get cursor position as (row, col) for rendering

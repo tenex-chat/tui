@@ -165,7 +165,22 @@ impl AppDataStore {
             }
         }
 
-        // Apply metadata (kind:513) to threads
+        // Update thread last_activity based on most recent message
+        for threads in self.threads_by_project.values_mut() {
+            for thread in threads.iter_mut() {
+                if let Some(messages) = self.messages_by_thread.get(&thread.id) {
+                    if let Some(last_msg) = messages.last() {
+                        if last_msg.created_at > thread.last_activity {
+                            thread.last_activity = last_msg.created_at;
+                        }
+                    }
+                }
+            }
+            // Re-sort after updating last_activity
+            threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+        }
+
+        // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
 
         // Load agent definitions (kind:4199)
@@ -194,7 +209,7 @@ impl AppDataStore {
             return;
         };
 
-        tracing::info!("Loading {} agent definitions (kind:4199)", results.len());
+        // Loading agent definitions (kind:4199)
 
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
@@ -218,7 +233,7 @@ impl AppDataStore {
             return;
         };
 
-        tracing::info!("Loading {} nudges (kind:4201)", results.len());
+        // Loading nudges (kind:4201)
 
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
@@ -241,7 +256,7 @@ impl AppDataStore {
             .collect();
 
         if project_a_tags.is_empty() {
-            tracing::debug!("No projects loaded, skipping report loading");
+            // No projects loaded, skipping report loading
             return;
         }
 
@@ -267,7 +282,7 @@ impl AppDataStore {
             }
         }
 
-        tracing::info!("Loaded {} reports (kind:30023) for {} projects", loaded_count, project_a_tags.len());
+        let _ = (loaded_count, project_a_tags.len()); // Loaded reports for projects
     }
 
     /// Add a report, maintaining version history and latest-by-slug
@@ -316,7 +331,7 @@ impl AppDataStore {
             return;
         };
 
-        tracing::info!("Loading {} recent operations status events (kind:24133)", results.len());
+        // Loading operations status events (kind:24133)
 
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
@@ -339,7 +354,7 @@ impl AppDataStore {
             }
         }
 
-        tracing::info!("Loaded {} active operations", self.operations_by_event.len());
+        // Loaded active operations
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -357,7 +372,7 @@ impl AppDataStore {
             return;
         };
 
-        tracing::info!("Processing {} existing kind:513 metadata events", results.len());
+        // Processing existing kind:513 metadata events
 
         // Group metadata events by thread_id, keeping only the most recent
         let mut latest_metadata: HashMap<String, ConversationMetadata> = HashMap::new();
@@ -381,22 +396,13 @@ impl AppDataStore {
             }
         }
 
-        tracing::info!("Applying latest metadata for {} unique threads", latest_metadata.len());
+        // Applying latest metadata for unique threads
 
         // Apply the latest metadata to each thread
         for (thread_id, metadata) in latest_metadata {
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
-                    let old_title = thread.title.clone();
                     if let Some(title) = metadata.title {
-                        if title != old_title {
-                            tracing::info!(
-                                "Applied metadata to thread {}: title changed from '{}' to '{}'",
-                                &thread.id[..16.min(thread.id.len())],
-                                old_title,
-                                title
-                            );
-                        }
                         thread.title = title;
                     }
                     thread.status_label = metadata.status_label;
@@ -561,6 +567,22 @@ impl AppDataStore {
                 }
             }
 
+            // Auto-mark inbox items as read when user replies to them
+            // If this message is from the current user and has e-tags pointing to inbox items, mark them read
+            if let Some(ref user_pk) = self.user_pubkey.clone() {
+                if pubkey == *user_pk {
+                    // This is a message from the current user - check if it replies to an inbox item
+                    // Extract all e-tag values from the note (including reply markers)
+                    let reply_to_ids = Self::extract_e_tag_ids(note);
+                    for reply_to_id in reply_to_ids {
+                        // Check if this ID is an inbox item and mark it read
+                        if self.inbox_items.iter().any(|item| item.id == reply_to_id) {
+                            self.mark_inbox_read(&reply_to_id);
+                        }
+                    }
+                }
+            }
+
             // Check for p-tag matching current user AND ask tag (for inbox)
             if let Some(ref user_pk) = self.user_pubkey.clone() {
                 if pubkey != *user_pk {  // Don't inbox our own messages
@@ -585,13 +607,28 @@ impl AppDataStore {
             }
 
             // Add to existing messages list, maintaining sort order by created_at
-            let messages = self.messages_by_thread.entry(thread_id).or_default();
+            let messages = self.messages_by_thread.entry(thread_id.clone()).or_default();
 
             // Check if message already exists (avoid duplicates)
             if !messages.iter().any(|m| m.id == message_id) {
+                let message_created_at = message.created_at;
+
                 // Insert in sorted position (oldest first)
-                let insert_pos = messages.partition_point(|m| m.created_at < message.created_at);
+                let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
                 messages.insert(insert_pos, message);
+
+                // Update thread's last_activity so it appears in Recent tab
+                for threads in self.threads_by_project.values_mut() {
+                    if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                        // Only update if this message is newer than current last_activity
+                        if message_created_at > thread.last_activity {
+                            thread.last_activity = message_created_at;
+                            // Re-sort to maintain order by last_activity (most recent first)
+                            threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                        }
+                        break;
+                    }
+                }
             }
         }
     }
@@ -660,24 +697,12 @@ impl AppDataStore {
             let summary = metadata.summary;
             let created_at = metadata.created_at;
 
-            tracing::debug!(
-                "Received kind:513 metadata for thread {} with title {:?}",
-                thread_id_short,
-                title
-            );
+            let _ = thread_id_short; // For debugging
 
             // Find the thread across all projects and update its fields
-            let mut found = false;
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
-                    let old_title = thread.title.clone();
                     if let Some(new_title) = title.clone() {
-                        tracing::info!(
-                            "Applying metadata to thread {}: title={} (was: {})",
-                            thread_id_short,
-                            new_title,
-                            old_title
-                        );
                         thread.title = new_title;
                     }
                     // Update status fields
@@ -688,26 +713,11 @@ impl AppDataStore {
                     thread.last_activity = created_at;
                     // Re-sort to maintain order by last_activity (most recent first)
                     threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
-                    found = true;
                     break;
                 }
             }
-
-            if !found {
-                let available = self.threads_by_project.values()
-                    .flat_map(|threads| threads.iter().map(|t| &t.id[..16.min(t.id.len())]))
-                    .take(5)
-                    .fold(String::new(), |acc, id| format!("{}{}, ", acc, id));
-
-                tracing::warn!(
-                    "No thread found for metadata event: thread_id={}, title={:?}. Available threads: {}",
-                    thread_id_short,
-                    title,
-                    available
-                );
-            }
         } else {
-            tracing::warn!("Failed to parse kind:513 metadata event: note_id={}", hex::encode(note.id()));
+            // Failed to parse kind:513 metadata event
         }
     }
 
@@ -723,6 +733,30 @@ impl AppDataStore {
             }
         }
         None
+    }
+
+    /// Extract all e-tag event IDs from a note (used for auto-marking inbox items as read)
+    fn extract_e_tag_ids(note: &Note) -> Vec<String> {
+        let mut ids = Vec::new();
+        for tag in note.tags() {
+            if tag.count() >= 2 {
+                let tag_name = tag.get(0).and_then(|t| t.variant().str());
+                if tag_name == Some("e") {
+                    // Try string first, then id bytes
+                    let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                        Some(s.to_string())
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        Some(hex::encode(id_bytes))
+                    } else {
+                        None
+                    };
+                    if let Some(id) = event_id {
+                        ids.push(id);
+                    }
+                }
+            }
+        }
+        ids
     }
 
 

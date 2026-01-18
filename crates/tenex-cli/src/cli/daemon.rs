@@ -9,11 +9,9 @@ use std::time::Instant;
 use tokio::net::UnixListener;
 
 use anyhow::Result;
-use tracing::{info, instrument};
 
 use crate::nostr::{self, NostrCommand};
 use crate::store::{AppDataStore, Database};
-use crate::tracing_setup::init_tracing_with_service;
 use tenex_core::config::CoreConfig;
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
@@ -22,18 +20,28 @@ use super::protocol::{Request, Response};
 const SOCKET_NAME: &str = "tenex-cli.sock";
 const PID_FILE: &str = "daemon.pid";
 
+/// Get the socket path, respecting TENEX_CLI_SOCKET environment variable.
+/// If TENEX_CLI_SOCKET is set, uses that path directly.
+/// Otherwise defaults to ~/.tenex-cli/tenex-cli.sock
 pub fn get_socket_path() -> PathBuf {
-    let base_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".tenex-cli");
-    base_dir.join(SOCKET_NAME)
+    if let Ok(custom_path) = std::env::var("TENEX_CLI_SOCKET") {
+        PathBuf::from(custom_path)
+    } else {
+        let base_dir = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(".tenex-cli");
+        base_dir.join(SOCKET_NAME)
+    }
 }
 
+/// Get the PID file path, stored in the same directory as the socket.
 fn get_pid_path() -> PathBuf {
-    let base_dir = dirs::home_dir()
+    let socket_path = get_socket_path();
+    socket_path
+        .parent()
+        .map(|p| p.to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".tenex-cli");
-    base_dir.join(PID_FILE)
+        .join(PID_FILE)
 }
 
 fn get_data_dir() -> PathBuf {
@@ -43,10 +51,6 @@ fn get_data_dir() -> PathBuf {
 /// Run the daemon server
 #[tokio::main]
 pub async fn run_daemon() -> Result<()> {
-    // Initialize tracing for CLI daemon
-    init_tracing_with_service("tenex-cli");
-
-    info!("Starting tenex-cli daemon");
     eprintln!("Starting tenex-cli daemon...");
 
     // Ensure base directory exists
@@ -126,9 +130,6 @@ pub async fn run_daemon() -> Result<()> {
     core_runtime.shutdown();
     fs::remove_file(&socket_path).ok();
     fs::remove_file(&pid_path).ok();
-
-    // Flush any pending traces
-    crate::tracing_setup::shutdown_tracing();
 
     eprintln!("Daemon stopped");
     Ok(())
@@ -229,7 +230,6 @@ fn handle_connection(
     Ok(false)
 }
 
-#[instrument(name = "cli_request", skip_all, fields(method = %request.method))]
 fn handle_request(
     request: &Request,
     data_store: &Rc<RefCell<AppDataStore>>,
@@ -238,8 +238,6 @@ fn handle_request(
     start_time: Instant,
     logged_in: bool,
 ) -> (Response, bool) {
-    info!("Handling request");
-
     let id = request.id;
 
     match request.method.as_str() {

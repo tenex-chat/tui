@@ -787,6 +787,9 @@ pub(super) fn handle_normal_mode(
                 let count = app.display_item_count();
                 if app.selected_message_index < count.saturating_sub(1) {
                     app.selected_message_index += 1;
+                } else {
+                    // At last message, focus the input
+                    app.input_mode = InputMode::Editing;
                 }
             }
             _ => {}
@@ -830,11 +833,14 @@ pub(super) fn handle_normal_mode(
         KeyCode::Esc => match app.view {
             View::Chat => {
                 if app.in_subthread() {
+                    // First priority: exit subthread view
                     app.exit_subthread();
+                } else if app.has_navigation_stack() {
+                    // Second priority: pop navigation stack (return to parent delegation)
+                    app.pop_navigation_stack();
                 } else {
-                    app.save_chat_draft();
-                    app.chat_editor.clear();
-                    app.view = View::Home;
+                    // Third priority: close tab and go to Home
+                    app.close_current_tab();
                 }
             }
             View::LessonViewer => {
@@ -996,18 +1002,8 @@ fn handle_chat_enter(app: &mut App) -> Result<()> {
                 }
             }
             DisplayItem::DelegationPreview { thread_id, .. } => {
-                let thread_and_project = {
-                    let store = app.data_store.borrow();
-                    store.get_thread_by_id(thread_id).map(|t| {
-                        let project_a_tag = store
-                            .find_project_for_thread(thread_id)
-                            .unwrap_or_default();
-                        (t.clone(), project_a_tag)
-                    })
-                };
-                if let Some((thread, project_a_tag)) = thread_and_project {
-                    app.open_thread_from_home(&thread, &project_a_tag);
-                }
+                // Push onto navigation stack instead of opening a new tab
+                app.push_delegation(thread_id);
             }
         }
     }
