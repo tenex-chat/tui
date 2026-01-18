@@ -302,15 +302,13 @@ Expansion:
 ## Data Flow
 
 **Backend provides:**
-- `todo_add` tool creates todos
-- `todo_update` tool updates status
+- `todo_write` tool creates/updates todos (replaces entire list)
 - Todos stored in conversation context
-- Each todo has: id, title, description, status, position
+- Each todo has: content, title, description, status, activeForm, skip_reason
 
 **TUI should:**
-- Parse todo events from conversation
-- Track status changes
-- Display aggregated view
+- Parse `todo_write` events from conversation
+- Display aggregated view (latest todo_write replaces previous)
 - Allow navigation to source conversation
 - Real-time updates as agent works
 

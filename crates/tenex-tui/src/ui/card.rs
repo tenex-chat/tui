@@ -19,6 +19,7 @@ pub const CHECKMARK: &str = "\u{2713}";
 pub const TODO_DONE_GLYPH: &str = CHECKMARK;
 pub const TODO_IN_PROGRESS_GLYPH: &str = "\u{25d0}";
 pub const TODO_PENDING_GLYPH: &str = HOLLOW_BULLET_GLYPH;
+pub const TODO_SKIPPED_GLYPH: &str = "\u{2717}"; // ✗
 pub const META_SEPARATOR: &str = " \u{2022} ";
 
 // Half-block border characters (like lipgloss OuterHalfBlockBorder)

@@ -121,7 +121,7 @@ pub fn tool_icon(name: &str) -> &'static str {
         "grep" | "search" => "◎",
         "task" | "agent" => "▶",
         "web_search" | "websearch" => "◎",
-        "todowrite" | "todo" => "☐",
+        "todo_write" | "todowrite" | "todo" => "☐",
         _ => "⚙",
     }
 }
@@ -137,7 +137,7 @@ pub fn tool_verb(name: &str) -> &'static str {
         "grep" | "search" => "Searching",
         "task" | "agent" => "",
         "web_search" | "websearch" => "Searching",
-        "todowrite" | "todo" => "",
+        "todo_write" | "todowrite" | "todo" => "",
         _ => "Executing",
     }
 }
@@ -196,8 +196,8 @@ pub fn render_tool_line(
         // Bash: "$ command" or "$ description"
         "bash" | "execute_bash" | "shell" => format!("$ {}", target),
 
-        // TodoWrite: collapsed count
-        "todowrite" | "todo" => {
+        // todo_write: collapsed count
+        "todo_write" | "todowrite" | "todo" => {
             let count = tool_call
                 .parameters
                 .get("todos")

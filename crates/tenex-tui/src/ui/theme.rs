@@ -301,6 +301,10 @@ pub fn todo_pending() -> Style {
     Style::default().fg(TEXT_DIM)
 }
 
+pub fn todo_skipped() -> Style {
+    Style::default().fg(ACCENT_ERROR)
+}
+
 // -----------------------------------------------------------------------------
 // Project/Agent Styles
 // -----------------------------------------------------------------------------
