@@ -92,7 +92,7 @@ tags   api · toolset · service
 
 3. **`crates/tenex-tui/src/ui/views/todo_aggregator.rs`** (new)
    - Parse `tool` and `tool-args` tags from events
-   - Support `TodoWrite` and `todo_add`/`todo_update` formats
+   - Support `todo_write` format (backend standard)
    - Return aggregated todo state
 
 ### Data flow
