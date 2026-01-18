@@ -17,23 +17,38 @@ use crate::tracing_setup::init_tracing_with_service;
 use tenex_core::config::CoreConfig;
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
+use super::config::CliConfig;
 use super::protocol::{Request, Response};
 
 const SOCKET_NAME: &str = "tenex-cli.sock";
 const PID_FILE: &str = "daemon.pid";
 
-pub fn get_socket_path() -> PathBuf {
+/// Get socket path, using config override if provided
+pub fn get_socket_path(config: Option<&CliConfig>) -> PathBuf {
+    if let Some(cfg) = config {
+        if let Some(ref path) = cfg.socket_path {
+            return path.clone();
+        }
+    }
+    default_socket_path()
+}
+
+/// Default socket path when no config is provided
+pub fn default_socket_path() -> PathBuf {
     let base_dir = dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".tenex-cli");
     base_dir.join(SOCKET_NAME)
 }
 
-fn get_pid_path() -> PathBuf {
-    let base_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".tenex-cli");
-    base_dir.join(PID_FILE)
+fn get_pid_path(config: Option<&CliConfig>) -> PathBuf {
+    // Put PID file next to socket
+    let socket_path = get_socket_path(config);
+    if let Some(parent) = socket_path.parent() {
+        parent.join(PID_FILE)
+    } else {
+        PathBuf::from(PID_FILE)
+    }
 }
 
 fn get_data_dir() -> PathBuf {
@@ -42,7 +57,7 @@ fn get_data_dir() -> PathBuf {
 
 /// Run the daemon server
 #[tokio::main]
-pub async fn run_daemon() -> Result<()> {
+pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
     // Initialize tracing for CLI daemon
     init_tracing_with_service("tenex-cli");
 
@@ -50,7 +65,7 @@ pub async fn run_daemon() -> Result<()> {
     eprintln!("Starting tenex-cli daemon...");
 
     // Ensure base directory exists
-    let socket_path = get_socket_path();
+    let socket_path = get_socket_path(config.as_ref());
     if let Some(parent) = socket_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -61,7 +76,7 @@ pub async fn run_daemon() -> Result<()> {
     }
 
     // Write PID file
-    let pid_path = get_pid_path();
+    let pid_path = get_pid_path(config.as_ref());
     fs::write(&pid_path, std::process::id().to_string())?;
 
     // Bind socket early so clients can connect while we initialize
@@ -75,8 +90,8 @@ pub async fn run_daemon() -> Result<()> {
     let db = core_runtime.database();
     let core_handle = core_runtime.handle();
 
-    // Try to auto-login if credentials are available
-    let keys = try_auto_login(db.as_ref(), &core_handle);
+    // Try to auto-login: config credentials take priority over stored credentials
+    let keys = try_auto_login_with_config(config.as_ref(), db.as_ref(), &core_handle);
     if keys.is_some() {
         eprintln!("Auto-login successful");
     } else {
@@ -132,6 +147,66 @@ pub async fn run_daemon() -> Result<()> {
 
     eprintln!("Daemon stopped");
     Ok(())
+}
+
+/// Try to login with config credentials first, then fall back to stored credentials
+fn try_auto_login_with_config(
+    config: Option<&CliConfig>,
+    db: &Database,
+    core_handle: &CoreHandle,
+) -> Option<nostr_sdk::Keys> {
+    // Try config credentials first
+    if let Some(cfg) = config {
+        if let Some(ref creds) = cfg.credentials {
+            match try_login_with_credentials(&creds.key, creds.password.as_deref(), core_handle) {
+                Ok(keys) => return Some(keys),
+                Err(e) => {
+                    eprintln!("Failed to login with config credentials: {}", e);
+                }
+            }
+        }
+    }
+
+    // Fall back to stored credentials
+    try_auto_login(db, core_handle)
+}
+
+/// Try to parse and login with the provided key (nsec or ncryptsec)
+fn try_login_with_credentials(
+    key: &str,
+    password: Option<&str>,
+    core_handle: &CoreHandle,
+) -> anyhow::Result<nostr_sdk::Keys> {
+    use nostr_sdk::prelude::*;
+
+    let keys = if key.starts_with("ncryptsec") {
+        // Encrypted key - needs password
+        let password = password.ok_or_else(|| {
+            anyhow::anyhow!("Password required for ncryptsec but not provided in config")
+        })?;
+        let encrypted = EncryptedSecretKey::from_bech32(key)?;
+        let secret_key = encrypted.to_secret_key(password)?;
+        Keys::new(secret_key)
+    } else if key.starts_with("nsec") {
+        // Unencrypted nsec
+        let secret_key = SecretKey::from_bech32(key)?;
+        Keys::new(secret_key)
+    } else {
+        return Err(anyhow::anyhow!(
+            "Invalid key format: expected nsec or ncryptsec"
+        ));
+    };
+
+    let pubkey = crate::nostr::get_current_pubkey(&keys);
+    core_handle
+        .send(NostrCommand::Connect {
+            keys: keys.clone(),
+            user_pubkey: pubkey,
+        })
+        .map_err(|_| anyhow::anyhow!("Failed to send Connect command"))?;
+
+    core_handle.send(NostrCommand::Sync).ok();
+    Ok(keys)
 }
 
 fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::Keys> {
