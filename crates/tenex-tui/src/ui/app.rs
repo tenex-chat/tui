@@ -1,4 +1,4 @@
-use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
+use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, NamedDraft, NamedDraftStorage, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
@@ -162,6 +162,9 @@ pub struct App {
     /// Draft storage for persisting message drafts
     draft_storage: RefCell<DraftStorage>,
 
+    /// Named draft storage for user-saved drafts associated with projects
+    named_draft_storage: RefCell<NamedDraftStorage>,
+
     /// Rich text editor for chat input (multiline, attachments)
     pub chat_editor: TextEditor,
 
@@ -300,6 +303,7 @@ impl App {
 
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
+            named_draft_storage: RefCell::new(NamedDraftStorage::new("tenex_data")),
             chat_editor: TextEditor::new(),
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
@@ -618,6 +622,106 @@ impl App {
         if let Some(ref thread) = self.selected_thread {
             self.draft_storage.borrow_mut().delete(&thread.id);
         }
+    }
+
+    /// Save current chat editor content as a named draft for the current project
+    pub fn save_named_draft(&mut self) {
+        let text = self.chat_editor.build_full_content();
+        if text.trim().is_empty() {
+            self.set_status("Cannot save empty draft");
+            return;
+        }
+
+        // Require a project to be selected for saving drafts
+        let project_a_tag = match &self.selected_project {
+            Some(p) => p.a_tag(),
+            None => {
+                self.set_status("Cannot save draft: no project selected");
+                return;
+            }
+        };
+
+        let draft = NamedDraft::new(text, project_a_tag);
+        let draft_name = draft.name.clone();
+
+        // Perform the save and capture result before calling set_status
+        let result = self.named_draft_storage.borrow_mut().save(draft);
+
+        match result {
+            Ok(()) => self.set_status(&format!("Draft saved: {}", draft_name)),
+            Err(e) => self.set_status(&format!("Failed to save draft: {}", e)),
+        }
+    }
+
+    /// Get named drafts for the current project
+    pub fn get_named_drafts_for_current_project(&self) -> Vec<NamedDraft> {
+        let project_a_tag = self.selected_project
+            .as_ref()
+            .map(|p| p.a_tag())
+            .unwrap_or_default();
+
+        self.named_draft_storage
+            .borrow()
+            .get_for_project(&project_a_tag)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get all named drafts
+    pub fn get_all_named_drafts(&self) -> Vec<NamedDraft> {
+        self.named_draft_storage
+            .borrow()
+            .get_all()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Delete a named draft by ID
+    pub fn delete_named_draft(&mut self, id: &str) {
+        // Perform the delete and capture result before calling set_status
+        let result = self.named_draft_storage.borrow_mut().delete(id);
+
+        match result {
+            Ok(()) => self.set_status("Draft deleted"),
+            Err(e) => self.set_status(&format!("Failed to delete draft: {}", e)),
+        }
+    }
+
+    /// Restore a named draft to the chat editor
+    pub fn restore_named_draft(&mut self, draft: &NamedDraft) {
+        self.chat_editor.text = draft.text.clone();
+        self.chat_editor.cursor = draft.text.len();
+        self.input_mode = InputMode::Editing;
+        self.set_status(&format!("Draft restored: {}", draft.name));
+    }
+
+    /// Open the draft navigator modal (scoped to current project)
+    pub fn open_draft_navigator(&mut self) {
+        use crate::ui::modal::DraftNavigatorState;
+
+        // Check for storage errors on init and surface them (extract error message first)
+        let storage_error = self.named_draft_storage.borrow().last_error().map(|e| e.to_string());
+        if let Some(error) = storage_error {
+            self.set_status(&format!("Warning: {}", error));
+            // Clear the error after surfacing it to avoid repeated warnings
+            self.named_draft_storage.borrow_mut().clear_error();
+        }
+
+        // Scope to current project - only show drafts for the selected project
+        let drafts = self.get_named_drafts_for_current_project();
+        let has_project = self.selected_project.is_some();
+
+        if drafts.is_empty() && has_project {
+            self.set_status("No drafts for this project. Use Ctrl+T 's' in edit mode to save one.");
+            return;
+        } else if drafts.is_empty() {
+            self.set_status("No project selected and no drafts available.");
+            return;
+        }
+
+        self.modal_state = ModalState::DraftNavigator(DraftNavigatorState::new(drafts));
     }
 
     /// Check if attachment modal is open
@@ -1079,6 +1183,12 @@ impl App {
         self.modal_state = ModalState::BranchSelector {
             selector: SelectorState::new(),
         };
+    }
+
+    /// Open the context selector modal (agent + branch, accessed via Down arrow)
+    pub fn open_context_selector(&mut self) {
+        use super::modal::ContextSelectorState;
+        self.modal_state = ModalState::ContextSelector(ContextSelectorState::new());
     }
 
     /// Open the command palette modal (Ctrl+T)

@@ -16,7 +16,7 @@ pub mod time_filter;
 
 pub use agent_definition::AgentDefinition;
 pub use conversation_metadata::ConversationMetadata;
-pub use draft::{ChatDraft, DraftStorage};
+pub use draft::{ChatDraft, DraftStorage, DraftStorageError, NamedDraft, NamedDraftStorage};
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
 pub use lesson::Lesson;
 pub use message::{AskEvent, AskQuestion, Message};

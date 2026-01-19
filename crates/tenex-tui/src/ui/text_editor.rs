@@ -780,6 +780,43 @@ impl TextEditor {
         }
     }
 
+    /// Check if cursor is on the last visual line (accounting for wrap width)
+    pub fn is_on_last_visual_line(&self, wrap_width: usize) -> bool {
+        if wrap_width == 0 {
+            // Without wrapping, check if on last logical line
+            let lines: Vec<&str> = self.text.split('\n').collect();
+            let (row, _) = self.cursor_position();
+            return row >= lines.len().saturating_sub(1);
+        }
+
+        // Find current logical line
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        let logical_line_end = self.text[self.cursor..]
+            .find('\n')
+            .map(|i| self.cursor + i)
+            .unwrap_or(self.text.len());
+        let logical_line_len = logical_line_end - logical_line_start;
+
+        let col_in_line = self.cursor - logical_line_start;
+        let visual_line_in_logical = col_in_line / wrap_width;
+
+        // How many visual lines does current logical line have?
+        let current_visual_lines = if logical_line_len == 0 {
+            1
+        } else {
+            (logical_line_len + wrap_width - 1) / wrap_width
+        };
+
+        // Check if on last visual line of current logical line AND this is the last logical line
+        let on_last_visual_of_logical = visual_line_in_logical >= current_visual_lines - 1;
+        let is_last_logical_line = logical_line_end >= self.text.len();
+
+        on_last_visual_of_logical && is_last_logical_line
+    }
+
     /// Move down one visual line (accounting for wrap width)
     pub fn move_down_visual(&mut self, wrap_width: usize) {
         self.clear_selection();

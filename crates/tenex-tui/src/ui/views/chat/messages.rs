@@ -813,18 +813,34 @@ pub(crate) fn render_messages_panel(
                 } else {
                     total_lines
                 };
+                let item_height = selected_end.saturating_sub(selected_start);
 
                 // Clamp current scroll_offset to max first (handles usize::MAX sentinel)
                 let current_scroll = app.scroll_offset.min(max_scroll);
 
-                // If selected item is above visible area, scroll up to show it
-                if selected_start < current_scroll {
-                    app.scroll_offset = selected_start;
-                }
-                // If selected item is below visible area, scroll down to show it
-                else if selected_end > current_scroll + visible_height {
-                    // Scroll so the end of the selected item is at bottom of viewport
-                    app.scroll_offset = selected_end.saturating_sub(visible_height).min(max_scroll);
+                // Check if message is taller than viewport
+                if item_height >= visible_height {
+                    // Message is taller than viewport - prioritize showing the top
+                    // Only scroll if the top of the message is not visible
+                    if selected_start < current_scroll {
+                        // Scroll up to show top of message
+                        app.scroll_offset = selected_start;
+                    } else if selected_start >= current_scroll + visible_height {
+                        // Message top is below viewport - scroll down to show top
+                        app.scroll_offset = selected_start.min(max_scroll);
+                    }
+                    // If top is visible but bottom isn't, don't auto-scroll (prevents flicker)
+                } else {
+                    // Message fits in viewport - ensure entire message is visible
+                    // If selected item is above visible area, scroll up to show it
+                    if selected_start < current_scroll {
+                        app.scroll_offset = selected_start;
+                    }
+                    // If selected item is below visible area, scroll down to show it
+                    else if selected_end > current_scroll + visible_height {
+                        // Scroll so the end of the selected item is at bottom of viewport
+                        app.scroll_offset = selected_end.saturating_sub(visible_height).min(max_scroll);
+                    }
                 }
             }
         }
