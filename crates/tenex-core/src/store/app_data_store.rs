@@ -1,4 +1,4 @@
-use crate::models::{AgentChatter, AgentDefinition, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectStatus, Report, Thread};
+use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectStatus, Report, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -82,6 +82,19 @@ impl AppDataStore {
             return;
         };
 
+        // First, build a set of ask event IDs that the user has already replied to
+        // by checking e-tags on user's messages
+        let mut answered_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for messages in self.messages_by_thread.values() {
+            for message in messages {
+                if message.pubkey == user_pubkey {
+                    if let Some(ref reply_to) = message.reply_to {
+                        answered_ask_ids.insert(reply_to.clone());
+                    }
+                }
+            }
+        }
+
         // Collect all messages that need checking
         let mut inbox_candidates: Vec<(String, Message)> = Vec::new();
 
@@ -99,7 +112,7 @@ impl AppDataStore {
             }
         }
 
-        // Check each message for p-tags
+        // Check each message for p-tags (inbox)
         for (thread_id, message) in inbox_candidates {
             // Query nostrdb for the note to check its tags
             let note_id_bytes = match hex::decode(&message.id) {
@@ -113,15 +126,16 @@ impl AppDataStore {
             };
 
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
-                // Only include ask events that p-tag the user
+                // Check for inbox: ask events that p-tag the user
                 if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
                     let project_a_tag = self.find_project_for_thread(&thread_id);
+                    let project_a_tag_str = project_a_tag.unwrap_or_default();
 
                     let inbox_item = InboxItem {
                         id: message.id.clone(),
                         event_type: InboxEventType::Mention,
                         title: message.content.chars().take(50).collect(),
-                        project_a_tag: project_a_tag.unwrap_or_default(),
+                        project_a_tag: project_a_tag_str,
                         author_pubkey: message.pubkey.clone(),
                         created_at: message.created_at,
                         is_read: false,
@@ -129,6 +143,7 @@ impl AppDataStore {
                     };
                     self.inbox_items.push(inbox_item);
                 }
+
             }
         }
 
@@ -567,17 +582,15 @@ impl AppDataStore {
                 }
             }
 
-            // Auto-mark inbox items as read when user replies to them
-            // If this message is from the current user and has e-tags pointing to inbox items, mark them read
+            // Auto-mark inbox items as read when user replies
+            // If this message is from the current user and has e-tags, mark those items read
             if let Some(ref user_pk) = self.user_pubkey.clone() {
                 if pubkey == *user_pk {
                     // This is a message from the current user - check if it replies to an inbox item
-                    // Extract all e-tag values from the note (including reply markers)
                     let reply_to_ids = Self::extract_e_tag_ids(note);
-                    for reply_to_id in reply_to_ids {
-                        // Check if this ID is an inbox item and mark it read
-                        if self.inbox_items.iter().any(|item| item.id == reply_to_id) {
-                            self.mark_inbox_read(&reply_to_id);
+                    for reply_to_id in &reply_to_ids {
+                        if self.inbox_items.iter().any(|item| item.id == *reply_to_id) {
+                            self.mark_inbox_read(reply_to_id);
                         }
                     }
                 }
@@ -590,12 +603,13 @@ impl AppDataStore {
                     if self.note_ptags_user(note, user_pk) && self.note_is_ask_event(note) {
                         // Find project a_tag for this thread
                         let project_a_tag = self.find_project_for_thread(&thread_id);
+                        let project_a_tag_str = project_a_tag.clone().unwrap_or_default();
 
                         let inbox_item = InboxItem {
                             id: message_id.clone(),
                             event_type: InboxEventType::Mention,
                             title: message.content.chars().take(50).collect(),
-                            project_a_tag: project_a_tag.unwrap_or_default(),
+                            project_a_tag: project_a_tag_str,
                             author_pubkey: pubkey.clone(),
                             created_at: message.created_at,
                             is_read: false,
@@ -758,7 +772,6 @@ impl AppDataStore {
         }
         ids
     }
-
 
     fn extract_profile_name(&self, note: &Note) -> Option<String> {
         let txn = Transaction::new(&self.ndb).ok()?;
@@ -1147,5 +1160,49 @@ impl AppDataStore {
         self.operations_by_event
             .values()
             .any(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
+    }
+
+    /// Get unanswered ask event for a thread (derived at check time).
+    /// Looks at messages in the thread, finds any with q-tags pointing to ask events,
+    /// and returns the first one that the current user hasn't replied to.
+    pub fn get_unanswered_ask_for_thread(&self, thread_id: &str) -> Option<(String, AskEvent, String)> {
+        let user_pubkey = self.user_pubkey.as_ref()?;
+        let messages = self.messages_by_thread.get(thread_id)?;
+
+        // Build set of message IDs the user has replied to (via e-tag)
+        let mut user_replied_to: HashSet<String> = HashSet::new();
+        for msg in messages {
+            if msg.pubkey == *user_pubkey {
+                if let Some(ref reply_to) = msg.reply_to {
+                    user_replied_to.insert(reply_to.clone());
+                }
+            }
+        }
+
+        // Find messages with q-tags pointing to ask events
+        for msg in messages {
+            for q_tag in &msg.q_tags {
+                // Skip if user has already replied to this ask
+                if user_replied_to.contains(q_tag) {
+                    continue;
+                }
+                // Look up the ask event and return if found
+                if let Some((ask_event, author_pubkey)) = self.get_ask_event_by_id(q_tag) {
+                    return Some((q_tag.clone(), ask_event, author_pubkey));
+                }
+            }
+        }
+
+        // Also check if the thread root itself is an ask event (direct viewing case)
+        // If the thread root is an ask event and user hasn't replied, return it
+        if let Some(thread) = self.get_thread_by_id(thread_id) {
+            if thread.pubkey != *user_pubkey && !user_replied_to.contains(thread_id) {
+                if let Some(ref ask_event) = thread.ask_event {
+                    return Some((thread_id.to_string(), ask_event.clone(), thread.pubkey.clone()));
+                }
+            }
+        }
+
+        None
     }
 }

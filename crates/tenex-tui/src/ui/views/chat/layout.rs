@@ -82,13 +82,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .unwrap_or_default();
 
-    // Auto-open ask modal for first unanswered question (only when no modal is active)
-    if matches!(app.modal_state, ModalState::None) {
-        if let Some((msg_id, ask_event, author_pubkey)) = app.has_unanswered_ask_event() {
-            app.open_ask_modal(msg_id, ask_event, author_pubkey);
-        }
-    }
-
     let input_height = input::input_height(app);
     let has_attachments = input::has_attachments(app);
     let has_status = input::has_status(app);
