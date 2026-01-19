@@ -68,9 +68,6 @@ async fn main() -> Result<()> {
                     }) {
                         app.set_status(&format!("Failed to connect: {}", e));
                         LoginStep::Nsec
-                    } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
-                        app.set_status(&format!("Failed to sync: {}", e));
-                        LoginStep::Nsec
                     } else {
                         app.view = View::Home;
                         app.load_filter_preferences();

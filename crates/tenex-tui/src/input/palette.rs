@@ -8,6 +8,7 @@ use crate::store::get_raw_event_json;
 use crate::ui;
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::{App, InputMode, ModalState, UndoAction, View};
+use std::collections::HashSet;
 
 use super::modal_handlers::export_thread_as_jsonl;
 
@@ -18,6 +19,7 @@ fn filter_and_group_messages<'a>(
     thread_id: Option<&str>,
     subthread_root: Option<&str>,
     user_pubkey: Option<&str>,
+    expanded_groups: Option<&HashSet<String>>,
 ) -> Vec<DisplayItem<'a>> {
     let display_messages: Vec<&Message> = if let Some(root_id) = subthread_root {
         messages
@@ -35,21 +37,20 @@ fn filter_and_group_messages<'a>(
             .collect()
     };
 
-    group_messages(&display_messages, user_pubkey)
+    group_messages(&display_messages, user_pubkey, expanded_groups)
 }
 
-/// Get the last visible message ID from a display item, respecting group collapse state.
-fn get_visible_message_id(app: &App, item: &DisplayItem<'_>) -> Option<String> {
+/// Get the message ID from a display item (for actions like "view raw event").
+fn get_message_id(item: &DisplayItem<'_>) -> Option<String> {
     match item {
         DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
+        DisplayItem::ExpandedGroupMessage { message, .. } => Some(message.id.clone()),
         DisplayItem::AgentGroup { visibility, .. } => {
-            let group_key = visibility.first().map(|v| v.message.id.as_str()).unwrap_or("");
-            let is_expanded = app.is_group_expanded(group_key);
-
+            // For collapsed groups, return the last visible message
             visibility
                 .iter()
                 .rev()
-                .find(|v| v.visible || is_expanded)
+                .find(|v| v.visible)
                 .map(|v| v.message.id.clone())
         }
         DisplayItem::DelegationPreview { .. } => None,
@@ -72,14 +73,6 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
         }
         'q' => {
             app.quit();
-        }
-        'r' => {
-            if let Some(core_handle) = app.core_handle.clone() {
-                app.set_status("Syncing...");
-                if let Err(e) = core_handle.send(NostrCommand::Sync) {
-                    app.set_status(&format!("Sync request failed: {}", e));
-                }
-            }
         }
 
         // New conversation (context-dependent)
@@ -266,21 +259,19 @@ fn copy_selected_message(app: &mut App) {
     let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         // Get the most relevant content from the display item
         let content = match item {
             DisplayItem::SingleMessage { message, .. } => message.content.as_str(),
+            DisplayItem::ExpandedGroupMessage { message, .. } => message.content.as_str(),
             DisplayItem::AgentGroup { visibility, .. } => {
-                // For a group, get the last VISIBLE message's content (respects collapse state)
-                let group_key = visibility.first().map(|v| v.message.id.as_str()).unwrap_or("");
-                let is_expanded = app.is_group_expanded(group_key);
-
+                // For a collapsed group, get the last visible message's content
                 visibility
                     .iter()
                     .rev()
-                    .find(|v| v.visible || is_expanded)
+                    .find(|v| v.visible)
                     .map(|v| v.message.content.as_str())
                     .unwrap_or("")
             }
@@ -304,10 +295,10 @@ fn view_raw_event(app: &mut App) {
     let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
 
     if let Some(item) = grouped.get(app.selected_message_index) {
-        if let Some(id) = get_visible_message_id(app, item) {
+        if let Some(id) = get_message_id(item) {
             if let Some(json) = get_raw_event_json(&app.db.ndb, &id) {
                 let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
                     serde_json::to_string_pretty(&value).unwrap_or(json)
@@ -332,10 +323,10 @@ fn open_trace(app: &mut App) {
     let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref());
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
 
     if let Some(item) = grouped.get(app.selected_message_index) {
-        if let Some(id) = get_visible_message_id(app, item) {
+        if let Some(id) = get_message_id(item) {
             if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
                 let url = format!("http://localhost:16686/trace/{}", trace_ctx.trace_id);
                 #[cfg(target_os = "macos")]

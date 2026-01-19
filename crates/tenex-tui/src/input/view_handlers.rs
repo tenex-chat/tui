@@ -734,14 +734,6 @@ pub(super) fn handle_normal_mode(
         KeyCode::Char('q') => {
             app.quit();
         }
-        KeyCode::Char('r') => {
-            if let Some(core_handle) = app.core_handle.clone() {
-                app.set_status("Syncing...");
-                if let Err(e) = core_handle.send(NostrCommand::Sync) {
-                    app.set_status(&format!("Sync request failed: {}", e));
-                }
-            }
-        }
         KeyCode::Char(c) => {
             handle_normal_mode_char(app, c)?;
         }
@@ -753,6 +745,7 @@ pub(super) fn handle_normal_mode(
         }
         KeyCode::Up => match app.view {
             View::Chat => {
+                // Simple navigation - expanded groups are flattened so each item is selectable
                 if app.selected_message_index > 0 {
                     app.selected_message_index -= 1;
                 }
@@ -784,6 +777,7 @@ pub(super) fn handle_normal_mode(
                 }
             }
             View::Chat => {
+                // Simple navigation - expanded groups are flattened so each item is selectable
                 let count = app.display_item_count();
                 if app.selected_message_index < count.saturating_sub(1) {
                     app.selected_message_index += 1;
@@ -869,7 +863,14 @@ pub(super) fn handle_normal_mode(
 }
 
 fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
-    if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
+    if c == 'A' && app.view == View::Chat {
+        // Shift+A: Reopen a dismissed ask event
+        if app.reopen_dismissed_ask() {
+            app.set_status("Reopened dismissed ask");
+        } else {
+            app.set_status("No dismissed asks to reopen");
+        }
+    } else if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
         app.open_agent_selector();
     } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
         app.open_agent_selector();
@@ -977,7 +978,7 @@ fn handle_chat_enter(app: &mut App) -> Result<()> {
             .collect()
     };
 
-    let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+    let grouped = group_messages(&display_messages, user_pubkey.as_deref(), Some(&app.expanded_groups));
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         match item {
@@ -986,11 +987,16 @@ fn handle_chat_enter(app: &mut App) -> Result<()> {
                 collapsed_count,
                 ..
             } => {
+                // Collapsed group - expand it
                 if *collapsed_count > 0 {
                     if let Some(first_msg) = group_messages.first() {
                         app.toggle_group_expansion(&first_msg.id);
                     }
                 }
+            }
+            DisplayItem::ExpandedGroupMessage { group_key, .. } => {
+                // Message from expanded group - collapse the group
+                app.toggle_group_expansion(group_key);
             }
             DisplayItem::SingleMessage { message: msg, .. } => {
                 let has_replies = messages.iter().any(|m| {
@@ -1086,8 +1092,6 @@ pub(super) fn handle_editing_mode(
                                     }) {
                                         app.set_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Nsec;
-                                    } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
-                                        app.set_status(&format!("Failed to sync: {}", e));
                                     } else {
                                         app.view = View::Home;
                                         app.load_filter_preferences();
@@ -1121,8 +1125,6 @@ pub(super) fn handle_editing_mode(
                                     }) {
                                         app.set_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Unlock;
-                                    } else if let Err(e) = core_handle.send(NostrCommand::Sync) {
-                                        app.set_status(&format!("Failed to sync: {}", e));
                                     } else {
                                         app.view = View::Home;
                                         app.load_filter_preferences();

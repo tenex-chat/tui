@@ -196,7 +196,6 @@ fn try_login_with_credentials(
         })
         .map_err(|_| anyhow::anyhow!("Failed to send Connect command"))?;
 
-    core_handle.send(NostrCommand::Sync).ok();
     Ok(keys)
 }
 
@@ -221,7 +220,6 @@ fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::
                         })
                         .is_ok()
                     {
-                        core_handle.send(NostrCommand::Sync).ok();
                         return Some(keys);
                     }
                 }
@@ -244,7 +242,6 @@ fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::
                 })
                 .is_ok()
             {
-                core_handle.send(NostrCommand::Sync).ok();
                 return Some(keys);
             }
         }
@@ -480,17 +477,6 @@ fn handle_request(
                     Response::error(id, "CREATE_FAILED", "Failed to create thread"),
                     false,
                 )
-            }
-        }
-
-        "sync" => {
-            if core_handle.send(NostrCommand::Sync).is_ok() {
-                (
-                    Response::success(id, serde_json::json!({"status": "syncing"})),
-                    false,
-                )
-            } else {
-                (Response::error(id, "SYNC_FAILED", "Failed to sync"), false)
             }
         }
 

@@ -63,9 +63,6 @@ enum Commands {
         title: String,
     },
 
-    /// Trigger relay sync
-    Sync,
-
     /// Boot/start a project (sends kind 24000 event)
     BootProject {
         /// Project ID (a-tag format)
@@ -106,7 +103,6 @@ fn main() {
         Some(Commands::CreateThread { project_id, title }) => {
             CliCommand::CreateThread { project_id, title }
         }
-        Some(Commands::Sync) => CliCommand::Sync,
         Some(Commands::BootProject { project_id }) => CliCommand::BootProject { project_id },
         Some(Commands::Status) => CliCommand::Status,
         Some(Commands::Shutdown) => CliCommand::Shutdown,
