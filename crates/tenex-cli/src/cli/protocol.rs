@@ -69,6 +69,14 @@ pub enum CliCommand {
     Status,
     /// Shutdown the daemon
     Shutdown,
+    /// List all agent definitions (kind:4199)
+    ListAgentDefinitions,
+    /// Create a new project (kind:31933)
+    CreateProject {
+        name: String,
+        description: String,
+        agent_ids: Vec<String>,
+    },
 }
 
 impl CliCommand {
@@ -97,6 +105,15 @@ impl CliCommand {
             }
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
+            CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
+            CliCommand::CreateProject { name, description, agent_ids } => (
+                "create_project",
+                serde_json::json!({
+                    "name": name,
+                    "description": description,
+                    "agent_ids": agent_ids
+                }),
+            ),
         };
 
         Some(Request {
