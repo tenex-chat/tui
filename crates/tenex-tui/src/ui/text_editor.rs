@@ -191,6 +191,7 @@ impl TextEditor {
 
     /// Handle pasted text - may become attachment if large (replaces selection if any)
     /// Uses smart paste detection for JSON and code
+    /// When text becomes an attachment, inserts a marker [Text Attachment N] at cursor position
     pub fn handle_paste(&mut self, text: &str) {
         self.push_undo_state();
         // Delete selection first if any
@@ -202,12 +203,17 @@ impl TextEditor {
         }
         self.selection_anchor = None;
         if Self::should_be_attachment(text) {
+            let id = self.next_attachment_id;
             let attachment = PasteAttachment {
-                id: self.next_attachment_id,
+                id,
                 content: text.to_string(),
             };
             self.next_attachment_id += 1;
             self.attachments.push(attachment);
+            // Insert marker at cursor position so the model knows where the attachment belongs
+            let marker = format!("[Text Attachment {}]", id);
+            self.text.insert_str(self.cursor, &marker);
+            self.cursor += marker.len();
         } else {
             // Apply smart paste detection for code/JSON
             let formatted = self.smart_format_paste(text);
@@ -943,7 +949,9 @@ impl TextEditor {
     }
 
     /// Build the full message content including attachments
-    /// Replaces [Image #N] and [Paste #N] markers with actual content
+    /// Replaces [Image #N] markers with actual URLs
+    /// Keeps [Text Attachment N] markers in place and appends attachment content at the end
+    /// Format: "user message with [Text Attachment N] markers\n\n----\n-- Text Attachment N --\n<content>"
     pub fn build_full_content(&self) -> String {
         let mut content = self.text.clone();
 
@@ -953,12 +961,20 @@ impl TextEditor {
             content = content.replace(&marker, &img.url);
         }
 
-        // Append paste attachments at the end
-        for attachment in &self.attachments {
+        // Append text attachments at the end with clear labeling
+        // The [Text Attachment N] markers remain in the text to show position
+        if !self.attachments.is_empty() {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
             }
-            content.push_str(&attachment.content);
+            content.push_str("\n----\n");
+            for attachment in &self.attachments {
+                content.push_str(&format!("-- Text Attachment {} --\n", attachment.id));
+                content.push_str(&attachment.content);
+                if !attachment.content.ends_with('\n') {
+                    content.push('\n');
+                }
+            }
         }
 
         content
@@ -1003,9 +1019,27 @@ mod tests {
         let mut editor = TextEditor::new();
         let long_text = "line1\nline2\nline3\nline4\nline5\nline6\n";
         editor.handle_paste(long_text);
-        assert!(editor.text.is_empty());
+        // Should insert marker at cursor position
+        assert_eq!(editor.text, "[Text Attachment 1]");
         assert_eq!(editor.attachments.len(), 1);
         assert_eq!(editor.attachments[0].content, long_text);
+    }
+
+    #[test]
+    fn test_paste_attachment_with_context() {
+        let mut editor = TextEditor::new();
+        editor.text = "look at this log! ".to_string();
+        editor.cursor = editor.text.len();
+        let long_text = "ERROR: something went wrong\nline2\nline3\nline4\nline5\nline6\n";
+        editor.handle_paste(long_text);
+        editor.text.push_str(" isn't it crazy?");
+
+        let full = editor.build_full_content();
+        // Should have marker in position and attachment at end
+        assert!(full.contains("look at this log! [Text Attachment 1] isn't it crazy?"));
+        assert!(full.contains("----"));
+        assert!(full.contains("-- Text Attachment 1 --"));
+        assert!(full.contains("ERROR: something went wrong"));
     }
 
     #[test]
