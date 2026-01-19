@@ -129,6 +129,11 @@ impl CoreRuntime {
             }
         }
 
+        // Subscribe to messages for any newly discovered projects
+        for project_a_tag in self.data_store.borrow_mut().drain_pending_project_subscriptions() {
+            let _ = self.handle.send(NostrCommand::SubscribeToProjectMessages { project_a_tag });
+        }
+
         Ok(events)
     }
 
