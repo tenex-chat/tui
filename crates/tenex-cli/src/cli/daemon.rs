@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::net::UnixListener;
 
 use anyhow::Result;
+use serde::Deserialize;
 
 use crate::nostr::{self, NostrCommand};
 use crate::store::{AppDataStore, Database};
@@ -536,6 +537,81 @@ fn handle_request(
             Response::success(id, serde_json::json!({"status": "shutting_down"})),
             true,
         ),
+
+        "list_agent_definitions" => {
+            let store = data_store.borrow();
+            let agent_defs: Vec<_> = store
+                .get_agent_definitions()
+                .iter()
+                .map(|ad| {
+                    serde_json::json!({
+                        "id": ad.id,
+                        "pubkey": ad.pubkey,
+                        "d_tag": ad.d_tag,
+                        "name": ad.name,
+                        "description": ad.description,
+                        "role": ad.role,
+                        "instructions": ad.instructions,
+                        "picture": ad.picture,
+                        "version": ad.version,
+                        "model": ad.model,
+                        "tools": ad.tools,
+                        "mcp_servers": ad.mcp_servers,
+                        "use_criteria": ad.use_criteria,
+                        "created_at": ad.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(agent_defs)), false)
+        }
+
+        "create_project" => {
+            #[derive(Deserialize)]
+            struct CreateProjectParams {
+                name: String,
+                #[serde(default)]
+                description: String,
+                #[serde(default)]
+                agent_ids: Vec<String>,
+            }
+
+            let params: CreateProjectParams = match serde_json::from_value(request.params.clone()) {
+                Ok(p) => p,
+                Err(_) => {
+                    return (
+                        Response::error(id, "INVALID_PARAMS", "Invalid create_project params"),
+                        false,
+                    );
+                }
+            };
+
+            let name = params.name.trim();
+            if name.is_empty() {
+                return (
+                    Response::error(id, "INVALID_PARAMS", "name is required and cannot be empty or whitespace-only"),
+                    false,
+                );
+            }
+
+            if core_handle
+                .send(NostrCommand::CreateProject {
+                    name: name.to_string(),
+                    description: params.description,
+                    agent_ids: params.agent_ids,
+                })
+                .is_ok()
+            {
+                (
+                    Response::success(id, serde_json::json!({"status": "created"})),
+                    false,
+                )
+            } else {
+                (
+                    Response::error(id, "CREATE_FAILED", "Failed to create project"),
+                    false,
+                )
+            }
+        }
 
         _ => (
             Response::error(
