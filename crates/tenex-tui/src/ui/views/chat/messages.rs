@@ -96,6 +96,9 @@ pub(crate) fn render_messages_panel(
         messages_text.push(Line::from(""));
     }
 
+    // Track line positions for each display item (for scroll-to-selection)
+    let mut item_line_starts: Vec<usize> = Vec::new();
+
     // Render display messages with card-style layout
     {
         // Collect all unique pubkeys and cache profile names with single borrow
@@ -120,7 +123,12 @@ pub(crate) fn render_messages_panel(
         // Convert messages to display items - each message is its own item
         let grouped = group_messages(&display_messages);
 
+        // Reserve capacity for line tracking
+        item_line_starts.reserve(grouped.len());
+
         for (group_idx, item) in grouped.iter().enumerate() {
+            // Record the starting line for this item
+            item_line_starts.push(messages_text.len());
             match item {
                 DisplayItem::SingleMessage {
                     message: msg,
@@ -793,6 +801,33 @@ pub(crate) fn render_messages_panel(
 
         // Update max_scroll_offset so scroll methods work correctly
         app.max_scroll_offset = max_scroll;
+
+        // Auto-scroll to keep selected message visible (when in Normal mode navigating)
+        if app.input_mode == InputMode::Normal && !item_line_starts.is_empty() {
+            let selected_idx = app.selected_message_index;
+            if selected_idx < item_line_starts.len() {
+                let selected_start = item_line_starts[selected_idx];
+                // Calculate end line (start of next item, or end of all lines)
+                let selected_end = if selected_idx + 1 < item_line_starts.len() {
+                    item_line_starts[selected_idx + 1]
+                } else {
+                    total_lines
+                };
+
+                // Clamp current scroll_offset to max first (handles usize::MAX sentinel)
+                let current_scroll = app.scroll_offset.min(max_scroll);
+
+                // If selected item is above visible area, scroll up to show it
+                if selected_start < current_scroll {
+                    app.scroll_offset = selected_start;
+                }
+                // If selected item is below visible area, scroll down to show it
+                else if selected_end > current_scroll + visible_height {
+                    // Scroll so the end of the selected item is at bottom of viewport
+                    app.scroll_offset = selected_end.saturating_sub(visible_height).min(max_scroll);
+                }
+            }
+        }
 
         // Use scroll_offset, clamped to max
         let scroll = app.scroll_offset.min(max_scroll);
