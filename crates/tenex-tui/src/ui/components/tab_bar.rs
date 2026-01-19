@@ -64,14 +64,15 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
 
         // Show shortcut hint for tabs 2-9
-        let shortcut = if tab_num <= 9 {
-            format!("⌥{} ", tab_num)
+        // ⌥ is a multi-byte character but displays as 1 cell width
+        let (shortcut, shortcut_display_width) = if tab_num <= 9 {
+            (format!("⌥{} ", tab_num), 4) // "⌥N " = 4 display cells
         } else {
-            "   ".to_string()
+            ("   ".to_string(), 3)
         };
-        title_spans.push(Span::styled(shortcut.clone(), num_style));
+        title_spans.push(Span::styled(shortcut, num_style));
 
-        // Unread indicator or draft indicator
+        // Unread indicator or draft indicator (always 1 char display width)
         if tab.is_draft() {
             title_spans.push(Span::styled("+", Style::default().fg(theme::ACCENT_SUCCESS)));
         } else if tab.has_unread && !is_active {
@@ -104,8 +105,9 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
 
         // Pad project line to align with title line
-        // shortcut (3 chars) + bullet/space (1 char)
-        project_spans.push(Span::styled("    ", Style::default()));
+        // shortcut_display_width + 1 (for bullet/indicator)
+        let prefix_padding = " ".repeat(shortcut_display_width + 1);
+        project_spans.push(Span::styled(prefix_padding, Style::default()));
         // Pad project name to match title width
         let padded_project = format!("{:width$}", project_display, width = title.len());
         project_spans.push(Span::styled(padded_project, project_style));
@@ -117,9 +119,6 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         }
     }
 
-    // Add hint at the end of title line
-    title_spans.push(Span::styled("  ", Style::default()));
-    title_spans.push(Span::styled("^Tx:close X:archive+close", Style::default().fg(theme::TEXT_MUTED)));
 
     // Render both lines
     let title_line = Line::from(title_spans);

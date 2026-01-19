@@ -121,6 +121,18 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle context selector modal when open
+    if matches!(app.modal_state, ModalState::ContextSelector(_)) {
+        handle_context_selector_key(app, key)?;
+        return Ok(true);
+    }
+
+    // Handle draft navigator modal when open
+    if matches!(app.modal_state, ModalState::DraftNavigator(_)) {
+        handle_draft_navigator_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -409,38 +421,6 @@ fn handle_chat_search_key(app: &mut App, key: KeyEvent) {
 fn handle_agent_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let agents = app.filtered_agents();
     let item_count = agents.len();
-
-    // Handle 's' key to open agent settings
-    if let KeyCode::Char('s') = key.code {
-        if let ModalState::AgentSelector { ref selector } = app.modal_state {
-            if let Some(agent) = agents.get(selector.index).cloned() {
-                if let Some(project) = &app.selected_project {
-                    let (all_tools, all_models) = app
-                        .data_store
-                        .borrow()
-                        .get_project_status(&project.a_tag())
-                        .map(|status| {
-                            let tools = status.tools().iter().map(|s| s.to_string()).collect();
-                            let models = status.models().iter().map(|s| s.to_string()).collect();
-                            (tools, models)
-                        })
-                        .unwrap_or_default();
-
-                    let settings_state = ui::modal::AgentSettingsState::new(
-                        agent.name.clone(),
-                        agent.pubkey.clone(),
-                        project.a_tag(),
-                        agent.model.clone(),
-                        agent.tools.clone(),
-                        all_models,
-                        all_tools,
-                    );
-                    app.modal_state = ModalState::AgentSettings(settings_state);
-                    return Ok(());
-                }
-            }
-        }
-    }
 
     if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
         match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
@@ -1524,5 +1504,178 @@ pub(super) fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
         Err(_) => {
             app.set_status("Failed to access clipboard");
         }
+    }
+}
+
+// =============================================================================
+// CONTEXT SELECTOR (Agent + Branch)
+// =============================================================================
+
+fn handle_context_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    use ui::modal::ContextSelectorFocus;
+
+    let agents = app.available_agents();
+    let branches = app.available_branches();
+
+    if let ModalState::ContextSelector(ref mut state) = app.modal_state {
+        match key.code {
+            // Escape or Up = return to input
+            KeyCode::Esc | KeyCode::Up => {
+                app.modal_state = ModalState::None;
+            }
+            // Tab or Left/Right = switch between agent and branch
+            KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
+                state.focus = match state.focus {
+                    ContextSelectorFocus::Agent => ContextSelectorFocus::Branch,
+                    ContextSelectorFocus::Branch => ContextSelectorFocus::Agent,
+                };
+            }
+            // Down or j = next item in current list
+            KeyCode::Down | KeyCode::Char('j') => {
+                match state.focus {
+                    ContextSelectorFocus::Agent => {
+                        if !agents.is_empty() && state.agent_index < agents.len() - 1 {
+                            state.agent_index += 1;
+                        }
+                    }
+                    ContextSelectorFocus::Branch => {
+                        if !branches.is_empty() && state.branch_index < branches.len() - 1 {
+                            state.branch_index += 1;
+                        }
+                    }
+                }
+            }
+            // k = previous item
+            KeyCode::Char('k') => {
+                match state.focus {
+                    ContextSelectorFocus::Agent => {
+                        if state.agent_index > 0 {
+                            state.agent_index -= 1;
+                        }
+                    }
+                    ContextSelectorFocus::Branch => {
+                        if state.branch_index > 0 {
+                            state.branch_index -= 1;
+                        }
+                    }
+                }
+            }
+            // Enter = select current item
+            KeyCode::Enter => {
+                match state.focus {
+                    ContextSelectorFocus::Agent => {
+                        if let Some(agent) = agents.get(state.agent_index).cloned() {
+                            app.selected_agent = Some(agent);
+                            app.user_explicitly_selected_agent = true;
+                        }
+                    }
+                    ContextSelectorFocus::Branch => {
+                        if let Some(branch) = branches.get(state.branch_index).cloned() {
+                            app.selected_branch = Some(branch);
+                        }
+                    }
+                }
+                app.modal_state = ModalState::None;
+            }
+            // 's' = open agent settings (only when focused on agent)
+            KeyCode::Char('s') => {
+                if state.focus == ContextSelectorFocus::Agent {
+                    if let Some(agent) = agents.get(state.agent_index).cloned() {
+                        if let Some(project) = &app.selected_project {
+                            let (all_tools, all_models) = app
+                                .data_store
+                                .borrow()
+                                .get_project_status(&project.a_tag())
+                                .map(|status| {
+                                    let tools = status.tools().iter().map(|s| s.to_string()).collect();
+                                    let models = status.models().iter().map(|s| s.to_string()).collect();
+                                    (tools, models)
+                                })
+                                .unwrap_or_default();
+
+                            let settings_state = ui::modal::AgentSettingsState::new(
+                                agent.name.clone(),
+                                agent.pubkey.clone(),
+                                project.a_tag(),
+                                agent.model.clone(),
+                                agent.tools.clone(),
+                                all_models,
+                                all_tools,
+                            );
+                            app.modal_state = ModalState::AgentSettings(settings_state);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+// =============================================================================
+// DRAFT NAVIGATOR MODAL
+// =============================================================================
+
+fn handle_draft_navigator_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+    let modifiers = key.modifiers;
+
+    // Get mutable access to the draft navigator state
+    let state = match &mut app.modal_state {
+        ModalState::DraftNavigator(state) => state,
+        _ => return,
+    };
+
+    match code {
+        // Close modal
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+
+        // Navigation
+        KeyCode::Up | KeyCode::Char('k') => {
+            state.move_up();
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            state.move_down();
+        }
+
+        // Select draft (restore to chat editor)
+        KeyCode::Enter => {
+            if let Some(draft) = state.selected_draft().cloned() {
+                app.modal_state = ModalState::None;
+                app.restore_named_draft(&draft);
+            }
+        }
+
+        // Delete draft
+        KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+            if let Some(draft) = state.selected_draft() {
+                let draft_id = draft.id.clone();
+                app.delete_named_draft(&draft_id);
+                // Refresh the drafts list (project-scoped to maintain consistency)
+                let drafts = app.get_named_drafts_for_current_project();
+                if let ModalState::DraftNavigator(state) = &mut app.modal_state {
+                    state.drafts = drafts;
+                    // Clamp selection index
+                    let max = state.filtered_drafts().len();
+                    if state.selected_index >= max && max > 0 {
+                        state.selected_index = max - 1;
+                    }
+                }
+            }
+        }
+
+        // Filter input
+        KeyCode::Char(c) if !modifiers.contains(KeyModifiers::CONTROL) => {
+            state.add_filter_char(c);
+        }
+        KeyCode::Backspace => {
+            state.backspace_filter();
+        }
+
+        _ => {}
     }
 }

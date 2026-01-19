@@ -171,6 +171,9 @@ pub enum HotkeyContext {
 
     /// Login view
     Login,
+
+    /// Draft navigator modal
+    DraftNavigatorModal,
 }
 
 impl HotkeyContext {
@@ -205,6 +208,8 @@ impl HotkeyContext {
             ModalState::CreateAgent(_) => return HotkeyContext::CreateAgentModal,
             ModalState::ExpandedEditor { .. } => return HotkeyContext::ExpandedEditorModal,
             ModalState::BranchSelector { .. } => return HotkeyContext::AnyModal,
+            ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
+            ModalState::ContextSelector(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
 

@@ -2,6 +2,7 @@ use crate::models::AskEvent;
 use crate::ui::ask_input::AskInputState;
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
+use tenex_core::models::NamedDraft;
 
 /// State for the ask modal (answering multi-question ask events)
 #[derive(Debug, Clone)]
@@ -756,6 +757,102 @@ impl AgentSettingsState {
     }
 }
 
+/// Focus area in the context selector
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContextSelectorFocus {
+    Agent,
+    Branch,
+}
+
+/// State for the context selector modal (accessed via Down arrow from input)
+/// Shows agent (with model) and branch side by side
+#[derive(Debug, Clone)]
+pub struct ContextSelectorState {
+    pub focus: ContextSelectorFocus,
+    pub agent_index: usize,
+    pub branch_index: usize,
+}
+
+impl ContextSelectorState {
+    pub fn new() -> Self {
+        Self {
+            focus: ContextSelectorFocus::Agent,
+            agent_index: 0,
+            branch_index: 0,
+        }
+    }
+}
+
+impl Default for ContextSelectorState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// State for the draft navigator modal (shows saved named drafts)
+#[derive(Debug, Clone)]
+pub struct DraftNavigatorState {
+    /// Selected index in the draft list
+    pub selected_index: usize,
+    /// Filter text for fuzzy searching drafts
+    pub filter: String,
+    /// Cached list of drafts (cloned for display)
+    pub drafts: Vec<NamedDraft>,
+}
+
+impl DraftNavigatorState {
+    pub fn new(drafts: Vec<NamedDraft>) -> Self {
+        Self {
+            selected_index: 0,
+            filter: String::new(),
+            drafts,
+        }
+    }
+
+    /// Get filtered drafts based on current filter
+    pub fn filtered_drafts(&self) -> Vec<&NamedDraft> {
+        if self.filter.is_empty() {
+            self.drafts.iter().collect()
+        } else {
+            let filter_lower = self.filter.to_lowercase();
+            self.drafts
+                .iter()
+                .filter(|d| {
+                    d.name.to_lowercase().contains(&filter_lower)
+                        || d.text.to_lowercase().contains(&filter_lower)
+                })
+                .collect()
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        let max = self.filtered_drafts().len();
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn selected_draft(&self) -> Option<&NamedDraft> {
+        self.filtered_drafts().get(self.selected_index).copied()
+    }
+
+    pub fn add_filter_char(&mut self, c: char) {
+        self.filter.push(c);
+        self.selected_index = 0;
+    }
+
+    pub fn backspace_filter(&mut self) {
+        self.filter.pop();
+        self.selected_index = 0;
+    }
+}
+
 /// Context for command palette - determines which commands are shown
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteContext {
@@ -852,6 +949,7 @@ impl CommandPaletteState {
             PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working } => {
                 commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
                 commands.push(PaletteCommand::new('%', "Select branch", "Input"));
+                commands.push(PaletteCommand::new('d', "View drafts", "Draft"));
                 commands.push(PaletteCommand::new('y', "Copy content", "Message"));
                 commands.push(PaletteCommand::new('v', "View raw event", "Message"));
                 if message_has_trace {
@@ -877,6 +975,8 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
                 commands.push(PaletteCommand::new('%', "Select branch", "Input"));
                 commands.push(PaletteCommand::new('E', "Expand editor", "Input"));
+                commands.push(PaletteCommand::new('s', "Save as draft", "Draft"));
+                commands.push(PaletteCommand::new('d', "View drafts", "Draft"));
                 commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
                 commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
                 commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
@@ -988,6 +1088,10 @@ pub enum ModalState {
     },
     /// Agent settings modal (model and tools configuration)
     AgentSettings(AgentSettingsState),
+    /// Context selector (agent + branch) - accessed via Down arrow from last line of input
+    ContextSelector(ContextSelectorState),
+    /// Draft navigator modal for viewing and restoring saved drafts
+    DraftNavigator(DraftNavigatorState),
 }
 
 impl Default for ModalState {

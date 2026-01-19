@@ -126,7 +126,12 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
             toggle_project_visibility_palette(app);
         }
         's' => {
-            open_project_settings(app);
+            // Save draft in chat editing mode, or open project settings in home sidebar
+            if app.view == View::Chat && app.input_mode == InputMode::Editing {
+                app.save_named_draft();
+            } else {
+                open_project_settings(app);
+            }
         }
         'b' => {
             boot_project(app);
@@ -175,6 +180,13 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
         }
         'E' => {
             app.open_expanded_editor_modal();
+        }
+
+        // Draft navigator (Chat view)
+        'd' => {
+            if app.view == View::Chat {
+                app.open_draft_navigator();
+            }
         }
 
         'u' => {

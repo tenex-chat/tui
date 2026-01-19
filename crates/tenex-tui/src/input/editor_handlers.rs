@@ -99,14 +99,6 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // @ = open agent selector
-        KeyCode::Char('@') => {
-            app.open_agent_selector();
-        }
-        // % = open branch selector
-        KeyCode::Char('%') => {
-            app.open_branch_selector();
-        }
         // Ctrl+N = open nudge selector
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
@@ -248,8 +240,13 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up => {
             app.chat_editor.move_up_visual(app.chat_input_wrap_width);
         }
+        // Down on last line = open context selector (agent/branch), otherwise move down
         KeyCode::Down => {
-            app.chat_editor.move_down_visual(app.chat_input_wrap_width);
+            if app.chat_editor.is_on_last_visual_line(app.chat_input_wrap_width) {
+                app.open_context_selector();
+            } else {
+                app.chat_editor.move_down_visual(app.chat_input_wrap_width);
+            }
         }
         KeyCode::PageUp => {
             app.scroll_up(20);

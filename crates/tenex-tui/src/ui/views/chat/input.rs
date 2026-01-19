@@ -136,11 +136,18 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    let agent_display = app
+    // Agent display with model info
+    let (agent_display, agent_model_display) = app
         .selected_agent
         .as_ref()
-        .map(|a| a.name.clone())
-        .unwrap_or_else(|| "none".to_string());
+        .map(|a| {
+            let model = a.model
+                .as_ref()
+                .map(|m| format!(" ({})", m))
+                .unwrap_or_default();
+            (a.name.clone(), model)
+        })
+        .unwrap_or_else(|| ("none".to_string(), String::new()));
 
     let branch_display = app
         .selected_branch
@@ -319,7 +326,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         format!(" [{}]", nudge_titles.join(", "))
     };
 
-    // Context line at bottom: @agent on %branch [nudges]
+    // Context line at bottom: @agent (model) %branch project [nudges]
     // Add scroll indicator if we're scrolling
     let scroll_indicator = if total_content_lines > available_content_lines {
         let current_line = cursor_visual_row + 1;
@@ -327,7 +334,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         String::new()
     };
-    let context_str = format!("@{}{}{}{}{}", agent_display, branch_display, project_display, nudge_display, scroll_indicator);
+    let context_str = format!("@{}{}{}{}{}{}", agent_display, agent_model_display, branch_display, project_display, nudge_display, scroll_indicator);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
@@ -339,6 +346,10 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
             Style::default()
                 .fg(theme::ACCENT_PRIMARY)
                 .bg(input_bg),
+        ),
+        Span::styled(
+            agent_model_display.clone(),
+            Style::default().fg(theme::TEXT_DIM).bg(input_bg),
         ),
         Span::styled(
             branch_display.clone(),
