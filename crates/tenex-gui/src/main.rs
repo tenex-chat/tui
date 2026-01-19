@@ -60,7 +60,6 @@ impl TenexGui {
                     })
                     .is_ok()
                 {
-                    let _ = self.core_handle.send(NostrCommand::Sync);
                     self.logged_in = true;
                     self.status = format!("Connected as {}", &pubkey[..8]);
                 } else {
@@ -86,7 +85,6 @@ impl TenexGui {
                     })
                     .is_ok()
                 {
-                    let _ = self.core_handle.send(NostrCommand::Sync);
                     self.logged_in = true;
                     self.password.clear();
                     self.status = format!("Connected as {}", &pubkey[..8]);
@@ -145,8 +143,6 @@ impl eframe::App for TenexGui {
                 } else {
                     ui.label("No stored credentials available for login.");
                 }
-            } else if ui.button("Sync").clicked() {
-                let _ = self.core_handle.send(NostrCommand::Sync);
             }
 
             if let Some(last_event_at) = self.last_event_at {

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
@@ -20,7 +19,6 @@ fn debug_log(msg: &str) {
 
 pub enum NostrCommand {
     Connect { keys: Keys, user_pubkey: String },
-    Sync,
     PublishThread {
         project_a_tag: String,
         title: String,
@@ -101,8 +99,6 @@ pub struct NostrWorker {
     ndb: Arc<Ndb>,
     data_tx: Sender<DataChange>,
     command_rx: Receiver<NostrCommand>,
-    subscribed_projects: HashSet<String>,
-    needed_profiles: HashSet<String>,
     rt_handle: Option<tokio::runtime::Handle>,
 }
 
@@ -115,8 +111,6 @@ impl NostrWorker {
             ndb,
             data_tx,
             command_rx,
-            subscribed_projects: HashSet::new(),
-            needed_profiles: HashSet::new(),
             rt_handle: None,
         }
     }
@@ -164,12 +158,6 @@ impl NostrWorker {
                             eprintln!("[WORKER ERROR] Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::Sync => {
-                        debug_log("Worker: Syncing data");
-                        if let Err(e) = rt.block_on(self.handle_sync()) {
-                            eprintln!("[WORKER ERROR] Failed to sync: {}", e);
-                        }
-                    }
                     NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids } => {
                         debug_log("Worker: Publishing thread");
                         if let Err(e) = rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
@@ -177,7 +165,7 @@ impl NostrWorker {
                         }
                     }
                     NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey } => {
-                        debug_log("Worker: Publishing message");
+                        eprintln!("[SEND] Worker received PublishMessage command");
                         if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
                             eprintln!("[WORKER ERROR] Failed to publish message: {}", e);
                         }
@@ -235,9 +223,15 @@ impl NostrWorker {
 
         client.add_relay(RELAY_URL).await?;
 
-        tokio::time::timeout(std::time::Duration::from_secs(10), client.connect())
-            .await
-            .ok();
+        eprintln!("[CONN] Starting relay connect...");
+        let connect_start = std::time::Instant::now();
+        let connect_result = tokio::time::timeout(std::time::Duration::from_secs(10), client.connect()).await;
+        let connect_elapsed = connect_start.elapsed();
+
+        match &connect_result {
+            Ok(()) => eprintln!("[CONN] Connect completed in {:?}", connect_elapsed),
+            Err(_) => eprintln!("[CONN] Connect TIMED OUT after {:?}", connect_elapsed),
+        }
 
         self.client = Some(client);
         self.keys = Some(keys);
@@ -286,7 +280,8 @@ impl NostrWorker {
 
         // Note: Reports (kind 30023) are fetched per-project in subscribe_to_project_content
 
-        debug_log("Starting persistent subscriptions");
+        eprintln!("[CONN] Starting subscriptions...");
+        let sub_start = std::time::Instant::now();
 
         let subscription_id = client
             .subscribe(
@@ -305,7 +300,7 @@ impl NostrWorker {
             )
             .await?;
 
-        debug_log(&format!("Subscription started: {:?}", subscription_id));
+        eprintln!("[CONN] Subscriptions set up in {:?}, id={:?}", sub_start.elapsed(), subscription_id);
 
         self.spawn_notification_handler();
 
@@ -323,10 +318,17 @@ impl NostrWorker {
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
+            let mut first_event = true;
+            let handler_start = std::time::Instant::now();
+            eprintln!("[CONN] Notification handler started, waiting for events...");
 
             loop {
                 if let Ok(notification) = notifications.recv().await {
                     if let RelayPoolNotification::Event { relay_url, event, .. } = notification {
+                        if first_event {
+                            eprintln!("[CONN] First event received after {:?}", handler_start.elapsed());
+                            first_event = false;
+                        }
                         debug_log(&format!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url));
 
                         if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
@@ -346,203 +348,6 @@ impl NostrWorker {
         // Ingest the event into nostrdb with relay metadata
         // UI gets notified via nostrdb SubscriptionStream when events are ready
         ingest_events(ndb, &[event.clone()], Some(relay_url))?;
-
-        Ok(())
-    }
-
-    async fn handle_sync(&mut self) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let user_pubkey = self.user_pubkey.as_ref().ok_or_else(|| anyhow::anyhow!("No user pubkey"))?;
-
-        debug_log(&format!("Starting sync for user {}", &user_pubkey[..8]));
-        debug_log(&format!("Starting sync for user {}", user_pubkey));
-
-        let pubkey = PublicKey::parse(user_pubkey)?;
-
-        // Fetch projects
-        let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
-        debug_log(&format!("Fetching projects (kind 31933) for author {}", user_pubkey));
-
-        let events = client
-            .fetch_events(vec![project_filter], std::time::Duration::from_secs(10))
-            .await?;
-
-        let events_vec: Vec<Event> = events.into_iter().collect();
-        debug_log(&format!("Fetched {} project events", events_vec.len()));
-        for event in &events_vec {
-            debug_log(&format!("  Project event: id={}, created_at={}", &event.id.to_hex()[..16], event.created_at.as_u64()));
-        }
-        ingest_events(&self.ndb, &events_vec, Some(RELAY_URL))?;
-        debug_log("Ingested project events into nostrdb");
-        // UI gets notified via nostrdb SubscriptionStream when data is ready
-
-        // Fetch project status events (kind 24010) for user's projects
-        // First try with p-tag filter, then also fetch by project coordinates
-        let status_filter = Filter::new()
-            .kind(Kind::Custom(24010))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), [user_pubkey]);
-
-        debug_log(&format!("Fetching 24010 events with p-tag filter for user {}", &user_pubkey[..16]));
-        let status_events = client
-            .fetch_events(vec![status_filter], std::time::Duration::from_secs(10))
-            .await?;
-
-        let mut status_events_vec: Vec<Event> = status_events.into_iter().collect();
-        debug_log(&format!("Fetched {} 24010 events with p-tag filter", status_events_vec.len()));
-
-        // Also fetch 24010 events by project a-tags (in case they don't have p-tags)
-        let projects = crate::store::get_projects(&self.ndb)?;
-        if !projects.is_empty() {
-            let project_coords: Vec<String> = projects.iter().map(|p| p.a_tag()).collect();
-            debug_log(&format!("Also fetching 24010 events for {} project coordinates", project_coords.len()));
-
-            let coord_filter = Filter::new()
-                .kind(Kind::Custom(24010))
-                .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_coords);
-
-            let coord_events = client
-                .fetch_events(vec![coord_filter], std::time::Duration::from_secs(10))
-                .await?;
-
-            let coord_events_vec: Vec<Event> = coord_events.into_iter().collect();
-            debug_log(&format!("Fetched {} 24010 events by a-tag filter", coord_events_vec.len()));
-
-            // Deduplicate by event ID
-            let existing_ids: std::collections::HashSet<_> = status_events_vec.iter().map(|e| e.id).collect();
-            for event in coord_events_vec {
-                if !existing_ids.contains(&event.id) {
-                    status_events_vec.push(event);
-                }
-            }
-        }
-
-        if !status_events_vec.is_empty() {
-            debug_log(&format!("Processing {} total 24010 events", status_events_vec.len()));
-            ingest_events(&self.ndb, &status_events_vec, Some(RELAY_URL))?;
-
-            // UI gets notified via SubscriptionStream when events are ready
-        } else {
-            debug_log("No 24010 events found during sync");
-        }
-
-        // Fetch agent definitions (kind 4199)
-        let agent_filter = Filter::new().kind(Kind::Custom(4199));
-        debug_log("Fetching agent definitions (kind 4199)");
-
-        let agent_events = client
-            .fetch_events(vec![agent_filter], std::time::Duration::from_secs(10))
-            .await?;
-
-        let agent_events_vec: Vec<Event> = agent_events.into_iter().collect();
-        debug_log(&format!("Fetched {} agent definition events", agent_events_vec.len()));
-        if !agent_events_vec.is_empty() {
-            ingest_events(&self.ndb, &agent_events_vec, Some(RELAY_URL))?;
-        }
-
-        // Get projects from nostrdb to subscribe to their content
-        let projects = crate::store::get_projects(&self.ndb)?;
-
-        for project in &projects {
-            let project_a_tag = project.a_tag();
-
-            if !self.subscribed_projects.contains(&project_a_tag) {
-                self.subscribe_to_project_content(client, &project_a_tag).await?;
-                self.subscribed_projects.insert(project_a_tag.clone());
-            }
-
-            self.needed_profiles.insert(project.pubkey.clone());
-            for p in &project.participants {
-                self.needed_profiles.insert(p.clone());
-            }
-        }
-
-        if !self.needed_profiles.is_empty() {
-            self.fetch_profiles().await?;
-        }
-
-        debug_log("Sync complete");
-
-        Ok(())
-    }
-
-    async fn subscribe_to_project_content(&self, client: &Client, project_a_tag: &str) -> Result<()> {
-        // Fetch all kind:1 events for this project (both threads and messages)
-        let kind1_filter = Filter::new()
-            .kind(Kind::from(1))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), [project_a_tag]);
-
-        let kind1_events = client
-            .fetch_events(vec![kind1_filter.clone()], std::time::Duration::from_secs(10))
-            .await?;
-
-        let kind1_events_vec: Vec<Event> = kind1_events.iter().cloned().collect();
-        ingest_events(&self.ndb, &kind1_events_vec, Some(RELAY_URL))?;
-        // UI gets notified via nostrdb SubscriptionStream when data is ready
-
-        // Extract thread IDs (kind:1 events without e-tags)
-        let thread_ids: Vec<EventId> = kind1_events
-            .iter()
-            .filter(|e| !e.tags.iter().any(|t| t.as_slice().first().map(|s| s == "e").unwrap_or(false)))
-            .map(|e| e.id)
-            .collect();
-
-        if !thread_ids.is_empty() {
-            // Convert thread IDs to hex strings for tag filtering
-            let thread_id_hexes: Vec<String> = thread_ids.iter().map(|id| id.to_hex()).collect();
-
-            // Fetch conversation metadata (kind 513) for these threads
-            // Kind 513 uses lowercase "e" tag to reference threads
-            let metadata_filter = Filter::new()
-                .kind(Kind::Custom(513))
-                .custom_tag(SingleLetterTag::lowercase(Alphabet::E), thread_id_hexes.clone());
-
-            let metadata_events = client
-                .fetch_events(vec![metadata_filter], std::time::Duration::from_secs(10))
-                .await?;
-
-            let metadata_events_vec: Vec<Event> = metadata_events.into_iter().collect();
-            ingest_events(&self.ndb, &metadata_events_vec, Some(RELAY_URL))?;
-            // UI gets notified via nostrdb SubscriptionStream when data is ready
-        }
-
-        // Fetch reports (kind 30023) for this project
-        let report_filter = Filter::new()
-            .kind(Kind::Custom(30023))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), [project_a_tag]);
-
-        let report_events = client
-            .fetch_events(vec![report_filter.clone()], std::time::Duration::from_secs(10))
-            .await?;
-
-        let report_events_vec: Vec<Event> = report_events.iter().cloned().collect();
-        if !report_events_vec.is_empty() {
-            debug_log(&format!("Fetched {} reports for project {}", report_events_vec.len(), &project_a_tag[..20.min(project_a_tag.len())]));
-            ingest_events(&self.ndb, &report_events_vec, Some(RELAY_URL))?;
-        }
-
-        // Subscribe for real-time updates on kind:1 and kind:30023 events for this project
-        client.subscribe(vec![kind1_filter, report_filter], None).await?;
-
-        Ok(())
-    }
-
-    async fn fetch_profiles(&mut self) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let pubkeys: Vec<String> = self.needed_profiles.drain().collect();
-
-        let pks: Vec<PublicKey> = pubkeys.iter().filter_map(|p| PublicKey::parse(p).ok()).collect();
-
-        if pks.is_empty() {
-            return Ok(());
-        }
-
-        let filter = Filter::new().kind(Kind::Metadata).authors(pks);
-
-        let events = client.fetch_events(vec![filter], std::time::Duration::from_secs(10)).await?;
-
-        let events_vec: Vec<Event> = events.into_iter().collect();
-        ingest_events(&self.ndb, &events_vec, Some(RELAY_URL))?;
-        // UI gets notified via SubscriptionStream when events are ready
 
         Ok(())
     }
@@ -691,19 +496,24 @@ impl NostrWorker {
 
         // Build and sign the event
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        eprintln!("[SEND] Signing message...");
+        let sign_start = std::time::Instant::now();
         let signed_event = event.sign_with_keys(keys)?;
+        eprintln!("[SEND] Signed in {:?}", sign_start.elapsed());
 
         // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
         ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        eprintln!("[SEND] Ingested locally, now sending to relay...");
 
         // Send to relay with timeout (don't block forever on degraded connections)
+        let send_start = std::time::Instant::now();
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             client.send_event(signed_event)
         ).await {
-            Ok(Ok(output)) => debug_log(&format!("Published message: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send message to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending message to relay (event was saved locally)"),
+            Ok(Ok(output)) => eprintln!("[SEND] Published message in {:?}: {}", send_start.elapsed(), output.id()),
+            Ok(Err(e)) => eprintln!("[SEND] Failed after {:?}: {}", send_start.elapsed(), e),
+            Err(_) => eprintln!("[SEND] TIMEOUT after {:?} (event saved locally)", send_start.elapsed()),
         }
 
         Ok(())
@@ -1056,7 +866,6 @@ impl NostrWorker {
         self.client = None;
         self.keys = None;
         self.user_pubkey = None;
-        self.subscribed_projects.clear();
         Ok(())
     }
 }
