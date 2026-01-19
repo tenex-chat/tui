@@ -43,6 +43,9 @@ pub struct AppDataStore {
     // Operations status - kind:24133 events
     // Maps event_id -> OperationsStatus (which agents are working on which events)
     operations_by_event: HashMap<String, OperationsStatus>,
+
+    // Pending subscriptions for new projects (drained by CoreRuntime)
+    pending_project_subscriptions: Vec<String>,
 }
 
 impl AppDataStore {
@@ -65,6 +68,7 @@ impl AppDataStore {
             reports_all_versions: HashMap::new(),
             document_threads: HashMap::new(),
             operations_by_event: HashMap::new(),
+            pending_project_subscriptions: Vec::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -509,6 +513,8 @@ impl AppDataStore {
             if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
                 *existing = project;
             } else {
+                // New project - queue subscription for its messages
+                self.pending_project_subscriptions.push(a_tag.clone());
                 self.projects.push(project);
             }
         }
@@ -799,6 +805,11 @@ impl AppDataStore {
 
     pub fn get_projects(&self) -> &[Project] {
         &self.projects
+    }
+
+    /// Drain pending project subscriptions (called by CoreRuntime after processing events)
+    pub fn drain_pending_project_subscriptions(&mut self) -> Vec<String> {
+        std::mem::take(&mut self.pending_project_subscriptions)
     }
 
     pub fn get_project_status(&self, a_tag: &str) -> Option<&ProjectStatus> {
