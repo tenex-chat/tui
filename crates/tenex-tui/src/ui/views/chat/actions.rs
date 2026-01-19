@@ -81,7 +81,6 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
             ("Ctrl+T", "Open command palette"),
             ("?", "Show this help"),
             ("q", "Quit"),
-            ("r", "Refresh / Sync"),
         ]),
         ("Navigation", vec![
             ("1", "Go to home/dashboard"),
