@@ -186,6 +186,10 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                             app.sync_agent_with_conversation();
                         }
                     }
+
+                    // Check if this new message created a pending ask for the current thread
+                    // and auto-open the modal (event-driven, not per-frame)
+                    app.maybe_open_pending_ask();
                 }
             }
             CoreEvent::ProjectStatus(status) => {

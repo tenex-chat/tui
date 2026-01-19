@@ -1608,6 +1608,9 @@ impl App {
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
             self.scroll_offset = usize::MAX;
+
+            // Auto-open pending ask modal if there's one for this thread
+            self.maybe_open_pending_ask();
         } else {
             // Project not found - clear state to prevent leaks
             self.selected_project = None;
@@ -1828,7 +1831,8 @@ impl App {
         self.input_mode = InputMode::Editing;
     }
 
-    /// Auto-open the ask modal if there's a pending ask for the current thread.
+    /// Auto-open the ask modal if there's an unanswered ask for the current thread.
+    /// Derives state at check time by looking at q-tags in messages.
     /// Only opens if no modal is currently active.
     pub fn maybe_open_pending_ask(&mut self) {
         if !matches!(self.modal_state, ModalState::None) {
@@ -1838,13 +1842,8 @@ impl App {
             Some(t) => t.id.clone(),
             None => return,
         };
-        // Get pending ask info (borrowing data_store temporarily)
-        let ask_info = {
-            let store = self.data_store.borrow();
-            store.get_pending_ask_for_thread(&thread_id).map(|ask| {
-                (ask.id.clone(), ask.ask_event.clone(), ask.author_pubkey.clone())
-            })
-        };
+        // Derive unanswered ask at check time (no persistent tracking)
+        let ask_info = self.data_store.borrow().get_unanswered_ask_for_thread(&thread_id);
         if let Some((id, ask_event, author_pubkey)) = ask_info {
             self.open_ask_modal(id, ask_event, author_pubkey);
         }
