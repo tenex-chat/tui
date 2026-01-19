@@ -60,7 +60,7 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
         1,
     );
     let hints =
-        Paragraph::new("↑↓ scroll · esc close").style(Style::default().fg(theme::TEXT_MUTED));
+        Paragraph::new("↑↓ scroll · y copy · esc close").style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 

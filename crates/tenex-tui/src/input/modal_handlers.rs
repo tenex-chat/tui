@@ -496,6 +496,23 @@ fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             app.modal_state = ModalState::None;
         }
+        KeyCode::Char('y') => {
+            if let ModalState::ViewRawEvent { ref json, .. } = app.modal_state {
+                use arboard::Clipboard;
+                match Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        if clipboard.set_text(json).is_ok() {
+                            app.set_status("Raw event copied to clipboard");
+                        } else {
+                            app.set_status("Failed to copy to clipboard");
+                        }
+                    }
+                    Err(_) => {
+                        app.set_status("Failed to access clipboard");
+                    }
+                }
+            }
+        }
         KeyCode::Up | KeyCode::Char('k') => {
             if let ModalState::ViewRawEvent {
                 scroll_offset: ref mut offset,

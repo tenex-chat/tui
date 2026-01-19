@@ -113,12 +113,12 @@ pub fn parse_message_content(content: &str) -> MessageContent {
 /// Get icon for a tool call based on its name (Unicode symbols for consistent width)
 pub fn tool_icon(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "edit" | "str_replace_editor" => "✎",
-        "write" | "file_write" => "✎",
-        "read" | "file_read" => "◉",
+        "edit" | "str_replace_editor" | "fs_edit" => "✎",
+        "write" | "file_write" | "fs_write" => "✎",
+        "read" | "file_read" | "fs_read" => "◉",
         "bash" | "execute_bash" | "shell" => "$",
-        "glob" | "find" => "◎",
-        "grep" | "search" => "◎",
+        "glob" | "find" | "fs_glob" => "◎",
+        "grep" | "search" | "fs_grep" => "◎",
         "task" | "agent" => "▶",
         "web_search" | "websearch" => "◎",
         "todo_write" | "todowrite" | "todo" => "☐",
@@ -129,12 +129,12 @@ pub fn tool_icon(name: &str) -> &'static str {
 /// Get semantic verb for a tool (e.g., "Reading", "Writing")
 pub fn tool_verb(name: &str) -> &'static str {
     match name.to_lowercase().as_str() {
-        "read" | "file_read" => "Reading",
-        "write" | "file_write" => "Writing",
-        "edit" | "str_replace_editor" => "Editing",
+        "read" | "file_read" | "fs_read" => "Reading",
+        "write" | "file_write" | "fs_write" => "Writing",
+        "edit" | "str_replace_editor" | "fs_edit" => "Editing",
         "bash" | "execute_bash" | "shell" => "", // uses $ prefix instead
-        "glob" | "find" => "Searching",
-        "grep" | "search" => "Searching",
+        "glob" | "find" | "fs_glob" => "Searching",
+        "grep" | "search" | "fs_grep" => "Searching",
         "task" | "agent" => "",
         "web_search" | "websearch" => "Searching",
         "todo_write" | "todowrite" | "todo" => "",
@@ -146,6 +146,13 @@ pub fn tool_verb(name: &str) -> &'static str {
 pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
     let params = &tool_call.parameters;
     let name = tool_call.name.to_lowercase();
+
+    // For file operations (fs_read, fs_write, fs_edit, etc.), prefer description over path
+    if matches!(name.as_str(), "read" | "file_read" | "fs_read" | "write" | "file_write" | "fs_write" | "edit" | "str_replace_editor" | "fs_edit") {
+        if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
+            return Some(truncate_with_ellipsis(desc, 60));
+        }
+    }
 
     // For bash, prefer description over command (like Svelte)
     if matches!(name.as_str(), "bash" | "execute_bash" | "shell") {
@@ -238,14 +245,14 @@ pub fn render_tool_line(
             }
         }
 
-        // File operations: "Reading path" / "Writing path" / "Editing path"
-        "read" | "file_read" => format!("Reading {}", target),
-        "write" | "file_write" => format!("Writing {}", target),
-        "edit" | "str_replace_editor" => format!("Editing {}", target),
+        // File operations: emoji + target/description
+        "read" | "file_read" | "fs_read" => format!("📖 {}", target),
+        "write" | "file_write" | "fs_write" => format!("✏️ {}", target),
+        "edit" | "str_replace_editor" | "fs_edit" => format!("✏️ {}", target),
 
-        // Search: "Searching "pattern""
-        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" => {
-            format!("Searching {}", target)
+        // Search: emoji + pattern
+        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" | "fs_glob" | "fs_grep" => {
+            format!("🔍 {}", target)
         }
 
         // Task/Agent: show description
