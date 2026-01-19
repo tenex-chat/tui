@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::UnixStream;
@@ -11,15 +12,26 @@ fn debug_log(msg: &str) {
     }
 }
 
+/// Lock info stored in the lockfile
+#[derive(serde::Serialize, serde::Deserialize)]
+struct LockInfo {
+    pid: u32,
+    started_at: u64,
+}
+
 /// Client for connecting to the local streaming socket
 pub struct SocketStreamClient {
     socket_path: PathBuf,
+    lock_path: PathBuf,
 }
 
 impl SocketStreamClient {
     pub fn new() -> Self {
+        let socket_path = Self::default_socket_path();
+        let lock_path = socket_path.with_extension("sock.lock");
         Self {
-            socket_path: Self::default_socket_path(),
+            socket_path,
+            lock_path,
         }
     }
 
@@ -29,6 +41,53 @@ impl SocketStreamClient {
         } else {
             PathBuf::from("/tmp/tenex-stream.sock")
         }
+    }
+
+    /// Check if another process holds the lock and is still running
+    fn is_locked_by_another(&self) -> bool {
+        if !self.lock_path.exists() {
+            return false;
+        }
+
+        match fs::read_to_string(&self.lock_path) {
+            Ok(content) => {
+                if let Ok(info) = serde_json::from_str::<LockInfo>(&content) {
+                    // Check if the process is still running (signal 0 = just check existence)
+                    let is_running = unsafe { libc::kill(info.pid as i32, 0) } == 0;
+                    if is_running && info.pid != std::process::id() {
+                        debug_log(&format!(
+                            "Socket locked by another TUI (PID {})",
+                            info.pid
+                        ));
+                        return true;
+                    }
+                }
+                false
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Acquire the lock for this process
+    fn acquire_lock(&self) -> bool {
+        let info = LockInfo {
+            pid: std::process::id(),
+            started_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        };
+
+        match serde_json::to_string(&info) {
+            Ok(content) => {
+                if fs::write(&self.lock_path, content).is_ok() {
+                    debug_log("Acquired streaming socket lock");
+                    return true;
+                }
+            }
+            Err(_) => {}
+        }
+        false
     }
 
     /// Try to connect to the socket, returns None if socket doesn't exist
@@ -54,13 +113,26 @@ impl SocketStreamClient {
     /// Reconnects automatically if connection is lost
     pub async fn run(self, chunk_tx: mpsc::Sender<LocalStreamChunk>) {
         loop {
+            // Check if another TUI already owns the socket
+            if self.is_locked_by_another() {
+                // Another TUI is using the socket - wait longer before checking again
+                tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                continue;
+            }
+
+            // Try to acquire the lock
+            if !self.acquire_lock() {
+                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                continue;
+            }
+
             if let Some(stream) = self.connect().await {
                 if let Err(e) = self.read_stream(stream, &chunk_tx).await {
                     eprintln!("[SOCKET ERROR] Stream read error: {}", e);
                 }
             }
 
-            // Wait before reconnect attempt
+            // Wait before reconnect attempt (keep the lock - we're retrying)
             tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
         }
     }
