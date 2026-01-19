@@ -150,6 +150,9 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
         't' => {
             open_trace(app);
         }
+        'O' => {
+            open_conversation_trace(app);
+        }
         '.' => {
             stop_agents(app);
         }
@@ -303,13 +306,31 @@ fn open_trace(app: &mut App) {
     if let Some(item) = grouped.get(app.selected_message_index) {
         if let Some(id) = get_message_id(item) {
             if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
-                let url = format!("http://localhost:16686/trace/{}", trace_ctx.trace_id);
+                let url = format!(
+                    "http://localhost:16686/trace/{}?uiFind={}",
+                    trace_ctx.trace_id, trace_ctx.span_id
+                );
                 #[cfg(target_os = "macos")]
                 let _ = std::process::Command::new("open").arg(&url).spawn();
                 #[cfg(target_os = "linux")]
                 let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
             }
         }
+    }
+}
+
+fn open_conversation_trace(app: &mut App) {
+    // Use the conversation root event ID (first 32 chars) as the trace ID
+    // This matches the Svelte implementation
+    if let Some(thread) = &app.selected_thread {
+        // Thread ID is the root event ID in hex format
+        // Take first 32 chars as the trace ID
+        let trace_id = &thread.id[..32.min(thread.id.len())];
+        let url = format!("http://localhost:16686/trace/{}", trace_id);
+        #[cfg(target_os = "macos")]
+        let _ = std::process::Command::new("open").arg(&url).spawn();
+        #[cfg(target_os = "linux")]
+        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
     }
 }
 
