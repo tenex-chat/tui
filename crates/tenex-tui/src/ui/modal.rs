@@ -906,7 +906,6 @@ impl CommandPaletteState {
         commands.push(PaletteCommand::new('1', "Go to Home", "Navigation"));
         commands.push(PaletteCommand::new('?', "Help", "Navigation"));
         commands.push(PaletteCommand::new('q', "Quit", "System"));
-        commands.push(PaletteCommand::new('r', "Refresh", "System"));
 
         // Context-specific commands
         match self.context {

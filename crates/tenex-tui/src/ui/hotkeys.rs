@@ -24,7 +24,6 @@ pub enum HotkeyId {
     // === Global Actions (work everywhere) ===
     Quit,
     CommandPalette,
-    Refresh,
     GoToHome,
     Help,
 
@@ -429,13 +428,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Global",
         &[HotkeyContext::Global],
     ).with_priority(100), // High priority - always available
-    HotkeyBinding::new(
-        HotkeyId::Refresh,
-        KeyCode::Char('r'),
-        "Refresh",
-        "Global",
-        &[HotkeyContext::Global],
-    ),
     HotkeyBinding::new(
         HotkeyId::GoToHome,
         KeyCode::Char('1'),
