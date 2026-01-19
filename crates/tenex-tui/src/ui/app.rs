@@ -1,6 +1,6 @@
 use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
 use crate::nostr::DataChange;
-use crate::store::{AppDataStore, Database};
+use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
 use crate::ui::notifications::{Notification, NotificationQueue};
@@ -433,6 +433,37 @@ impl App {
         self.selected_thread.as_ref()
             .map(|t| self.data_store.borrow().get_messages(&t.id).to_vec())
             .unwrap_or_default()
+    }
+
+    /// Get the ID of the currently selected message (if any)
+    pub fn selected_message_id(&self) -> Option<String> {
+        use crate::ui::views::chat::{group_messages, DisplayItem};
+
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+
+        // Filter messages based on current view (subthread or main thread)
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+            messages.iter()
+                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .collect()
+        } else {
+            messages.iter()
+                .filter(|m| {
+                    Some(m.id.as_str()) == thread_id
+                        || m.reply_to.is_none()
+                        || m.reply_to.as_deref() == thread_id
+                })
+                .collect()
+        };
+
+        let grouped = group_messages(&display_messages);
+        grouped.get(self.selected_message_index).and_then(|item| {
+            match item {
+                DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
+                DisplayItem::DelegationPreview { .. } => None,
+            }
+        })
     }
 
     /// Get the count of display items in the current chat view.
@@ -1099,14 +1130,16 @@ impl App {
                         .is_some();
 
                     // Check if selected message has trace
-                    let has_trace = false; // Simplified for now
+                    let message_has_trace = self.selected_message_id()
+                        .map(|id| get_trace_context(&self.db.ndb, &id).is_some())
+                        .unwrap_or(false);
 
                     // Check if any agent is working on this thread
                     let agent_working = self.selected_thread.as_ref()
                         .map(|t| self.data_store.borrow().is_event_busy(&t.id))
                         .unwrap_or(false);
 
-                    PaletteContext::ChatNormal { has_parent, has_trace, agent_working }
+                    PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working }
                 }
             }
             View::AgentBrowser => {
@@ -1867,26 +1900,28 @@ impl App {
 
     /// Check if a specific message's ask event has been answered by the current user
     pub fn is_ask_answered_by_user(&self, message_id: &str) -> bool {
+        self.get_user_response_to_ask(message_id).is_some()
+    }
+
+    /// Get the user's response to an ask event (if any)
+    pub fn get_user_response_to_ask(&self, message_id: &str) -> Option<String> {
         let messages = self.messages();
 
         // Get current user's pubkey
-        let user_pubkey = match self.data_store.borrow().user_pubkey.clone() {
-            Some(pk) => pk,
-            None => return false,
-        };
+        let user_pubkey = self.data_store.borrow().user_pubkey.clone()?;
 
-        // Check if there's a reply from current user to this message
+        // Find user's reply to this message
         for msg in &messages {
             if msg.pubkey == user_pubkey {
                 if let Some(ref reply_to) = msg.reply_to {
                     if reply_to == message_id {
-                        return true;
+                        return Some(msg.content.clone());
                     }
                 }
             }
         }
 
-        false
+        None
     }
 
     // ===== Local Streaming Methods =====

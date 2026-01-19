@@ -763,7 +763,7 @@ pub enum PaletteContext {
     HomeInbox,
     HomeReports,
     HomeSidebar { is_online: bool, is_busy: bool, is_archived: bool },
-    ChatNormal { has_parent: bool, has_trace: bool, agent_working: bool },
+    ChatNormal { has_parent: bool, message_has_trace: bool, agent_working: bool },
     ChatEditing,
     AgentBrowserList,
     AgentBrowserDetail,
@@ -849,12 +849,12 @@ impl CommandPaletteState {
                     commands.push(PaletteCommand::new('a', "Archive", "Project"));
                 }
             }
-            PaletteContext::ChatNormal { has_parent, has_trace, agent_working } => {
+            PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working } => {
                 commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
                 commands.push(PaletteCommand::new('%', "Select branch", "Input"));
                 commands.push(PaletteCommand::new('y', "Copy content", "Message"));
                 commands.push(PaletteCommand::new('v', "View raw event", "Message"));
-                if has_trace {
+                if message_has_trace {
                     commands.push(PaletteCommand::new('t', "Open trace", "Message"));
                 }
                 commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
@@ -866,6 +866,7 @@ impl CommandPaletteState {
                     commands.push(PaletteCommand::new('g', "Go to parent", "Conversation"));
                 }
                 commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
+                commands.push(PaletteCommand::new('O', "Open trace", "Conversation"));
                 commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
                 commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
@@ -879,6 +880,7 @@ impl CommandPaletteState {
                 commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
                 commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
                 commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
+                commands.push(PaletteCommand::new('O', "Open trace", "Conversation"));
                 commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
                 commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
