@@ -1,5 +1,7 @@
+use std::io::Write;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use std::time::Instant;
 
 use anyhow::Result;
 use nostr_sdk::prelude::*;
@@ -8,12 +10,34 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::constants::RELAY_URL;
-use crate::store::ingest_events;
+use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
+
+static START_TIME: OnceLock<Instant> = OnceLock::new();
+
+fn elapsed_ms() -> u64 {
+    START_TIME.get_or_init(Instant::now).elapsed().as_millis() as u64
+}
+
+fn log_to_file(tag: &str, msg: &str) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tenex.log")
+    {
+        let _ = writeln!(file, "[{:>8}ms] [{}] {}", elapsed_ms(), tag, msg);
+    }
+}
+
+macro_rules! tlog {
+    ($tag:expr, $($arg:tt)*) => {
+        log_to_file($tag, &format!($($arg)*))
+    };
+}
 
 fn debug_log(msg: &str) {
     if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
-        eprintln!("[WORKER] {}", msg);
+        tlog!("DEBUG", "{}", msg);
     }
 }
 
@@ -75,6 +99,10 @@ pub enum NostrCommand {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+    },
+    /// Subscribe to messages for a new project
+    SubscribeToProjectMessages {
+        project_a_tag: String,
     },
     Shutdown,
 }
@@ -155,55 +183,61 @@ impl NostrWorker {
                     NostrCommand::Connect { keys, user_pubkey } => {
                         debug_log(&format!("Worker: Connecting with user {}", &user_pubkey[..8]));
                         if let Err(e) = rt.block_on(self.handle_connect(keys, user_pubkey)) {
-                            eprintln!("[WORKER ERROR] Failed to connect: {}", e);
+                            tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
                     NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids } => {
                         debug_log("Worker: Publishing thread");
                         if let Err(e) = rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
-                            eprintln!("[WORKER ERROR] Failed to publish thread: {}", e);
+                            tlog!("ERROR", "Failed to publish thread: {}", e);
                         }
                     }
                     NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey } => {
-                        eprintln!("[SEND] Worker received PublishMessage command");
+                        tlog!("SEND", "Worker received PublishMessage command");
                         if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
-                            eprintln!("[WORKER ERROR] Failed to publish message: {}", e);
+                            tlog!("ERROR", "Failed to publish message: {}", e);
                         }
                     }
                     NostrCommand::BootProject { project_a_tag, project_pubkey } => {
                         debug_log(&format!("Worker: Booting project {}", project_a_tag));
                         if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag, project_pubkey)) {
-                            eprintln!("[WORKER ERROR] Failed to boot project: {}", e);
+                            tlog!("ERROR", "Failed to boot project: {}", e);
                         }
                     }
                     NostrCommand::UpdateProjectAgents { project_a_tag, agent_ids } => {
                         debug_log(&format!("Worker: Updating project agents for {}", project_a_tag));
                         if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids)) {
-                            eprintln!("[WORKER ERROR] Failed to update project agents: {}", e);
+                            tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
                     NostrCommand::CreateProject { name, description, agent_ids } => {
                         debug_log(&format!("Worker: Creating project {}", name));
                         if let Err(e) = rt.block_on(self.handle_create_project(name, description, agent_ids)) {
-                            eprintln!("[WORKER ERROR] Failed to create project: {}", e);
+                            tlog!("ERROR", "Failed to create project: {}", e);
                         }
                     }
                     NostrCommand::CreateAgentDefinition { name, description, role, instructions, version, source_id, is_fork } => {
                         debug_log(&format!("Worker: Creating agent definition {}", name));
                         if let Err(e) = rt.block_on(self.handle_create_agent_definition(name, description, role, instructions, version, source_id, is_fork)) {
-                            eprintln!("[WORKER ERROR] Failed to create agent definition: {}", e);
+                            tlog!("ERROR", "Failed to create agent definition: {}", e);
                         }
                     }
                     NostrCommand::StopOperations { project_a_tag, event_ids, agent_pubkeys } => {
                         debug_log(&format!("Worker: Sending stop command for {} events", event_ids.len()));
                         if let Err(e) = rt.block_on(self.handle_stop_operations(project_a_tag, event_ids, agent_pubkeys)) {
-                            eprintln!("[WORKER ERROR] Failed to send stop command: {}", e);
+                            tlog!("ERROR", "Failed to send stop command: {}", e);
                         }
                     }
                     NostrCommand::UpdateAgentConfig { project_a_tag, agent_pubkey, model, tools } => {
                         debug_log(&format!("Worker: Updating agent config for {}", &agent_pubkey[..8]));
                         if let Err(e) = rt.block_on(self.handle_update_agent_config(project_a_tag, agent_pubkey, model, tools)) {
-                            eprintln!("[WORKER ERROR] Failed to update agent config: {}", e);
+                            tlog!("ERROR", "Failed to update agent config: {}", e);
+                        }
+                    }
+                    NostrCommand::SubscribeToProjectMessages { project_a_tag } => {
+                        debug_log(&format!("Worker: Subscribing to messages for project {}", &project_a_tag));
+                        if let Err(e) = rt.block_on(self.handle_subscribe_to_project_messages(project_a_tag)) {
+                            tlog!("ERROR", "Failed to subscribe to project messages: {}", e);
                         }
                     }
                     NostrCommand::Shutdown => {
@@ -223,14 +257,14 @@ impl NostrWorker {
 
         client.add_relay(RELAY_URL).await?;
 
-        eprintln!("[CONN] Starting relay connect...");
+        tlog!("CONN", "Starting relay connect...");
         let connect_start = std::time::Instant::now();
         let connect_result = tokio::time::timeout(std::time::Duration::from_secs(10), client.connect()).await;
         let connect_elapsed = connect_start.elapsed();
 
         match &connect_result {
-            Ok(()) => eprintln!("[CONN] Connect completed in {:?}", connect_elapsed),
-            Err(_) => eprintln!("[CONN] Connect TIMED OUT after {:?}", connect_elapsed),
+            Ok(()) => tlog!("CONN", "Connect completed in {:?}", connect_elapsed),
+            Err(_) => tlog!("CONN", "Connect TIMED OUT after {:?}", connect_elapsed),
         }
 
         self.client = Some(client);
@@ -278,29 +312,52 @@ impl NostrWorker {
         // Nudges (kind 4201) - agent nudges/prompts
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
 
-        // Note: Reports (kind 30023) are fetched per-project in subscribe_to_project_content
+        // Conversation messages (kind 1) with project a-tags
+        // Query nostrdb for existing projects to get their a-tags
+        let messages_filter = {
+            let project_atags: Vec<String> = get_projects(&self.ndb)
+                .unwrap_or_default()
+                .iter()
+                .map(|p| p.a_tag())
+                .collect();
 
-        eprintln!("[CONN] Starting subscriptions...");
+            if project_atags.is_empty() {
+                tlog!("CONN", "No projects found, skipping kind:1 a-tag subscription");
+                None
+            } else {
+                tlog!("CONN", "Subscribing to kind:1 for {} projects", project_atags.len());
+                Some(
+                    Filter::new()
+                        .kind(Kind::from(1))
+                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_atags)
+                )
+            }
+        };
+
+        tlog!("CONN", "Starting subscriptions...");
         let sub_start = std::time::Instant::now();
 
+        let mut filters = vec![
+            project_filter,
+            mention_filter,
+            agent_filter,
+            status_filter,
+            all_status_filter,
+            metadata_filter,
+            lesson_filter,
+            operations_status_filter,
+            nudge_filter,
+        ];
+
+        if let Some(msg_filter) = messages_filter {
+            filters.push(msg_filter);
+        }
+
         let subscription_id = client
-            .subscribe(
-                vec![
-                    project_filter,
-                    mention_filter,
-                    agent_filter,
-                    status_filter,
-                    all_status_filter,
-                    metadata_filter,
-                    lesson_filter,
-                    operations_status_filter,
-                    nudge_filter,
-                ],
-                None,
-            )
+            .subscribe(filters, None)
             .await?;
 
-        eprintln!("[CONN] Subscriptions set up in {:?}, id={:?}", sub_start.elapsed(), subscription_id);
+        tlog!("CONN", "Subscriptions set up in {:?}, id={:?}", sub_start.elapsed(), subscription_id);
 
         self.spawn_notification_handler();
 
@@ -320,19 +377,19 @@ impl NostrWorker {
             let mut notifications = client.notifications();
             let mut first_event = true;
             let handler_start = std::time::Instant::now();
-            eprintln!("[CONN] Notification handler started, waiting for events...");
+            tlog!("CONN", "Notification handler started, waiting for events...");
 
             loop {
                 if let Ok(notification) = notifications.recv().await {
                     if let RelayPoolNotification::Event { relay_url, event, .. } = notification {
                         if first_event {
-                            eprintln!("[CONN] First event received after {:?}", handler_start.elapsed());
+                            tlog!("CONN", "First event received after {:?}", handler_start.elapsed());
                             first_event = false;
                         }
                         debug_log(&format!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url));
 
                         if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
-                            eprintln!("[WORKER ERROR] Failed to handle event: {}", e);
+                            tlog!("ERROR", "Failed to handle event: {}", e);
                         }
                     }
                 }
@@ -418,8 +475,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Published thread: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send thread to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending thread to relay (event was saved locally)"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send thread to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending thread to relay (event was saved locally)"),
         }
 
         Ok(())
@@ -496,14 +553,14 @@ impl NostrWorker {
 
         // Build and sign the event
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
-        eprintln!("[SEND] Signing message...");
+        tlog!("SEND", "Signing message...");
         let sign_start = std::time::Instant::now();
         let signed_event = event.sign_with_keys(keys)?;
-        eprintln!("[SEND] Signed in {:?}", sign_start.elapsed());
+        tlog!("SEND", "Signed in {:?}", sign_start.elapsed());
 
         // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
         ingest_events(&self.ndb, &[signed_event.clone()], None)?;
-        eprintln!("[SEND] Ingested locally, now sending to relay...");
+        tlog!("SEND", "Ingested locally, now sending to relay...");
 
         // Send to relay with timeout (don't block forever on degraded connections)
         let send_start = std::time::Instant::now();
@@ -511,9 +568,9 @@ impl NostrWorker {
             std::time::Duration::from_secs(5),
             client.send_event(signed_event)
         ).await {
-            Ok(Ok(output)) => eprintln!("[SEND] Published message in {:?}: {}", send_start.elapsed(), output.id()),
-            Ok(Err(e)) => eprintln!("[SEND] Failed after {:?}: {}", send_start.elapsed(), e),
-            Err(_) => eprintln!("[SEND] TIMEOUT after {:?} (event saved locally)", send_start.elapsed()),
+            Ok(Ok(output)) => tlog!("SEND", "Published message in {:?}: {}", send_start.elapsed(), output.id()),
+            Ok(Err(e)) => tlog!("SEND", "Failed after {:?}: {}", send_start.elapsed(), e),
+            Err(_) => tlog!("SEND", "TIMEOUT after {:?} (event saved locally)", send_start.elapsed()),
         }
 
         Ok(())
@@ -551,8 +608,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent boot request: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send boot request to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending boot request to relay"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send boot request to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending boot request to relay"),
         }
 
         Ok(())
@@ -611,8 +668,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Updated project agents: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send project update to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending project update to relay (saved locally)"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send project update to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending project update to relay (saved locally)"),
         }
 
         Ok(())
@@ -669,8 +726,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Created project: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send project to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending project to relay (saved locally)"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send project to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending project to relay (saved locally)"),
         }
 
         Ok(())
@@ -741,8 +798,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Created agent definition '{}': {}", name, output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send agent definition to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending agent definition to relay (saved locally)"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send agent definition to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending agent definition to relay (saved locally)"),
         }
 
         Ok(())
@@ -793,8 +850,8 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent stop command: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send stop command to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending stop command to relay"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send stop command to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending stop command to relay"),
         }
 
         Ok(())
@@ -852,9 +909,23 @@ impl NostrWorker {
             client.send_event(signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent agent config update: {}", output.id())),
-            Ok(Err(e)) => eprintln!("[WORKER ERROR] Failed to send agent config update to relay: {}", e),
-            Err(_) => eprintln!("[WORKER ERROR] Timeout sending agent config update to relay"),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send agent config update to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending agent config update to relay"),
         }
+
+        Ok(())
+    }
+
+    async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+
+        tlog!("CONN", "Adding subscription for kind:1 messages with a-tag: {}", project_a_tag);
+
+        let filter = Filter::new()
+            .kind(Kind::from(1))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag]);
+
+        client.subscribe(vec![filter], None).await?;
 
         Ok(())
     }
