@@ -9,6 +9,7 @@ use std::time::Instant;
 use tokio::net::UnixListener;
 
 use anyhow::Result;
+use serde::Deserialize;
 
 use crate::nostr::{self, NostrCommand};
 use crate::store::{AppDataStore, Database};
@@ -565,20 +566,29 @@ fn handle_request(
         }
 
         "create_project" => {
-            let name = request.params["name"].as_str().unwrap_or("");
-            let description = request.params["description"].as_str().unwrap_or("");
-            let agent_ids: Vec<String> = request.params["agent_ids"]
-                .as_array()
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
+            #[derive(Deserialize)]
+            struct CreateProjectParams {
+                name: String,
+                #[serde(default)]
+                description: String,
+                #[serde(default)]
+                agent_ids: Vec<String>,
+            }
 
+            let params: CreateProjectParams = match serde_json::from_value(request.params.clone()) {
+                Ok(p) => p,
+                Err(_) => {
+                    return (
+                        Response::error(id, "INVALID_PARAMS", "Invalid create_project params"),
+                        false,
+                    );
+                }
+            };
+
+            let name = params.name.trim();
             if name.is_empty() {
                 return (
-                    Response::error(id, "INVALID_PARAMS", "name is required"),
+                    Response::error(id, "INVALID_PARAMS", "name is required and cannot be empty or whitespace-only"),
                     false,
                 );
             }
@@ -586,8 +596,8 @@ fn handle_request(
             if core_handle
                 .send(NostrCommand::CreateProject {
                     name: name.to_string(),
-                    description: description.to_string(),
-                    agent_ids,
+                    description: params.description,
+                    agent_ids: params.agent_ids,
                 })
                 .is_ok()
             {
