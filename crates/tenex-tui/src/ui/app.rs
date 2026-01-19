@@ -236,10 +236,6 @@ pub struct App {
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
 
-    /// Expanded message groups (group key = first message ID)
-    /// When a group is in this set, all collapsed messages are shown
-    pub expanded_groups: HashSet<String>,
-
     /// Project a_tag when waiting for a newly created thread to appear
     pub pending_new_thread_project: Option<String>,
     /// Draft ID when waiting for a newly created thread (to convert draft tab)
@@ -269,8 +265,6 @@ pub struct App {
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
-    /// Ask event IDs that user dismissed (ESC) without answering - prevents auto-reopen
-    pub dismissed_ask_ids: HashSet<String>,
     /// Last action that can be undone (Ctrl+T + u)
     pub last_undo_action: Option<UndoAction>,
 }
@@ -338,7 +332,6 @@ impl App {
             show_llm_metadata: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
-            expanded_groups: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
             selected_nudge_ids: Vec::new(),
@@ -351,7 +344,6 @@ impl App {
             show_archived: false,
             show_archived_projects: false,
             user_explicitly_selected_agent: false,
-            dismissed_ask_ids: HashSet::new(),
             last_undo_action: None,
         }
     }
@@ -426,20 +418,6 @@ impl App {
         }
     }
 
-    /// Toggle expansion for a message group (group key = first message ID)
-    pub fn toggle_group_expansion(&mut self, group_key: &str) {
-        if self.expanded_groups.contains(group_key) {
-            self.expanded_groups.remove(group_key);
-        } else {
-            self.expanded_groups.insert(group_key.to_string());
-        }
-    }
-
-    /// Check if a message group is expanded
-    pub fn is_group_expanded(&self, group_key: &str) -> bool {
-        self.expanded_groups.contains(group_key)
-    }
-
     /// Get project status for a project - delegates to data store
     pub fn get_project_status(&self, project: &Project) -> Option<ProjectStatus> {
         self.data_store.borrow().get_project_status(&project.a_tag()).cloned()
@@ -464,7 +442,6 @@ impl App {
 
         let messages = self.messages();
         let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
 
         // Filter messages based on current view (subthread or main thread)
         let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
@@ -481,7 +458,7 @@ impl App {
                 .collect()
         };
 
-        group_messages(&display_messages, user_pubkey.as_deref()).len()
+        group_messages(&display_messages).len()
     }
 
     /// Enter a subthread view rooted at the given message
@@ -1255,9 +1232,6 @@ impl App {
         // Save current draft before switching
         self.save_chat_draft();
 
-        // Clear dismissed asks when switching conversations (so they can reappear if user returns)
-        self.dismissed_ask_ids.clear();
-
         // Switch in the tab manager (handles history tracking)
         self.tabs.switch_to(index);
 
@@ -1371,6 +1345,9 @@ impl App {
                 self.input_mode = InputMode::Editing; // Auto-focus input
             }
         }
+
+        // Auto-open pending ask modal if there's one for this thread
+        self.maybe_open_pending_ask();
     }
 
     /// Cycle to next tab in history (Alt+Tab behavior)
@@ -1685,6 +1662,9 @@ impl App {
             if let Some(project) = project {
                 self.selected_project = Some(project);
             }
+
+            // Auto-open pending ask modal if there's one for this thread
+            self.maybe_open_pending_ask();
         }
     }
 
@@ -1721,6 +1701,9 @@ impl App {
                 if let Some(project) = project {
                     self.selected_project = Some(project);
                 }
+
+                // Auto-open pending ask modal if there's one for this thread
+                self.maybe_open_pending_ask();
 
                 return true;
             }
@@ -1839,14 +1822,32 @@ impl App {
     }
 
     /// Close ask UI and return to normal input
-    /// Tracks the dismissed ask ID so it won't auto-reopen
+    /// The pending ask remains until the user answers (sends a message that e-tags it)
     pub fn close_ask_modal(&mut self) {
-        if let ModalState::AskModal(state) = &self.modal_state {
-            // Track this ask as dismissed so it doesn't auto-reopen
-            self.dismissed_ask_ids.insert(state.message_id.clone());
-        }
         self.modal_state = ModalState::None;
         self.input_mode = InputMode::Editing;
+    }
+
+    /// Auto-open the ask modal if there's a pending ask for the current thread.
+    /// Only opens if no modal is currently active.
+    pub fn maybe_open_pending_ask(&mut self) {
+        if !matches!(self.modal_state, ModalState::None) {
+            return;
+        }
+        let thread_id = match self.selected_thread.as_ref() {
+            Some(t) => t.id.clone(),
+            None => return,
+        };
+        // Get pending ask info (borrowing data_store temporarily)
+        let ask_info = {
+            let store = self.data_store.borrow();
+            store.get_pending_ask_for_thread(&thread_id).map(|ask| {
+                (ask.id.clone(), ask.ask_event.clone(), ask.author_pubkey.clone())
+            })
+        };
+        if let Some((id, ask_event, author_pubkey)) = ask_info {
+            self.open_ask_modal(id, ask_event, author_pubkey);
+        }
     }
 
     /// Get reference to ask modal state if it's open
@@ -1863,75 +1864,6 @@ impl App {
             ModalState::AskModal(state) => Some(state),
             _ => None,
         }
-    }
-
-    /// Check for unanswered ask events in current thread
-    /// Returns the first unanswered ask event found (not answered by current user)
-    /// Returns: (message_id, ask_event, author_pubkey)
-    pub fn has_unanswered_ask_event(&self) -> Option<(String, AskEvent, String)> {
-        let messages = self.messages();
-        let thread = self.selected_thread.as_ref()?;
-        let thread_id = thread.id.as_str();
-
-        // Get current user's pubkey - if no user, can't answer questions
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone()?;
-
-        // Get all message IDs that have been replied to BY THE CURRENT USER
-        let mut replied_to_by_user: std::collections::HashSet<&str> = std::collections::HashSet::new();
-        for msg in &messages {
-            // Only count replies from the current user
-            if msg.pubkey == user_pubkey {
-                if let Some(ref reply_to) = msg.reply_to {
-                    replied_to_by_user.insert(reply_to.as_str());
-                }
-            }
-        }
-
-        // First check the thread root itself (if not in subthread view)
-        if self.subthread_root.is_none() {
-            if let Some(ref ask_event) = thread.ask_event {
-                // Check if the thread has been replied to by current user or dismissed
-                if !replied_to_by_user.contains(thread_id) && !self.dismissed_ask_ids.contains(&thread.id) {
-                    return Some((thread.id.clone(), ask_event.clone(), thread.pubkey.clone()));
-                }
-            }
-        }
-
-        // Then check messages
-        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
-            messages.iter()
-                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                .collect()
-        } else {
-            messages.iter()
-                .filter(|m| m.reply_to.is_none() || m.reply_to.as_deref() == Some(thread_id))
-                .collect()
-        };
-
-        for msg in &display_messages {
-            if let Some(ref ask_event) = msg.ask_event {
-                // Check if this message has been replied to by current user or dismissed
-                if !replied_to_by_user.contains(msg.id.as_str()) && !self.dismissed_ask_ids.contains(&msg.id) {
-                    return Some((msg.id.clone(), ask_event.clone(), msg.pubkey.clone()));
-                }
-            }
-        }
-
-        // Also check q-tags for ask events (like Svelte's DelegationPreview)
-        // q-tags may point directly to ask events instead of threads
-        for msg in display_messages {
-            for q_tag in &msg.q_tags {
-                // Check if this q-tag points to an ask event
-                if let Some((ask_event, pubkey)) = self.data_store.borrow().get_ask_event_by_id(q_tag) {
-                    // Check if this ask event has been replied to by current user or dismissed
-                    if !replied_to_by_user.contains(q_tag.as_str()) && !self.dismissed_ask_ids.contains(q_tag) {
-                        return Some((q_tag.clone(), ask_event, pubkey));
-                    }
-                }
-            }
-        }
-
-        None
     }
 
     /// Check if a specific message's ask event has been answered by the current user
@@ -2383,7 +2315,6 @@ impl App {
 
         // Get messages and group them (same logic as rendering)
         let messages = self.messages();
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone();
 
         // Get display messages based on current view
         let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
@@ -2401,7 +2332,7 @@ impl App {
         };
 
         // Group messages to get display items
-        let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+        let grouped = group_messages(&display_messages);
 
         // Check if the selected item is a DelegationPreview
         if let Some(item) = grouped.get(self.selected_message_index) {
