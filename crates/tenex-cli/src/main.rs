@@ -74,6 +74,22 @@ enum Commands {
 
     /// Shutdown the daemon
     Shutdown,
+
+    /// List all agent definitions (kind:4199 events)
+    ListAgentDefinitions,
+
+    /// Create a new project (kind:31933 event)
+    CreateProject {
+        /// Project name
+        #[arg(long, short = 'n')]
+        name: String,
+        /// Project description
+        #[arg(long, short = 'd', default_value = "")]
+        description: String,
+        /// Agent IDs to include in the project (can be specified multiple times)
+        #[arg(long, short = 'a')]
+        agent: Vec<String>,
+    },
 }
 
 fn main() {
@@ -106,6 +122,14 @@ fn main() {
         Some(Commands::BootProject { project_id }) => CliCommand::BootProject { project_id },
         Some(Commands::Status) => CliCommand::Status,
         Some(Commands::Shutdown) => CliCommand::Shutdown,
+        Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
+        Some(Commands::CreateProject { name, description, agent }) => {
+            CliCommand::CreateProject {
+                name,
+                description,
+                agent_ids: agent,
+            }
+        }
         None => {
             // No command - show help
             eprintln!("No command specified. Use --help for usage.");
