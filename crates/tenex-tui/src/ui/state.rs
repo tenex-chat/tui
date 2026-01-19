@@ -201,13 +201,11 @@ impl MessageHistoryState {
     }
 }
 
-/// State for nudge and ask event management.
+/// State for nudge management.
 #[derive(Debug, Clone, Default)]
 pub struct NudgeState {
     /// Selected nudge IDs for the current conversation
     pub selected_ids: Vec<String>,
-    /// Ask event IDs that user dismissed (ESC) without answering
-    pub dismissed_ask_ids: HashSet<String>,
 }
 
 impl NudgeState {
@@ -244,16 +242,6 @@ impl NudgeState {
     /// Clear all selected nudges
     pub fn clear(&mut self) {
         self.selected_ids.clear();
-    }
-
-    /// Dismiss an ask event
-    pub fn dismiss_ask(&mut self, id: String) {
-        self.dismissed_ask_ids.insert(id);
-    }
-
-    /// Check if an ask event was dismissed
-    pub fn is_ask_dismissed(&self, id: &str) -> bool {
-        self.dismissed_ask_ids.contains(id)
     }
 }
 
@@ -826,8 +814,6 @@ pub struct ChatViewState {
     pub todo_sidebar_visible: bool,
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
-    /// Expanded message groups (group key = first message ID)
-    pub expanded_groups: HashSet<String>,
 }
 
 impl ChatViewState {
@@ -876,20 +862,6 @@ impl ChatViewState {
     /// Check if a thread is collapsed
     pub fn is_thread_collapsed(&self, thread_id: &str) -> bool {
         self.collapsed_threads.contains(thread_id)
-    }
-
-    /// Toggle message group expansion
-    pub fn toggle_group_expansion(&mut self, group_key: &str) {
-        if self.expanded_groups.contains(group_key) {
-            self.expanded_groups.remove(group_key);
-        } else {
-            self.expanded_groups.insert(group_key.to_string());
-        }
-    }
-
-    /// Check if a group is expanded
-    pub fn is_group_expanded(&self, group_key: &str) -> bool {
-        self.expanded_groups.contains(group_key)
     }
 
     /// Scroll up by a number of lines

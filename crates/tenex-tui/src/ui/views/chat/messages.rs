@@ -11,7 +11,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use super::cards::{author_line, author_line_with_recipient, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines};
 use super::grouping::{group_messages, DisplayItem};
@@ -96,16 +96,14 @@ pub(crate) fn render_messages_panel(
         messages_text.push(Line::from(""));
     }
 
-    // Render display messages with card-style layout and action grouping
+    // Render display messages with card-style layout
     {
-
         // Collect all unique pubkeys and cache profile names with single borrow
-        let (user_pubkey, profile_cache) = {
+        let profile_cache = {
             let store = app.data_store.borrow();
-            let user_pk = store.user_pubkey.clone();
 
             // Collect unique pubkeys from ALL messages (includes replies not in display)
-            let mut pubkeys: HashSet<&str> = HashSet::new();
+            let mut pubkeys: std::collections::HashSet<&str> = std::collections::HashSet::new();
             for msg in all_messages {
                 pubkeys.insert(&msg.pubkey);
             }
@@ -116,210 +114,19 @@ pub(crate) fn render_messages_panel(
                 .map(|pk| (pk.to_string(), store.get_profile_name(pk)))
                 .collect();
 
-            (user_pk, cache)
+            cache
         };
 
-        // Group consecutive action messages
-        let grouped = group_messages(&display_messages, user_pubkey.as_deref());
+        // Convert messages to display items - each message is its own item
+        let grouped = group_messages(&display_messages);
 
         for (group_idx, item) in grouped.iter().enumerate() {
             match item {
-                DisplayItem::AgentGroup {
-                    messages: group_messages,
-                    pubkey,
-                    is_consecutive,
-                    has_next_consecutive,
-                    visibility,
-                    collapsed_count,
-                } => {
-                    // Render agent group with collapsible messages
-                    let indicator_color = theme::user_color(pubkey);
-                    let card_bg = theme::BG_CARD;
-                    let card_bg_selected = theme::BG_SELECTED;
-                    let author = profile_cache
-                        .get(pubkey)
-                        .cloned()
-                        .unwrap_or_else(|| pubkey[..8.min(pubkey.len())].to_string());
-
-                    // Check if this group is selected
-                    let is_selected =
-                        group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
-
-                    // Group key for expansion tracking (first message ID)
-                    let group_key = group_messages.first().map(|m| m.id.as_str()).unwrap_or("");
-                    let is_expanded = app.is_group_expanded(group_key);
-
-                    // Check if any message in this group has a search match
-                    let has_search_match = app.chat_search.active &&
-                        group_messages.iter().any(|m| app.message_has_search_match(&m.id));
-                    let is_current_search = app.chat_search.active &&
-                        group_messages.iter().any(|m| {
-                            app.chat_search.match_locations.get(app.chat_search.current_match)
-                                .map(|loc| loc.message_id == m.id)
-                                .unwrap_or(false)
-                        });
-
-                    // Use appropriate background: current search match > any search match > selected > normal
-                    let bg = if is_current_search {
-                        theme::BG_SEARCH_CURRENT
-                    } else if has_search_match {
-                        theme::BG_SEARCH_MATCH
-                    } else if is_selected {
-                        card_bg_selected
-                    } else {
-                        card_bg
-                    };
-
-                    // Show header only if not consecutive (first in a sequence from this author)
-                    if !is_consecutive {
-                        messages_text.push(author_line(&author, indicator_color, bg, content_width));
-                    }
-
-                    // Show collapsed count indicator if there are collapsed messages and NOT expanded
-                    if *collapsed_count > 0 && !is_expanded {
-                        let indicator = if *is_consecutive { "·  " } else { "│  " };
-                        let hint = if is_selected { " (Enter to expand)" } else { "" };
-                        messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled("▸ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
-                            Span::styled(
-                                format!("{} collapsed{}", collapsed_count, hint),
-                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                            ),
-                        ]));
-                    }
-
-                    // Render messages (all if expanded, otherwise only visible ones)
-                    for (vis_idx, vis) in visibility.iter().enumerate() {
-                        if !vis.visible && !is_expanded {
-                            continue;
-                        }
-
-                        let msg = vis.message;
-                        let is_first_visible = vis_idx == 0 || !visibility[..vis_idx].iter().any(|v| v.visible);
-                        let msg_is_consecutive = !is_first_visible || *is_consecutive;
-                        let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
-
-                        if is_tool_use {
-                            // Tool use: render muted tool line only
-                            let parsed = parse_message_content(&msg.content);
-                            if let MessageContent::Mixed { tool_calls, .. } = &parsed {
-                                for tool_call in tool_calls {
-                                    messages_text.push(render_tool_line(tool_call, indicator_color));
-                                }
-                            } else {
-                                // Fallback
-                                let tool_name = msg.tool_name.as_deref().unwrap_or("tool");
-                                let indicator = if msg_is_consecutive { "·  " } else { "│  " };
-                                messages_text.push(Line::from(vec![
-                                    Span::styled(indicator, Style::default().fg(indicator_color)),
-                                    Span::styled(
-                                        format!("{}: ", tool_name),
-                                        Style::default().fg(theme::TEXT_MUTED),
-                                    ),
-                                    Span::styled(
-                                        msg.content.chars().take(50).collect::<String>(),
-                                        Style::default().fg(theme::TEXT_MUTED),
-                                    ),
-                                ]));
-                            }
-                        } else if msg.is_reasoning {
-                            // Reasoning/thinking message: muted style, no background
-                            let parsed = parse_message_content(&msg.content);
-                            let content_text = match &parsed {
-                                MessageContent::PlainText(text) => text.clone(),
-                                MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
-                            };
-                            let rendered = render_markdown(&content_text);
-
-                            // Show dot for consecutive messages within group
-                            if msg_is_consecutive && !is_first_visible {
-                                messages_text.push(reasoning_dot_line(indicator_color));
-                            }
-
-                            messages_text.extend(reasoning_lines(
-                                &rendered,
-                                indicator_color,
-                                content_width,
-                            ));
-                        } else {
-                            // Non-tool message: full content with background
-                            let parsed = parse_message_content(&msg.content);
-                            let content_text = match &parsed {
-                                MessageContent::PlainText(text) => text.clone(),
-                                MessageContent::Mixed { text_parts, .. } => text_parts.join("\n"),
-                            };
-                            let rendered = render_markdown(&content_text);
-
-                            // Check if message has p-tags (recipients)
-                            let msg_has_p_tags = !msg.p_tags.is_empty();
-
-                            // Show header with recipient if message has p-tags, otherwise dot for consecutive
-                            if msg_has_p_tags {
-                                // Resolve p-tag pubkeys to display names
-                                let recipient_names: Vec<String> = {
-                                    let store = app.data_store.borrow();
-                                    msg.p_tags.iter()
-                                        .map(|pk| store.get_profile_name(pk))
-                                        .collect()
-                                };
-                                messages_text.push(author_line_with_recipient(
-                                    &author,
-                                    &recipient_names,
-                                    indicator_color,
-                                    card_bg,
-                                    content_width,
-                                ));
-                            } else if msg_is_consecutive && !is_first_visible {
-                                messages_text.push(dot_line(indicator_color, card_bg, content_width));
-                            }
-
-                            messages_text.extend(markdown_lines(
-                                &rendered,
-                                indicator_color,
-                                card_bg,
-                                content_width,
-                            ));
-
-                            // Tool calls from content
-                            if let MessageContent::Mixed { tool_calls, .. } = &parsed {
-                                for tool_call in tool_calls {
-                                    messages_text.push(render_tool_line(tool_call, indicator_color));
-                                }
-                            }
-                        }
-
-                        // Delegation previews are now rendered as separate DelegationPreview items
-                        // (see emit_delegation_previews in grouping.rs)
-                    }
-
-                    // Show collapse indicator at end when expanded and there are collapsed messages
-                    if is_expanded && *collapsed_count > 0 {
-                        let indicator = if *is_consecutive { "·  " } else { "│  " };
-                        let hint = if is_selected { " (Enter to collapse)" } else { "" };
-                        messages_text.push(Line::from(vec![
-                            Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                            Span::styled("▾ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
-                            Span::styled(
-                                format!("Collapse {}{}", collapsed_count, hint),
-                                Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                            ),
-                        ]));
-                    }
-
-                    // Only add blank line if no next consecutive (end of author group)
-                    if !has_next_consecutive {
-                        messages_text.push(Line::from(""));
-                    }
-                }
-
                 DisplayItem::SingleMessage {
                     message: msg,
                     is_consecutive,
                     has_next_consecutive,
                 } => {
-                    let _ = group_idx; // Used for debugging
-
                     // Check if this message is selected (for navigation)
                     let is_selected =
                         group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
@@ -502,9 +309,6 @@ pub(crate) fn render_messages_panel(
                         ));
                     }
 
-                    // Delegation previews are now rendered as separate DelegationPreview items
-                    // (see emit_delegation_previews in grouping.rs)
-
                     // Replies indicator
                     if let Some(replies) = replies_by_parent.get(msg.id.as_str()) {
                         if !replies.is_empty() {
@@ -540,6 +344,7 @@ pub(crate) fn render_messages_panel(
                     parent_pubkey,
                     is_consecutive,
                     has_next_consecutive,
+                    branch,
                 } => {
                     // Check if this delegation preview is selected
                     let is_selected =
@@ -675,17 +480,31 @@ pub(crate) fn render_messages_panel(
                                 ),
                             ]));
                         } else {
-                            // Delegation card header - use available width
-                            let title_display: String = title.chars().take(delegation_text_width).collect();
-                            let hint = if is_selected { " (Enter to open)" } else { "" };
+                            // Delegation card with full box border
+                            // Card inner width (excluding indicator and box borders)
+                            let card_inner_width = content_width.saturating_sub(3 + 2 + 1); // indicator(3) + "│ "(2) + "│"(1)
+
+                            // Top border: │  ┌─────────────────────┐
+                            let top_border: String = "─".repeat(card_inner_width);
                             messages_text.push(Line::from(vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
                                 Span::styled(
-                                    "┌─ ",
+                                    format!("┌{}┐", top_border),
                                     Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
                                 ),
+                            ]));
+
+                            // Title line: │  │ Title (Enter to open)                    │
+                            let hint = if is_selected { " (Enter to open)" } else { "" };
+                            let title_max_width = card_inner_width.saturating_sub(1 + hint.len()); // space + hint
+                            let title_display: String = title.chars().take(title_max_width).collect();
+                            let title_padding = card_inner_width.saturating_sub(title_display.chars().count() + hint.len());
+                            let title_pad_str: String = " ".repeat(title_padding);
+                            messages_text.push(Line::from(vec![
+                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                 Span::styled(
-                                    title_display,
+                                    format!(" {}", title_display),
                                     Style::default()
                                         .fg(theme::TEXT_PRIMARY)
                                         .bg(bg)
@@ -695,21 +514,36 @@ pub(crate) fn render_messages_panel(
                                     hint,
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
                                 ),
+                                Span::styled(title_pad_str, Style::default().bg(bg)),
+                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                             ]));
 
-                            // Agent and status line
-                            let mut agent_line = vec![
+                            // Agent and status line: │  │ @agent · Done ·  branch        │
+                            let mut agent_content = format!(" @{}", agent_name);
+                            if is_busy {
+                                agent_content.push_str(&format!(" · {} working...", app.spinner_char()));
+                            } else if let Some(ref status_label) = status {
+                                agent_content.push_str(&format!(" · {}", status_label));
+                            }
+                            if let Some(ref branch_name) = branch {
+                                agent_content.push_str(&format!(" ·  {}", branch_name));
+                            }
+                            let agent_display: String = agent_content.chars().take(card_inner_width).collect();
+                            let agent_padding = card_inner_width.saturating_sub(agent_display.chars().count());
+                            let agent_pad_str: String = " ".repeat(agent_padding);
+
+                            // Build agent line with proper coloring
+                            let mut agent_spans = vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                 Span::styled(
-                                    format!("@{}", agent_name),
+                                    format!(" @{}", agent_name),
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
                                 ),
                             ];
-                            // Show "working..." with spinner if agents are busy, otherwise show 513 status
                             if is_busy {
-                                agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
-                                agent_line.push(Span::styled(
+                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_spans.push(Span::styled(
                                     format!("{} working...", app.spinner_char()),
                                     Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
                                 ));
@@ -719,31 +553,44 @@ pub(crate) fn render_messages_panel(
                                 } else {
                                     theme::ACCENT_WARNING
                                 };
-                                agent_line.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
-                                agent_line.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
+                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_spans.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
                             }
-                            messages_text.push(Line::from(agent_line));
+                            if let Some(ref branch_name) = branch {
+                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_spans.push(Span::styled(
+                                    format!(" {}", branch_name),
+                                    Style::default().fg(theme::ACCENT_SPECIAL).bg(bg),
+                                ));
+                            }
+                            agent_spans.push(Span::styled(agent_pad_str, Style::default().bg(bg)));
+                            agent_spans.push(Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)));
+                            messages_text.push(Line::from(agent_spans));
 
-                            // Activity line (from 513 or most recent message) - use available width
+                            // Activity line (if present): │  │ Activity text...                │
                             if !activity.is_empty() {
-                                let activity_display: String = activity.chars().take(delegation_text_width).collect();
+                                let activity_max_width = card_inner_width.saturating_sub(1); // space prefix
+                                let activity_display: String = activity.chars().take(activity_max_width).collect();
+                                let activity_padding = card_inner_width.saturating_sub(1 + activity_display.chars().count());
+                                let activity_pad_str: String = " ".repeat(activity_padding);
                                 messages_text.push(Line::from(vec![
                                     Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                    Span::styled("│  ", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                    Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                     Span::styled(
-                                        activity_display,
+                                        format!(" {}", activity_display),
                                         Style::default().fg(theme::TEXT_MUTED).bg(bg).add_modifier(Modifier::ITALIC),
                                     ),
+                                    Span::styled(activity_pad_str, Style::default().bg(bg)),
+                                    Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                 ]));
                             }
 
-                            // Bottom border - match content width
-                            let border_width = delegation_text_width.min(40);
-                            let border: String = "─".repeat(border_width);
+                            // Bottom border: │  └─────────────────────┘
+                            let bottom_border: String = "─".repeat(card_inner_width);
                             messages_text.push(Line::from(vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
                                 Span::styled(
-                                    format!("└{}", border),
+                                    format!("└{}┘", bottom_border),
                                     Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
                                 ),
                             ]));

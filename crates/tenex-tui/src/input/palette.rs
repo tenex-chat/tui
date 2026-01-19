@@ -8,18 +8,15 @@ use crate::store::get_raw_event_json;
 use crate::ui;
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::{App, InputMode, ModalState, UndoAction, View};
-use std::collections::HashSet;
 
 use super::modal_handlers::export_thread_as_jsonl;
 
 /// Filter and group messages based on current view (subthread vs main thread).
-/// Returns grouped display items for the current selection context.
+/// Returns display items for the current selection context.
 fn filter_and_group_messages<'a>(
     messages: &'a [Message],
     thread_id: Option<&str>,
     subthread_root: Option<&str>,
-    user_pubkey: Option<&str>,
-    expanded_groups: Option<&HashSet<String>>,
 ) -> Vec<DisplayItem<'a>> {
     let display_messages: Vec<&Message> = if let Some(root_id) = subthread_root {
         messages
@@ -37,22 +34,13 @@ fn filter_and_group_messages<'a>(
             .collect()
     };
 
-    group_messages(&display_messages, user_pubkey, expanded_groups)
+    group_messages(&display_messages)
 }
 
 /// Get the message ID from a display item (for actions like "view raw event").
 fn get_message_id(item: &DisplayItem<'_>) -> Option<String> {
     match item {
         DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
-        DisplayItem::ExpandedGroupMessage { message, .. } => Some(message.id.clone()),
-        DisplayItem::AgentGroup { visibility, .. } => {
-            // For collapsed groups, return the last visible message
-            visibility
-                .iter()
-                .rev()
-                .find(|v| v.visible)
-                .map(|v| v.message.id.clone())
-        }
         DisplayItem::DelegationPreview { .. } => None,
     }
 }
@@ -256,25 +244,14 @@ fn boot_project(app: &mut App) {
 fn copy_selected_message(app: &mut App) {
     let messages = app.messages();
     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         // Get the most relevant content from the display item
         let content = match item {
             DisplayItem::SingleMessage { message, .. } => message.content.as_str(),
-            DisplayItem::ExpandedGroupMessage { message, .. } => message.content.as_str(),
-            DisplayItem::AgentGroup { visibility, .. } => {
-                // For a collapsed group, get the last visible message's content
-                visibility
-                    .iter()
-                    .rev()
-                    .find(|v| v.visible)
-                    .map(|v| v.message.content.as_str())
-                    .unwrap_or("")
-            }
             DisplayItem::DelegationPreview { thread_id, .. } => {
                 // Copy the thread ID for delegation previews
                 thread_id.as_str()
@@ -292,10 +269,9 @@ fn copy_selected_message(app: &mut App) {
 fn view_raw_event(app: &mut App) {
     let messages = app.messages();
     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         if let Some(id) = get_message_id(item) {
@@ -320,10 +296,9 @@ fn open_trace(app: &mut App) {
 
     let messages = app.messages();
     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
     let subthread_root = app.subthread_root.as_deref();
 
-    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root, user_pubkey.as_deref(), Some(&app.expanded_groups));
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         if let Some(id) = get_message_id(item) {

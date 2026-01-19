@@ -863,14 +863,7 @@ pub(super) fn handle_normal_mode(
 }
 
 fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
-    if c == 'A' && app.view == View::Chat {
-        // Shift+A: Reopen a dismissed ask event
-        if app.reopen_dismissed_ask() {
-            app.set_status("Reopened dismissed ask");
-        } else {
-            app.set_status("No dismissed asks to reopen");
-        }
-    } else if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
+    if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
         app.open_agent_selector();
     } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
         app.open_agent_selector();
@@ -960,7 +953,6 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
 fn handle_chat_enter(app: &mut App) -> Result<()> {
     let messages = app.messages();
     let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let user_pubkey = app.data_store.borrow().user_pubkey.clone();
 
     let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
         messages
@@ -978,26 +970,10 @@ fn handle_chat_enter(app: &mut App) -> Result<()> {
             .collect()
     };
 
-    let grouped = group_messages(&display_messages, user_pubkey.as_deref(), Some(&app.expanded_groups));
+    let grouped = group_messages(&display_messages);
 
     if let Some(item) = grouped.get(app.selected_message_index) {
         match item {
-            DisplayItem::AgentGroup {
-                messages: group_messages,
-                collapsed_count,
-                ..
-            } => {
-                // Collapsed group - expand it
-                if *collapsed_count > 0 {
-                    if let Some(first_msg) = group_messages.first() {
-                        app.toggle_group_expansion(&first_msg.id);
-                    }
-                }
-            }
-            DisplayItem::ExpandedGroupMessage { group_key, .. } => {
-                // Message from expanded group - collapse the group
-                app.toggle_group_expansion(group_key);
-            }
             DisplayItem::SingleMessage { message: msg, .. } => {
                 let has_replies = messages.iter().any(|m| {
                     m.reply_to.as_deref() == Some(msg.id.as_str())
