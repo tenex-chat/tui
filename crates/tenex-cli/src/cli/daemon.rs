@@ -35,10 +35,7 @@ pub fn get_socket_path(config: Option<&CliConfig>) -> PathBuf {
 
 /// Default socket path when no config is provided
 pub fn default_socket_path() -> PathBuf {
-    let base_dir = dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".tenex-cli");
-    base_dir.join(SOCKET_NAME)
+    CoreConfig::default_data_dir().join(SOCKET_NAME)
 }
 
 fn get_pid_path(config: Option<&CliConfig>) -> PathBuf {

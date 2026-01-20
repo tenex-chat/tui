@@ -5,3 +5,4 @@ tenex_data/
 
 # Git worktrees
 .worktrees/
+addresses.txt
