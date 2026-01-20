@@ -27,3 +27,81 @@ pub use lesson_viewer::render_lesson_viewer;
 pub use nudge_selector::render_nudge_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};
 pub use report_viewer::render_report_viewer;
+
+use crate::ui::components::{render_modal_items, Modal, ModalItem, ModalSize};
+use crate::ui::modal::{BackendApprovalAction, BackendApprovalState};
+use crate::ui::theme;
+use ratatui::{
+    layout::Rect,
+    style::Style,
+    widgets::Paragraph,
+    Frame,
+};
+
+/// Render the backend approval modal
+pub fn render_backend_approval_modal(
+    f: &mut Frame,
+    area: Rect,
+    state: &BackendApprovalState,
+) {
+    let actions = BackendApprovalAction::ALL;
+    let content_height = (actions.len() + 4) as u16;
+    let total_height = content_height + 6;
+    let height_percent = (total_height as f32 / area.height as f32).min(0.5);
+
+    // Truncate pubkey for display
+    let short_pubkey = if state.backend_pubkey.len() > 16 {
+        format!("{}...{}", &state.backend_pubkey[..8], &state.backend_pubkey[state.backend_pubkey.len()-8..])
+    } else {
+        state.backend_pubkey.clone()
+    };
+
+    let title = "Unknown Backend";
+
+    let items: Vec<ModalItem> = actions
+        .iter()
+        .enumerate()
+        .map(|(i, action)| {
+            let is_selected = i == state.selected_index;
+            ModalItem::new(action.label())
+                .with_shortcut(action.hotkey().to_string())
+                .selected(is_selected)
+        })
+        .collect();
+
+    let popup_area = Modal::new(title)
+        .size(ModalSize {
+            max_width: 50,
+            height_percent,
+        })
+        .render(f, area, |f, content_area| {
+            // Render description
+            let desc_area = Rect::new(content_area.x, content_area.y, content_area.width, 2);
+            let desc = Paragraph::new(format!(
+                "Backend {} wants to send status updates.\nDo you trust this backend?",
+                short_pubkey
+            ))
+            .style(Style::default().fg(theme::TEXT_MUTED))
+            .wrap(ratatui::widgets::Wrap { trim: true });
+            f.render_widget(desc, desc_area);
+
+            // Render actions below description
+            let actions_area = Rect::new(
+                content_area.x,
+                content_area.y + 3,
+                content_area.width,
+                content_area.height.saturating_sub(3),
+            );
+            render_modal_items(f, actions_area, &items);
+        });
+
+    let hints_area = Rect::new(
+        popup_area.x + 2,
+        popup_area.y + popup_area.height.saturating_sub(2),
+        popup_area.width.saturating_sub(4),
+        1,
+    );
+    let hints = Paragraph::new("a approve · r reject · b block · ↑↓ navigate · esc dismiss")
+        .style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(hints, hints_area);
+}

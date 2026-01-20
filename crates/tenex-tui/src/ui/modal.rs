@@ -821,166 +821,78 @@ impl DraftNavigatorState {
     }
 }
 
-/// Context for command palette - determines which commands are shown
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PaletteContext {
-    HomeRecent { show_archived: bool },
-    HomeInbox { show_archived: bool },
-    HomeReports,
-    HomeSidebar { is_online: bool, is_busy: bool, is_archived: bool, show_archived_projects: bool },
-    ChatNormal { has_parent: bool, message_has_trace: bool, agent_working: bool },
-    ChatEditing,
-    AgentBrowserList,
-    AgentBrowserDetail,
-}
-
-/// A command available in the palette
-#[derive(Debug, Clone)]
-pub struct PaletteCommand {
-    pub key: char,
-    pub label: &'static str,
-    pub section: &'static str,
-}
-
-impl PaletteCommand {
-    pub const fn new(key: char, label: &'static str, section: &'static str) -> Self {
-        Self { key, label, section }
-    }
-}
-
 /// State for command palette modal (Ctrl+T)
+/// Commands are defined in input/commands.rs
 #[derive(Debug, Clone)]
 pub struct CommandPaletteState {
     pub selected_index: usize,
-    pub context: PaletteContext,
 }
 
-impl CommandPaletteState {
-    pub fn new(context: PaletteContext) -> Self {
-        Self {
-            selected_index: 0,
-            context,
+/// Actions for backend approval modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackendApprovalAction {
+    Approve,
+    Reject,
+    Block,
+}
+
+impl BackendApprovalAction {
+    pub const ALL: [BackendApprovalAction; 3] = [
+        BackendApprovalAction::Approve,
+        BackendApprovalAction::Reject,
+        BackendApprovalAction::Block,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            BackendApprovalAction::Approve => "Approve Backend",
+            BackendApprovalAction::Reject => "Reject (Ask Later)",
+            BackendApprovalAction::Block => "Block Backend",
         }
     }
 
-    /// Get commands available for the current context
-    ///
-    /// Commands are sorted by section name to match the display order in the palette
-    /// (which uses BTreeMap for grouping). This ensures selected_index matches visually.
-    pub fn available_commands(&self) -> Vec<PaletteCommand> {
-        let mut commands = Vec::new();
-
-        // Global commands (always available)
-        commands.push(PaletteCommand::new('1', "Go to Home", "Navigation"));
-        commands.push(PaletteCommand::new('?', "Help", "Navigation"));
-        commands.push(PaletteCommand::new('q', "Quit", "System"));
-
-        // Context-specific commands
-        match self.context {
-            PaletteContext::HomeRecent { show_archived } => {
-                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
-                commands.push(PaletteCommand::new('o', "Open selected", "Conversation"));
-                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
-                commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
-                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
-                commands.push(PaletteCommand::new('f', "Time filter", "Filter"));
-                if show_archived {
-                    commands.push(PaletteCommand::new('H', "Hide archived", "Filter"));
-                } else {
-                    commands.push(PaletteCommand::new('H', "Show archived", "Filter"));
-                }
-                commands.push(PaletteCommand::new('A', "Agent Browser", "Other"));
-                commands.push(PaletteCommand::new('N', "Create project", "Other"));
-            }
-            PaletteContext::HomeInbox { show_archived } => {
-                commands.push(PaletteCommand::new('o', "Open selected", "Inbox"));
-                commands.push(PaletteCommand::new('R', "Mark as read", "Inbox"));
-                commands.push(PaletteCommand::new('M', "Mark all read", "Inbox"));
-                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
-                if show_archived {
-                    commands.push(PaletteCommand::new('H', "Hide archived", "Filter"));
-                } else {
-                    commands.push(PaletteCommand::new('H', "Show archived", "Filter"));
-                }
-            }
-            PaletteContext::HomeReports => {
-                commands.push(PaletteCommand::new('o', "View report", "Reports"));
-                commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
-            }
-            PaletteContext::HomeSidebar { is_online, is_busy, is_archived, show_archived_projects } => {
-                commands.push(PaletteCommand::new(' ', "Toggle visibility", "Project"));
-                commands.push(PaletteCommand::new('n', "New conversation", "Project"));
-                commands.push(PaletteCommand::new('s', "Settings", "Project"));
-                if !is_online {
-                    commands.push(PaletteCommand::new('b', "Boot project", "Project"));
-                }
-                if is_busy {
-                    commands.push(PaletteCommand::new('.', "Stop all agents", "Project"));
-                }
-                if is_archived {
-                    commands.push(PaletteCommand::new('a', "Unarchive", "Project"));
-                } else {
-                    commands.push(PaletteCommand::new('a', "Archive", "Project"));
-                }
-                if show_archived_projects {
-                    commands.push(PaletteCommand::new('H', "Hide archived projects", "Filter"));
-                } else {
-                    commands.push(PaletteCommand::new('H', "Show archived projects", "Filter"));
-                }
-            }
-            PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working } => {
-                commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
-                commands.push(PaletteCommand::new('%', "Select branch", "Input"));
-                commands.push(PaletteCommand::new('d', "View drafts", "Draft"));
-                commands.push(PaletteCommand::new('y', "Copy content", "Message"));
-                commands.push(PaletteCommand::new('v', "View raw event", "Message"));
-                if message_has_trace {
-                    commands.push(PaletteCommand::new('t', "Open trace", "Message"));
-                }
-                commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
-                if agent_working {
-                    commands.push(PaletteCommand::new('.', "Stop agent", "Agent"));
-                }
-                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
-                if has_parent {
-                    commands.push(PaletteCommand::new('g', "Go to parent", "Conversation"));
-                }
-                commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
-                commands.push(PaletteCommand::new('O', "Open trace", "Conversation"));
-                commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
-                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
-                commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
-                commands.push(PaletteCommand::new('X', "Archive + Close", "Tab"));
-                commands.push(PaletteCommand::new('T', "Toggle sidebar", "View"));
-            }
-            PaletteContext::ChatEditing => {
-                commands.push(PaletteCommand::new('@', "Mention agent", "Input"));
-                commands.push(PaletteCommand::new('%', "Select branch", "Input"));
-                commands.push(PaletteCommand::new('E', "Expand editor", "Input"));
-                commands.push(PaletteCommand::new('s', "Save as draft", "Draft"));
-                commands.push(PaletteCommand::new('d', "View drafts", "Draft"));
-                commands.push(PaletteCommand::new('S', "Agent settings", "Agent"));
-                commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
-                commands.push(PaletteCommand::new('c', "Copy conversation ID", "Conversation"));
-                commands.push(PaletteCommand::new('O', "Open trace", "Conversation"));
-                commands.push(PaletteCommand::new('e', "Copy JSONL", "Conversation"));
-                commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
-                commands.push(PaletteCommand::new('x', "Close tab", "Tab"));
-                commands.push(PaletteCommand::new('X', "Archive + Close", "Tab"));
-            }
-            PaletteContext::AgentBrowserList => {
-                commands.push(PaletteCommand::new('o', "View agent", "Agent"));
-                commands.push(PaletteCommand::new('n', "Create new agent", "Agent"));
-            }
-            PaletteContext::AgentBrowserDetail => {
-                commands.push(PaletteCommand::new('f', "Fork agent", "Agent"));
-                commands.push(PaletteCommand::new('c', "Clone agent", "Agent"));
-            }
+    pub fn description(&self) -> &'static str {
+        match self {
+            BackendApprovalAction::Approve => "Trust this backend and show status updates",
+            BackendApprovalAction::Reject => "Dismiss for now, ask again later",
+            BackendApprovalAction::Block => "Never show events from this backend",
         }
+    }
 
-        // Sort by section name to match display order (BTreeMap iterates alphabetically)
-        commands.sort_by(|a, b| a.section.cmp(b.section));
-        commands
+    pub fn hotkey(&self) -> char {
+        match self {
+            BackendApprovalAction::Approve => 'a',
+            BackendApprovalAction::Reject => 'r',
+            BackendApprovalAction::Block => 'b',
+        }
+    }
+}
+
+/// State for backend approval modal
+#[derive(Debug, Clone)]
+pub struct BackendApprovalState {
+    pub backend_pubkey: String,
+    pub project_a_tag: String,
+    pub selected_index: usize,
+}
+
+impl BackendApprovalState {
+    pub fn new(backend_pubkey: String, project_a_tag: String) -> Self {
+        Self {
+            backend_pubkey,
+            project_a_tag,
+            selected_index: 0,
+        }
+    }
+
+    pub fn selected_action(&self) -> BackendApprovalAction {
+        BackendApprovalAction::ALL[self.selected_index]
+    }
+}
+
+impl CommandPaletteState {
+    pub fn new() -> Self {
+        Self { selected_index: 0 }
     }
 
     pub fn move_up(&mut self) {
@@ -1072,6 +984,8 @@ pub enum ModalState {
     AgentSettings(AgentSettingsState),
     /// Draft navigator modal for viewing and restoring saved drafts
     DraftNavigator(DraftNavigatorState),
+    /// Backend approval modal for unknown backend pubkeys
+    BackendApproval(BackendApprovalState),
 }
 
 impl Default for ModalState {

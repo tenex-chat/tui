@@ -2,7 +2,7 @@ use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, NamedDraft, Name
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
-use crate::ui::modal::{CommandPaletteState, ModalState, PaletteContext};
+use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
 use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager};
@@ -218,7 +218,7 @@ pub struct App {
     /// Filter by time since last activity
     pub time_filter: Option<TimeFilter>,
 
-    preferences: RefCell<PreferencesStorage>,
+    pub preferences: RefCell<PreferencesStorage>,
 
     /// Unified modal state
     pub modal_state: ModalState,
@@ -286,6 +286,7 @@ impl App {
     pub fn new(
         db: Arc<Database>,
         data_store: Rc<RefCell<AppDataStore>>,
+        data_dir: &str,
     ) -> Self {
         Self {
             running: true,
@@ -330,7 +331,7 @@ impl App {
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
             time_filter: None,
-            preferences: RefCell::new(PreferencesStorage::new("tenex_data")),
+            preferences: RefCell::new(PreferencesStorage::new(data_dir)),
             modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
@@ -499,6 +500,13 @@ impl App {
                 DisplayItem::DelegationPreview { .. } => None,
             }
         })
+    }
+
+    /// Check if the currently selected message has a trace context
+    pub fn selected_message_has_trace(&self) -> bool {
+        self.selected_message_id()
+            .map(|id| get_trace_context(&self.db.ndb, &id).is_some())
+            .unwrap_or(false)
     }
 
     /// Get the count of display items in the current chat view.
@@ -1218,74 +1226,7 @@ impl App {
 
     /// Open the command palette modal (Ctrl+T)
     pub fn open_command_palette(&mut self) {
-        let context = self.get_palette_context();
-        self.modal_state = ModalState::CommandPalette(CommandPaletteState::new(context));
-    }
-
-    /// Get the current context for the command palette
-    fn get_palette_context(&self) -> PaletteContext {
-        match self.view {
-            View::Home => {
-                if self.sidebar_focused {
-                    // Check if selected project is online/busy using filtered_projects
-                    let (online, offline) = self.filtered_projects();
-                    let online_count = online.len();
-                    let is_online = self.sidebar_project_index < online_count;
-
-                    // Get the actual project to check busy and archived status
-                    let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-                    let (is_busy, is_archived) = all_projects.get(self.sidebar_project_index)
-                        .map(|p| {
-                            let a_tag = p.a_tag();
-                            (
-                                self.data_store.borrow().is_project_busy(&a_tag),
-                                self.is_project_archived(&a_tag),
-                            )
-                        })
-                        .unwrap_or((false, false));
-
-                    PaletteContext::HomeSidebar { is_online, is_busy, is_archived, show_archived_projects: self.show_archived_projects }
-                } else {
-                    match self.home_panel_focus {
-                        HomeTab::Recent => PaletteContext::HomeRecent { show_archived: self.show_archived },
-                        HomeTab::Inbox => PaletteContext::HomeInbox { show_archived: self.show_archived },
-                        HomeTab::Reports => PaletteContext::HomeReports,
-                        HomeTab::Status => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Reuse Recent context for Status
-                        HomeTab::Search => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Reuse Recent context for Search
-                    }
-                }
-            }
-            View::Chat => {
-                if self.input_mode == InputMode::Editing {
-                    PaletteContext::ChatEditing
-                } else {
-                    // Check context for normal mode
-                    let has_parent = self.selected_thread.as_ref()
-                        .and_then(|t| t.parent_conversation_id.as_ref())
-                        .is_some();
-
-                    // Check if selected message has trace
-                    let message_has_trace = self.selected_message_id()
-                        .map(|id| get_trace_context(&self.db.ndb, &id).is_some())
-                        .unwrap_or(false);
-
-                    // Check if any agent is working on this thread
-                    let agent_working = self.selected_thread.as_ref()
-                        .map(|t| self.data_store.borrow().is_event_busy(&t.id))
-                        .unwrap_or(false);
-
-                    PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working }
-                }
-            }
-            View::AgentBrowser => {
-                if self.agent_browser_in_detail {
-                    PaletteContext::AgentBrowserDetail
-                } else {
-                    PaletteContext::AgentBrowserList
-                }
-            }
-            _ => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Default fallback
-        }
+        self.modal_state = ModalState::CommandPalette(CommandPaletteState::new());
     }
 
     /// Close the branch selector modal
@@ -2837,6 +2778,38 @@ impl App {
     /// Toggle archive status of a project
     pub fn toggle_project_archived(&mut self, project_a_tag: &str) -> bool {
         self.preferences.borrow_mut().toggle_project_archived(project_a_tag)
+    }
+
+    // ===== Backend Trust Methods =====
+
+    /// Approve a backend pubkey (persist to preferences and update data store)
+    pub fn approve_backend(&mut self, pubkey: &str) {
+        self.preferences.borrow_mut().approve_backend(pubkey);
+        self.data_store.borrow_mut().add_approved_backend(pubkey);
+    }
+
+    /// Block a backend pubkey (persist to preferences and update data store)
+    pub fn block_backend(&mut self, pubkey: &str) {
+        self.preferences.borrow_mut().block_backend(pubkey);
+        self.data_store.borrow_mut().add_blocked_backend(pubkey);
+    }
+
+    /// Show the backend approval modal for a pending approval
+    pub fn show_backend_approval_modal(&mut self, backend_pubkey: String, project_a_tag: String) {
+        use crate::ui::modal::BackendApprovalState;
+        self.modal_state = ModalState::BackendApproval(BackendApprovalState::new(
+            backend_pubkey,
+            project_a_tag,
+        ));
+    }
+
+    /// Initialize trusted backends from preferences (called on app init)
+    pub fn init_trusted_backends(&mut self) {
+        let prefs = self.preferences.borrow();
+        let approved = prefs.approved_backend_pubkeys().clone();
+        let blocked = prefs.blocked_backend_pubkeys().clone();
+        drop(prefs);
+        self.data_store.borrow_mut().set_trusted_backends(approved, blocked);
     }
 }
 

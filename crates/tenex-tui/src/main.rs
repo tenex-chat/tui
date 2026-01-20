@@ -38,10 +38,12 @@ async fn main() -> Result<()> {
         original_hook(panic_info);
     }));
 
-    let mut core_runtime = CoreRuntime::new(CoreConfig::default())?;
+    let config = CoreConfig::default();
+    let data_dir = config.data_dir.to_str().unwrap_or("tenex_data").to_string();
+    let mut core_runtime = CoreRuntime::new(config)?;
     let data_store = core_runtime.data_store();
     let db = core_runtime.database();
-    let mut app = App::new(db.clone(), data_store);
+    let mut app = App::new(db.clone(), data_store, &data_dir);
     let mut terminal = ui::init_terminal()?;
     let core_handle = core_runtime.handle();
     let data_rx = core_runtime
@@ -49,39 +51,47 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
     app.set_core_handle(core_handle.clone(), data_rx);
 
-    let mut login_step = if nostr::has_stored_credentials(&app.db.credentials_conn()) {
-        if nostr::credentials_need_password(&app.db.credentials_conn()) {
-            // Password required - show unlock prompt with autofocus
-            app.input_mode = InputMode::Editing;
-            LoginStep::Unlock
-        } else {
-            // No password - auto-login with unencrypted credentials
-            match nostr::load_unencrypted_keys(&app.db.credentials_conn()) {
-                Ok(keys) => {
-                    let user_pubkey = nostr::get_current_pubkey(&keys);
-                    app.keys = Some(keys.clone());
-                    app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
+    // Check credentials state upfront to avoid borrow conflicts
+    let has_creds = nostr::has_stored_credentials(&app.preferences.borrow());
+    let needs_password = has_creds && nostr::credentials_need_password(&app.preferences.borrow());
 
-                    if let Err(e) = core_handle.send(NostrCommand::Connect {
-                        keys: keys.clone(),
-                        user_pubkey: user_pubkey.clone(),
-                    }) {
-                        app.set_status(&format!("Failed to connect: {}", e));
-                        LoginStep::Nsec
-                    } else {
-                        app.view = View::Home;
-                        app.load_filter_preferences();
-                        LoginStep::Nsec // Won't be shown since view is Home
-                    }
-                }
-                Err(e) => {
-                    app.set_status(&format!("Failed to load credentials: {}", e));
+    let mut login_step = if !has_creds {
+        // No credentials - show nsec prompt with autofocus
+        app.input_mode = InputMode::Editing;
+        LoginStep::Nsec
+    } else if needs_password {
+        // Password required - show unlock prompt with autofocus
+        app.input_mode = InputMode::Editing;
+        LoginStep::Unlock
+    } else {
+        // No password - auto-login with unencrypted credentials
+        let keys_result = nostr::load_unencrypted_keys(&app.preferences.borrow());
+        match keys_result {
+            Ok(keys) => {
+                let user_pubkey = nostr::get_current_pubkey(&keys);
+                app.keys = Some(keys.clone());
+                app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
+
+                if let Err(e) = core_handle.send(NostrCommand::Connect {
+                    keys: keys.clone(),
+                    user_pubkey: user_pubkey.clone(),
+                }) {
+                    app.set_status(&format!("Failed to connect: {}", e));
+                    app.input_mode = InputMode::Editing;
                     LoginStep::Nsec
+                } else {
+                    app.view = View::Home;
+                    app.load_filter_preferences();
+                    app.init_trusted_backends();
+                    LoginStep::Nsec // Won't be shown since view is Home
                 }
             }
+            Err(e) => {
+                app.set_status(&format!("Failed to load credentials: {}", e));
+                app.input_mode = InputMode::Editing;
+                LoginStep::Nsec
+            }
         }
-    } else {
-        LoginStep::Nsec
     };
     let mut pending_nsec: Option<String> = None;
 

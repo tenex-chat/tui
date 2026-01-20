@@ -210,6 +210,7 @@ impl HotkeyContext {
             ModalState::ExpandedEditor { .. } => return HotkeyContext::ExpandedEditorModal,
             ModalState::BranchSelector { .. } => return HotkeyContext::AnyModal,
             ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
+            ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
 
@@ -587,9 +588,16 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchived,
         KeyCode::Char('H'),
-        "Show/Hide Archived",
+        "Show/Hide Archived Conversations",
         "Filter",
         &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::ShowHideArchivedProjects,
+        KeyCode::Char('P'),
+        "Show/Hide Archived Projects",
+        "Filter",
+        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,

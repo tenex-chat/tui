@@ -11,7 +11,7 @@ use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream, Transaction};
 use crate::config::CoreConfig;
 use crate::events::CoreEvent;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
-use crate::models::{Message, ProjectStatus};
+use crate::models::Message;
 use crate::store::{AppDataStore, Database};
 
 #[derive(Clone)]
@@ -107,7 +107,8 @@ impl CoreRuntime {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, note_key) {
                 let kind = note.kind();
 
-                self.data_store.borrow_mut().handle_event(kind, &note);
+                // handle_event returns CoreEvent for kinds that need special handling (24010)
+                let status_event = self.data_store.borrow_mut().handle_event(kind, &note);
 
                 match kind {
                     1 => {
@@ -116,8 +117,9 @@ impl CoreRuntime {
                         }
                     }
                     24010 => {
-                        if let Some(status) = ProjectStatus::from_note(&note) {
-                            events.push(CoreEvent::ProjectStatus(status));
+                        // Use the event returned by handle_event (trust-validated)
+                        if let Some(event) = status_event {
+                            events.push(event);
                         }
                     }
                     24133 => {

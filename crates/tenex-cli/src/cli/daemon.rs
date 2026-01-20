@@ -12,8 +12,9 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::nostr::{self, NostrCommand};
-use crate::store::{AppDataStore, Database};
+use crate::store::AppDataStore;
 use tenex_core::config::CoreConfig;
+use tenex_core::models::PreferencesStorage;
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
 use super::config::CliConfig;
@@ -51,7 +52,7 @@ fn get_pid_path(config: Option<&CliConfig>) -> PathBuf {
 }
 
 fn get_data_dir() -> PathBuf {
-    PathBuf::from("tenex_data")
+    CoreConfig::default_data_dir()
 }
 
 /// Run the daemon server
@@ -82,11 +83,13 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
     let data_dir = get_data_dir();
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
     let data_store = core_runtime.data_store();
-    let db = core_runtime.database();
     let core_handle = core_runtime.handle();
 
+    // Initialize preferences for credential storage
+    let prefs = PreferencesStorage::new(data_dir.to_str().unwrap_or("tenex_data"));
+
     // Try to auto-login: config credentials take priority over stored credentials
-    let keys = try_auto_login_with_config(config.as_ref(), db.as_ref(), &core_handle);
+    let keys = try_auto_login_with_config(config.as_ref(), &prefs, &core_handle);
     if keys.is_some() {
         eprintln!("Auto-login successful");
     } else {
@@ -109,7 +112,6 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
                             std_stream,
                             &data_store,
                             &core_handle,
-                            db.as_ref(),
                             start_time,
                             keys.is_some(),
                         )?;
@@ -144,7 +146,7 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
 /// Try to login with config credentials first, then fall back to stored credentials
 fn try_auto_login_with_config(
     config: Option<&CliConfig>,
-    db: &Database,
+    prefs: &PreferencesStorage,
     core_handle: &CoreHandle,
 ) -> Option<nostr_sdk::Keys> {
     // Try config credentials first
@@ -160,7 +162,7 @@ fn try_auto_login_with_config(
     }
 
     // Fall back to stored credentials
-    try_auto_login(db, core_handle)
+    try_auto_login(prefs, core_handle)
 }
 
 /// Try to parse and login with the provided key (nsec or ncryptsec)
@@ -200,18 +202,16 @@ fn try_login_with_credentials(
     Ok(keys)
 }
 
-fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::Keys> {
-    let conn = db.credentials_conn();
-
-    if !nostr::has_stored_credentials(&conn) {
+fn try_auto_login(prefs: &PreferencesStorage, core_handle: &CoreHandle) -> Option<nostr_sdk::Keys> {
+    if !nostr::has_stored_credentials(prefs) {
         return None;
     }
 
     // Check if password required
-    if nostr::credentials_need_password(&conn) {
+    if nostr::credentials_need_password(prefs) {
         // Try to get password from environment
         if let Ok(password) = std::env::var("TENEX_PASSWORD") {
-            match nostr::load_stored_keys(&password, &conn) {
+            match nostr::load_stored_keys(&password, prefs) {
                 Ok(keys) => {
                     let pubkey = nostr::get_current_pubkey(&keys);
                     if core_handle
@@ -233,7 +233,7 @@ fn try_auto_login(db: &Database, core_handle: &CoreHandle) -> Option<nostr_sdk::
     }
 
     // Unencrypted credentials
-    match nostr::load_unencrypted_keys(&conn) {
+    match nostr::load_unencrypted_keys(prefs) {
         Ok(keys) => {
             let pubkey = nostr::get_current_pubkey(&keys);
             if core_handle
@@ -258,7 +258,6 @@ fn handle_connection(
     stream: UnixStream,
     data_store: &Rc<RefCell<AppDataStore>>,
     core_handle: &CoreHandle,
-    db: &Database,
     start_time: Instant,
     logged_in: bool,
 ) -> Result<bool> {
@@ -278,7 +277,7 @@ fn handle_connection(
         };
 
         let (response, should_shutdown) =
-            handle_request(&request, data_store, core_handle, db, start_time, logged_in);
+            handle_request(&request, data_store, core_handle, start_time, logged_in);
 
         writeln!(writer, "{}", serde_json::to_string(&response)?)?;
         writer.flush()?;
@@ -297,7 +296,6 @@ fn handle_request(
     request: &Request,
     data_store: &Rc<RefCell<AppDataStore>>,
     core_handle: &CoreHandle,
-    _db: &Database,
     start_time: Instant,
     logged_in: bool,
 ) -> (Response, bool) {

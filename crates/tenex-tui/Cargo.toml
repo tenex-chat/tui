@@ -20,3 +20,4 @@ futures.workspace = true
 pulldown-cmark.workspace = true
 arboard.workspace = true
 png.workspace = true
+unicode-width = "0.2"

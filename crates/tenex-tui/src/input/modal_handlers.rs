@@ -127,6 +127,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle backend approval modal when open
+    if matches!(app.modal_state, ModalState::BackendApproval(_)) {
+        handle_backend_approval_modal_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -255,10 +261,11 @@ fn submit_ask_response(app: &mut App) {
 // =============================================================================
 
 fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
-    if let ModalState::CommandPalette(ref mut state) = app.modal_state {
-        let commands = state.available_commands();
-        let cmd_count = commands.len();
+    // Get available commands before matching on state (to avoid mutable borrow conflict)
+    let commands = super::commands::available_commands(app);
+    let cmd_count = commands.len();
 
+    if let ModalState::CommandPalette(ref mut state) = app.modal_state {
         match key.code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;
@@ -279,14 +286,15 @@ fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 if let Some(cmd) = commands.get(state.selected_index) {
-                    super::palette::execute_palette_command(app, cmd.key);
+                    let cmd_key = cmd.key;
+                    app.modal_state = ModalState::None;
+                    super::commands::execute_command(app, cmd_key);
                 }
             }
             KeyCode::Char(c) => {
                 // Execute command directly if it matches a hotkey
-                if commands.iter().any(|cmd| cmd.key == c) {
-                    super::palette::execute_palette_command(app, c);
-                }
+                app.modal_state = ModalState::None;
+                super::commands::execute_command(app, c);
             }
             _ => {}
         }
@@ -1568,5 +1576,85 @@ fn handle_draft_navigator_key(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+// =============================================================================
+// BACKEND APPROVAL MODAL
+// =============================================================================
+
+fn handle_backend_approval_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::BackendApprovalAction;
+
+    let state = match &app.modal_state {
+        ModalState::BackendApproval(s) => s.clone(),
+        _ => return,
+    };
+
+    let action_count = BackendApprovalAction::ALL.len();
+
+    match key.code {
+        KeyCode::Esc => {
+            // Dismiss - same as reject (will ask again later)
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if state.selected_index > 0 {
+                if let ModalState::BackendApproval(ref mut s) = app.modal_state {
+                    s.selected_index -= 1;
+                }
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if state.selected_index + 1 < action_count {
+                if let ModalState::BackendApproval(ref mut s) = app.modal_state {
+                    s.selected_index += 1;
+                }
+            }
+        }
+        KeyCode::Enter => {
+            execute_backend_approval_action(app, &state, state.selected_action());
+        }
+        KeyCode::Char('a') => {
+            execute_backend_approval_action(app, &state, BackendApprovalAction::Approve);
+        }
+        KeyCode::Char('r') => {
+            execute_backend_approval_action(app, &state, BackendApprovalAction::Reject);
+        }
+        KeyCode::Char('b') => {
+            execute_backend_approval_action(app, &state, BackendApprovalAction::Block);
+        }
+        _ => {}
+    }
+}
+
+fn execute_backend_approval_action(
+    app: &mut App,
+    state: &ui::modal::BackendApprovalState,
+    action: ui::modal::BackendApprovalAction,
+) {
+    use ui::modal::BackendApprovalAction;
+
+    match action {
+        BackendApprovalAction::Approve => {
+            app.approve_backend(&state.backend_pubkey);
+            app.set_status(&format!(
+                "Approved backend {}...",
+                &state.backend_pubkey[..8.min(state.backend_pubkey.len())]
+            ));
+            app.modal_state = ModalState::None;
+        }
+        BackendApprovalAction::Reject => {
+            // Just dismiss - will ask again later
+            app.modal_state = ModalState::None;
+        }
+        BackendApprovalAction::Block => {
+            app.block_backend(&state.backend_pubkey);
+            app.set_status(&format!(
+                "Blocked backend {}...",
+                &state.backend_pubkey[..8.min(state.backend_pubkey.len())]
+            ));
+            app.modal_state = ModalState::None;
+        }
     }
 }

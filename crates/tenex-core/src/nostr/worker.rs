@@ -290,13 +290,13 @@ impl NostrWorker {
         // Agent definitions (kind 4199)
         let agent_filter = Filter::new().kind(Kind::Custom(4199));
 
-        // Project status (kind 24010) - subscribe to both p-tagged events AND all 24010 events
-        // We filter client-side by project coordinate since 24010 events may not have p-tags
+        // Project status (kind 24010) - subscribe to both p-tagged AND all events
+        // Trust validation happens client-side in AppDataStore::handle_status_event
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
             .pubkey(pubkey);
 
-        // Also subscribe to ALL 24010 events (we'll filter by project coord client-side)
+        // Also subscribe to ALL 24010 events for discovery (filtered client-side by trust)
         let all_status_filter = Filter::new()
             .kind(Kind::Custom(24010));
 

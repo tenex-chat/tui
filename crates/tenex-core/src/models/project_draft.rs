@@ -79,6 +79,15 @@ pub struct Preferences {
     /// If true, threads with children are collapsed by default in the Recent tab
     #[serde(default)]
     pub threads_default_collapsed: bool,
+    /// Backend pubkeys explicitly approved by the user to receive status updates
+    #[serde(default)]
+    pub approved_backend_pubkeys: HashSet<String>,
+    /// Backend pubkeys blocked by the user (silently ignore their events)
+    #[serde(default)]
+    pub blocked_backend_pubkeys: HashSet<String>,
+    /// Stored credentials (nsec or ncryptsec)
+    #[serde(default)]
+    pub stored_credentials: Option<String>,
 }
 
 pub struct PreferencesStorage {
@@ -193,5 +202,67 @@ impl PreferencesStorage {
         self.prefs.threads_default_collapsed = !self.prefs.threads_default_collapsed;
         self.save_to_file();
         self.prefs.threads_default_collapsed
+    }
+
+    // ===== Backend Trust Methods =====
+
+    pub fn is_backend_approved(&self, pubkey: &str) -> bool {
+        self.prefs.approved_backend_pubkeys.contains(pubkey)
+    }
+
+    pub fn is_backend_blocked(&self, pubkey: &str) -> bool {
+        self.prefs.blocked_backend_pubkeys.contains(pubkey)
+    }
+
+    pub fn approved_backend_pubkeys(&self) -> &HashSet<String> {
+        &self.prefs.approved_backend_pubkeys
+    }
+
+    pub fn blocked_backend_pubkeys(&self) -> &HashSet<String> {
+        &self.prefs.blocked_backend_pubkeys
+    }
+
+    pub fn approve_backend(&mut self, pubkey: &str) {
+        // Remove from blocked if present
+        self.prefs.blocked_backend_pubkeys.remove(pubkey);
+        // Add to approved
+        self.prefs.approved_backend_pubkeys.insert(pubkey.to_string());
+        self.save_to_file();
+    }
+
+    pub fn block_backend(&mut self, pubkey: &str) {
+        // Remove from approved if present
+        self.prefs.approved_backend_pubkeys.remove(pubkey);
+        // Add to blocked
+        self.prefs.blocked_backend_pubkeys.insert(pubkey.to_string());
+        self.save_to_file();
+    }
+
+    // ===== Credentials Methods =====
+
+    pub fn has_stored_credentials(&self) -> bool {
+        self.prefs.stored_credentials.is_some()
+    }
+
+    pub fn get_stored_credentials(&self) -> Option<&str> {
+        self.prefs.stored_credentials.as_deref()
+    }
+
+    pub fn store_credentials(&mut self, credentials: &str) {
+        self.prefs.stored_credentials = Some(credentials.to_string());
+        self.save_to_file();
+    }
+
+    pub fn clear_credentials(&mut self) {
+        self.prefs.stored_credentials = None;
+        self.save_to_file();
+    }
+
+    pub fn credentials_need_password(&self) -> bool {
+        self.prefs
+            .stored_credentials
+            .as_ref()
+            .map(|c| c.starts_with("ncryptsec"))
+            .unwrap_or(false)
     }
 }
