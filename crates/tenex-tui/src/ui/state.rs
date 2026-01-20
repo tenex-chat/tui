@@ -505,14 +505,9 @@ impl TabManager {
 
     /// Open a draft tab for a new conversation.
     /// Returns the tab index.
+    /// Always creates a new draft tab - multiple drafts per project are allowed.
     pub fn open_draft(&mut self, project_a_tag: String, project_name: String) -> usize {
-        // Check if we already have a draft for this project
-        if let Some((idx, _)) = self.find_draft_for_project(&project_a_tag) {
-            self.active_index = idx;
-            return idx;
-        }
-
-        // Create new draft tab
+        // Create new draft tab (always - allow multiple drafts per project)
         let tab = OpenTab::draft(project_a_tag, project_name);
 
         // Evict if at capacity (prefer non-drafts)
