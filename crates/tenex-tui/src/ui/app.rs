@@ -2162,7 +2162,8 @@ impl App {
     // ===== Search Methods =====
 
     /// Get search results based on current search_filter
-    /// Searches thread titles, thread content, and message content
+    /// Uses nostrdb fulltext search for kind:1 message content
+    /// Plus in-memory search for thread titles (from kind:513 metadata)
     /// Respects visible_projects filter
     pub fn search_results(&self) -> Vec<SearchResult> {
         if self.search_filter.trim().is_empty() {
@@ -2172,8 +2173,9 @@ impl App {
         let filter = self.search_filter.to_lowercase();
         let store = self.data_store.borrow();
         let mut results = Vec::new();
+        let mut seen_threads: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // Search threads (title and content match)
+        // 1. Search thread titles/content (in-memory, from kind:513 metadata)
         for project in store.get_projects() {
             let a_tag = project.a_tag();
 
@@ -2185,12 +2187,14 @@ impl App {
             let project_name = project.name.clone();
 
             for thread in store.get_threads(&a_tag) {
-                // Check if thread title, content, or ID matches
+                // Check if thread title or content matches
                 let title_matches = thread.title.to_lowercase().contains(&filter);
                 let content_matches = thread.content.to_lowercase().contains(&filter);
                 let id_matches = thread.id.to_lowercase().contains(&filter);
 
                 if title_matches || content_matches || id_matches {
+                    seen_threads.insert(thread.id.clone());
+
                     let (match_type, excerpt) = if id_matches {
                         (SearchMatchType::ConversationId, Some(format!("ID: {}", thread.id)))
                     } else if title_matches {
@@ -2206,29 +2210,52 @@ impl App {
                         match_type,
                         excerpt,
                     });
-                    continue;
-                }
-
-                // Search messages within this thread (limit per thread for performance)
-                let messages = store.get_messages(&thread.id);
-                for message in messages.iter().take(100) {
-                    if message.content.to_lowercase().contains(&filter) {
-                        let excerpt = Self::extract_excerpt(&message.content, &filter);
-                        results.push(SearchResult {
-                            thread: thread.clone(),
-                            project_a_tag: a_tag.clone(),
-                            project_name: project_name.clone(),
-                            match_type: SearchMatchType::Message {
-                                message_id: message.id.clone()
-                            },
-                            excerpt: Some(excerpt),
-                        });
-
-                        // Only include first message match per thread
-                        break;
-                    }
                 }
             }
+        }
+
+        // 2. Search message content using nostrdb fulltext (kind:1 only)
+        let search_hits = store.text_search(&self.search_filter, 200);
+
+        for (event_id, thread_id_opt, content, _kind) in search_hits {
+            // Determine which thread this belongs to
+            let thread_id = thread_id_opt.unwrap_or_else(|| event_id.clone());
+
+            // Skip if we already have this thread from title/content match
+            if seen_threads.contains(&thread_id) {
+                continue;
+            }
+
+            // Find the thread in our data
+            let thread_and_project = store.threads_by_project
+                .iter()
+                .find_map(|(a_tag, threads)| {
+                    threads.iter()
+                        .find(|t| t.id == thread_id)
+                        .map(|t| (t.clone(), a_tag.clone()))
+                });
+
+            let Some((thread, project_a_tag)) = thread_and_project else {
+                continue;
+            };
+
+            // Skip projects not in visible_projects
+            if !self.visible_projects.is_empty() && !self.visible_projects.contains(&project_a_tag) {
+                continue;
+            }
+
+            seen_threads.insert(thread_id.clone());
+
+            let project_name = store.get_project_name(&project_a_tag);
+            let excerpt = Self::extract_excerpt(&content, &filter);
+
+            results.push(SearchResult {
+                thread,
+                project_a_tag,
+                project_name,
+                match_type: SearchMatchType::Message { message_id: event_id },
+                excerpt: Some(excerpt),
+            });
         }
 
         // Sort by last activity (most recent first)

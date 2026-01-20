@@ -1242,6 +1242,64 @@ impl AppDataStore {
         None
     }
 
+    // ===== Text Search Methods =====
+
+    /// Search content using nostrdb's fulltext search.
+    /// Returns (event_id, thread_id, content, kind) for matching events.
+    /// thread_id is extracted from e-tags (root marker) or is the event itself if it's a thread root.
+    pub fn text_search(&self, query: &str, limit: i32) -> Vec<(String, Option<String>, String, u32)> {
+        eprintln!("[SEARCH] query='{}' limit={}", query, limit);
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            eprintln!("[SEARCH] failed to create txn");
+            return vec![];
+        };
+
+        // nostrdb only fulltext indexes kind:1 and kind:30023, so no need to filter
+        let result = self.ndb.text_search(&txn, query, None, limit);
+        eprintln!("[SEARCH] result={:?}", result.as_ref().map(|v| v.len()));
+
+        let Ok(notes) = result else {
+            eprintln!("[SEARCH] error from text_search");
+            return vec![];
+        };
+
+        eprintln!("[SEARCH] found {} notes", notes.len());
+        notes
+            .iter()
+            .map(|note| {
+                let event_id = hex::encode(note.id());
+                let content = note.content().to_string();
+                let kind = note.kind() as u32;
+
+                // Find thread_id: look for e-tag with "root" marker, or use the event itself
+                let thread_id = Self::extract_thread_id_from_note(note);
+
+                (event_id, thread_id, content, kind)
+            })
+            .collect()
+    }
+
+    /// Extract thread ID from a note's e-tags (looking for "root" marker per NIP-10)
+    fn extract_thread_id_from_note(note: &nostrdb::Note) -> Option<String> {
+        for tag in note.tags() {
+            if tag.get(0).and_then(|t| t.variant().str()) == Some("e") {
+                // Check for "root" marker in position 3
+                let marker = tag.get(3).and_then(|t| t.variant().str());
+                if marker == Some("root") {
+                    // Get the event ID from position 1
+                    if let Some(id) = tag.get(1).and_then(|t| t.variant().str()) {
+                        return Some(id.to_string());
+                    }
+                    if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        return Some(hex::encode(id_bytes));
+                    }
+                }
+            }
+        }
+        None
+    }
+
     // ===== Backend Trust Methods =====
 
     /// Set the trusted backends from preferences (called on init)
