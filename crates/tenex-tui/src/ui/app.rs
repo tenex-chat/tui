@@ -1489,6 +1489,7 @@ impl App {
                 self.subthread_root = None;
                 self.subthread_root_message = None;
                 self.input_mode = InputMode::Editing; // Auto-focus input
+                self.view = View::Chat; // Switch to Chat view
             }
         }
 
