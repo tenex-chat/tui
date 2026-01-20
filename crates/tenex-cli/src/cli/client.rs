@@ -105,9 +105,9 @@ pub fn send_command(command: CliCommand, pretty: bool, config: Option<CliConfig>
     Ok(())
 }
 
-/// Check if the daemon is running (uses default socket path)
-pub fn is_daemon_running() -> bool {
-    let socket_path = get_socket_path(None);
+/// Check if the daemon is running
+pub fn is_daemon_running(config: Option<&CliConfig>) -> bool {
+    let socket_path = get_socket_path(config);
     if !socket_path.exists() {
         return false;
     }
@@ -116,7 +116,7 @@ pub fn is_daemon_running() -> bool {
     UnixStream::connect(&socket_path).is_ok()
 }
 
-/// Get the socket path for external use (uses default socket path)
-pub fn socket_path() -> std::path::PathBuf {
-    get_socket_path(None)
+/// Get the socket path for external use
+pub fn socket_path(config: Option<&CliConfig>) -> std::path::PathBuf {
+    get_socket_path(config)
 }

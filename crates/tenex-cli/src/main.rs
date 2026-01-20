@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use tenex_cli::cli::{run_daemon, send_command, CliCommand, CliConfig};
+use tenex_cli::cli::{is_daemon_running, run_daemon, send_command, socket_path, CliCommand, CliConfig};
 
 #[derive(Parser)]
 #[command(name = "tenex-cli")]
@@ -70,7 +70,11 @@ enum Commands {
     },
 
     /// Get daemon status
-    Status,
+    Status {
+        /// Quick check if daemon is running (doesn't auto-start daemon)
+        #[arg(long)]
+        running: bool,
+    },
 
     /// Shutdown the daemon
     Shutdown,
@@ -120,7 +124,34 @@ fn main() {
             CliCommand::CreateThread { project_id, title }
         }
         Some(Commands::BootProject { project_id }) => CliCommand::BootProject { project_id },
-        Some(Commands::Status) => CliCommand::Status,
+        Some(Commands::Status { running }) => {
+            if running {
+                // Quick check without auto-starting daemon
+                let is_running = is_daemon_running(config.as_ref());
+                let path = socket_path(config.as_ref());
+                if cli.pretty {
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&serde_json::json!({
+                            "running": is_running,
+                            "socket_path": path.display().to_string(),
+                        }))
+                        .unwrap()
+                    );
+                } else {
+                    println!(
+                        "{}",
+                        serde_json::to_string(&serde_json::json!({
+                            "running": is_running,
+                            "socket_path": path.display().to_string(),
+                        }))
+                        .unwrap()
+                    );
+                }
+                std::process::exit(if is_running { 0 } else { 1 });
+            }
+            CliCommand::Status
+        }
         Some(Commands::Shutdown) => CliCommand::Shutdown,
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
         Some(Commands::CreateProject { name, description, agent }) => {
