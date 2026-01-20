@@ -120,6 +120,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             app.modal_state =
                 ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
         }
+        KeyCode::Char('H') if has_shift => {
+            // Show/hide archived items based on focus
+            if app.sidebar_focused {
+                app.toggle_show_archived_projects();
+            } else {
+                app.toggle_show_archived();
+            }
+        }
         KeyCode::Tab => {
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Recent => HomeTab::Inbox,
@@ -188,6 +196,19 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.visible_projects.insert(a_tag);
                 }
                 app.save_selected_projects();
+
+                // Clamp selection to valid range after filtering change
+                let current = app.current_selection();
+                let max = match app.home_panel_focus {
+                    HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
+                    HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                    HomeTab::Reports => app.reports().len().saturating_sub(1),
+                    HomeTab::Status => app.status_threads().len().saturating_sub(1),
+                    HomeTab::Search => app.search_results().len().saturating_sub(1),
+                };
+                if current > max {
+                    app.set_current_selection(max);
+                }
             }
         }
         KeyCode::Char('s') if app.sidebar_focused => {
@@ -342,6 +363,15 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 if item.has_children {
                     app.toggle_thread_collapse(&item.thread.id);
                 }
+            }
+        }
+        KeyCode::Char('c') if app.home_panel_focus == HomeTab::Recent => {
+            // Toggle collapse/expand all threads
+            let now_collapsed = app.toggle_collapse_all_threads();
+            if now_collapsed {
+                app.set_status("All threads collapsed");
+            } else {
+                app.set_status("All threads expanded");
             }
         }
         // Vim-style navigation (j/k)
