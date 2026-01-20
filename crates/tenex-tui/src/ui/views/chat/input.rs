@@ -1,10 +1,11 @@
+use crate::ui::app::InputContextFocus;
 use crate::ui::card;
 use crate::ui::layout;
 use crate::ui::notifications::NotificationLevel;
 use crate::ui::{theme, App, InputMode, ModalState};
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -136,23 +137,24 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    // Agent display with model info
+    // Agent display with model info (no @ prefix)
     let (agent_display, agent_model_display) = app
         .selected_agent
         .as_ref()
         .map(|a| {
             let model = a.model
                 .as_ref()
-                .map(|m| format!(" ({})", m))
-                .unwrap_or_default();
+                .map(|m| format!("({})", m))
+                .unwrap_or_else(|| "(no model)".to_string());
             (a.name.clone(), model)
         })
         .unwrap_or_else(|| ("none".to_string(), String::new()));
 
+    // Branch display (no % prefix)
     let branch_display = app
         .selected_branch
         .as_ref()
-        .map(|b| format!(" %{}", b))
+        .cloned()
         .unwrap_or_default();
 
     let project_display = app
@@ -314,19 +316,20 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         ]));
     }
 
-    // Build nudge display string
-    let nudge_display = if app.selected_nudge_ids.is_empty() {
-        String::new()
+    // Build nudge display string - always show "/" even if empty (for selection)
+    // Uses per-tab isolated nudge selections
+    let selected_nudge_ids = app.selected_nudge_ids();
+    let nudge_display = if selected_nudge_ids.is_empty() {
+        "/".to_string()
     } else {
-        let nudge_titles: Vec<String> = app
-            .selected_nudge_ids
+        let nudge_titles: Vec<String> = selected_nudge_ids
             .iter()
             .filter_map(|id| app.data_store.borrow().get_nudge(id).map(|n| format!("/{}", n.title)))
             .collect();
-        format!(" [{}]", nudge_titles.join(", "))
+        format!("[{}]", nudge_titles.join(", "))
     };
 
-    // Context line at bottom: @agent (model) %branch project [nudges]
+    // Context line at bottom: agent (model) branch project [nudges]
     // Add scroll indicator if we're scrolling
     let scroll_indicator = if total_content_lines > available_content_lines {
         let current_line = cursor_visual_row + 1;
@@ -334,40 +337,75 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         String::new()
     };
-    let context_str = format!("@{}{}{}{}{}{}", agent_display, agent_model_display, branch_display, project_display, nudge_display, scroll_indicator);
+
+    // Get focus state for highlighting
+    let context_focus = app.input_context_focus;
+
+    // Style helper for focused items (highlighted with inverse colors)
+    let focused_style = |base_fg: Color| -> Style {
+        Style::default()
+            .fg(Color::Black)
+            .bg(base_fg)
+            .add_modifier(Modifier::BOLD)
+    };
+
+    // Calculate context string for padding (without prefixes now)
+    let branch_str = if branch_display.is_empty() { String::new() } else { format!(" {}", branch_display) };
+    let nudge_str = format!(" {}", nudge_display);
+    let context_str = format!("{} {}{}{}{}{}", agent_display, agent_model_display, branch_str, project_display, nudge_str, scroll_indicator);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
+    // Build context line with highlighting based on focus
     let mut context_spans = vec![
         Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
         Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
-        Span::styled(
-            format!("@{}", agent_display),
-            Style::default()
-                .fg(theme::ACCENT_PRIMARY)
-                .bg(input_bg),
-        ),
-        Span::styled(
-            agent_model_display.clone(),
-            Style::default().fg(theme::TEXT_DIM).bg(input_bg),
-        ),
-        Span::styled(
-            branch_display.clone(),
-            Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg),
-        ),
-        Span::styled(
-            project_display.clone(),
-            Style::default().fg(theme::TEXT_MUTED).bg(input_bg),
-        ),
     ];
 
-    // Add nudge display if any selected
-    if !nudge_display.is_empty() {
-        context_spans.push(Span::styled(
-            nudge_display,
-            Style::default().fg(theme::ACCENT_WARNING).bg(input_bg),
-        ));
+    // Agent name (highlighted if focused)
+    let agent_style = if context_focus == Some(InputContextFocus::Agent) {
+        focused_style(theme::ACCENT_PRIMARY)
+    } else {
+        Style::default().fg(theme::ACCENT_PRIMARY).bg(input_bg)
+    };
+    context_spans.push(Span::styled(agent_display.clone(), agent_style));
+
+    // Space separator
+    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
+
+    // Model (highlighted if focused)
+    let model_style = if context_focus == Some(InputContextFocus::Model) {
+        focused_style(theme::TEXT_PRIMARY)
+    } else {
+        Style::default().fg(theme::TEXT_DIM).bg(input_bg)
+    };
+    context_spans.push(Span::styled(agent_model_display.clone(), model_style));
+
+    // Branch (highlighted if focused)
+    if !branch_display.is_empty() {
+        context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
+        let branch_style = if context_focus == Some(InputContextFocus::Branch) {
+            focused_style(theme::ACCENT_SUCCESS)
+        } else {
+            Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg)
+        };
+        context_spans.push(Span::styled(branch_display.clone(), branch_style));
     }
+
+    // Project (not selectable, always muted)
+    context_spans.push(Span::styled(
+        project_display.clone(),
+        Style::default().fg(theme::TEXT_MUTED).bg(input_bg),
+    ));
+
+    // Nudge display (highlighted if focused) - always shown
+    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
+    let nudge_style = if context_focus == Some(InputContextFocus::Nudge) {
+        focused_style(theme::ACCENT_WARNING)
+    } else {
+        Style::default().fg(theme::ACCENT_WARNING).bg(input_bg)
+    };
+    context_spans.push(Span::styled(nudge_display, nudge_style));
 
     // Add scroll indicator if scrolling
     if !scroll_indicator.is_empty() {

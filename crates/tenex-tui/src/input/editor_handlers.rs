@@ -4,12 +4,19 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::input::input_prefix;
 use crate::nostr::NostrCommand;
-use crate::ui::app::VimMode;
+use crate::ui::app::{InputContextFocus, VimMode};
 use crate::ui::{App, InputMode};
 
 /// Handle key events for the chat editor (rich text editing)
 pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
+    // If context line is focused, handle navigation there first
+    if app.input_context_focus.is_some() {
+        handle_context_focus_key(app, key);
+        return;
+    }
+
     // If vim mode is enabled, dispatch based on mode
     if app.vim_enabled {
         match app.vim_mode {
@@ -240,10 +247,11 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up => {
             app.chat_editor.move_up_visual(app.chat_input_wrap_width);
         }
-        // Down on last line = open context selector (agent/branch), otherwise move down
+        // Down on last line = focus context line (agent/model/branch), otherwise move down
         KeyCode::Down => {
             if app.chat_editor.is_on_last_visual_line(app.chat_input_wrap_width) {
-                app.open_context_selector();
+                // Focus the agent in the context line
+                app.input_context_focus = Some(InputContextFocus::Agent);
             } else {
                 app.chat_editor.move_down_visual(app.chat_input_wrap_width);
             }
@@ -254,10 +262,96 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::PageDown => {
             app.scroll_down(20);
         }
-        // Regular character input
+        // Regular character input - check for prefix triggers first
         KeyCode::Char(c) => {
-            app.chat_editor.insert_char(c);
-            app.save_chat_draft();
+            // Check if this is a prefix trigger (e.g., @ on empty input)
+            if !input_prefix::try_handle_prefix(app, c) {
+                // Not a prefix trigger, insert normally
+                app.chat_editor.insert_char(c);
+                app.save_chat_draft();
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handle key events when context line is focused (agent/model/branch selection)
+fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
+    use crate::ui::ModalState;
+
+    let focus = match app.input_context_focus {
+        Some(f) => f,
+        None => return,
+    };
+
+    match key.code {
+        // Up or Esc = return to text input
+        KeyCode::Up | KeyCode::Esc => {
+            app.input_context_focus = None;
+        }
+        // Left = move to previous item (Nudge -> Branch -> Model -> Agent)
+        KeyCode::Left => {
+            app.input_context_focus = Some(match focus {
+                InputContextFocus::Agent => InputContextFocus::Agent, // Already at leftmost
+                InputContextFocus::Model => InputContextFocus::Agent,
+                InputContextFocus::Branch => InputContextFocus::Model,
+                InputContextFocus::Nudge => InputContextFocus::Branch,
+            });
+        }
+        // Right = move to next item (Agent -> Model -> Branch -> Nudge)
+        KeyCode::Right => {
+            app.input_context_focus = Some(match focus {
+                InputContextFocus::Agent => InputContextFocus::Model,
+                InputContextFocus::Model => InputContextFocus::Branch,
+                InputContextFocus::Branch => InputContextFocus::Nudge,
+                InputContextFocus::Nudge => InputContextFocus::Nudge, // Already at rightmost
+            });
+        }
+        // Enter = open the appropriate selector modal
+        KeyCode::Enter => {
+            match focus {
+                InputContextFocus::Agent => {
+                    app.input_context_focus = None;
+                    app.open_agent_selector();
+                }
+                InputContextFocus::Model => {
+                    // Open agent settings for the current agent to change the model
+                    if let Some(agent) = &app.selected_agent {
+                        if let Some(project) = &app.selected_project {
+                            let (all_tools, all_models) = app
+                                .data_store
+                                .borrow()
+                                .get_project_status(&project.a_tag())
+                                .map(|status| {
+                                    let tools = status.tools().iter().map(|s| s.to_string()).collect();
+                                    let models = status.models().iter().map(|s| s.to_string()).collect();
+                                    (tools, models)
+                                })
+                                .unwrap_or_default();
+
+                            let settings_state = crate::ui::modal::AgentSettingsState::new(
+                                agent.name.clone(),
+                                agent.pubkey.clone(),
+                                project.a_tag(),
+                                agent.model.clone(),
+                                agent.tools.clone(),
+                                all_models,
+                                all_tools,
+                            );
+                            app.input_context_focus = None;
+                            app.modal_state = ModalState::AgentSettings(settings_state);
+                        }
+                    }
+                }
+                InputContextFocus::Branch => {
+                    app.input_context_focus = None;
+                    app.open_branch_selector();
+                }
+                InputContextFocus::Nudge => {
+                    app.input_context_focus = None;
+                    app.open_nudge_selector();
+                }
+            }
         }
         _ => {}
     }
@@ -389,7 +483,8 @@ fn handle_send_message(app: &mut App) {
             let project_a_tag = project.a_tag();
             let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
             let branch = app.selected_branch.clone();
-            let nudge_ids = app.selected_nudge_ids.clone();
+            // Per-tab isolated nudge selection
+            let nudge_ids = app.selected_nudge_ids();
 
             if let Some(ref thread) = app.selected_thread {
                 // Reply to existing thread
@@ -413,7 +508,7 @@ fn handle_send_message(app: &mut App) {
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
                     app.delete_chat_draft();
-                    app.selected_nudge_ids.clear();
+                    app.clear_selected_nudges();
                 }
             } else {
                 // Create new thread (kind:1)
@@ -435,7 +530,7 @@ fn handle_send_message(app: &mut App) {
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
-                    app.selected_nudge_ids.clear();
+                    app.clear_selected_nudges();
                 }
             }
         }

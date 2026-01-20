@@ -140,11 +140,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         render_branch_selector(f, app, area);
     }
 
-    // Render context selector popup if showing (Down arrow from input)
-    if matches!(app.modal_state, ModalState::ContextSelector(_)) {
-        render_context_selector(f, app, area);
-    }
-
     // Render attachment modal if showing
     if app.is_attachment_modal_open() {
         render_attachment_modal(f, app, area);
@@ -205,8 +200,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::home::render_search_modal(f, app, area);
     }
 
-    // In-conversation search overlay (Ctrl+F)
-    if app.chat_search.active {
+    // In-conversation search overlay (Ctrl+F) - per-tab isolated
+    if app.is_chat_search_active() {
         render_chat_search_bar(f, app, area);
     }
 }
@@ -503,141 +498,6 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Render the context selector (agent + branch) - accessed via Down arrow from input
-fn render_context_selector(f: &mut Frame, app: &App, area: Rect) {
-    use crate::ui::modal::ContextSelectorFocus;
-    use ratatui::text::{Line, Span};
-
-    let state = match &app.modal_state {
-        ModalState::ContextSelector(s) => s,
-        _ => return,
-    };
-
-    let agents = app.available_agents();
-    let branches = app.available_branches();
-
-    // Calculate dimensions - show in bottom portion of screen, above input
-    let max_items = 8;
-    let agent_count = agents.len().min(max_items);
-    let branch_count = branches.len().min(max_items);
-    let content_height = agent_count.max(branch_count).max(1) as u16 + 3; // +3 for header, hints, padding
-
-    let popup_width = area.width.min(80);
-    let popup_height = content_height.min(area.height / 2);
-    let popup_x = (area.width.saturating_sub(popup_width)) / 2;
-    let popup_y = area.height.saturating_sub(popup_height + 10); // Above input area
-
-    let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
-
-    // Clear and render background
-    f.render_widget(Clear, popup_area);
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(theme::BORDER_ACTIVE))
-        .style(Style::default().bg(theme::BG_CARD));
-    f.render_widget(block, popup_area);
-
-    // Inner area
-    let inner = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + 1,
-        popup_area.width.saturating_sub(4),
-        popup_area.height.saturating_sub(3),
-    );
-
-    // Split into two columns: Agent (left) and Branch (right)
-    let col_width = inner.width / 2;
-    let agent_col = Rect::new(inner.x, inner.y, col_width.saturating_sub(1), inner.height);
-    let branch_col = Rect::new(inner.x + col_width, inner.y, col_width, inner.height);
-
-    // Render agent column
-    let agent_header_style = if state.focus == ContextSelectorFocus::Agent {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(ratatui::style::Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    let agent_header = Paragraph::new(Line::from(vec![
-        Span::styled("Agent", agent_header_style),
-    ]));
-    f.render_widget(agent_header, Rect::new(agent_col.x, agent_col.y, agent_col.width, 1));
-
-    // Render agents
-    let mut agent_lines: Vec<Line> = Vec::new();
-    for (i, agent) in agents.iter().enumerate().take(max_items) {
-        let is_selected = i == state.agent_index && state.focus == ContextSelectorFocus::Agent;
-        let model_info = agent
-            .model
-            .as_ref()
-            .map(|m| format!(" ({})", m))
-            .unwrap_or_default();
-
-        let style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).bg(theme::BG_SELECTED)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-        let model_style = if is_selected {
-            Style::default().fg(theme::TEXT_MUTED).bg(theme::BG_SELECTED)
-        } else {
-            Style::default().fg(theme::TEXT_DIM)
-        };
-
-        agent_lines.push(Line::from(vec![
-            Span::styled(&agent.name, style),
-            Span::styled(model_info, model_style),
-        ]));
-    }
-    if agents.is_empty() {
-        agent_lines.push(Line::from(Span::styled("No agents", Style::default().fg(theme::TEXT_MUTED))));
-    }
-    let agents_para = Paragraph::new(agent_lines);
-    f.render_widget(agents_para, Rect::new(agent_col.x, agent_col.y + 1, agent_col.width, agent_col.height.saturating_sub(1)));
-
-    // Render branch column
-    let branch_header_style = if state.focus == ContextSelectorFocus::Branch {
-        Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(ratatui::style::Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    let branch_header = Paragraph::new(Line::from(vec![
-        Span::styled("Branch", branch_header_style),
-    ]));
-    f.render_widget(branch_header, Rect::new(branch_col.x, branch_col.y, branch_col.width, 1));
-
-    // Render branches
-    let mut branch_lines: Vec<Line> = Vec::new();
-    for (i, branch) in branches.iter().enumerate().take(max_items) {
-        let is_selected = i == state.branch_index && state.focus == ContextSelectorFocus::Branch;
-        let style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).bg(theme::BG_SELECTED)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-        branch_lines.push(Line::from(Span::styled(branch, style)));
-    }
-    if branches.is_empty() {
-        branch_lines.push(Line::from(Span::styled("No branches", Style::default().fg(theme::TEXT_MUTED))));
-    }
-    let branches_para = Paragraph::new(branch_lines);
-    f.render_widget(branches_para, Rect::new(branch_col.x, branch_col.y + 1, branch_col.width, branch_col.height.saturating_sub(1)));
-
-    // Render hints at bottom of popup
-    let hints_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + popup_area.height.saturating_sub(2),
-        popup_area.width.saturating_sub(4),
-        1,
-    );
-    let hints_text = if state.focus == ContextSelectorFocus::Agent {
-        "↑ back to input · ↓ next · Tab switch · s settings · Enter select"
-    } else {
-        "↑ back to input · ↓ next · Tab switch · Enter select"
-    };
-    let hints = Paragraph::new(hints_text)
-        .style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(hints, hints_area);
-}
-
 /// Render the chat actions modal (Ctrl+T /)
 fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState) {
     let actions = state.available_actions();
@@ -889,20 +749,25 @@ fn render_chat_search_bar(f: &mut Frame, app: &App, area: Rect) {
         1,
     );
 
-    // Build search line
-    let query_display = if app.chat_search.query.is_empty() {
+    // Build search line (per-tab isolated)
+    let search_query = app.chat_search_query();
+    let (current_match, total_matches) = app.chat_search()
+        .map(|s| (s.current_match, s.total_matches))
+        .unwrap_or((0, 0));
+
+    let query_display = if search_query.is_empty() {
         Span::styled("Type to search...", Style::default().fg(theme::TEXT_MUTED))
     } else {
-        Span::styled(&app.chat_search.query, Style::default().fg(theme::TEXT_PRIMARY))
+        Span::styled(search_query.clone(), Style::default().fg(theme::TEXT_PRIMARY))
     };
 
-    let match_info = if app.chat_search.total_matches > 0 {
+    let match_info = if total_matches > 0 {
         format!(
             " [{}/{}]",
-            app.chat_search.current_match + 1,
-            app.chat_search.total_matches
+            current_match + 1,
+            total_matches
         )
-    } else if !app.chat_search.query.is_empty() {
+    } else if !search_query.is_empty() {
         " [0 matches]".to_string()
     } else {
         String::new()

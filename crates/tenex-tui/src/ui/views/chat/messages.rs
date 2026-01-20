@@ -153,12 +153,13 @@ pub(crate) fn render_messages_panel(
                     let card_bg = theme::BG_CARD;
                     let card_bg_selected = theme::BG_SELECTED;
 
-                    // Check if this message has a search match
+                    // Check if this message has a search match (per-tab isolated)
                     let has_search_match = app.message_has_search_match(&msg.id);
-                    let is_current_search = app.chat_search.active &&
-                        app.chat_search.match_locations.get(app.chat_search.current_match)
-                            .map(|loc| loc.message_id == msg.id)
-                            .unwrap_or(false);
+                    let is_current_search = app.chat_search()
+                        .filter(|s| s.active)
+                        .and_then(|s| s.match_locations.get(s.current_match))
+                        .map(|loc| loc.message_id == msg.id)
+                        .unwrap_or(false);
 
                     let bg = if is_current_search {
                         theme::BG_SEARCH_CURRENT
@@ -191,14 +192,15 @@ pub(crate) fn render_messages_panel(
 
                         if let Some(tool_call) = tool_call_from_args {
                             // Render using the structured tool_args data
-                            messages_text.push(render_tool_line(&tool_call, indicator_color));
+                            // Pass content as fallback for unknown tools
+                            messages_text.push(render_tool_line(&tool_call, indicator_color, Some(&msg.content)));
                         } else {
                             // Fallback: parse content for embedded JSON tool calls
                             let parsed = parse_message_content(&msg.content);
 
                             if let MessageContent::Mixed { tool_calls, .. } = &parsed {
                                 for tool_call in tool_calls {
-                                    messages_text.push(render_tool_line(tool_call, indicator_color));
+                                    messages_text.push(render_tool_line(tool_call, indicator_color, Some(&msg.content)));
                                 }
                             } else {
                                 // Final fallback: show tool name with content preview
@@ -308,7 +310,7 @@ pub(crate) fn render_messages_panel(
                         // Tool calls from content (with tool-specific rendering, no background)
                         if let MessageContent::Mixed { tool_calls, .. } = &parsed {
                             for tool_call in tool_calls {
-                                messages_text.push(render_tool_line(tool_call, indicator_color));
+                                messages_text.push(render_tool_line(tool_call, indicator_color, Some(&msg.content)));
                             }
                         }
                     }

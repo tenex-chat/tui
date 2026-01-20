@@ -333,6 +333,51 @@ pub struct NavigationStackEntry {
     pub selected_message_index: usize,
 }
 
+/// Per-tab message history state (isolated from other tabs)
+#[derive(Debug, Clone, Default)]
+pub struct TabMessageHistory {
+    /// Sent message history for this tab (most recent last, max 50)
+    pub messages: Vec<String>,
+    /// Current index in history (None = typing new message)
+    pub index: Option<usize>,
+    /// Draft preserved when browsing history
+    pub draft: Option<String>,
+}
+
+impl TabMessageHistory {
+    /// Maximum number of messages to keep in history
+    pub const MAX_HISTORY: usize = 50;
+
+    /// Add a message to history
+    pub fn add(&mut self, message: String) {
+        if message.trim().is_empty() {
+            return;
+        }
+        // Avoid duplicates at the end
+        if self.messages.last().map(|s| s.as_str()) != Some(message.trim()) {
+            self.messages.push(message);
+            // Limit to max entries
+            if self.messages.len() > Self::MAX_HISTORY {
+                self.messages.remove(0);
+            }
+        }
+        // Reset history navigation
+        self.index = None;
+        self.draft = None;
+    }
+
+    /// Check if currently browsing history
+    pub fn is_browsing(&self) -> bool {
+        self.index.is_some()
+    }
+
+    /// Exit history mode
+    pub fn exit(&mut self) {
+        self.index = None;
+        self.draft = None;
+    }
+}
+
 /// An open tab representing a thread or draft conversation
 #[derive(Debug, Clone)]
 pub struct OpenTab {
@@ -349,6 +394,12 @@ pub struct OpenTab {
     /// Navigation stack for drilling into delegations.
     /// Each entry represents a parent conversation we can return to with Esc.
     pub navigation_stack: Vec<NavigationStackEntry>,
+    /// Per-tab message history (isolated from other tabs)
+    pub message_history: TabMessageHistory,
+    /// Per-tab chat search state (isolated from other tabs)
+    pub chat_search: ChatSearchState,
+    /// Per-tab selected nudge IDs (isolated from other tabs)
+    pub selected_nudge_ids: Vec<String>,
 }
 
 impl OpenTab {
@@ -366,6 +417,9 @@ impl OpenTab {
             has_unread: false,
             draft_id: None,
             navigation_stack: Vec::new(),
+            message_history: TabMessageHistory::default(),
+            chat_search: ChatSearchState::default(),
+            selected_nudge_ids: Vec::new(),
         }
     }
 
@@ -385,6 +439,9 @@ impl OpenTab {
             has_unread: false,
             draft_id: Some(draft_id),
             navigation_stack: Vec::new(),
+            message_history: TabMessageHistory::default(),
+            chat_search: ChatSearchState::default(),
+            selected_nudge_ids: Vec::new(),
         }
     }
 }
