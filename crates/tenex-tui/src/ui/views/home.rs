@@ -222,8 +222,9 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     // Get q-tag relationships for fallback parent-child detection
     let q_tag_relationships = app.data_store.borrow().get_q_tag_relationships();
 
-    // Build hierarchical thread list
-    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships);
+    // Build hierarchical thread list (with default collapsed state from preferences)
+    let default_collapsed = app.threads_default_collapsed();
+    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships, default_collapsed);
 
     // Helper to calculate card height
     // Full mode: 4 lines (title, summary, activity, reply) + spacing, but some may be hidden
@@ -321,7 +322,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 pub fn get_hierarchical_threads(app: &App) -> Vec<HierarchicalThread> {
     let recent = app.recent_threads();
     let q_tag_relationships = app.data_store.borrow().get_q_tag_relationships();
-    build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships)
+    let default_collapsed = app.threads_default_collapsed();
+    build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships, default_collapsed)
 }
 
 /// Render card content in table-like format:
@@ -1512,7 +1514,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
         }
     } else {
         match app.home_panel_focus {
-            HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · Enter open · n new · m filter · f time · A agents · q quit",
+            HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · c fold all · Enter open · n new · m filter · f time · A agents · q quit",
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
             HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
             HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",

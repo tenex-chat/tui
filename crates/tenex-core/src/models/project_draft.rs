@@ -76,6 +76,9 @@ pub struct Preferences {
     pub archived_thread_ids: HashSet<String>,
     #[serde(default)]
     pub archived_project_ids: HashSet<String>,
+    /// If true, threads with children are collapsed by default in the Recent tab
+    #[serde(default)]
+    pub threads_default_collapsed: bool,
 }
 
 pub struct PreferencesStorage {
@@ -175,5 +178,20 @@ impl PreferencesStorage {
         };
         self.save_to_file();
         is_now_archived
+    }
+
+    pub fn threads_default_collapsed(&self) -> bool {
+        self.prefs.threads_default_collapsed
+    }
+
+    pub fn set_threads_default_collapsed(&mut self, value: bool) {
+        self.prefs.threads_default_collapsed = value;
+        self.save_to_file();
+    }
+
+    pub fn toggle_threads_default_collapsed(&mut self) -> bool {
+        self.prefs.threads_default_collapsed = !self.prefs.threads_default_collapsed;
+        self.save_to_file();
+        self.prefs.threads_default_collapsed
     }
 }
