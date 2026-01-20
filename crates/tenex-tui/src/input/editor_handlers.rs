@@ -125,9 +125,9 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.chat_editor.kill_to_line_end();
             app.save_chat_draft();
         }
-        // Ctrl+U = kill to beginning of line
+        // Ctrl+U = clear entire input (can be restored with Ctrl+Z)
         KeyCode::Char('u') if has_ctrl => {
-            app.chat_editor.kill_to_line_start();
+            app.chat_editor.clear_input();
             app.save_chat_draft();
         }
         // Ctrl+W = delete word backward
