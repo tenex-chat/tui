@@ -932,6 +932,18 @@ impl ReportCopyOption {
     }
 }
 
+/// Debug stats modal state
+#[derive(Debug, Clone, Default)]
+pub struct DebugStatsState {
+    pub scroll_offset: usize,
+}
+
+impl DebugStatsState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Unified modal state - only one modal can be open at a time
 #[derive(Debug, Clone)]
 pub enum ModalState {
@@ -986,6 +998,8 @@ pub enum ModalState {
     DraftNavigator(DraftNavigatorState),
     /// Backend approval modal for unknown backend pubkeys
     BackendApproval(BackendApprovalState),
+    /// Debug stats modal (Ctrl+T D)
+    DebugStats(DebugStatsState),
 }
 
 impl Default for ModalState {

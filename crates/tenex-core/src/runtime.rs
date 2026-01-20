@@ -12,6 +12,7 @@ use crate::config::CoreConfig;
 use crate::events::CoreEvent;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::models::Message;
+use crate::stats::SharedEventStats;
 use crate::store::{AppDataStore, Database};
 
 #[derive(Clone)]
@@ -33,6 +34,7 @@ pub struct CoreRuntime {
     handle: CoreHandle,
     worker_handle: Option<JoinHandle<()>>,
     ndb_stream: SubscriptionStream,
+    event_stats: SharedEventStats,
 }
 
 impl CoreRuntime {
@@ -49,13 +51,14 @@ impl CoreRuntime {
         let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
         let (data_tx, data_rx) = mpsc::channel::<DataChange>();
 
-        let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx);
+        let event_stats = SharedEventStats::new();
+        let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx, event_stats.clone());
         let worker_handle = std::thread::spawn(move || {
             worker.run();
         });
 
         // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded
-        // They should only be received via live subscriptions, never read from nostrdb
+        // They are processed directly via DataChange channel, not through nostrdb
         let ndb_filter = FilterBuilder::new()
             .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
             .build();
@@ -70,6 +73,7 @@ impl CoreRuntime {
             handle: CoreHandle { command_tx },
             worker_handle: Some(worker_handle),
             ndb_stream,
+            event_stats,
         })
     }
 
@@ -87,6 +91,10 @@ impl CoreRuntime {
 
     pub fn ndb(&self) -> Arc<Ndb> {
         self.ndb.clone()
+    }
+
+    pub fn event_stats(&self) -> SharedEventStats {
+        self.event_stats.clone()
     }
 
     pub fn take_data_rx(&mut self) -> Option<Receiver<DataChange>> {
