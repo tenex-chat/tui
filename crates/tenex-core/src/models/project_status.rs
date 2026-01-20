@@ -24,6 +24,8 @@ pub struct ProjectStatus {
     /// All available models from model tags (including unassigned ones)
     pub all_models: Vec<String>,
     pub created_at: u64,
+    /// The pubkey of the backend that published this status event
+    pub backend_pubkey: String,
 }
 
 impl ProjectStatus {
@@ -32,6 +34,9 @@ impl ProjectStatus {
         if note.kind() != 24010 {
             return None;
         }
+
+        // Extract backend pubkey from note author
+        let backend_pubkey = hex::encode(note.pubkey());
 
         // Extract tags, handling the id variant for agent pubkeys
         let mut tags: Vec<Vec<String>> = Vec::new();
@@ -49,11 +54,11 @@ impl ProjectStatus {
             tags.push(parts);
         }
 
-        Self::from_tags(note.created_at(), tags)
+        Self::from_tags(note.created_at(), tags, backend_pubkey)
     }
 
     /// Common parsing logic for tags
-    fn from_tags(created_at: u64, tags: Vec<Vec<String>>) -> Option<Self> {
+    fn from_tags(created_at: u64, tags: Vec<Vec<String>>, backend_pubkey: String) -> Option<Self> {
         let mut project_coordinate: Option<String> = None;
         let mut agent_map: HashMap<String, ProjectAgent> = HashMap::new();
         let mut branches: Vec<String> = Vec::new();
@@ -144,6 +149,7 @@ impl ProjectStatus {
             branches,
             all_models,
             created_at,
+            backend_pubkey,
         })
     }
 

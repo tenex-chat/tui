@@ -1,13 +1,10 @@
 use anyhow::Result;
 use nostrdb::Ndb;
-use rusqlite::Connection;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 pub struct Database {
-    #[allow(dead_code)] // Used in tests
     pub ndb: Arc<Ndb>,
-    creds_conn: Arc<Mutex<Connection>>,
 }
 
 impl Database {
@@ -29,25 +26,7 @@ impl Database {
         let db_dir = db_dir.as_ref();
         std::fs::create_dir_all(db_dir)?;
 
-        let creds_path = db_dir.join("credentials.db");
-        let creds_conn = Connection::open(&creds_path)?;
-        creds_conn.execute_batch(
-            r#"
-            CREATE TABLE IF NOT EXISTS credentials (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                ncryptsec TEXT NOT NULL
-            );
-            "#,
-        )?;
-
-        Ok(Self {
-            ndb,
-            creds_conn: Arc::new(Mutex::new(creds_conn)),
-        })
-    }
-
-    pub fn credentials_conn(&self) -> Arc<Mutex<Connection>> {
-        self.creds_conn.clone()
+        Ok(Self { ndb })
     }
 }
 

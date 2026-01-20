@@ -1,3 +1,4 @@
+use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectStatus, Report, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -46,6 +47,11 @@ pub struct AppDataStore {
 
     // Pending subscriptions for new projects (drained by CoreRuntime)
     pending_project_subscriptions: Vec<String>,
+
+    // Backend trust state
+    approved_backends: HashSet<String>,
+    blocked_backends: HashSet<String>,
+    pending_backend_approvals: Vec<PendingBackendApproval>,
 }
 
 impl AppDataStore {
@@ -69,6 +75,9 @@ impl AppDataStore {
             document_threads: HashMap::new(),
             operations_by_event: HashMap::new(),
             pending_project_subscriptions: Vec::new(),
+            approved_backends: HashSet::new(),
+            blocked_backends: HashSet::new(),
+            pending_backend_approvals: Vec::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -161,12 +170,10 @@ impl AppDataStore {
             self.projects = projects;
         }
 
-        // Load statuses and threads for all projects
-        let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
+        // NOTE: Project statuses are loaded in set_trusted_backends() after login
+        // This ensures trust validation is applied
 
-        for a_tag in &a_tags {
-            self.reload_project_status(a_tag);
-        }
+        let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
 
         for a_tag in a_tags {
             // Pre-load threads for each project
@@ -433,26 +440,21 @@ impl AppDataStore {
         }
     }
 
-    fn reload_project_status(&mut self, a_tag: &str) {
-        if let Some(status) = crate::store::get_project_status(&self.ndb, a_tag) {
-            self.project_statuses.insert(a_tag.to_string(), status);
-        }
-    }
-
     /// Handle a new event from SubscriptionStream - incrementally update data
-    pub fn handle_event(&mut self, kind: u32, note: &Note) {
+    /// Returns an optional CoreEvent for kinds that need special handling (24010)
+    pub fn handle_event(&mut self, kind: u32, note: &Note) -> Option<crate::events::CoreEvent> {
         match kind {
-            31933 => self.handle_project_event(note),
-            1 => self.handle_text_event(note),
-            0 => self.handle_profile_event(note),
+            31933 => { self.handle_project_event(note); None }
+            1 => { self.handle_text_event(note); None }
+            0 => { self.handle_profile_event(note); None }
             24010 => self.handle_status_event(note),
-            513 => self.handle_metadata_event(note),
-            4129 => self.handle_lesson_event(note),
-            4199 => self.handle_agent_definition_event(note),
-            4201 => self.handle_nudge_event(note),
-            24133 => self.handle_operations_status_event(note),
-            30023 => self.handle_report_event(note),
-            _ => {}
+            513 => { self.handle_metadata_event(note); None }
+            4129 => { self.handle_lesson_event(note); None }
+            4199 => { self.handle_agent_definition_event(note); None }
+            4201 => { self.handle_nudge_event(note); None }
+            24133 => { self.handle_operations_status_event(note); None }
+            30023 => { self.handle_report_event(note); None }
+            _ => None
         }
     }
 
@@ -514,10 +516,46 @@ impl AppDataStore {
         }
     }
 
-    fn handle_status_event(&mut self, note: &Note) {
-        if let Some(status) = ProjectStatus::from_note(note) {
-            self.project_statuses.insert(status.project_coordinate.clone(), status);
+    fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
+        let status = ProjectStatus::from_note(note)?;
+        let backend_pubkey = &status.backend_pubkey;
+
+        // Check trust status
+        if self.blocked_backends.contains(backend_pubkey) {
+            // Silently ignore blocked backends
+            return None;
         }
+
+        if self.approved_backends.contains(backend_pubkey) {
+            // Approved backend - process normally
+            let event = crate::events::CoreEvent::ProjectStatus(status.clone());
+            self.project_statuses.insert(status.project_coordinate.clone(), status);
+            return Some(event);
+        }
+
+        // Unknown backend - queue for approval
+        // Only add if not already pending for this backend
+        let already_pending = self.pending_backend_approvals.iter().any(|p| {
+            p.backend_pubkey == *backend_pubkey
+        });
+
+        if !already_pending {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+
+            let pending = PendingBackendApproval {
+                backend_pubkey: backend_pubkey.clone(),
+                project_a_tag: status.project_coordinate.clone(),
+                first_seen: now,
+            };
+
+            self.pending_backend_approvals.push(pending.clone());
+            return Some(crate::events::CoreEvent::PendingBackendApproval(pending));
+        }
+
+        None
     }
 
     fn handle_profile_event(&mut self, note: &Note) {
@@ -1209,5 +1247,45 @@ impl AppDataStore {
         }
 
         None
+    }
+
+    // ===== Backend Trust Methods =====
+
+    /// Set the trusted backends from preferences (called on init)
+    /// Status data will only be populated when 24010 events arrive through subscriptions
+    pub fn set_trusted_backends(&mut self, approved: HashSet<String>, blocked: HashSet<String>) {
+        self.approved_backends = approved;
+        self.blocked_backends = blocked;
+        // NOTE: We intentionally do NOT query nostrdb for cached 24010 events here.
+        // Status data flows ONLY through handle_status_event when events arrive
+        // from subscriptions, ensuring trust validation is always applied.
+    }
+
+    /// Add a backend to the approved list and process any pending status events
+    pub fn add_approved_backend(&mut self, pubkey: &str) {
+        self.blocked_backends.remove(pubkey);
+        self.approved_backends.insert(pubkey.to_string());
+
+        // Remove from pending approvals
+        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
+    }
+
+    /// Add a backend to the blocked list
+    pub fn add_blocked_backend(&mut self, pubkey: &str) {
+        self.approved_backends.remove(pubkey);
+        self.blocked_backends.insert(pubkey.to_string());
+
+        // Remove from pending approvals
+        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
+    }
+
+    /// Drain pending backend approvals (called by TUI to show modals)
+    pub fn drain_pending_backend_approvals(&mut self) -> Vec<PendingBackendApproval> {
+        std::mem::take(&mut self.pending_backend_approvals)
+    }
+
+    /// Check if there are pending backend approvals
+    pub fn has_pending_backend_approvals(&self) -> bool {
+        !self.pending_backend_approvals.is_empty()
     }
 }

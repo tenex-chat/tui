@@ -1,20 +1,21 @@
+use crate::input::commands;
 use crate::ui::components::{render_modal_sections, Modal, ModalItem, ModalSection, ModalSize};
-use crate::ui::modal::CommandPaletteState;
+use crate::ui::App;
 use ratatui::{layout::Rect, Frame};
 use std::collections::BTreeMap;
 
 /// Render the command palette modal (Ctrl+T)
-pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteState) {
-    // Get available commands and group by section
-    let commands = state.available_commands();
+pub fn render_command_palette(f: &mut Frame, area: Rect, app: &App, selected_index: usize) {
+    // Get available commands from the commands module
+    let commands = commands::available_commands(app);
 
     // Group commands by section (preserving order with BTreeMap)
-    let mut sections_map: BTreeMap<&str, Vec<(&char, &str)>> = BTreeMap::new();
+    let mut sections_map: BTreeMap<&str, Vec<(char, &str)>> = BTreeMap::new();
     for cmd in &commands {
         sections_map
             .entry(cmd.section)
             .or_default()
-            .push((&cmd.key, cmd.label));
+            .push((cmd.key, cmd.label));
     }
 
     // Build sections for rendering
@@ -26,7 +27,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteS
         let mut section_items = Vec::new();
 
         for (key, label) in items {
-            let shortcut = if **key == ' ' {
+            let shortcut = if *key == ' ' {
                 "Space".to_string()
             } else {
                 key.to_string()
@@ -34,7 +35,7 @@ pub fn render_command_palette(f: &mut Frame, area: Rect, state: &CommandPaletteS
 
             let item = ModalItem::new(*label)
                 .with_shortcut(shortcut)
-                .selected(item_idx == state.selected_index);
+                .selected(item_idx == selected_index);
 
             section_items.push(item);
             item_idx += 1;

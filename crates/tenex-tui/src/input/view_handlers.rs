@@ -128,6 +128,12 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.toggle_show_archived();
             }
         }
+        KeyCode::Char('P') if has_shift => {
+            // Show/hide archived projects from main panel
+            if !app.sidebar_focused {
+                app.toggle_show_archived_projects();
+            }
+        }
         KeyCode::Tab => {
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Recent => HomeTab::Inbox,
@@ -1040,7 +1046,10 @@ pub(super) fn handle_editing_mode(
 
     match code {
         KeyCode::Esc => {
-            app.input_mode = InputMode::Normal;
+            // Login view always stays in editing mode
+            if app.view != View::Login {
+                app.input_mode = InputMode::Normal;
+            }
             app.clear_input();
             if app.creating_thread {
                 app.creating_thread = false;
@@ -1052,13 +1061,13 @@ pub(super) fn handle_editing_mode(
         KeyCode::Right => app.move_cursor_right(),
         KeyCode::Enter => {
             let input = app.submit_input();
-            app.input_mode = InputMode::Normal;
 
             if app.view == View::Login {
+                // Keep input focused on login screen
                 match login_step {
                     LoginStep::Nsec => {
                         if input.is_empty()
-                            && nostr::has_stored_credentials(&app.db.credentials_conn())
+                            && nostr::has_stored_credentials(&app.preferences.borrow())
                         {
                             *pending_nsec = None;
                             *login_step = LoginStep::Password;
@@ -1071,14 +1080,14 @@ pub(super) fn handle_editing_mode(
                     }
                     LoginStep::Password => {
                         let keys_result = if pending_nsec.is_none() {
-                            nostr::load_stored_keys(&input, &app.db.credentials_conn())
+                            nostr::load_stored_keys(&input, &app.preferences.borrow())
                         } else if let Some(ref nsec) = pending_nsec {
                             let password = if input.is_empty() {
                                 None
                             } else {
                                 Some(input.as_str())
                             };
-                            nostr::auth::login_with_nsec(nsec, password, &app.db.credentials_conn())
+                            nostr::auth::login_with_nsec(nsec, password, &mut app.preferences.borrow_mut())
                         } else {
                             Err(anyhow::anyhow!("No credentials provided"))
                         };
@@ -1101,6 +1110,7 @@ pub(super) fn handle_editing_mode(
                                     } else {
                                         app.view = View::Home;
                                         app.load_filter_preferences();
+                                        app.init_trusted_backends();
                                         app.dismiss_notification();
                                     }
                                 }
@@ -1114,7 +1124,7 @@ pub(super) fn handle_editing_mode(
                     }
                     LoginStep::Unlock => {
                         let keys_result =
-                            nostr::load_stored_keys(&input, &app.db.credentials_conn());
+                            nostr::load_stored_keys(&input, &app.preferences.borrow());
 
                         match keys_result {
                             Ok(keys) => {
@@ -1134,6 +1144,7 @@ pub(super) fn handle_editing_mode(
                                     } else {
                                         app.view = View::Home;
                                         app.load_filter_preferences();
+                                        app.init_trusted_backends();
                                         app.dismiss_notification();
                                     }
                                 }

@@ -190,9 +190,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_draft_navigator(f, area, state);
     }
 
+    // Render backend approval modal if showing
+    if let ModalState::BackendApproval(ref state) = app.modal_state {
+        super::super::render_backend_approval_modal(f, area, state);
+    }
+
     // Command palette overlay (Ctrl+T)
     if let ModalState::CommandPalette(ref state) = app.modal_state {
-        super::super::render_command_palette(f, area, state);
+        super::super::render_command_palette(f, area, app, state.selected_index);
     }
 
     // Global search modal overlay (/)

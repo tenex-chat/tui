@@ -130,6 +130,9 @@ pub(crate) async fn run_app(
             _ = tick_interval.tick() => {
                 app.tick(); // Increment frame counter for animations
                 app.check_for_data_updates()?;
+
+                // Check for pending backend approvals
+                check_pending_backend_approvals(app);
             }
 
             // Handle upload results from background tasks
@@ -204,7 +207,27 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                     }
                 }
             }
+            CoreEvent::PendingBackendApproval(pending) => {
+                // Show approval modal if no modal is currently open
+                if app.modal_state.is_none() {
+                    app.show_backend_approval_modal(pending.backend_pubkey, pending.project_a_tag);
+                }
+            }
         }
+    }
+}
+
+/// Check if there are pending backend approvals and show modal
+fn check_pending_backend_approvals(app: &mut App) {
+    // Only show approval modal if no modal is currently open
+    if !app.modal_state.is_none() {
+        return;
+    }
+
+    // Drain pending approvals from data store and show first one
+    let pending = app.data_store.borrow_mut().drain_pending_backend_approvals();
+    if let Some(first) = pending.into_iter().next() {
+        app.show_backend_approval_modal(first.backend_pubkey, first.project_a_tag);
     }
 }
 

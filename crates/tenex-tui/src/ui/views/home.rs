@@ -121,7 +121,12 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
     // Command palette overlay (Ctrl+T)
     if let ModalState::CommandPalette(ref state) = app.modal_state {
-        super::render_command_palette(f, area, state);
+        super::render_command_palette(f, area, app, state.selected_index);
+    }
+
+    // Backend approval modal
+    if let ModalState::BackendApproval(ref state) = app.modal_state {
+        super::render_backend_approval_modal(f, area, state);
     }
 }
 

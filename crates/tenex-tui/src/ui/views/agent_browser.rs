@@ -35,7 +35,7 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
 
     // Command palette overlay (Ctrl+T)
     if let ModalState::CommandPalette(ref state) = app.modal_state {
-        super::render_command_palette(f, area, state);
+        super::render_command_palette(f, area, app, state.selected_index);
     }
 }
 

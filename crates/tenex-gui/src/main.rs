@@ -3,6 +3,7 @@ use eframe::egui;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 use tenex_core::config::CoreConfig;
+use tenex_core::models::PreferencesStorage;
 use tenex_core::nostr::{self, DataChange, NostrCommand};
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
@@ -10,6 +11,7 @@ struct TenexGui {
     core_runtime: CoreRuntime,
     core_handle: CoreHandle,
     data_rx: Option<Receiver<DataChange>>,
+    preferences: PreferencesStorage,
     status: String,
     password: String,
     logged_in: bool,
@@ -19,14 +21,18 @@ struct TenexGui {
 
 impl TenexGui {
     fn new() -> Result<Self> {
-        let mut core_runtime = CoreRuntime::new(CoreConfig::default())?;
+        let config = CoreConfig::default();
+        let data_dir = config.data_dir.to_str().unwrap_or("tenex_data").to_string();
+        let mut core_runtime = CoreRuntime::new(config)?;
         let core_handle = core_runtime.handle();
         let data_rx = core_runtime.take_data_rx();
+        let preferences = PreferencesStorage::new(&data_dir);
 
         let mut app = Self {
             core_runtime,
             core_handle,
             data_rx,
+            preferences,
             status: String::new(),
             password: String::new(),
             logged_in: false,
@@ -39,17 +45,16 @@ impl TenexGui {
     }
 
     fn try_auto_login(&mut self) {
-        let conn = self.core_runtime.database().credentials_conn();
-        if !nostr::has_stored_credentials(&conn) {
+        if !nostr::has_stored_credentials(&self.preferences) {
             self.status = "No stored credentials found".to_string();
             return;
         }
-        if nostr::credentials_need_password(&conn) {
+        if nostr::credentials_need_password(&self.preferences) {
             self.status = "Password required".to_string();
             return;
         }
 
-        match nostr::load_unencrypted_keys(&conn) {
+        match nostr::load_unencrypted_keys(&self.preferences) {
             Ok(keys) => {
                 let pubkey = nostr::get_current_pubkey(&keys);
                 if self
@@ -73,8 +78,7 @@ impl TenexGui {
     }
 
     fn unlock_with_password(&mut self) {
-        let conn = self.core_runtime.database().credentials_conn();
-        match nostr::load_stored_keys(&self.password, &conn) {
+        match nostr::load_stored_keys(&self.password, &self.preferences) {
             Ok(keys) => {
                 let pubkey = nostr::get_current_pubkey(&keys);
                 if self
@@ -123,9 +127,8 @@ impl eframe::App for TenexGui {
                 ui.label(&self.status);
             }
 
-            let conn = self.core_runtime.database().credentials_conn();
-            let has_creds = nostr::has_stored_credentials(&conn);
-            let needs_password = has_creds && nostr::credentials_need_password(&conn);
+            let has_creds = nostr::has_stored_credentials(&self.preferences);
+            let needs_password = has_creds && nostr::credentials_need_password(&self.preferences);
 
             if !self.logged_in {
                 if needs_password {

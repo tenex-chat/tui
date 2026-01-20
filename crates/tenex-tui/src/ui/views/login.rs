@@ -1,5 +1,5 @@
 use crate::ui::notifications::NotificationLevel;
-use crate::ui::{theme, App, InputMode};
+use crate::ui::{theme, App};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
     style::Style,
@@ -34,12 +34,6 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
     f.render_widget(instruction_widget, chunks[0]);
 
     // Input field
-    let input_style = if app.input_mode == InputMode::Editing {
-        Style::default().fg(theme::ACCENT_WARNING)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-
     let display_text = if *login_step == LoginStep::Nsec && !app.input.is_empty() {
         // Mask the nsec
         "*".repeat(app.input.len())
@@ -52,20 +46,11 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
     };
 
     let input_widget = Paragraph::new(display_text)
-        .style(input_style)
+        .style(Style::default().fg(theme::ACCENT_WARNING))
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(if app.input_mode == InputMode::Editing {
-                    Style::default().fg(theme::ACCENT_WARNING)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED)
-                })
-                .title(if app.input_mode == InputMode::Editing {
-                    "Editing (Esc to cancel, Enter to submit)"
-                } else {
-                    "Press 'i' to start typing"
-                }),
+                .border_style(Style::default().fg(theme::ACCENT_WARNING)),
         );
     f.render_widget(input_widget, chunks[1]);
 

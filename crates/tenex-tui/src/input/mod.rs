@@ -4,12 +4,12 @@
 //! - `modal_handlers`: Handlers for various modal dialogs
 //! - `view_handlers`: Handlers for main view input (Home, Chat, etc.)
 //! - `editor_handlers`: Handlers for text editing (chat editor, vim mode)
-//! - `palette`: Command palette execution logic
+//! - `commands`: Command definitions and execution for the command palette
 
+pub mod commands;
 mod modal_handlers;
 mod view_handlers;
 mod editor_handlers;
-mod palette;
 pub mod input_prefix;
 
 use anyhow::Result;

@@ -1,10 +1,10 @@
 use anyhow::Result;
 use nostr_sdk::nips::nip49::EncryptedSecretKey;
 use nostr_sdk::prelude::*;
-use rusqlite::Connection;
-use std::sync::{Arc, Mutex};
 
-pub fn login_with_nsec(nsec: &str, password: Option<&str>, conn: &Arc<Mutex<Connection>>) -> Result<Keys> {
+use crate::models::PreferencesStorage;
+
+pub fn login_with_nsec(nsec: &str, password: Option<&str>, prefs: &mut PreferencesStorage) -> Result<Keys> {
     let secret_key = SecretKey::parse(nsec)?;
     let keys = Keys::new(secret_key);
 
@@ -13,69 +13,52 @@ pub fn login_with_nsec(nsec: &str, password: Option<&str>, conn: &Arc<Mutex<Conn
         if !pwd.is_empty() {
             let encrypted = keys.secret_key().encrypt(pwd)?;
             let encrypted_bech32 = encrypted.to_bech32()?;
-            store_credentials(conn, &encrypted_bech32)?;
+            prefs.store_credentials(&encrypted_bech32);
         }
     } else {
         // Store unencrypted (as nsec)
-        store_credentials(conn, nsec)?;
+        prefs.store_credentials(nsec);
     }
 
     Ok(keys)
 }
 
-pub fn load_stored_keys(password: &str, conn: &Arc<Mutex<Connection>>) -> Result<Keys> {
-    let ncryptsec = get_stored_credentials(conn)?;
+pub fn load_stored_keys(password: &str, prefs: &PreferencesStorage) -> Result<Keys> {
+    let ncryptsec = prefs
+        .get_stored_credentials()
+        .ok_or_else(|| anyhow::anyhow!("No stored credentials"))?;
 
     // Try to decrypt
     let secret_key = if ncryptsec.starts_with("ncryptsec") {
-        let encrypted = EncryptedSecretKey::from_bech32(&ncryptsec)?;
+        let encrypted = EncryptedSecretKey::from_bech32(ncryptsec)?;
         encrypted.to_secret_key(password)?
     } else {
-        SecretKey::parse(&ncryptsec)?
+        SecretKey::parse(ncryptsec)?
     };
 
     Ok(Keys::new(secret_key))
 }
 
-pub fn has_stored_credentials(conn: &Arc<Mutex<Connection>>) -> bool {
-    get_stored_credentials(conn).is_ok()
+pub fn has_stored_credentials(prefs: &PreferencesStorage) -> bool {
+    prefs.has_stored_credentials()
 }
 
 /// Check if stored credentials are encrypted (require a password to unlock)
-pub fn credentials_need_password(conn: &Arc<Mutex<Connection>>) -> bool {
-    match get_stored_credentials(conn) {
-        Ok(cred) => cred.starts_with("ncryptsec"),
-        Err(_) => false,
-    }
+pub fn credentials_need_password(prefs: &PreferencesStorage) -> bool {
+    prefs.credentials_need_password()
 }
 
 /// Load stored keys that don't require a password (unencrypted nsec)
-pub fn load_unencrypted_keys(conn: &Arc<Mutex<Connection>>) -> Result<Keys> {
-    let nsec = get_stored_credentials(conn)?;
+pub fn load_unencrypted_keys(prefs: &PreferencesStorage) -> Result<Keys> {
+    let nsec = prefs
+        .get_stored_credentials()
+        .ok_or_else(|| anyhow::anyhow!("No stored credentials"))?;
+
     if nsec.starts_with("ncryptsec") {
         anyhow::bail!("Credentials are encrypted, password required");
     }
-    let secret_key = SecretKey::parse(&nsec)?;
+    let secret_key = SecretKey::parse(nsec)?;
     Ok(Keys::new(secret_key))
-}
-
-fn store_credentials(conn: &Arc<Mutex<Connection>>, ncryptsec: &str) -> Result<()> {
-    let conn = conn.lock().unwrap();
-    conn.execute(
-        "INSERT OR REPLACE INTO credentials (id, ncryptsec) VALUES (1, ?1)",
-        [ncryptsec],
-    )?;
-    Ok(())
-}
-
-fn get_stored_credentials(conn: &Arc<Mutex<Connection>>) -> Result<String> {
-    let conn = conn.lock().unwrap();
-    let result: String = conn.query_row(
-        "SELECT ncryptsec FROM credentials WHERE id = 1",
-        [],
-        |row| row.get(0),
-    )?;
-    Ok(result)
 }
 
 pub fn get_current_pubkey(keys: &Keys) -> String {
@@ -85,34 +68,22 @@ pub fn get_current_pubkey(keys: &Keys) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::Database;
     use tempfile::tempdir;
-
-    fn clear_credentials(conn: &Arc<Mutex<Connection>>) -> Result<()> {
-        let conn = conn.lock().unwrap();
-        conn.execute("DELETE FROM credentials WHERE id = 1", [])?;
-        Ok(())
-    }
-
-    fn is_logged_in(keys: Option<&Keys>) -> bool {
-        keys.is_some()
-    }
 
     #[test]
     fn test_login_and_store() {
         let dir = tempdir().unwrap();
-        let db = Database::new(dir.path()).unwrap();
-        let conn = db.credentials_conn();
+        let mut prefs = PreferencesStorage::new(dir.path().to_str().unwrap());
 
         // Generate a test nsec
         let keys = Keys::generate();
         let nsec = keys.secret_key().to_bech32().unwrap();
 
-        let result = login_with_nsec(&nsec, Some("password123"), &conn);
+        let result = login_with_nsec(&nsec, Some("password123"), &mut prefs);
         assert!(result.is_ok());
 
         // Should be able to load back
-        let loaded = load_stored_keys("password123", &conn);
+        let loaded = load_stored_keys("password123", &prefs);
         assert!(loaded.is_ok());
         assert_eq!(loaded.unwrap().public_key(), keys.public_key());
     }
@@ -120,33 +91,31 @@ mod tests {
     #[test]
     fn test_has_stored_credentials() {
         let dir = tempdir().unwrap();
-        let db = Database::new(dir.path()).unwrap();
-        let conn = db.credentials_conn();
+        let mut prefs = PreferencesStorage::new(dir.path().to_str().unwrap());
 
-        assert!(!has_stored_credentials(&conn));
+        assert!(!has_stored_credentials(&prefs));
 
         let keys = Keys::generate();
         let nsec = keys.secret_key().to_bech32().unwrap();
-        login_with_nsec(&nsec, None, &conn).unwrap();
+        login_with_nsec(&nsec, None, &mut prefs).unwrap();
 
-        assert!(has_stored_credentials(&conn));
+        assert!(has_stored_credentials(&prefs));
     }
 
     #[test]
     fn test_clear_credentials() {
         let dir = tempdir().unwrap();
-        let db = Database::new(dir.path()).unwrap();
-        let conn = db.credentials_conn();
+        let mut prefs = PreferencesStorage::new(dir.path().to_str().unwrap());
 
         let keys = Keys::generate();
         let nsec = keys.secret_key().to_bech32().unwrap();
-        login_with_nsec(&nsec, None, &conn).unwrap();
+        login_with_nsec(&nsec, None, &mut prefs).unwrap();
 
-        assert!(has_stored_credentials(&conn));
+        assert!(has_stored_credentials(&prefs));
 
-        clear_credentials(&conn).unwrap();
+        prefs.clear_credentials();
 
-        assert!(!has_stored_credentials(&conn));
+        assert!(!has_stored_credentials(&prefs));
     }
 
     #[test]
@@ -158,6 +127,9 @@ mod tests {
 
     #[test]
     fn test_is_logged_in() {
+        fn is_logged_in(keys: Option<&Keys>) -> bool {
+            keys.is_some()
+        }
         let keys = Keys::generate();
         assert!(is_logged_in(Some(&keys)));
         assert!(!is_logged_in(None));
