@@ -20,10 +20,14 @@ pub struct HierarchicalThread {
 /// Uses two sources to determine parent-child relationships:
 /// 1. Primary: `delegation` tag on child conversation root (thread.parent_conversation_id)
 /// 2. Fallback: `q-tags` in parent conversation messages pointing to child conversations
+///
+/// When `default_collapsed` is true, threads with children will be collapsed by default
+/// unless explicitly expanded (not in collapsed_ids is treated as collapsed).
 pub fn build_thread_hierarchy(
     threads: &[(Thread, String)],
     collapsed_ids: &HashSet<String>,
     q_tag_relationships: &QTagRelationships,
+    default_collapsed: bool,
 ) -> Vec<HierarchicalThread> {
     // Build reverse lookup: child_conversation_id -> parent_thread_id from q-tags
     let mut q_tag_child_to_parent: HashMap<&str, &str> = HashMap::new();
@@ -87,11 +91,22 @@ pub fn build_thread_hierarchy(
         collapsed_ids: &HashSet<String>,
         parent_to_children: &HashMap<&str, Vec<(&Thread, &String)>>,
         result: &mut Vec<HierarchicalThread>,
+        default_collapsed: bool,
     ) {
         let children = parent_to_children.get(thread.id.as_str());
         let has_children = children.map(|c| !c.is_empty()).unwrap_or(false);
         let child_count = count_descendants(&thread.id, parent_to_children);
-        let is_collapsed = collapsed_ids.contains(&thread.id);
+
+        // Determine collapsed state:
+        // - If default_collapsed is true: collapsed unless explicitly in collapsed_ids (inverted: presence means expanded)
+        // - If default_collapsed is false: expanded unless explicitly in collapsed_ids (presence means collapsed)
+        let is_collapsed = if default_collapsed && has_children {
+            // When default collapsed, being in the set means EXPANDED (user toggled to expand)
+            !collapsed_ids.contains(&thread.id)
+        } else {
+            // When default expanded, being in the set means COLLAPSED (user toggled to collapse)
+            collapsed_ids.contains(&thread.id)
+        };
 
         result.push(HierarchicalThread {
             thread: thread.clone(),
@@ -113,6 +128,7 @@ pub fn build_thread_hierarchy(
                         collapsed_ids,
                         parent_to_children,
                         result,
+                        default_collapsed,
                     );
                 }
             }
@@ -134,6 +150,7 @@ pub fn build_thread_hierarchy(
             collapsed_ids,
             &parent_to_children,
             &mut result,
+            default_collapsed,
         );
     }
 

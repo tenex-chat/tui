@@ -431,6 +431,28 @@ impl App {
         }
     }
 
+    /// Toggle collapse/expand all threads and persist the setting.
+    /// Returns true if threads are now collapsed, false if expanded.
+    ///
+    /// With the new inverted logic:
+    /// - When default_collapsed is true: presence in collapsed_threads means EXPANDED
+    /// - When default_collapsed is false: presence in collapsed_threads means COLLAPSED
+    ///
+    /// So when toggling, we clear the set to reset all overrides.
+    pub fn toggle_collapse_all_threads(&mut self) -> bool {
+        let now_collapsed = self.preferences.borrow_mut().toggle_threads_default_collapsed();
+
+        // Clear all individual overrides so the default takes effect
+        self.collapsed_threads.clear();
+
+        now_collapsed
+    }
+
+    /// Check if threads are default collapsed (from preferences)
+    pub fn threads_default_collapsed(&self) -> bool {
+        self.preferences.borrow().threads_default_collapsed()
+    }
+
     /// Get project status for a project - delegates to data store
     pub fn get_project_status(&self, project: &Project) -> Option<ProjectStatus> {
         self.data_store.borrow().get_project_status(&project.a_tag()).cloned()
@@ -1222,14 +1244,14 @@ impl App {
                         })
                         .unwrap_or((false, false));
 
-                    PaletteContext::HomeSidebar { is_online, is_busy, is_archived }
+                    PaletteContext::HomeSidebar { is_online, is_busy, is_archived, show_archived_projects: self.show_archived_projects }
                 } else {
                     match self.home_panel_focus {
-                        HomeTab::Recent => PaletteContext::HomeRecent,
-                        HomeTab::Inbox => PaletteContext::HomeInbox,
+                        HomeTab::Recent => PaletteContext::HomeRecent { show_archived: self.show_archived },
+                        HomeTab::Inbox => PaletteContext::HomeInbox { show_archived: self.show_archived },
                         HomeTab::Reports => PaletteContext::HomeReports,
-                        HomeTab::Status => PaletteContext::HomeRecent, // Reuse Recent context for Status
-                        HomeTab::Search => PaletteContext::HomeRecent, // Reuse Recent context for Search
+                        HomeTab::Status => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Reuse Recent context for Status
+                        HomeTab::Search => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Reuse Recent context for Search
                     }
                 }
             }
@@ -1262,7 +1284,7 @@ impl App {
                     PaletteContext::AgentBrowserList
                 }
             }
-            _ => PaletteContext::HomeRecent, // Default fallback
+            _ => PaletteContext::HomeRecent { show_archived: self.show_archived }, // Default fallback
         }
     }
 
