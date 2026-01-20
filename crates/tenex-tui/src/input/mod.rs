@@ -10,6 +10,7 @@ mod modal_handlers;
 mod view_handlers;
 mod editor_handlers;
 mod palette;
+pub mod input_prefix;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

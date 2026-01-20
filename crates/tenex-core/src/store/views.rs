@@ -224,7 +224,11 @@ pub fn get_profile_picture(ndb: &Ndb, pubkey: &str) -> Option<String> {
 /// Get project status for a project
 pub fn get_project_status(ndb: &Ndb, project_a_tag: &str) -> Option<ProjectStatus> {
     let txn = Transaction::new(ndb).ok()?;
-    let filter = Filter::new().kinds([24010]).build();
+    // Query status events that specifically a-tag this project
+    let filter = Filter::new()
+        .kinds([24010])
+        .tags([project_a_tag], 'a')
+        .build();
     let results = ndb.query(&txn, &[filter], 100).ok()?;
 
     // Find the most recent status for this project
@@ -232,12 +236,7 @@ pub fn get_project_status(ndb: &Ndb, project_a_tag: &str) -> Option<ProjectStatu
         .iter()
         .filter_map(|r| {
             let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
-            let status = ProjectStatus::from_note(&note)?;
-            if status.project_coordinate == project_a_tag {
-                Some(status)
-            } else {
-                None
-            }
+            ProjectStatus::from_note(&note)
         })
         .max_by_key(|s| s.created_at)
 }
