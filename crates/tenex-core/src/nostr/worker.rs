@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::constants::RELAY_URL;
+use crate::stats::SharedEventStats;
 use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
@@ -104,6 +105,10 @@ pub enum NostrCommand {
     SubscribeToProjectMessages {
         project_a_tag: String,
     },
+    /// Subscribe to metadata for a new project
+    SubscribeToProjectMetadata {
+        project_a_tag: String,
+    },
     Shutdown,
 }
 
@@ -128,10 +133,16 @@ pub struct NostrWorker {
     data_tx: Sender<DataChange>,
     command_rx: Receiver<NostrCommand>,
     rt_handle: Option<tokio::runtime::Handle>,
+    event_stats: SharedEventStats,
 }
 
 impl NostrWorker {
-    pub fn new(ndb: Arc<Ndb>, data_tx: Sender<DataChange>, command_rx: Receiver<NostrCommand>) -> Self {
+    pub fn new(
+        ndb: Arc<Ndb>,
+        data_tx: Sender<DataChange>,
+        command_rx: Receiver<NostrCommand>,
+        event_stats: SharedEventStats,
+    ) -> Self {
         Self {
             client: None,
             keys: None,
@@ -140,6 +151,7 @@ impl NostrWorker {
             data_tx,
             command_rx,
             rt_handle: None,
+            event_stats,
         }
     }
 
@@ -240,6 +252,12 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to subscribe to project messages: {}", e);
                         }
                     }
+                    NostrCommand::SubscribeToProjectMetadata { project_a_tag } => {
+                        debug_log(&format!("Worker: Subscribing to metadata for project {}", &project_a_tag));
+                        if let Err(e) = rt.block_on(self.handle_subscribe_to_project_metadata(project_a_tag)) {
+                            tlog!("ERROR", "Failed to subscribe to project metadata: {}", e);
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
                         let _ = rt.block_on(self.handle_disconnect());
@@ -305,102 +323,74 @@ impl NostrWorker {
 
         let pubkey = PublicKey::parse(user_pubkey)?;
 
-        // User's projects
-        let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
-
-        // Events mentioning the user
-        let mention_filter = Filter::new().pubkey(pubkey);
-
-        // Agent definitions (kind 4199)
-        let agent_filter = Filter::new().kind(Kind::Custom(4199));
-
-        // Project status (kind 24010) - only subscribe to events p-tagging us
-        let status_filter = Filter::new()
-            .kind(Kind::Custom(24010))
-            .pubkey(pubkey);
-
-        // Conversation metadata (kind 513) - provides titles and summaries for threads
-        // Filtered by project a-tags to avoid downloading metadata for unrelated projects
-        let metadata_filter = {
-            let project_atags: Vec<String> = get_projects(&self.ndb)
-                .unwrap_or_default()
-                .iter()
-                .map(|p| p.a_tag())
-                .collect();
-
-            if project_atags.is_empty() {
-                None
-            } else {
-                Some(
-                    Filter::new()
-                        .kind(Kind::Custom(513))
-                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_atags)
-                )
-            }
-        };
-
-        // Agent lessons (kind 4129) - learning insights from agents
-        let lesson_filter = Filter::new().kind(Kind::Custom(4129));
-
-        // Operations status (kind 24133) - which agents are working on what
-        // Uses uppercase P tag (#P) to indicate the project owner/recipient
-        let operations_status_filter = Filter::new()
-            .kind(Kind::Custom(24133))
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()]);
-
-        // Nudges (kind 4201) - agent nudges/prompts
-        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
-
-        // Conversation messages (kind 1) with project a-tags - batched in groups of 4
-        let messages_filters: Vec<Filter> = {
-            let project_atags: Vec<String> = get_projects(&self.ndb)
-                .unwrap_or_default()
-                .iter()
-                .map(|p| p.a_tag())
-                .collect();
-
-            if project_atags.is_empty() {
-                tlog!("CONN", "No projects found, skipping kind:1 a-tag subscription");
-                Vec::new()
-            } else {
-                let batch_count = (project_atags.len() + 3) / 4; // ceiling division
-                tlog!("CONN", "Subscribing to kind:1 for {} projects in {} batches", project_atags.len(), batch_count);
-                project_atags
-                    .chunks(4)
-                    .map(|chunk| {
-                        Filter::new()
-                            .kind(Kind::from(1))
-                            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec())
-                    })
-                    .collect()
-            }
-        };
-
         tlog!("CONN", "Starting subscriptions...");
         let sub_start = std::time::Instant::now();
 
-        let mut filters = vec![
-            project_filter,
-            mention_filter,
-            agent_filter,
-            status_filter,
-            lesson_filter,
-            operations_status_filter,
-            nudge_filter,
-        ];
+        // 1. User's projects (kind:31933)
+        let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
+        client.subscribe(vec![project_filter], None).await?;
+        tlog!("CONN", "Subscribed to projects (kind:31933)");
 
-        if let Some(meta_filter) = metadata_filter {
-            filters.push(meta_filter);
+        // 2. Status events (kind:24010, kind:24133)
+        let status_filter = Filter::new()
+            .kind(Kind::Custom(24010))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
+        let operations_status_filter = Filter::new()
+            .kind(Kind::Custom(24133))
+            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()]);
+        client.subscribe(vec![status_filter, operations_status_filter], None).await?;
+        tlog!("CONN", "Subscribed to status events (kind:24010, kind:24133)");
+
+        // 3. Agent definitions (kind:4199)
+        let agent_filter = Filter::new().kind(Kind::Custom(4199));
+        client.subscribe(vec![agent_filter], None).await?;
+        tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
+
+        // 4. Nudges (kind:4201)
+        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+        client.subscribe(vec![nudge_filter], None).await?;
+        tlog!("CONN", "Subscribed to nudges (kind:4201)");
+
+        // 5. Agent lessons (kind:4129)
+        let lesson_filter = Filter::new().kind(Kind::Custom(4129));
+        client.subscribe(vec![lesson_filter], None).await?;
+        tlog!("CONN", "Subscribed to agent lessons (kind:4129)");
+
+        // 6. Per-project subscriptions (kind:513 metadata, kind:1 messages)
+        let project_atags: Vec<String> = get_projects(&self.ndb)
+            .unwrap_or_default()
+            .iter()
+            .map(|p| p.a_tag())
+            .collect();
+
+        if !project_atags.is_empty() {
+            tlog!("CONN", "Setting up subscriptions for {} existing projects", project_atags.len());
+
+            for project_a_tag in &project_atags {
+                // Metadata subscription (kind:513)
+                let metadata_filter = Filter::new()
+                    .kind(Kind::Custom(513))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
+                client.subscribe(vec![metadata_filter], None).await?;
+
+                // Messages subscription (kind:1)
+                let message_filter = Filter::new()
+                    .kind(Kind::from(1))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
+                client.subscribe(vec![message_filter], None).await?;
+
+                // Long-form content subscription (kind:30023)
+                let longform_filter = Filter::new()
+                    .kind(Kind::Custom(30023))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
+                client.subscribe(vec![longform_filter], None).await?;
+            }
+            tlog!("CONN", "Subscribed to kind:513, kind:1, and kind:30023 for {} projects", project_atags.len());
+        } else {
+            tlog!("CONN", "No projects found, skipping kind:513 and kind:1 subscriptions");
         }
 
-        // Add batched message filters
-        filters.extend(messages_filters);
-
-        let subscription_id = client
-            .subscribe(filters, None)
-            .await?;
-
-        tlog!("CONN", "Subscriptions set up in {:?}, id={:?}", sub_start.elapsed(), subscription_id);
+        tlog!("CONN", "All subscriptions set up in {:?}", sub_start.elapsed());
 
         self.spawn_notification_handler();
 
@@ -415,6 +405,7 @@ impl NostrWorker {
         let rt_handle = self.rt_handle.as_ref()
             .expect("spawn_notification_handler called before runtime initialized")
             .clone();
+        let event_stats = self.event_stats.clone();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
@@ -430,6 +421,13 @@ impl NostrWorker {
                             first_event = false;
                         }
                         debug_log(&format!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url));
+
+                        // Track stats - extract project a-tag from event tags
+                        let project_a_tag = event.tags.iter()
+                            .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::A)))
+                            .and_then(|t| t.content())
+                            .map(|s| s.to_string());
+                        event_stats.record(event.kind.as_u16(), project_a_tag.as_deref());
 
                         if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
                             tlog!("ERROR", "Failed to handle event: {}", e);
@@ -962,10 +960,30 @@ impl NostrWorker {
     async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
-        tlog!("CONN", "Adding subscription for kind:1 messages with a-tag: {}", project_a_tag);
+        tlog!("CONN", "Adding subscription for kind:1 and kind:30023 with a-tag: {}", project_a_tag);
+
+        // Messages (kind:1)
+        let message_filter = Filter::new()
+            .kind(Kind::from(1))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
+
+        // Long-form content (kind:30023)
+        let longform_filter = Filter::new()
+            .kind(Kind::Custom(30023))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag]);
+
+        client.subscribe(vec![message_filter, longform_filter], None).await?;
+
+        Ok(())
+    }
+
+    async fn handle_subscribe_to_project_metadata(&self, project_a_tag: String) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+
+        tlog!("CONN", "Adding subscription for kind:513 metadata with a-tag: {}", project_a_tag);
 
         let filter = Filter::new()
-            .kind(Kind::from(1))
+            .kind(Kind::Custom(513))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag]);
 
         client.subscribe(vec![filter], None).await?;
@@ -1035,7 +1053,7 @@ async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -
     let nudge_filter = Filter::new().kind(Kind::Custom(4201));
     total_new += sync_filter(client, nudge_filter, "4201").await;
 
-    // Messages (kind 1) with project a-tags - batched in groups of 4
+    // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
     if let Ok(projects) = get_projects(ndb) {
         let atags: Vec<String> = projects.iter().map(|p| p.a_tag()).collect();
         if !atags.is_empty() {
@@ -1045,6 +1063,11 @@ async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -
                     .kind(Kind::from(1))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
                 total_new += sync_filter(client, msg_filter, "1").await;
+
+                let longform_filter = Filter::new()
+                    .kind(Kind::Custom(30023))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
+                total_new += sync_filter(client, longform_filter, "30023").await;
             }
         }
     }
