@@ -301,7 +301,24 @@ impl NostrWorker {
             .kind(Kind::Custom(24010));
 
         // Conversation metadata (kind 513) - provides titles and summaries for threads
-        let metadata_filter = Filter::new().kind(Kind::Custom(513));
+        // Filtered by project a-tags to avoid downloading metadata for unrelated projects
+        let metadata_filter = {
+            let project_atags: Vec<String> = get_projects(&self.ndb)
+                .unwrap_or_default()
+                .iter()
+                .map(|p| p.a_tag())
+                .collect();
+
+            if project_atags.is_empty() {
+                None
+            } else {
+                Some(
+                    Filter::new()
+                        .kind(Kind::Custom(513))
+                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_atags)
+                )
+            }
+        };
 
         // Agent lessons (kind 4129) - learning insights from agents
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
@@ -343,11 +360,14 @@ impl NostrWorker {
             agent_filter,
             status_filter,
             all_status_filter,
-            metadata_filter,
             lesson_filter,
             operations_status_filter,
             nudge_filter,
         ];
+
+        if let Some(meta_filter) = metadata_filter {
+            filters.push(meta_filter);
+        }
 
         if let Some(msg_filter) = messages_filter {
             filters.push(msg_filter);
