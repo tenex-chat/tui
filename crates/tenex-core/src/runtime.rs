@@ -54,8 +54,10 @@ impl CoreRuntime {
             worker.run();
         });
 
+        // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded
+        // They should only be received via live subscriptions, never read from nostrdb
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 24010, 513, 24133])
+            .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);

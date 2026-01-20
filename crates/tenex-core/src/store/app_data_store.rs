@@ -215,8 +215,9 @@ impl AppDataStore {
         // Load nudges (kind:4201)
         self.load_nudges();
 
-        // Load operations status (kind:24133) - only recent ones matter
-        self.load_operations_status();
+        // NOTE: Ephemeral events (kind:24010, 24133) are intentionally NOT loaded from nostrdb.
+        // They are only received via live subscriptions and stored in memory.
+        // Operations status (kind:24133) will be populated when events arrive.
 
         // Load reports (kind:30023)
         self.load_reports();
@@ -328,54 +329,9 @@ impl AppDataStore {
         }
     }
 
-    /// Load recent operations status events (kind:24133)
-    /// Only keeps the most recent status per event_id, and only if agents are still working
-    fn load_operations_status(&mut self) {
-        use nostrdb::{Filter, Transaction};
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        // Only load recent events (last 5 minutes) since older ones are stale
-        let five_mins_ago = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs().saturating_sub(300))
-            .unwrap_or(0);
-
-        let filter = Filter::new()
-            .kinds([24133])
-            .since(five_mins_ago)
-            .build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 500) else {
-            return;
-        };
-
-        // Loading operations status events (kind:24133)
-
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(status) = OperationsStatus::from_note(&note) {
-                    let event_id = status.event_id.clone();
-
-                    // Skip if no agents working (event finished)
-                    if status.agent_pubkeys.is_empty() {
-                        continue;
-                    }
-
-                    // Only keep newest status per event
-                    if let Some(existing) = self.operations_by_event.get(&event_id) {
-                        if existing.created_at > status.created_at {
-                            continue;
-                        }
-                    }
-                    self.operations_by_event.insert(event_id, status);
-                }
-            }
-        }
-
-        // Loaded active operations
-    }
+    // NOTE: load_operations_status() was removed because ephemeral events (kind:24133)
+    // should NOT be read from nostrdb. Operations status is only received via live
+    // subscriptions and stored in memory (operations_by_event).
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
     /// Only applies the MOST RECENT metadata event for each thread

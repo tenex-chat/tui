@@ -1,4 +1,4 @@
-use crate::models::{ConversationMetadata, Message, Project, ProjectStatus, Thread};
+use crate::models::{ConversationMetadata, Message, Project, Thread};
 use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
 use std::collections::HashMap;
@@ -221,25 +221,9 @@ pub fn get_profile_picture(ndb: &Ndb, pubkey: &str) -> Option<String> {
     None
 }
 
-/// Get project status for a project
-pub fn get_project_status(ndb: &Ndb, project_a_tag: &str) -> Option<ProjectStatus> {
-    let txn = Transaction::new(ndb).ok()?;
-    // Query status events that specifically a-tag this project
-    let filter = Filter::new()
-        .kinds([24010])
-        .tags([project_a_tag], 'a')
-        .build();
-    let results = ndb.query(&txn, &[filter], 100).ok()?;
-
-    // Find the most recent status for this project
-    results
-        .iter()
-        .filter_map(|r| {
-            let note = ndb.get_note_by_key(&txn, r.note_key).ok()?;
-            ProjectStatus::from_note(&note)
-        })
-        .max_by_key(|s| s.created_at)
-}
+// NOTE: Ephemeral events (kind:24010) should NOT be queried from nostrdb.
+// Project status is only received via live subscriptions and stored in AppDataStore.
+// Use app_data_store.get_project_status() instead.
 
 #[cfg(test)]
 mod tests {
