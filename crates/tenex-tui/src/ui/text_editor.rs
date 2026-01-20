@@ -5,6 +5,8 @@
 /// - Ctrl+A: Move to beginning of line
 /// - Ctrl+E: Move to end of line
 /// - Ctrl+K: Kill from cursor to end of line
+/// - Ctrl+U: Clear entire input (restorable with Ctrl+Z)
+/// - Ctrl+Z: Undo last change
 /// - Alt+Left/Right: Word jumping
 /// - Large pastes become attachments
 
@@ -454,7 +456,7 @@ impl TextEditor {
         }
     }
 
-    /// Kill from cursor to beginning of line (Ctrl+U)
+    /// Kill from cursor to beginning of line (Ctrl+U legacy behavior)
     pub fn kill_to_line_start(&mut self) {
         let start = self.text[..self.cursor]
             .rfind('\n')
@@ -464,6 +466,17 @@ impl TextEditor {
             self.push_undo_state();
             self.text.drain(start..self.cursor);
             self.cursor = start;
+        }
+    }
+
+    /// Clear the entire input text (Ctrl+U)
+    /// Pushes current state to undo stack so Ctrl+Z can restore it
+    pub fn clear_input(&mut self) {
+        if !self.text.is_empty() {
+            self.push_undo_state();
+            self.text.clear();
+            self.cursor = 0;
+            self.selection_anchor = None;
         }
     }
 
@@ -1114,5 +1127,36 @@ mod tests {
 
         editor.move_to_line_end();
         assert_eq!(editor.cursor, 22);
+    }
+
+    #[test]
+    fn test_clear_input_and_undo() {
+        let mut editor = TextEditor::new();
+        editor.text = "hello world".to_string();
+        editor.cursor = 5;
+
+        // Clear input (Ctrl+U behavior)
+        editor.clear_input();
+        assert_eq!(editor.text, "");
+        assert_eq!(editor.cursor, 0);
+
+        // Undo should restore (Ctrl+Z behavior)
+        editor.undo();
+        assert_eq!(editor.text, "hello world");
+        assert_eq!(editor.cursor, 5);
+    }
+
+    #[test]
+    fn test_clear_input_empty_noop() {
+        let mut editor = TextEditor::new();
+        assert!(editor.text.is_empty());
+
+        // Clear on empty input should be a no-op (no undo state pushed)
+        editor.clear_input();
+        assert!(editor.text.is_empty());
+
+        // Undo should have nothing to restore
+        editor.undo();
+        assert!(editor.text.is_empty());
     }
 }
