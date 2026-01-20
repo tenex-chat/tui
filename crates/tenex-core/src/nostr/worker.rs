@@ -335,13 +335,15 @@ impl NostrWorker {
         client.subscribe(vec![project_filter], None).await?;
         tlog!("CONN", "Subscribed to projects (kind:31933)");
 
-        // 2. Status events (kind:24010, kind:24133)
+        // 2. Status events (kind:24010, kind:24133) - limit(0) = future events only
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()])
+            .limit(0);
         let operations_status_filter = Filter::new()
             .kind(Kind::Custom(24133))
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()]);
+            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()])
+            .limit(0);
         client.subscribe(vec![status_filter, operations_status_filter], None).await?;
         tlog!("CONN", "Subscribed to status events (kind:24010, kind:24133)");
 

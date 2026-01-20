@@ -3031,7 +3031,6 @@ dependencies = [
 [[package]]
 name = "nostrdb"
 version = "0.8.0"
-source = "git+https://github.com/pablof7z/nostrdb-rs?rev=db03aa58ecd58d5897799f022160bfba055b0309#db03aa58ecd58d5897799f022160bfba055b0309"
 dependencies = [
  "bindgen",
  "cc",
