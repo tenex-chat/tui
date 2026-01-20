@@ -268,11 +268,7 @@ impl AppDataStore {
         use nostrdb::{Filter, Transaction};
 
         // Collect project a-tags to filter reports
-        let project_a_tags: std::collections::HashSet<String> = self
-            .projects
-            .iter()
-            .map(|p| p.a_tag())
-            .collect();
+        let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
 
         if project_a_tags.is_empty() {
             // No projects loaded, skipping report loading
@@ -283,25 +279,23 @@ impl AppDataStore {
             return;
         };
 
-        let filter = Filter::new().kinds([30023]).build();
+        // Query reports that specifically a-tag our projects (instead of fetching all and filtering)
+        let a_tag_refs: Vec<&str> = project_a_tags.iter().map(|s| s.as_str()).collect();
+        let filter = Filter::new()
+            .kinds([30023])
+            .tags(a_tag_refs, 'a')
+            .build();
         let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
             return;
         };
 
-        let mut loaded_count = 0;
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
                 if let Some(report) = Report::from_note(&note) {
-                    // Only add reports that belong to known projects
-                    if project_a_tags.contains(&report.project_a_tag) {
-                        self.add_report(report);
-                        loaded_count += 1;
-                    }
+                    self.add_report(report);
                 }
             }
         }
-
-        let _ = (loaded_count, project_a_tags.len()); // Loaded reports for projects
     }
 
     /// Add a report, maintaining version history and latest-by-slug

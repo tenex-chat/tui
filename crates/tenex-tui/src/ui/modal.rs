@@ -757,38 +757,6 @@ impl AgentSettingsState {
     }
 }
 
-/// Focus area in the context selector
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ContextSelectorFocus {
-    Agent,
-    Branch,
-}
-
-/// State for the context selector modal (accessed via Down arrow from input)
-/// Shows agent (with model) and branch side by side
-#[derive(Debug, Clone)]
-pub struct ContextSelectorState {
-    pub focus: ContextSelectorFocus,
-    pub agent_index: usize,
-    pub branch_index: usize,
-}
-
-impl ContextSelectorState {
-    pub fn new() -> Self {
-        Self {
-            focus: ContextSelectorFocus::Agent,
-            agent_index: 0,
-            branch_index: 0,
-        }
-    }
-}
-
-impl Default for ContextSelectorState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 /// State for the draft navigator modal (shows saved named drafts)
 #[derive(Debug, Clone)]
 pub struct DraftNavigatorState {
@@ -1087,8 +1055,6 @@ pub enum ModalState {
     },
     /// Agent settings modal (model and tools configuration)
     AgentSettings(AgentSettingsState),
-    /// Context selector (agent + branch) - accessed via Down arrow from last line of input
-    ContextSelector(ContextSelectorState),
     /// Draft navigator modal for viewing and restoring saved drafts
     DraftNavigator(DraftNavigatorState),
 }

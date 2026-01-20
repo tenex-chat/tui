@@ -192,9 +192,11 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
 
 /// Render a tool call line with tool-specific formatting (like Svelte renderers)
 /// Tool calls render without background, in muted text color
+/// Optional content_fallback is used when we don't have special handling for the tool
 pub fn render_tool_line(
     tool_call: &ToolCall,
     indicator_color: Color,
+    content_fallback: Option<&str>,
 ) -> Line<'static> {
     let name = tool_call.name.to_lowercase();
     let target = extract_target(tool_call).unwrap_or_default();
@@ -265,11 +267,43 @@ pub fn render_tool_line(
             format!("▶ {}", truncate_with_ellipsis(desc, 40))
         }
 
-        // Default: verb + target or just tool name
+        // Model change: show variant being switched to
+        "change_model" => {
+            let variant = tool_call
+                .parameters
+                .get("variant")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
+            format!("🧠 → {}", variant)
+        }
+
+        // Default: use content fallback if available, otherwise verb + target
         _ => {
+            // If we have a meaningful content fallback, use it
+            if let Some(content) = content_fallback {
+                let trimmed = content.trim();
+                if !trimmed.is_empty() {
+                    return Line::from(vec![
+                        Span::styled("│", Style::default().fg(indicator_color)),
+                        Span::raw("  "),
+                        Span::styled(
+                            truncate_with_ellipsis(trimmed, 80),
+                            Style::default().fg(theme::TEXT_MUTED),
+                        ),
+                    ]);
+                }
+            }
+
+            // Fall back to verb + target or just tool name
             let verb = tool_verb(&tool_call.name);
             if verb.is_empty() {
-                format!("{} {}", tool_call.name, target)
+                if target.is_empty() {
+                    tool_call.name.clone()
+                } else {
+                    format!("{} {}", tool_call.name, target)
+                }
+            } else if target.is_empty() {
+                verb.to_string()
             } else {
                 format!("{} {}", verb, target)
             }

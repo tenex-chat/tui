@@ -208,7 +208,6 @@ impl HotkeyContext {
             ModalState::ExpandedEditor { .. } => return HotkeyContext::ExpandedEditorModal,
             ModalState::BranchSelector { .. } => return HotkeyContext::AnyModal,
             ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
-            ModalState::ContextSelector(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
 
