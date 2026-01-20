@@ -193,6 +193,17 @@ pub(super) fn execute_palette_command(app: &mut App, key: char) {
             undo_last_action(app);
         }
 
+        // Show/Hide archived toggle
+        'H' => {
+            if app.view == View::Home {
+                if app.sidebar_focused {
+                    app.toggle_show_archived_projects();
+                } else {
+                    app.toggle_show_archived();
+                }
+            }
+        }
+
         // Agent browser commands
         'c' => {
             if app.view == View::Chat {

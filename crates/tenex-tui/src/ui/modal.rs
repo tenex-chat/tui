@@ -824,10 +824,10 @@ impl DraftNavigatorState {
 /// Context for command palette - determines which commands are shown
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaletteContext {
-    HomeRecent,
-    HomeInbox,
+    HomeRecent { show_archived: bool },
+    HomeInbox { show_archived: bool },
     HomeReports,
-    HomeSidebar { is_online: bool, is_busy: bool, is_archived: bool },
+    HomeSidebar { is_online: bool, is_busy: bool, is_archived: bool, show_archived_projects: bool },
     ChatNormal { has_parent: bool, message_has_trace: bool, agent_working: bool },
     ChatEditing,
     AgentBrowserList,
@@ -877,27 +877,37 @@ impl CommandPaletteState {
 
         // Context-specific commands
         match self.context {
-            PaletteContext::HomeRecent => {
+            PaletteContext::HomeRecent { show_archived } => {
                 commands.push(PaletteCommand::new('n', "New conversation", "Conversation"));
                 commands.push(PaletteCommand::new('o', "Open selected", "Conversation"));
                 commands.push(PaletteCommand::new('a', "Archive/Unarchive", "Conversation"));
                 commands.push(PaletteCommand::new('e', "Export JSONL", "Conversation"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
                 commands.push(PaletteCommand::new('f', "Time filter", "Filter"));
+                if show_archived {
+                    commands.push(PaletteCommand::new('H', "Hide archived", "Filter"));
+                } else {
+                    commands.push(PaletteCommand::new('H', "Show archived", "Filter"));
+                }
                 commands.push(PaletteCommand::new('A', "Agent Browser", "Other"));
                 commands.push(PaletteCommand::new('N', "Create project", "Other"));
             }
-            PaletteContext::HomeInbox => {
+            PaletteContext::HomeInbox { show_archived } => {
                 commands.push(PaletteCommand::new('o', "Open selected", "Inbox"));
                 commands.push(PaletteCommand::new('R', "Mark as read", "Inbox"));
                 commands.push(PaletteCommand::new('M', "Mark all read", "Inbox"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
+                if show_archived {
+                    commands.push(PaletteCommand::new('H', "Hide archived", "Filter"));
+                } else {
+                    commands.push(PaletteCommand::new('H', "Show archived", "Filter"));
+                }
             }
             PaletteContext::HomeReports => {
                 commands.push(PaletteCommand::new('o', "View report", "Reports"));
                 commands.push(PaletteCommand::new('p', "Switch project", "Filter"));
             }
-            PaletteContext::HomeSidebar { is_online, is_busy, is_archived } => {
+            PaletteContext::HomeSidebar { is_online, is_busy, is_archived, show_archived_projects } => {
                 commands.push(PaletteCommand::new(' ', "Toggle visibility", "Project"));
                 commands.push(PaletteCommand::new('n', "New conversation", "Project"));
                 commands.push(PaletteCommand::new('s', "Settings", "Project"));
@@ -911,6 +921,11 @@ impl CommandPaletteState {
                     commands.push(PaletteCommand::new('a', "Unarchive", "Project"));
                 } else {
                     commands.push(PaletteCommand::new('a', "Archive", "Project"));
+                }
+                if show_archived_projects {
+                    commands.push(PaletteCommand::new('H', "Hide archived projects", "Filter"));
+                } else {
+                    commands.push(PaletteCommand::new('H', "Show archived projects", "Filter"));
                 }
             }
             PaletteContext::ChatNormal { has_parent, message_has_trace, agent_working } => {

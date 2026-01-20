@@ -49,6 +49,8 @@ pub enum HotkeyId {
     NewConversation,
     OpenSelected,
     ArchiveToggle,
+    ShowHideArchived,      // Toggle visibility of archived conversations
+    ShowHideArchivedProjects, // Toggle visibility of archived projects
     ExportJsonl,
     SwitchProject,
     TimeFilter,
@@ -581,6 +583,20 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Create Project",
         "Other",
         &[HotkeyContext::HomeRecent],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::ShowHideArchived,
+        KeyCode::Char('H'),
+        "Show/Hide Archived",
+        "Filter",
+        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::ShowHideArchivedProjects,
+        KeyCode::Char('H'),
+        "Show/Hide Archived Projects",
+        "Filter",
+        &[HotkeyContext::HomeSidebar],
     ),
 
     // === Home View - Inbox Tab ===
