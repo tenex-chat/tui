@@ -43,8 +43,8 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle in-conversation search when active
-    if app.chat_search.active {
+    // Handle in-conversation search when active (per-tab isolated)
+    if app.is_chat_search_active() {
         handle_chat_search_key(app, key);
         return Ok(true);
     }
@@ -118,12 +118,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle expanded editor modal when open
     if matches!(app.modal_state, ModalState::ExpandedEditor { .. }) {
         handle_expanded_editor_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle context selector modal when open
-    if matches!(app.modal_state, ModalState::ContextSelector(_)) {
-        handle_context_selector_key(app, key)?;
         return Ok(true);
     }
 
@@ -403,11 +397,17 @@ fn handle_chat_search_key(app: &mut App, key: KeyEvent) {
         KeyCode::Enter | KeyCode::Down => app.chat_search_next(),
         KeyCode::Up => app.chat_search_prev(),
         KeyCode::Char(c) => {
-            app.chat_search.query.push(c);
+            // Per-tab isolated: update query on active tab
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                tab.chat_search.query.push(c);
+            }
             app.update_chat_search();
         }
         KeyCode::Backspace => {
-            app.chat_search.query.pop();
+            // Per-tab isolated: update query on active tab
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                tab.chat_search.query.pop();
+            }
             app.update_chat_search();
         }
         _ => {}
@@ -425,14 +425,9 @@ fn handle_agent_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
     if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
         match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
             SelectorAction::Selected(agent) => {
-                let agent_name = agent.name.clone();
+                // Set agent as recipient - never insert text into input
                 app.selected_agent = Some(agent);
                 app.user_explicitly_selected_agent = true;
-                let mention = format!("@{} ", agent_name);
-                for c in mention.chars() {
-                    app.chat_editor.insert_char(c);
-                }
-                app.save_chat_draft();
                 app.modal_state = ModalState::None;
             }
             SelectorAction::Cancelled => {
@@ -562,8 +557,11 @@ fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
                 app.modal_state = ModalState::None;
             }
             KeyCode::Enter => {
+                // Apply to current tab (per-tab isolated)
                 let selected_ids = state.selected_nudge_ids.clone();
-                app.selected_nudge_ids = selected_ids;
+                if let Some(tab) = app.tabs.active_tab_mut() {
+                    tab.selected_nudge_ids = selected_ids;
+                }
                 app.modal_state = ModalState::None;
             }
             KeyCode::Up => {
@@ -1505,113 +1503,6 @@ pub(super) fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
             app.set_status("Failed to access clipboard");
         }
     }
-}
-
-// =============================================================================
-// CONTEXT SELECTOR (Agent + Branch)
-// =============================================================================
-
-fn handle_context_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    use ui::modal::ContextSelectorFocus;
-
-    let agents = app.available_agents();
-    let branches = app.available_branches();
-
-    if let ModalState::ContextSelector(ref mut state) = app.modal_state {
-        match key.code {
-            // Escape or Up = return to input
-            KeyCode::Esc | KeyCode::Up => {
-                app.modal_state = ModalState::None;
-            }
-            // Tab or Left/Right = switch between agent and branch
-            KeyCode::Tab | KeyCode::Left | KeyCode::Right => {
-                state.focus = match state.focus {
-                    ContextSelectorFocus::Agent => ContextSelectorFocus::Branch,
-                    ContextSelectorFocus::Branch => ContextSelectorFocus::Agent,
-                };
-            }
-            // Down or j = next item in current list
-            KeyCode::Down | KeyCode::Char('j') => {
-                match state.focus {
-                    ContextSelectorFocus::Agent => {
-                        if !agents.is_empty() && state.agent_index < agents.len() - 1 {
-                            state.agent_index += 1;
-                        }
-                    }
-                    ContextSelectorFocus::Branch => {
-                        if !branches.is_empty() && state.branch_index < branches.len() - 1 {
-                            state.branch_index += 1;
-                        }
-                    }
-                }
-            }
-            // k = previous item
-            KeyCode::Char('k') => {
-                match state.focus {
-                    ContextSelectorFocus::Agent => {
-                        if state.agent_index > 0 {
-                            state.agent_index -= 1;
-                        }
-                    }
-                    ContextSelectorFocus::Branch => {
-                        if state.branch_index > 0 {
-                            state.branch_index -= 1;
-                        }
-                    }
-                }
-            }
-            // Enter = select current item
-            KeyCode::Enter => {
-                match state.focus {
-                    ContextSelectorFocus::Agent => {
-                        if let Some(agent) = agents.get(state.agent_index).cloned() {
-                            app.selected_agent = Some(agent);
-                            app.user_explicitly_selected_agent = true;
-                        }
-                    }
-                    ContextSelectorFocus::Branch => {
-                        if let Some(branch) = branches.get(state.branch_index).cloned() {
-                            app.selected_branch = Some(branch);
-                        }
-                    }
-                }
-                app.modal_state = ModalState::None;
-            }
-            // 's' = open agent settings (only when focused on agent)
-            KeyCode::Char('s') => {
-                if state.focus == ContextSelectorFocus::Agent {
-                    if let Some(agent) = agents.get(state.agent_index).cloned() {
-                        if let Some(project) = &app.selected_project {
-                            let (all_tools, all_models) = app
-                                .data_store
-                                .borrow()
-                                .get_project_status(&project.a_tag())
-                                .map(|status| {
-                                    let tools = status.tools().iter().map(|s| s.to_string()).collect();
-                                    let models = status.models().iter().map(|s| s.to_string()).collect();
-                                    (tools, models)
-                                })
-                                .unwrap_or_default();
-
-                            let settings_state = ui::modal::AgentSettingsState::new(
-                                agent.name.clone(),
-                                agent.pubkey.clone(),
-                                project.a_tag(),
-                                agent.model.clone(),
-                                agent.tools.clone(),
-                                all_models,
-                                all_tools,
-                            );
-                            app.modal_state = ModalState::AgentSettings(settings_state);
-                            return Ok(());
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(())
 }
 
 // =============================================================================

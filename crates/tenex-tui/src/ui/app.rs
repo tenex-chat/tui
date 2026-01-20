@@ -117,6 +117,20 @@ pub enum VimMode {
     Insert,
 }
 
+/// Focus state for the context line (agent/model/branch bar below input)
+/// None means the text input is focused, Some(X) means item X in context line is selected
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputContextFocus {
+    /// Agent name is selected
+    Agent,
+    /// Model selector is selected
+    Model,
+    /// Branch is selected
+    Branch,
+    /// Nudge selector is selected
+    Nudge,
+}
+
 /// Actions that can be undone
 #[derive(Debug, Clone)]
 pub enum UndoAction {
@@ -224,8 +238,7 @@ pub struct App {
     pub search_filter: String,
     pub search_index: usize,
 
-    /// In-conversation search state
-    pub chat_search: ChatSearchState,
+    // NOTE: chat_search is now per-tab in OpenTab.chat_search
 
     /// Local streaming buffers by conversation_id
     pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
@@ -244,18 +257,13 @@ pub struct App {
     /// Draft ID when waiting for a newly created thread (to convert draft tab)
     pub pending_new_thread_draft_id: Option<String>,
 
-    /// Selected nudge IDs for the current conversation
-    pub selected_nudge_ids: Vec<String>,
+    // NOTE: selected_nudge_ids is now per-tab in OpenTab.selected_nudge_ids
 
     /// Frame counter for animations (incremented on each tick)
     pub frame_counter: u64,
 
-    /// Sent message history for ↑/↓ navigation (max 50)
-    pub message_history: Vec<String>,
-    /// Current index in message history (None = typing new)
-    pub history_index: Option<usize>,
-    /// Draft preserved when browsing history
-    pub history_draft: Option<String>,
+    // NOTE: message_history is now per-tab in OpenTab.message_history
+    // NOTE: chat_search is now per-tab in OpenTab.chat_search
 
     /// Whether vim mode is enabled
     pub vim_enabled: bool,
@@ -270,6 +278,8 @@ pub struct App {
     pub user_explicitly_selected_agent: bool,
     /// Last action that can be undone (Ctrl+T + u)
     pub last_undo_action: Option<UndoAction>,
+    /// Focus state for the context line (None = text input focused)
+    pub input_context_focus: Option<InputContextFocus>,
 }
 
 impl App {
@@ -331,24 +341,23 @@ impl App {
             showing_search_modal: false,
             search_filter: String::new(),
             search_index: 0,
-            chat_search: ChatSearchState::default(),
+            // NOTE: chat_search is now per-tab in OpenTab
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
             todo_sidebar_visible: true,
             collapsed_threads: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
-            selected_nudge_ids: Vec::new(),
+            // NOTE: selected_nudge_ids is now per-tab in OpenTab
             frame_counter: 0,
-            message_history: Vec::new(),
-            history_index: None,
-            history_draft: None,
+            // NOTE: message_history is now per-tab in OpenTab
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
             show_archived_projects: false,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
+            input_context_focus: None,
         }
     }
 
@@ -1185,12 +1194,6 @@ impl App {
         };
     }
 
-    /// Open the context selector modal (agent + branch, accessed via Down arrow)
-    pub fn open_context_selector(&mut self) {
-        use super::modal::ContextSelectorState;
-        self.modal_state = ModalState::ContextSelector(ContextSelectorState::new());
-    }
-
     /// Open the command palette modal (Ctrl+T)
     pub fn open_command_palette(&mut self) {
         let context = self.get_palette_context();
@@ -1534,25 +1537,51 @@ impl App {
     }
 
     /// Switch to next tab (Ctrl+Tab)
+    /// Tab order: Home (0) -> Tab 1 -> Tab 2 -> ... -> Home
     pub fn next_tab(&mut self) {
-        if self.tabs.len() <= 1 {
-            return;
+        if self.tabs.is_empty() {
+            return; // Only Home exists, nothing to switch to
         }
-        let next = (self.tabs.active_index() + 1) % self.tabs.len();
-        self.switch_to_tab(next);
+
+        if self.view == View::Home {
+            // From Home, go to first conversation tab (index 0)
+            self.switch_to_tab(0);
+        } else {
+            // From a conversation tab
+            let current = self.tabs.active_index();
+            if current + 1 >= self.tabs.len() {
+                // At last conversation tab, wrap to Home
+                self.save_chat_draft();
+                self.view = View::Home;
+            } else {
+                // Go to next conversation tab
+                self.switch_to_tab(current + 1);
+            }
+        }
     }
 
     /// Switch to previous tab (Ctrl+Shift+Tab)
+    /// Tab order: Home (0) <- Tab 1 <- Tab 2 <- ... <- Home
     pub fn prev_tab(&mut self) {
-        if self.tabs.len() <= 1 {
-            return;
+        if self.tabs.is_empty() {
+            return; // Only Home exists, nothing to switch to
         }
-        let prev = if self.tabs.active_index() == 0 {
-            self.tabs.len() - 1
+
+        if self.view == View::Home {
+            // From Home, go to last conversation tab
+            self.switch_to_tab(self.tabs.len() - 1);
         } else {
-            self.tabs.active_index() - 1
-        };
-        self.switch_to_tab(prev);
+            // From a conversation tab
+            let current = self.tabs.active_index();
+            if current == 0 {
+                // At first conversation tab, go to Home
+                self.save_chat_draft();
+                self.view = View::Home;
+            } else {
+                // Go to previous conversation tab
+                self.switch_to_tab(current - 1);
+            }
+        }
     }
 
     /// Mark a thread as having unread messages (if it's open in a tab but not active)
@@ -2269,83 +2298,149 @@ impl App {
         }
     }
 
-    // ===== Chat Search Methods (in-conversation search) =====
+    // ===== Chat Search Methods (in-conversation search) - Per-tab isolated =====
 
-    /// Enter chat search mode
+    /// Enter chat search mode (per-tab isolated)
     pub fn enter_chat_search(&mut self) {
-        self.chat_search.active = true;
-        self.chat_search.query.clear();
-        self.chat_search.current_match = 0;
-        self.chat_search.total_matches = 0;
-        self.chat_search.match_locations.clear();
-    }
-
-    /// Exit chat search mode
-    pub fn exit_chat_search(&mut self) {
-        self.chat_search.active = false;
-        self.chat_search.query.clear();
-        self.chat_search.match_locations.clear();
-    }
-
-    /// Update chat search results based on current query
-    pub fn update_chat_search(&mut self) {
-        self.chat_search.match_locations.clear();
-        self.chat_search.current_match = 0;
-        self.chat_search.total_matches = 0;
-
-        if self.chat_search.query.trim().is_empty() {
-            return;
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.chat_search.enter();
         }
+    }
 
-        let query_lower = self.chat_search.query.to_lowercase();
+    /// Exit chat search mode (per-tab isolated)
+    pub fn exit_chat_search(&mut self) {
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.chat_search.exit();
+        }
+    }
+
+    /// Get reference to current tab's chat search state
+    pub fn chat_search(&self) -> Option<&ChatSearchState> {
+        self.tabs.active_tab().map(|t| &t.chat_search)
+    }
+
+    /// Get mutable reference to current tab's chat search state
+    pub fn chat_search_mut(&mut self) -> Option<&mut ChatSearchState> {
+        self.tabs.active_tab_mut().map(|t| &mut t.chat_search)
+    }
+
+    /// Check if chat search is active for current tab
+    pub fn is_chat_search_active(&self) -> bool {
+        self.chat_search().map(|s| s.active).unwrap_or(false)
+    }
+
+    /// Get the chat search query for current tab
+    pub fn chat_search_query(&self) -> String {
+        self.chat_search().map(|s| s.query.clone()).unwrap_or_default()
+    }
+
+    /// Update chat search results based on current query (per-tab isolated)
+    pub fn update_chat_search(&mut self) {
+        // Get the query first
+        let query = match self.tabs.active_tab() {
+            Some(tab) => {
+                if tab.chat_search.query.trim().is_empty() {
+                    // Clear and return early
+                    if let Some(t) = self.tabs.active_tab_mut() {
+                        t.chat_search.match_locations.clear();
+                        t.chat_search.current_match = 0;
+                        t.chat_search.total_matches = 0;
+                    }
+                    return;
+                }
+                tab.chat_search.query.clone()
+            }
+            None => return,
+        };
+
+        let query_lower = query.to_lowercase();
         let messages = self.messages();
 
+        // Build match locations
+        let mut new_matches = Vec::new();
         for msg in &messages {
             let content_lower = msg.content.to_lowercase();
             let mut start = 0;
 
             while let Some(pos) = content_lower[start..].find(&query_lower) {
                 let absolute_pos = start + pos;
-                self.chat_search.match_locations.push(ChatSearchMatch {
+                new_matches.push(ChatSearchMatch {
                     message_id: msg.id.clone(),
                     start_offset: absolute_pos,
-                    length: self.chat_search.query.len(),
+                    length: query.len(),
                 });
                 start = absolute_pos + 1;
             }
         }
 
-        self.chat_search.total_matches = self.chat_search.match_locations.len();
+        // Apply to tab
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.chat_search.total_matches = new_matches.len();
+            tab.chat_search.match_locations = new_matches;
+            tab.chat_search.current_match = 0;
+        }
     }
 
-    /// Navigate to next search match
+    /// Navigate to next search match (per-tab isolated)
     pub fn chat_search_next(&mut self) {
-        if self.chat_search.total_matches > 0 {
-            self.chat_search.current_match =
-                (self.chat_search.current_match + 1) % self.chat_search.total_matches;
-            self.scroll_to_current_search_match();
-        }
-    }
-
-    /// Navigate to previous search match
-    pub fn chat_search_prev(&mut self) {
-        if self.chat_search.total_matches > 0 {
-            if self.chat_search.current_match == 0 {
-                self.chat_search.current_match = self.chat_search.total_matches - 1;
+        let should_scroll = {
+            let tab = match self.tabs.active_tab_mut() {
+                Some(t) => t,
+                None => return,
+            };
+            if tab.chat_search.total_matches > 0 {
+                tab.chat_search.current_match =
+                    (tab.chat_search.current_match + 1) % tab.chat_search.total_matches;
+                true
             } else {
-                self.chat_search.current_match -= 1;
+                false
             }
+        };
+        if should_scroll {
             self.scroll_to_current_search_match();
         }
     }
 
-    /// Scroll to make the current search match visible
+    /// Navigate to previous search match (per-tab isolated)
+    pub fn chat_search_prev(&mut self) {
+        let should_scroll = {
+            let tab = match self.tabs.active_tab_mut() {
+                Some(t) => t,
+                None => return,
+            };
+            if tab.chat_search.total_matches > 0 {
+                if tab.chat_search.current_match == 0 {
+                    tab.chat_search.current_match = tab.chat_search.total_matches - 1;
+                } else {
+                    tab.chat_search.current_match -= 1;
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if should_scroll {
+            self.scroll_to_current_search_match();
+        }
+    }
+
+    /// Scroll to make the current search match visible (per-tab isolated)
     fn scroll_to_current_search_match(&mut self) {
-        if let Some(match_loc) = self.chat_search.match_locations.get(self.chat_search.current_match) {
+        let match_msg_id = {
+            let tab = match self.tabs.active_tab() {
+                Some(t) => t,
+                None => return,
+            };
+            tab.chat_search.match_locations
+                .get(tab.chat_search.current_match)
+                .map(|m| m.message_id.clone())
+        };
+
+        if let Some(msg_id) = match_msg_id {
             let messages = self.messages();
             // Find the message index
             if let Some((msg_idx, _)) = messages.iter().enumerate()
-                .find(|(_, m)| m.id == match_loc.message_id)
+                .find(|(_, m)| m.id == msg_id)
             {
                 self.selected_message_index = msg_idx;
                 // Scroll will happen naturally in render
@@ -2353,29 +2448,32 @@ impl App {
         }
     }
 
-    /// Check if a message ID has search matches
+    /// Check if a message ID has search matches (per-tab isolated)
     pub fn message_has_search_match(&self, message_id: &str) -> bool {
-        self.chat_search.active &&
-            self.chat_search.match_locations.iter().any(|m| m.message_id == message_id)
+        self.chat_search()
+            .map(|s| s.active && s.match_locations.iter().any(|m| m.message_id == message_id))
+            .unwrap_or(false)
     }
 
-    /// Get search matches for a specific message
-    pub fn get_message_search_matches(&self, message_id: &str) -> Vec<&ChatSearchMatch> {
-        if !self.chat_search.active {
-            return vec![];
+    /// Get search matches for a specific message (per-tab isolated)
+    pub fn get_message_search_matches(&self, message_id: &str) -> Vec<ChatSearchMatch> {
+        match self.chat_search() {
+            Some(s) if s.active => {
+                s.match_locations.iter()
+                    .filter(|m| m.message_id == message_id)
+                    .cloned()
+                    .collect()
+            }
+            _ => vec![],
         }
-        self.chat_search.match_locations.iter()
-            .filter(|m| m.message_id == message_id)
-            .collect()
     }
 
-    /// Check if a match is the currently focused one
+    /// Check if a match is the currently focused one (per-tab isolated)
     pub fn is_current_search_match(&self, message_id: &str, start_offset: usize) -> bool {
-        if let Some(current) = self.chat_search.match_locations.get(self.chat_search.current_match) {
-            current.message_id == message_id && current.start_offset == start_offset
-        } else {
-            false
-        }
+        self.chat_search()
+            .and_then(|s| s.match_locations.get(s.current_match))
+            .map(|current| current.message_id == message_id && current.start_offset == start_offset)
+            .unwrap_or(false)
     }
 
     // ===== Nudge Selector Methods =====
@@ -2385,17 +2483,25 @@ impl App {
         use crate::ui::modal::NudgeSelectorState;
         use crate::ui::selector::SelectorState;
 
+        // Get current nudge selections from active tab (per-tab isolation)
+        let current_nudges = self.tabs.active_tab()
+            .map(|t| t.selected_nudge_ids.clone())
+            .unwrap_or_default();
+
         self.modal_state = ModalState::NudgeSelector(NudgeSelectorState {
             selector: SelectorState::new(),
-            selected_nudge_ids: self.selected_nudge_ids.clone(),
+            selected_nudge_ids: current_nudges,
         });
     }
 
-    /// Close the nudge selector modal, applying selections
+    /// Close the nudge selector modal, applying selections to current tab
     pub fn close_nudge_selector(&mut self, apply: bool) {
         if let ModalState::NudgeSelector(ref state) = self.modal_state {
             if apply {
-                self.selected_nudge_ids = state.selected_nudge_ids.clone();
+                // Apply to current tab (per-tab isolation)
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.selected_nudge_ids = state.selected_nudge_ids.clone();
+                }
             }
         }
         if matches!(self.modal_state, ModalState::NudgeSelector(_)) {
@@ -2492,22 +2598,38 @@ impl App {
         Some(thread.id.clone())
     }
 
-    /// Check if a nudge is selected in the nudge selector
+    /// Check if a nudge is selected (per-tab isolated)
     pub fn is_nudge_selected(&self, nudge_id: &str) -> bool {
         match &self.modal_state {
             ModalState::NudgeSelector(state) => state.selected_nudge_ids.contains(&nudge_id.to_string()),
-            _ => self.selected_nudge_ids.contains(&nudge_id.to_string()),
+            _ => {
+                // Use per-tab state
+                self.tabs.active_tab()
+                    .map(|t| t.selected_nudge_ids.contains(&nudge_id.to_string()))
+                    .unwrap_or(false)
+            }
         }
     }
 
-    /// Remove a nudge from selected nudges (outside of modal)
+    /// Remove a nudge from selected nudges (per-tab isolated)
     pub fn remove_selected_nudge(&mut self, nudge_id: &str) {
-        self.selected_nudge_ids.retain(|id| id != nudge_id);
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.selected_nudge_ids.retain(|id| id != nudge_id);
+        }
     }
 
-    /// Clear all selected nudges
+    /// Clear all selected nudges for current tab
     pub fn clear_selected_nudges(&mut self) {
-        self.selected_nudge_ids.clear();
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.selected_nudge_ids.clear();
+        }
+    }
+
+    /// Get selected nudge IDs for current tab (per-tab isolated)
+    pub fn selected_nudge_ids(&self) -> Vec<String> {
+        self.tabs.active_tab()
+            .map(|t| t.selected_nudge_ids.clone())
+            .unwrap_or_default()
     }
 
     /// Check if a thread has an unsent draft
@@ -2517,41 +2639,54 @@ impl App {
             .unwrap_or(false)
     }
 
-    /// Add a message to history (called after successful send)
+    /// Add a message to history for the current tab (called after successful send)
     pub fn add_to_message_history(&mut self, content: String) {
-        if content.trim().is_empty() {
-            return;
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.message_history.add(content);
         }
-        // Avoid duplicates at the end
-        if self.message_history.last().map(|s| s.as_str()) != Some(content.trim()) {
-            self.message_history.push(content);
-            // Limit to 50 entries
-            if self.message_history.len() > 50 {
-                self.message_history.remove(0);
-            }
-        }
-        // Reset history navigation
-        self.history_index = None;
-        self.history_draft = None;
     }
 
-    /// Navigate to previous message in history (↑ key)
+    /// Navigate to previous message in history (↑ key) - per-tab isolated
     pub fn history_prev(&mut self) {
-        if self.message_history.is_empty() {
+        let history = self.tabs.active_tab().map(|t| &t.message_history);
+        if history.map(|h| h.messages.is_empty()).unwrap_or(true) {
             return;
         }
-        match self.history_index {
+
+        // Get current state from tab
+        let (messages_len, current_index) = {
+            let tab = match self.tabs.active_tab() {
+                Some(t) => t,
+                None => return,
+            };
+            (tab.message_history.messages.len(), tab.message_history.index)
+        };
+
+        match current_index {
             None => {
                 // Save current input as draft and go to last history entry
-                self.history_draft = Some(self.chat_editor.text.clone());
-                self.history_index = Some(self.message_history.len() - 1);
-                self.chat_editor.text = self.message_history.last().cloned().unwrap_or_default();
+                let current_text = self.chat_editor.text.clone();
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.message_history.draft = Some(current_text);
+                    tab.message_history.index = Some(messages_len - 1);
+                }
+                let last_msg = self.tabs.active_tab()
+                    .and_then(|t| t.message_history.messages.last())
+                    .cloned()
+                    .unwrap_or_default();
+                self.chat_editor.text = last_msg;
                 self.chat_editor.cursor = self.chat_editor.text.len();
             }
             Some(idx) if idx > 0 => {
                 // Go to older entry
-                self.history_index = Some(idx - 1);
-                self.chat_editor.text = self.message_history.get(idx - 1).cloned().unwrap_or_default();
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.message_history.index = Some(idx - 1);
+                }
+                let msg = self.tabs.active_tab()
+                    .and_then(|t| t.message_history.messages.get(idx - 1))
+                    .cloned()
+                    .unwrap_or_default();
+                self.chat_editor.text = msg;
                 self.chat_editor.cursor = self.chat_editor.text.len();
             }
             _ => {}
@@ -2559,33 +2694,57 @@ impl App {
         self.chat_editor.clear_selection();
     }
 
-    /// Navigate to next message in history (↓ key)
+    /// Navigate to next message in history (↓ key) - per-tab isolated
     pub fn history_next(&mut self) {
-        if let Some(idx) = self.history_index {
-            if idx + 1 < self.message_history.len() {
+        let (messages_len, current_index, draft) = {
+            let tab = match self.tabs.active_tab() {
+                Some(t) => t,
+                None => return,
+            };
+            (
+                tab.message_history.messages.len(),
+                tab.message_history.index,
+                tab.message_history.draft.clone(),
+            )
+        };
+
+        if let Some(idx) = current_index {
+            if idx + 1 < messages_len {
                 // Go to newer entry
-                self.history_index = Some(idx + 1);
-                self.chat_editor.text = self.message_history.get(idx + 1).cloned().unwrap_or_default();
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.message_history.index = Some(idx + 1);
+                }
+                let msg = self.tabs.active_tab()
+                    .and_then(|t| t.message_history.messages.get(idx + 1))
+                    .cloned()
+                    .unwrap_or_default();
+                self.chat_editor.text = msg;
                 self.chat_editor.cursor = self.chat_editor.text.len();
             } else {
                 // Restore draft and exit history mode
-                self.chat_editor.text = self.history_draft.take().unwrap_or_default();
+                self.chat_editor.text = draft.unwrap_or_default();
                 self.chat_editor.cursor = self.chat_editor.text.len();
-                self.history_index = None;
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.message_history.index = None;
+                    tab.message_history.draft = None;
+                }
             }
             self.chat_editor.clear_selection();
         }
     }
 
-    /// Check if currently browsing history
+    /// Check if currently browsing history (per-tab)
     pub fn is_browsing_history(&self) -> bool {
-        self.history_index.is_some()
+        self.tabs.active_tab()
+            .map(|t| t.message_history.is_browsing())
+            .unwrap_or(false)
     }
 
-    /// Exit history mode without changing input
+    /// Exit history mode without changing input (per-tab)
     pub fn exit_history_mode(&mut self) {
-        self.history_index = None;
-        self.history_draft = None;
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.message_history.exit();
+        }
     }
 
     /// Toggle vim mode on/off
