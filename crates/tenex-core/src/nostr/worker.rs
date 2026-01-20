@@ -273,7 +273,31 @@ impl NostrWorker {
 
         self.start_subscriptions(&user_pubkey).await?;
 
+        // Spawn negentropy sync task for catching up on missed events
+        self.spawn_negentropy_sync(&user_pubkey);
+
         Ok(())
+    }
+
+    fn spawn_negentropy_sync(&self, user_pubkey: &str) {
+        let client = self.client.as_ref()
+            .expect("spawn_negentropy_sync called before Connect")
+            .clone();
+        let ndb = self.ndb.clone();
+        let pubkey = match PublicKey::parse(user_pubkey) {
+            Ok(p) => p,
+            Err(e) => {
+                tlog!("SYNC", "Failed to parse pubkey: {}", e);
+                return;
+            }
+        };
+        let rt_handle = self.rt_handle.as_ref()
+            .expect("spawn_negentropy_sync called before runtime initialized")
+            .clone();
+
+        rt_handle.spawn(async move {
+            run_negentropy_sync(client, ndb, pubkey).await;
+        });
     }
 
     async fn start_subscriptions(&mut self, user_pubkey: &str) -> Result<()> {
@@ -290,15 +314,10 @@ impl NostrWorker {
         // Agent definitions (kind 4199)
         let agent_filter = Filter::new().kind(Kind::Custom(4199));
 
-        // Project status (kind 24010) - subscribe to both p-tagged AND all events
-        // Trust validation happens client-side in AppDataStore::handle_status_event
+        // Project status (kind 24010) - only subscribe to events p-tagging us
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
             .pubkey(pubkey);
-
-        // Also subscribe to ALL 24010 events for discovery (filtered client-side by trust)
-        let all_status_filter = Filter::new()
-            .kind(Kind::Custom(24010));
 
         // Conversation metadata (kind 513) - provides titles and summaries for threads
         // Filtered by project a-tags to avoid downloading metadata for unrelated projects
@@ -324,14 +343,16 @@ impl NostrWorker {
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
 
         // Operations status (kind 24133) - which agents are working on what
-        let operations_status_filter = Filter::new().kind(Kind::Custom(24133));
+        // Uses uppercase P tag (#P) to indicate the project owner/recipient
+        let operations_status_filter = Filter::new()
+            .kind(Kind::Custom(24133))
+            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()]);
 
         // Nudges (kind 4201) - agent nudges/prompts
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
 
-        // Conversation messages (kind 1) with project a-tags
-        // Query nostrdb for existing projects to get their a-tags
-        let messages_filter = {
+        // Conversation messages (kind 1) with project a-tags - batched in groups of 4
+        let messages_filters: Vec<Filter> = {
             let project_atags: Vec<String> = get_projects(&self.ndb)
                 .unwrap_or_default()
                 .iter()
@@ -340,14 +361,18 @@ impl NostrWorker {
 
             if project_atags.is_empty() {
                 tlog!("CONN", "No projects found, skipping kind:1 a-tag subscription");
-                None
+                Vec::new()
             } else {
-                tlog!("CONN", "Subscribing to kind:1 for {} projects", project_atags.len());
-                Some(
-                    Filter::new()
-                        .kind(Kind::from(1))
-                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_atags)
-                )
+                let batch_count = (project_atags.len() + 3) / 4; // ceiling division
+                tlog!("CONN", "Subscribing to kind:1 for {} projects in {} batches", project_atags.len(), batch_count);
+                project_atags
+                    .chunks(4)
+                    .map(|chunk| {
+                        Filter::new()
+                            .kind(Kind::from(1))
+                            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec())
+                    })
+                    .collect()
             }
         };
 
@@ -359,7 +384,6 @@ impl NostrWorker {
             mention_filter,
             agent_filter,
             status_filter,
-            all_status_filter,
             lesson_filter,
             operations_status_filter,
             nudge_filter,
@@ -369,9 +393,8 @@ impl NostrWorker {
             filters.push(meta_filter);
         }
 
-        if let Some(msg_filter) = messages_filter {
-            filters.push(msg_filter);
-        }
+        // Add batched message filters
+        filters.extend(messages_filters);
 
         let subscription_id = client
             .subscribe(filters, None)
@@ -958,6 +981,101 @@ impl NostrWorker {
         self.keys = None;
         self.user_pubkey = None;
         Ok(())
+    }
+}
+
+/// Run negentropy sync loop with adaptive timing
+/// Syncs non-ephemeral kinds: 31933, 4199, 513, 4129, 4201, and kind:1 messages
+async fn run_negentropy_sync(client: Client, ndb: Arc<Ndb>, user_pubkey: PublicKey) {
+    use std::time::Duration;
+
+    let mut interval_secs: u64 = 60;
+    const MAX_INTERVAL: u64 = 900; // 15 minutes cap
+
+    tlog!("SYNC", "Starting initial negentropy sync...");
+
+    loop {
+        let total_new = sync_all_filters(&client, &ndb, &user_pubkey).await;
+
+        if total_new == 0 {
+            interval_secs = (interval_secs * 2).min(MAX_INTERVAL);
+            tlog!("SYNC", "No gaps found. Next sync in {}s", interval_secs);
+        } else {
+            interval_secs = 60;
+            tlog!("SYNC", "Found {} new events. Next sync in {}s", total_new, interval_secs);
+        }
+
+        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+    }
+}
+
+/// Sync all non-ephemeral kinds using negentropy reconciliation
+async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -> usize {
+    let mut total_new = 0;
+
+    // User's projects (kind 31933)
+    let project_filter = Filter::new()
+        .kind(Kind::Custom(31933))
+        .author(*user_pubkey);
+    total_new += sync_filter(client, project_filter, "31933").await;
+
+    // Agent definitions (kind 4199)
+    let agent_filter = Filter::new().kind(Kind::Custom(4199));
+    total_new += sync_filter(client, agent_filter, "4199").await;
+
+    // Conversation metadata (kind 513)
+    let metadata_filter = Filter::new().kind(Kind::Custom(513));
+    total_new += sync_filter(client, metadata_filter, "513").await;
+
+    // Agent lessons (kind 4129)
+    let lesson_filter = Filter::new().kind(Kind::Custom(4129));
+    total_new += sync_filter(client, lesson_filter, "4129").await;
+
+    // Nudges (kind 4201)
+    let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+    total_new += sync_filter(client, nudge_filter, "4201").await;
+
+    // Messages (kind 1) with project a-tags - batched in groups of 4
+    if let Ok(projects) = get_projects(ndb) {
+        let atags: Vec<String> = projects.iter().map(|p| p.a_tag()).collect();
+        if !atags.is_empty() {
+            // Batch in groups of 4 (same as subscriptions)
+            for chunk in atags.chunks(4) {
+                let msg_filter = Filter::new()
+                    .kind(Kind::from(1))
+                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
+                total_new += sync_filter(client, msg_filter, "1").await;
+            }
+        }
+    }
+
+    total_new
+}
+
+/// Perform negentropy sync for a single filter
+/// Returns the number of new events received
+async fn sync_filter(client: &Client, filter: Filter, label: &str) -> usize {
+    let opts = SyncOptions::default();
+
+    match client.sync(filter, &opts).await {
+        Ok(output) => {
+            // output.val is Reconciliation, output.success is HashSet<RelayUrl>
+            let count = output.val.received.len();
+
+            if count > 0 {
+                tlog!("SYNC", "kind:{} -> {} new events", label, count);
+            }
+
+            count
+        }
+        Err(e) => {
+            // Only log if it's not a "not supported" error (common for relays without negentropy)
+            let err_str = format!("{}", e);
+            if !err_str.contains("not supported") && !err_str.contains("NEG-ERR") {
+                tlog!("SYNC", "kind:{} failed: {}", label, e);
+            }
+            0
+        }
     }
 }
 
