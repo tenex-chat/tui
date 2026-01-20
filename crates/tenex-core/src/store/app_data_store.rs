@@ -472,6 +472,43 @@ impl AppDataStore {
         }
     }
 
+    /// Handle a project status event from JSON (ephemeral events via DataChange channel)
+    pub fn handle_status_event_json(&mut self, json: &str) {
+        if let Some(status) = ProjectStatus::from_json(json) {
+            let backend_pubkey = &status.backend_pubkey;
+
+            // Check trust status
+            if self.blocked_backends.contains(backend_pubkey) {
+                return;
+            }
+
+            if self.approved_backends.contains(backend_pubkey) {
+                self.project_statuses.insert(status.project_coordinate.clone(), status);
+                return;
+            }
+
+            // Unknown backend - queue for approval
+            let already_pending = self.pending_backend_approvals.iter().any(|p| {
+                p.backend_pubkey == *backend_pubkey
+            });
+
+            if !already_pending {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+
+                let pending = PendingBackendApproval {
+                    backend_pubkey: backend_pubkey.clone(),
+                    project_a_tag: status.project_coordinate.clone(),
+                    first_seen: now,
+                };
+
+                self.pending_backend_approvals.push(pending);
+            }
+        }
+    }
+
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
         let status = ProjectStatus::from_note(note)?;
         let backend_pubkey = &status.backend_pubkey;

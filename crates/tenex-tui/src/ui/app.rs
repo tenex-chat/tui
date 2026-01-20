@@ -194,6 +194,9 @@ pub struct App {
     /// Single source of truth for app data
     pub data_store: Rc<RefCell<AppDataStore>>,
 
+    /// Event stats for debugging (network events received)
+    pub event_stats: tenex_core::stats::SharedEventStats,
+
     /// When viewing a subthread, this is the root message ID
     pub subthread_root: Option<String>,
     /// The root message when viewing a subthread (for display and reply tagging)
@@ -286,6 +289,7 @@ impl App {
     pub fn new(
         db: Arc<Database>,
         data_store: Rc<RefCell<AppDataStore>>,
+        event_stats: tenex_core::stats::SharedEventStats,
         data_dir: &str,
     ) -> Self {
         Self {
@@ -320,6 +324,7 @@ impl App {
             attachment_modal_editor: TextEditor::new(),
             chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
+            event_stats,
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,
@@ -927,6 +932,9 @@ impl App {
                         reasoning_delta,
                         is_finish,
                     );
+                }
+                DataChange::ProjectStatus { json } => {
+                    self.data_store.borrow_mut().handle_status_event_json(&json);
                 }
             }
         }

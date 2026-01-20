@@ -123,6 +123,10 @@ pub enum DataChange {
         reasoning_delta: Option<String>,
         is_finish: bool,
     },
+    /// Ephemeral project status event (kind:24010) - not cached in nostrdb
+    ProjectStatus {
+        json: String,
+    },
 }
 
 pub struct NostrWorker {
@@ -406,6 +410,7 @@ impl NostrWorker {
             .expect("spawn_notification_handler called before runtime initialized")
             .clone();
         let event_stats = self.event_stats.clone();
+        let data_tx = self.data_tx.clone();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
@@ -429,8 +434,18 @@ impl NostrWorker {
                             .map(|s| s.to_string());
                         event_stats.record(event.kind.as_u16(), project_a_tag.as_deref());
 
-                        if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
-                            tlog!("ERROR", "Failed to handle event: {}", e);
+                        let kind = event.kind.as_u16();
+
+                        // Ephemeral events (24010, 24133) go through DataChange channel
+                        if kind == 24010 || kind == 24133 {
+                            if let Ok(json) = serde_json::to_string(&*event) {
+                                let _ = data_tx.send(DataChange::ProjectStatus { json });
+                            }
+                        } else {
+                            // All other events go through nostrdb
+                            if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
+                                tlog!("ERROR", "Failed to handle event: {}", e);
+                            }
                         }
                     }
                 }

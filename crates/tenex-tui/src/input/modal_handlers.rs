@@ -133,6 +133,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle debug stats modal when open
+    if matches!(app.modal_state, ModalState::DebugStats(_)) {
+        handle_debug_stats_modal_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -1656,5 +1662,38 @@ fn execute_backend_approval_action(
             ));
             app.modal_state = ModalState::None;
         }
+    }
+}
+
+// =============================================================================
+// DEBUG STATS MODAL
+// =============================================================================
+
+fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('D') => {
+            app.modal_state = ModalState::None;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.scroll_offset = state.scroll_offset.saturating_sub(1);
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.scroll_offset = state.scroll_offset.saturating_add(1);
+            }
+        }
+        KeyCode::PageUp => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.scroll_offset = state.scroll_offset.saturating_sub(10);
+            }
+        }
+        KeyCode::PageDown => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.scroll_offset = state.scroll_offset.saturating_add(10);
+            }
+        }
+        _ => {}
     }
 }

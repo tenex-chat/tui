@@ -46,6 +46,15 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
+        key: 'D',
+        label: "Debug stats",
+        section: "System",
+        available: |_| true,
+        execute: |app| {
+            app.modal_state = ModalState::DebugStats(modal::DebugStatsState::new());
+        },
+    },
+    Command {
         key: 'q',
         label: "Quit",
         section: "System",

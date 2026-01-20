@@ -200,6 +200,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_command_palette(f, area, app, state.selected_index);
     }
 
+    // Debug stats modal (Ctrl+T D)
+    if let ModalState::DebugStats(ref state) = app.modal_state {
+        super::super::render_debug_stats(f, area, app, state);
+    }
+
     // Global search modal overlay (/)
     if app.showing_search_modal {
         super::super::home::render_search_modal(f, app, area);

@@ -29,6 +29,32 @@ pub struct ProjectStatus {
 }
 
 impl ProjectStatus {
+    /// Create from JSON string (for ephemeral events received via DataChange channel)
+    pub fn from_json(json: &str) -> Option<Self> {
+        let event: serde_json::Value = serde_json::from_str(json).ok()?;
+
+        let kind = event.get("kind")?.as_u64()?;
+        if kind != 24010 {
+            return None;
+        }
+
+        let backend_pubkey = event.get("pubkey")?.as_str()?.to_string();
+        let created_at = event.get("created_at")?.as_u64()?;
+
+        let tags_value = event.get("tags")?.as_array()?;
+        let tags: Vec<Vec<String>> = tags_value.iter()
+            .filter_map(|t| {
+                t.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                        .collect()
+                })
+            })
+            .collect();
+
+        Self::from_tags(created_at, tags, backend_pubkey)
+    }
+
     /// Create from nostrdb::Note
     pub fn from_note(note: &Note) -> Option<Self> {
         if note.kind() != 24010 {

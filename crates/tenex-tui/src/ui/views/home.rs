@@ -128,6 +128,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::BackendApproval(ref state) = app.modal_state {
         super::render_backend_approval_modal(f, area, state);
     }
+
+    // Debug stats modal (Ctrl+T D)
+    if let ModalState::DebugStats(ref state) = app.modal_state {
+        super::render_debug_stats(f, area, app, state);
+    }
 }
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {

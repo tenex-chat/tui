@@ -211,6 +211,7 @@ impl HotkeyContext {
             ModalState::BranchSelector { .. } => return HotkeyContext::AnyModal,
             ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
             ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
+            ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
 
