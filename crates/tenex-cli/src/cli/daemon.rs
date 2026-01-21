@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -15,6 +15,7 @@ use crate::nostr::{self, NostrCommand};
 use crate::store::AppDataStore;
 use tenex_core::config::CoreConfig;
 use tenex_core::models::PreferencesStorage;
+use tenex_core::nostr::set_log_path;
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
 
 use super::config::CliConfig;
@@ -22,46 +23,28 @@ use super::protocol::{Request, Response};
 
 const SOCKET_NAME: &str = "tenex-cli.sock";
 const PID_FILE: &str = "daemon.pid";
+const LOG_FILE: &str = "tenex.log";
 
-/// Get socket path, using config override if provided
-pub fn get_socket_path(config: Option<&CliConfig>) -> PathBuf {
-    if let Some(cfg) = config {
-        if let Some(ref path) = cfg.socket_path {
-            return path.clone();
-        }
-    }
-    default_socket_path()
-}
-
-/// Default socket path when no config is provided
-pub fn default_socket_path() -> PathBuf {
-    CoreConfig::default_data_dir().join(SOCKET_NAME)
-}
-
-fn get_pid_path(config: Option<&CliConfig>) -> PathBuf {
-    // Put PID file next to socket
-    let socket_path = get_socket_path(config);
-    if let Some(parent) = socket_path.parent() {
-        parent.join(PID_FILE)
-    } else {
-        PathBuf::from(PID_FILE)
-    }
-}
-
-fn get_data_dir() -> PathBuf {
-    CoreConfig::default_data_dir()
+/// Get socket path from data directory
+pub fn socket_path(data_dir: &Path) -> PathBuf {
+    data_dir.join(SOCKET_NAME)
 }
 
 /// Run the daemon server
 #[tokio::main]
-pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
+pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<()> {
     eprintln!("Starting tenex-cli daemon...");
 
-    // Ensure base directory exists
-    let socket_path = get_socket_path(config.as_ref());
-    if let Some(parent) = socket_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
+    // Ensure data directory exists
+    fs::create_dir_all(&data_dir)?;
+
+    // Set log path before any logging happens
+    let log_path = data_dir.join(LOG_FILE);
+    set_log_path(log_path.clone());
+    eprintln!("Log file: {:?}", log_path);
+
+    // Socket path
+    let socket_path = data_dir.join(SOCKET_NAME);
 
     // Remove stale socket if exists
     if socket_path.exists() {
@@ -69,7 +52,7 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
     }
 
     // Write PID file
-    let pid_path = get_pid_path(config.as_ref());
+    let pid_path = data_dir.join(PID_FILE);
     fs::write(&pid_path, std::process::id().to_string())?;
 
     // Bind socket early so clients can connect while we initialize
@@ -77,7 +60,6 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
     eprintln!("Listening on {:?}", socket_path);
 
     // Initialize core runtime
-    let data_dir = get_data_dir();
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
     let data_store = core_runtime.data_store();
     let core_handle = core_runtime.handle();
@@ -140,7 +122,7 @@ pub async fn run_daemon(config: Option<CliConfig>) -> Result<()> {
     Ok(())
 }
 
-/// Try to login with config credentials first, then fall back to stored credentials
+/// Try to login with config credentials first, then env vars, then stored credentials
 fn try_auto_login_with_config(
     config: Option<&CliConfig>,
     prefs: &PreferencesStorage,
@@ -154,6 +136,17 @@ fn try_auto_login_with_config(
                 Err(e) => {
                     eprintln!("Failed to login with config credentials: {}", e);
                 }
+            }
+        }
+    }
+
+    // Try environment variables (used when daemon is spawned by client)
+    if let Ok(key) = std::env::var("TENEX_KEY") {
+        let password = std::env::var("TENEX_KEY_PASSWORD").ok();
+        match try_login_with_credentials(&key, password.as_deref(), core_handle) {
+            Ok(keys) => return Some(keys),
+            Err(e) => {
+                eprintln!("Failed to login with TENEX_KEY: {}", e);
             }
         }
     }
