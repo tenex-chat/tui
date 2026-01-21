@@ -10,8 +10,10 @@
 /// - Alt+Left/Right: Word jumping
 /// - Large pastes become attachments
 
+use serde::{Deserialize, Serialize};
+
 /// Represents a pasted attachment (large text that was pasted)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PasteAttachment {
     pub id: usize,
     pub content: String,
@@ -28,7 +30,7 @@ impl PasteAttachment {
 }
 
 /// Represents an uploaded image attachment
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImageAttachment {
     pub id: usize,
     pub url: String,
@@ -791,6 +793,29 @@ impl TextEditor {
             let target_col = (last_visual_line_start + col_in_visual_line).min(prev_line_len);
             self.cursor = prev_line_start + target_col;
         }
+    }
+
+    /// Check if cursor is on the first visual line (accounting for wrap width)
+    pub fn is_on_first_visual_line(&self, wrap_width: usize) -> bool {
+        if wrap_width == 0 {
+            let (row, _) = self.cursor_position();
+            return row == 0;
+        }
+
+        // Find current logical line start
+        let logical_line_start = self.text[..self.cursor]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let col_in_line = self.cursor - logical_line_start;
+        let visual_line_in_logical = col_in_line / wrap_width;
+
+        // On first visual line if: on first visual wrap of first logical line
+        let is_first_logical_line = logical_line_start == 0;
+        let on_first_visual_of_logical = visual_line_in_logical == 0;
+
+        is_first_logical_line && on_first_visual_of_logical
     }
 
     /// Check if cursor is on the last visual line (accounting for wrap width)

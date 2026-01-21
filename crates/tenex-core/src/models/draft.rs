@@ -40,11 +40,29 @@ fn generate_draft_id() -> String {
 // ChatDraft - per-conversation drafts
 // =============================================================================
 
+/// Serializable paste attachment for draft storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DraftPasteAttachment {
+    pub id: usize,
+    pub content: String,
+}
+
+/// Serializable image attachment for draft storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DraftImageAttachment {
+    pub id: usize,
+    pub url: String,
+}
+
 /// Represents a chat draft for a conversation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatDraft {
     pub conversation_id: String,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<DraftPasteAttachment>,
+    #[serde(default)]
+    pub image_attachments: Vec<DraftImageAttachment>,
     pub selected_agent_pubkey: Option<String>,
     pub selected_branch: Option<String>,
     pub last_modified: u64,
@@ -265,10 +283,12 @@ impl NamedDraftStorage {
 }
 
 impl ChatDraft {
-    /// A draft is considered empty only if it has no text AND no agent/branch selection
-    /// This ensures agent selection is persisted even if user hasn't typed anything yet
+    /// A draft is considered empty only if it has no text, no attachments, AND no agent/branch selection
+    /// This ensures agent selection and attachments are persisted even if user hasn't typed anything yet
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
+            && self.attachments.is_empty()
+            && self.image_attachments.is_empty()
             && self.selected_agent_pubkey.is_none()
             && self.selected_branch.is_none()
     }
