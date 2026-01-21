@@ -80,9 +80,11 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Down if app.is_browsing_history() => {
             app.history_next();
         }
-        // Up = focus attachments (when there are any)
+        // Up = focus attachments (only when on first visual line and there are attachments)
         KeyCode::Up
-            if app.chat_editor.has_attachments() && app.chat_editor.focused_attachment.is_none() =>
+            if app.chat_editor.has_attachments()
+                && app.chat_editor.focused_attachment.is_none()
+                && app.chat_editor.is_on_first_visual_line(app.chat_input_wrap_width) =>
         {
             app.chat_editor.focus_attachments();
         }

@@ -1,4 +1,4 @@
-use crate::models::{AskEvent, ChatDraft, DraftStorage, Message, NamedDraft, NamedDraftStorage, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
+use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, DraftStorage, Message, NamedDraft, NamedDraftStorage, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
@@ -6,7 +6,7 @@ use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
 use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager};
-use crate::ui::text_editor::TextEditor;
+use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -14,6 +14,7 @@ use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use tenex_core::runtime::CoreHandle;
+use tenex_core::tlog;
 
 /// Fuzzy match: all chars in pattern must appear in target in order (case-insensitive)
 pub fn fuzzy_matches(target: &str, pattern: &str) -> bool {
@@ -571,10 +572,39 @@ impl App {
         };
 
         if let Some(conversation_id) = draft_key {
+            let agent_pubkey = self.selected_agent.as_ref().map(|a| a.pubkey.clone());
+            tlog!("AGENT", "save_chat_draft: key={}, agent={:?}",
+                conversation_id,
+                self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+            );
+
+            // Convert attachments to draft format
+            let attachments: Vec<DraftPasteAttachment> = self
+                .chat_editor
+                .attachments
+                .iter()
+                .map(|a| DraftPasteAttachment {
+                    id: a.id,
+                    content: a.content.clone(),
+                })
+                .collect();
+
+            let image_attachments: Vec<DraftImageAttachment> = self
+                .chat_editor
+                .image_attachments
+                .iter()
+                .map(|a| DraftImageAttachment {
+                    id: a.id,
+                    url: a.url.clone(),
+                })
+                .collect();
+
             let draft = ChatDraft {
                 conversation_id,
-                text: self.chat_editor.build_full_content(),
-                selected_agent_pubkey: self.selected_agent.as_ref().map(|a| a.pubkey.clone()),
+                text: self.chat_editor.text.clone(), // Raw text, not build_full_content()
+                attachments,
+                image_attachments,
+                selected_agent_pubkey: agent_pubkey,
                 selected_branch: self.selected_branch.clone(),
                 last_modified: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -588,12 +618,18 @@ impl App {
     /// Restore draft for the selected thread or draft tab into chat_editor
     /// Priority: draft values > conversation sync > defaults
     pub fn restore_chat_draft(&mut self) {
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.clone());
+        tlog!("AGENT", "restore_chat_draft called, thread_id={:?}", thread_id);
+
         // Reset explicit selection flag when switching conversations
         self.user_explicitly_selected_agent = false;
 
         // Always clear editor first - each conversation has its own draft
         self.chat_editor.text.clear();
         self.chat_editor.cursor = 0;
+        self.chat_editor.attachments.clear();
+        self.chat_editor.image_attachments.clear();
+        self.chat_editor.focused_attachment = None;
 
         // Determine the draft key - use thread id or draft_id from active tab
         let draft_key = if let Some(ref thread) = self.selected_thread {
@@ -602,6 +638,8 @@ impl App {
             // Check if current tab is a draft tab
             self.tabs.active_tab().and_then(|t| t.draft_id.clone())
         };
+
+        tlog!("AGENT", "restore_chat_draft: draft_key={:?}", draft_key);
 
         // Track whether draft had explicit agent/branch selections
         let mut draft_had_agent = false;
@@ -613,6 +651,27 @@ impl App {
                 self.chat_editor.text = draft.text;
                 self.chat_editor.cursor = self.chat_editor.text.len();
 
+                // Restore attachments from draft
+                self.chat_editor.attachments = draft
+                    .attachments
+                    .into_iter()
+                    .map(|a| PasteAttachment {
+                        id: a.id,
+                        content: a.content,
+                    })
+                    .collect();
+
+                self.chat_editor.image_attachments = draft
+                    .image_attachments
+                    .into_iter()
+                    .map(|a| ImageAttachment { id: a.id, url: a.url })
+                    .collect();
+
+                tlog!("AGENT", "restore_chat_draft: loaded draft, agent_pubkey={:?}, branch={:?}",
+                    draft.selected_agent_pubkey.as_ref().map(|p| &p[..8.min(p.len())]),
+                    draft.selected_branch
+                );
+
                 // Restore agent from draft if one was saved (takes priority over sync)
                 if let Some(ref agent_pubkey) = draft.selected_agent_pubkey {
                     // Find agent by pubkey in available agents
@@ -620,8 +679,13 @@ impl App {
                         .into_iter()
                         .find(|a| &a.pubkey == agent_pubkey);
                     if let Some(agent) = agent {
+                        tlog!("AGENT", "restore_chat_draft: restoring agent from draft='{}' (pubkey={})",
+                            agent.name, &agent.pubkey[..8]);
                         self.selected_agent = Some(agent);
                         draft_had_agent = true;
+                    } else {
+                        tlog!("AGENT", "restore_chat_draft: draft agent_pubkey={} NOT FOUND in available_agents",
+                            &agent_pubkey[..8.min(agent_pubkey.len())]);
                     }
                 }
                 // Restore branch from draft if one was saved (takes priority over sync)
@@ -629,6 +693,8 @@ impl App {
                     self.selected_branch = draft.selected_branch;
                     draft_had_branch = true;
                 }
+            } else {
+                tlog!("AGENT", "restore_chat_draft: no draft found for key");
             }
         }
 
@@ -636,19 +702,30 @@ impl App {
         // This ensures draft selections are preserved while still providing sensible defaults
         if self.selected_thread.is_some() {
             if !draft_had_agent {
+                tlog!("AGENT", "restore_chat_draft: draft had no agent, calling sync_agent_with_conversation");
                 self.sync_agent_with_conversation();
+            } else {
+                tlog!("AGENT", "restore_chat_draft: draft had agent, skipping sync");
             }
             if !draft_had_branch {
                 self.sync_branch_with_conversation();
             }
         }
+
+        tlog!("AGENT", "restore_chat_draft done, selected_agent={:?}",
+            self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+        );
     }
 
     /// Sync selected_agent with the most recent agent in the conversation
     /// Falls back to PM agent if no agent has responded yet
     pub fn sync_agent_with_conversation(&mut self) {
+        tlog!("AGENT", "sync_agent_with_conversation called");
+
         // First try to get the most recent agent from the conversation
         if let Some(recent_agent) = self.get_most_recent_agent_from_conversation() {
+            tlog!("AGENT", "sync_agent: setting to recent_agent='{}' (pubkey={})",
+                recent_agent.name, &recent_agent.pubkey[..8]);
             self.selected_agent = Some(recent_agent);
             return;
         }
@@ -656,8 +733,14 @@ impl App {
         // Fall back to PM agent if no agent has responded yet
         if let Some(status) = self.get_selected_project_status() {
             if let Some(pm) = status.pm_agent() {
+                tlog!("AGENT", "sync_agent: no recent agent, falling back to PM='{}' (pubkey={})",
+                    pm.name, &pm.pubkey[..8]);
                 self.selected_agent = Some(pm.clone());
+            } else {
+                tlog!("AGENT", "sync_agent: no recent agent and no PM available");
             }
+        } else {
+            tlog!("AGENT", "sync_agent: no project status available");
         }
     }
 
@@ -1049,6 +1132,12 @@ impl App {
         let available_agents = self.available_agents();
         let user_pubkey = self.data_store.borrow().user_pubkey.clone();
 
+        tlog!("AGENT", "get_most_recent_agent: thread_id={}, messages={}, available_agents={:?}",
+            thread.id,
+            messages.len(),
+            available_agents.iter().map(|a| format!("{}({})", a.name, &a.pubkey[..8])).collect::<Vec<_>>()
+        );
+
         // Create a set of agent pubkeys for quick lookup
         let agent_pubkeys: std::collections::HashSet<&str> = available_agents
             .iter()
@@ -1070,6 +1159,7 @@ impl App {
             if agent_pubkeys.contains(msg.pubkey.as_str()) && msg.created_at >= latest_timestamp {
                 latest_timestamp = msg.created_at;
                 latest_agent_pubkey = Some(msg.pubkey.as_str());
+                tlog!("AGENT", "  found agent message: pubkey={}, timestamp={}", &msg.pubkey[..8], msg.created_at);
             }
         }
 
@@ -1079,13 +1169,20 @@ impl App {
         if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str()) {
             if user_pubkey.as_ref().map(|pk| pk != &thread.pubkey).unwrap_or(true) {
                 latest_agent_pubkey = Some(thread.pubkey.as_str());
+                tlog!("AGENT", "  using thread author as agent: pubkey={}", &thread.pubkey[..8]);
             }
         }
 
         // Find and return the matching agent
-        latest_agent_pubkey.and_then(|pubkey| {
+        let result = latest_agent_pubkey.and_then(|pubkey| {
             available_agents.into_iter().find(|a| a.pubkey == pubkey)
-        })
+        });
+
+        tlog!("AGENT", "get_most_recent_agent result: {:?}",
+            result.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+        );
+
+        result
     }
 
     /// Get the most recent branch from conversation messages.
@@ -1358,6 +1455,9 @@ impl App {
         let thread_id = tab.thread_id.clone();
         let project_a_tag = tab.project_a_tag.clone();
 
+        tlog!("AGENT", "switch_to_tab: index={}, is_draft={}, thread_id={}, project={}",
+            index, is_draft, thread_id, project_a_tag);
+
         if is_draft {
             // Draft tab - set up for new conversation
             self.selected_thread = None;
@@ -1368,6 +1468,7 @@ impl App {
             self.selected_project = None;
             self.selected_agent = None;
             self.selected_branch = None;
+            tlog!("AGENT", "switch_to_tab(draft): cleared agent/branch");
 
             // Set the project for this draft
             let project = self.data_store.borrow()
@@ -1384,6 +1485,8 @@ impl App {
                 // (restore_chat_draft will override if draft has specific values)
                 if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
                     if let Some(pm) = status.pm_agent() {
+                        tlog!("AGENT", "switch_to_tab(draft): setting PM='{}' (pubkey={})",
+                            pm.name, &pm.pubkey[..8]);
                         self.selected_agent = Some(pm.clone());
                     }
                     // Always set default branch (removed .is_none() guard to prevent stale values)
@@ -1406,6 +1509,7 @@ impl App {
                 .cloned();
 
             if let Some(thread) = thread {
+                tlog!("AGENT", "switch_to_tab(real): found thread '{}'", thread.title);
                 self.selected_thread = Some(thread);
                 self.creating_thread = false;
 
@@ -1426,16 +1530,24 @@ impl App {
                     let draft_has_agent = draft.as_ref().map(|d| d.selected_agent_pubkey.is_some()).unwrap_or(false);
                     let draft_has_branch = draft.as_ref().map(|d| d.selected_branch.is_some()).unwrap_or(false);
 
+                    tlog!("AGENT", "switch_to_tab(real): draft_has_agent={}, draft_has_branch={}",
+                        draft_has_agent, draft_has_branch);
+
                     // Set agent and branch defaults only if draft doesn't have them
                     if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
                         if !draft_has_agent {
                             // No draft agent, use PM as default
                             if let Some(pm) = status.pm_agent() {
+                                tlog!("AGENT", "switch_to_tab(real): no draft agent, setting PM='{}' (pubkey={}) BEFORE restore_chat_draft",
+                                    pm.name, &pm.pubkey[..8]);
                                 self.selected_agent = Some(pm.clone());
                             } else {
                                 // No PM available, clear to prevent stale state
+                                tlog!("AGENT", "switch_to_tab(real): no draft agent and no PM, clearing");
                                 self.selected_agent = None;
                             }
+                        } else {
+                            tlog!("AGENT", "switch_to_tab(real): draft has agent, skipping PM default");
                         }
 
                         if !draft_has_branch {
@@ -1443,6 +1555,7 @@ impl App {
                         }
                     } else {
                         // No project status, clear agent/branch to prevent stale state
+                        tlog!("AGENT", "switch_to_tab(real): no project status, clearing agent/branch");
                         self.selected_agent = None;
                         self.selected_branch = None;
                     }
@@ -1451,6 +1564,7 @@ impl App {
                     self.restore_chat_draft();
                 } else {
                     // Project lookup failed - clear all context to prevent stale state leaking
+                    tlog!("AGENT", "switch_to_tab(real): project lookup failed, clearing all");
                     self.selected_project = None;
                     self.selected_agent = None;
                     self.selected_branch = None;
@@ -1463,6 +1577,10 @@ impl App {
                 self.view = View::Chat; // Switch to Chat view
             }
         }
+
+        tlog!("AGENT", "switch_to_tab DONE: selected_agent={:?}",
+            self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+        );
 
         // Auto-open pending ask modal if there's one for this thread
         self.maybe_open_pending_ask();
@@ -1766,6 +1884,11 @@ impl App {
     /// Push current conversation onto the navigation stack and navigate to a delegation.
     /// This allows drilling into delegations within the same tab.
     pub fn push_delegation(&mut self, delegation_thread_id: &str) {
+        tlog!("AGENT", "push_delegation: entering thread_id={}", delegation_thread_id);
+
+        // Save current draft before navigating
+        self.save_chat_draft();
+
         // Get current tab state to save
         let current_state = self.tabs.active_tab().map(|tab| NavigationStackEntry {
             thread_id: tab.thread_id.clone(),
@@ -1800,6 +1923,7 @@ impl App {
             self.selected_thread = Some(thread);
             self.scroll_offset = usize::MAX; // Start at bottom
             self.selected_message_index = 0;
+            self.input_mode = InputMode::Editing;
 
             // Update project context if needed
             let project = self.data_store.borrow().get_projects()
@@ -1810,6 +1934,13 @@ impl App {
                 self.selected_project = Some(project);
             }
 
+            // Restore draft and sync agent with conversation
+            self.restore_chat_draft();
+
+            tlog!("AGENT", "push_delegation done: selected_agent={:?}",
+                self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+            );
+
             // Auto-open pending ask modal if there's one for this thread
             self.maybe_open_pending_ask();
         }
@@ -1818,10 +1949,17 @@ impl App {
     /// Pop from the navigation stack and return to the parent conversation.
     /// Returns true if popped successfully, false if stack was empty.
     pub fn pop_navigation_stack(&mut self) -> bool {
+        tlog!("AGENT", "pop_navigation_stack: returning to parent");
+
+        // Save current draft before navigating
+        self.save_chat_draft();
+
         let entry = self.tabs.active_tab_mut()
             .and_then(|tab| tab.navigation_stack.pop());
 
         if let Some(entry) = entry {
+            tlog!("AGENT", "pop_navigation_stack: popped entry thread_id={}", entry.thread_id);
+
             // Find the parent thread
             let thread = self.data_store.borrow()
                 .get_thread_by_id(&entry.thread_id)
@@ -1848,6 +1986,13 @@ impl App {
                 if let Some(project) = project {
                     self.selected_project = Some(project);
                 }
+
+                // Restore draft and sync agent with conversation
+                self.restore_chat_draft();
+
+                tlog!("AGENT", "pop_navigation_stack done: selected_agent={:?}",
+                    self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+                );
 
                 // Auto-open pending ask modal if there's one for this thread
                 self.maybe_open_pending_ask();
