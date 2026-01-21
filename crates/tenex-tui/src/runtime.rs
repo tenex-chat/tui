@@ -1,7 +1,8 @@
 use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
-use std::time::Duration;
+use std::io::Write;
+use std::time::{Duration, Instant};
 
 use tenex_core::events::CoreEvent;
 use tenex_core::runtime::CoreRuntime;
@@ -11,6 +12,16 @@ use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, Tui, View};
+
+fn log_diagnostic(msg: &str) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/tenex-diag.log")
+    {
+        let _ = writeln!(file, "{}", msg);
+    }
+}
 
 pub(crate) async fn run_app(
     terminal: &mut Tui,
@@ -29,10 +40,28 @@ pub(crate) async fn run_app(
     let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(10);
 
     let mut loop_count: u64 = 0;
+    let mut terminal_events: u64 = 0;
+    let mut ndb_events: u64 = 0;
+    let mut tick_events: u64 = 0;
+    let mut upload_events: u64 = 0;
+    let diag_start = Instant::now();
+
     while app.running {
         loop_count += 1;
-        if loop_count % 100 == 0 {
-            let _ = loop_count; // Used for occasional debug logging
+
+        // Log diagnostics every 1000 iterations
+        if loop_count % 1000 == 0 {
+            let elapsed = diag_start.elapsed().as_secs();
+            log_diagnostic(&format!(
+                "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={}",
+                loop_count,
+                elapsed,
+                if elapsed > 0 { loop_count / elapsed } else { loop_count },
+                terminal_events,
+                ndb_events,
+                tick_events,
+                upload_events
+            ));
         }
 
         // Render
@@ -42,6 +71,7 @@ pub(crate) async fn run_app(
         tokio::select! {
             // Terminal UI events
             maybe_event = event_stream.next() => {
+                terminal_events += 1;
                 // Received terminal event
                 if let Some(Ok(event)) = maybe_event {
                     match event {
@@ -119,6 +149,7 @@ pub(crate) async fn run_app(
 
             // nostrdb notifications - events are ready to query
             Some(note_keys) = core_runtime.next_note_keys() => {
+                ndb_events += 1;
                 let events = core_runtime.process_note_keys(&note_keys)?;
                 handle_core_events(app, events);
 
@@ -128,6 +159,7 @@ pub(crate) async fn run_app(
 
             // Tick for regular updates (data channel polling for non-message updates)
             _ = tick_interval.tick() => {
+                tick_events += 1;
                 app.tick(); // Increment frame counter for animations
                 app.check_for_data_updates()?;
 
@@ -137,6 +169,7 @@ pub(crate) async fn run_app(
 
             // Handle upload results from background tasks
             Some(result) = upload_rx.recv() => {
+                upload_events += 1;
                 match result {
                     UploadResult::Success(url) => {
                         let id = app.chat_editor.add_image_attachment(url);
