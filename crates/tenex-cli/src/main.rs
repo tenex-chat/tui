@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use tenex_cli::cli::{is_daemon_running, run_daemon, send_command, socket_path, CliCommand, CliConfig};
+use tenex_core::config::CoreConfig;
 
 #[derive(Parser)]
 #[command(name = "tenex-cli")]
@@ -15,13 +16,9 @@ struct Cli {
     #[arg(long, short)]
     pretty: bool,
 
-    /// Path to JSON config file (contains socketPath, credentials)
-    #[arg(long, short = 'c')]
-    config: Option<PathBuf>,
-
-    /// JSON config passed internally (used when spawning daemon)
-    #[arg(long, hide = true)]
-    config_json: Option<String>,
+    /// Data directory for config, socket, database, logs, pid (default: ~/.tenex/cli)
+    #[arg(long, short = 'd')]
+    data_dir: Option<PathBuf>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -99,12 +96,15 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
-    // Load config from file or JSON string
-    let config = load_config(&cli);
+    // Determine data directory
+    let data_dir = cli.data_dir.clone().unwrap_or_else(CoreConfig::default_data_dir);
+
+    // Load config from data_dir/config.json if exists
+    let config = load_config(&data_dir);
 
     // Run daemon mode
     if cli.daemon {
-        if let Err(e) = run_daemon(config) {
+        if let Err(e) = run_daemon(data_dir, config) {
             eprintln!("Daemon error: {}", e);
             std::process::exit(1);
         }
@@ -127,8 +127,8 @@ fn main() {
         Some(Commands::Status { running }) => {
             if running {
                 // Quick check without auto-starting daemon
-                let is_running = is_daemon_running(config.as_ref());
-                let path = socket_path(config.as_ref());
+                let is_running = is_daemon_running(&data_dir);
+                let path = socket_path(&data_dir);
                 if cli.pretty {
                     println!(
                         "{}",
@@ -169,33 +169,22 @@ fn main() {
     };
 
     // Send command to daemon
-    if let Err(e) = send_command(command, cli.pretty, config) {
+    if let Err(e) = send_command(command, cli.pretty, &data_dir, config) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
 }
 
-/// Load configuration from file or JSON string
-fn load_config(cli: &Cli) -> Option<CliConfig> {
-    // Priority: --config-json (internal) > --config (file)
-    if let Some(ref json) = cli.config_json {
-        match CliConfig::from_json(json) {
+/// Load configuration from data_dir/config.json if it exists
+fn load_config(data_dir: &std::path::Path) -> Option<CliConfig> {
+    let config_path = data_dir.join("config.json");
+    if config_path.exists() {
+        match CliConfig::load(&config_path) {
             Ok(config) => return Some(config),
             Err(e) => {
-                eprintln!("Warning: Failed to parse config JSON: {}", e);
+                eprintln!("Warning: Failed to load config: {}", e);
             }
         }
     }
-
-    if let Some(ref path) = cli.config {
-        match CliConfig::load(path) {
-            Ok(config) => return Some(config),
-            Err(e) => {
-                eprintln!("Error: {}", e);
-                std::process::exit(1);
-            }
-        }
-    }
-
     None
 }
