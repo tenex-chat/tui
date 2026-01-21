@@ -1,4 +1,5 @@
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
@@ -15,6 +16,19 @@ use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
 static START_TIME: OnceLock<Instant> = OnceLock::new();
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Set the log file path. Must be called before any logging occurs.
+pub fn set_log_path(path: PathBuf) {
+    let _ = LOG_PATH.set(path);
+}
+
+fn get_log_path() -> PathBuf {
+    LOG_PATH
+        .get()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("/tmp/tenex.log"))
+}
 
 fn elapsed_ms() -> u64 {
     START_TIME.get_or_init(Instant::now).elapsed().as_millis() as u64
@@ -24,7 +38,7 @@ fn log_to_file(tag: &str, msg: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("/tmp/tenex.log")
+        .open(get_log_path())
     {
         let _ = writeln!(file, "[{:>8}ms] [{}] {}", elapsed_ms(), tag, msg);
     }
@@ -295,12 +309,13 @@ impl NostrWorker {
 
         self.start_subscriptions(&user_pubkey).await?;
 
-        // Spawn negentropy sync task for catching up on missed events
-        self.spawn_negentropy_sync(&user_pubkey);
+        // Negentropy sync temporarily disabled - most relays don't support it yet
+        // self.spawn_negentropy_sync(&user_pubkey);
 
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn spawn_negentropy_sync(&self, user_pubkey: &str) {
         let client = self.client.as_ref()
             .expect("spawn_negentropy_sync called before Connect")
@@ -1021,6 +1036,7 @@ impl NostrWorker {
 
 /// Run negentropy sync loop with adaptive timing
 /// Syncs non-ephemeral kinds: 31933, 4199, 513, 4129, 4201, and kind:1 messages
+#[allow(dead_code)]
 async fn run_negentropy_sync(client: Client, ndb: Arc<Ndb>, user_pubkey: PublicKey) {
     use std::time::Duration;
 
@@ -1045,6 +1061,7 @@ async fn run_negentropy_sync(client: Client, ndb: Arc<Ndb>, user_pubkey: PublicK
 }
 
 /// Sync all non-ephemeral kinds using negentropy reconciliation
+#[allow(dead_code)]
 async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -> usize {
     let mut total_new = 0;
 
@@ -1094,6 +1111,7 @@ async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -
 
 /// Perform negentropy sync for a single filter
 /// Returns the number of new events received
+#[allow(dead_code)]
 async fn sync_filter(client: &Client, filter: Filter, label: &str) -> usize {
     let opts = SyncOptions::default();
 
