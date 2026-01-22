@@ -66,13 +66,23 @@ impl Thread {
                     // Thread must NOT have e-tags (messages have e-tags)
                     has_e_tag = true;
                 }
-                Some("delegation") => {
-                    // Delegation tag format: ["delegation", "<parent-conversation-id>"]
-                    parent_conversation_id = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                Some("delegation") | Some("parent") => {
+                    // Parent tag format: ["parent", "<parent-conversation-id>"]
+                    // (Note: "delegation" is legacy - nostrdb has issues with NIP-26 collision)
+                    // nostrdb stores 64-char hex strings as Id variant, so we need to handle both
+                    parent_conversation_id = tag.get(1).and_then(|t| {
+                        match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                        }
+                    });
                 }
                 Some("p") => {
+                    // nostrdb stores 64-char hex strings as Id variant
                     if let Some(pubkey) = tag.get(1).and_then(|t| t.variant().str()) {
                         p_tags.push(pubkey.to_string());
+                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                        p_tags.push(hex::encode(id_bytes));
                     }
                 }
                 _ => {}
@@ -239,5 +249,50 @@ mod tests {
 
         let thread = Thread::from_note(&note);
         assert!(thread.is_none(), "Should reject non-kind:1 notes");
+    }
+
+    #[test]
+    fn test_thread_parses_delegation_tag() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let parent_id = "4f69d3302cf2d0d5fa6a8b3c5978c5c3ceac100b57a4e67b855379973d51b58e";
+
+        let event = EventBuilder::new(Kind::from(1), "Child thread content")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                vec!["31933:pubkey:proj1".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Child Thread".to_string()],
+            ))
+            // Note: nostrdb stores 64-char hex strings as Id variant, so parsing needs to handle both
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("delegation")),
+                vec![parent_id.to_string()],
+            ))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+
+        // Wait for async processing
+        let filter = Filter::new().kinds([1]).build();
+        wait_for_event_processing(&db.ndb, filter.clone(), 5000);
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert_eq!(results.len(), 1, "Event should be indexed");
+
+        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
+        let thread = Thread::from_note(&note);
+
+        assert!(thread.is_some(), "Should parse kind:1 with delegation tag as thread");
+        let thread = thread.unwrap();
+        assert_eq!(thread.title, "Child Thread");
+        assert_eq!(thread.parent_conversation_id, Some(parent_id.to_string()),
+            "Delegation tag should be parsed into parent_conversation_id");
     }
 }

@@ -163,9 +163,15 @@ impl Message {
                 Some("reasoning") => {
                     is_reasoning = true;
                 }
-                Some("delegation") => {
-                    // Delegation tag format: ["delegation", "<parent-conversation-id>"]
-                    delegation_tag = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                Some("delegation") | Some("parent") => {
+                    // Parent tag format: ["parent", "<parent-conversation-id>"]
+                    // (Note: "delegation" is legacy - nostrdb stores hex as Id variant)
+                    delegation_tag = tag.get(1).and_then(|t| {
+                        match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                        }
+                    });
                 }
                 Some("branch") => {
                     // Branch tag format: ["branch", "<branch-name>"]
@@ -611,6 +617,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         assert!(msg.has_images());
 
@@ -629,6 +636,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         assert!(!no_images.has_images());
     }
@@ -650,6 +658,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
@@ -672,6 +681,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
@@ -694,6 +704,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         let urls = msg.extract_image_urls();
         assert!(urls.is_empty());
@@ -716,6 +727,7 @@ mod tests {
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
+            branch: None,
         };
         let urls = msg.extract_image_urls();
         assert_eq!(urls, vec!["https://example.com/image.png"]);
