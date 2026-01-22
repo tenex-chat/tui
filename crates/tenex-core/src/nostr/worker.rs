@@ -1,7 +1,8 @@
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 use std::time::Instant;
 
 use anyhow::Result;
@@ -11,7 +12,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::constants::RELAY_URL;
-use crate::stats::SharedEventStats;
+use crate::stats::{SharedEventStats, SharedSubscriptionStats, SubscriptionInfo};
 use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
@@ -30,11 +31,11 @@ fn get_log_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/tmp/tenex.log"))
 }
 
-fn elapsed_ms() -> u64 {
+pub fn elapsed_ms() -> u64 {
     START_TIME.get_or_init(Instant::now).elapsed().as_millis() as u64
 }
 
-fn log_to_file(tag: &str, msg: &str) {
+pub fn log_to_file(tag: &str, msg: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -44,9 +45,10 @@ fn log_to_file(tag: &str, msg: &str) {
     }
 }
 
+#[macro_export]
 macro_rules! tlog {
     ($tag:expr, $($arg:tt)*) => {
-        log_to_file($tag, &format!($($arg)*))
+        $crate::nostr::worker::log_to_file($tag, &format!($($arg)*))
     };
 }
 
@@ -55,6 +57,9 @@ fn debug_log(msg: &str) {
         tlog!("DEBUG", "{}", msg);
     }
 }
+
+/// Response channel for commands that need to return data (like event IDs)
+pub type EventIdSender = std::sync::mpsc::SyncSender<String>;
 
 pub enum NostrCommand {
     Connect { keys: Keys, user_pubkey: String },
@@ -65,6 +70,8 @@ pub enum NostrCommand {
         agent_pubkey: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
+        /// Optional channel to send back the event ID after signing
+        response_tx: Option<EventIdSender>,
     },
     PublishMessage {
         thread_id: String,
@@ -76,6 +83,8 @@ pub enum NostrCommand {
         nudge_ids: Vec<String>,
         /// Pubkey of the ask event author (for p-tagging when replying to ask events)
         ask_author_pubkey: Option<String>,
+        /// Optional channel to send back the event ID after signing
+        response_tx: Option<EventIdSender>,
     },
     #[allow(dead_code)]
     BootProject {
@@ -152,6 +161,9 @@ pub struct NostrWorker {
     command_rx: Receiver<NostrCommand>,
     rt_handle: Option<tokio::runtime::Handle>,
     event_stats: SharedEventStats,
+    subscription_stats: SharedSubscriptionStats,
+    /// Pubkeys for which we've already requested kind:0 profiles
+    requested_profiles: Arc<RwLock<HashSet<String>>>,
 }
 
 impl NostrWorker {
@@ -160,6 +172,7 @@ impl NostrWorker {
         data_tx: Sender<DataChange>,
         command_rx: Receiver<NostrCommand>,
         event_stats: SharedEventStats,
+        subscription_stats: SharedSubscriptionStats,
     ) -> Self {
         Self {
             client: None,
@@ -170,6 +183,8 @@ impl NostrWorker {
             command_rx,
             rt_handle: None,
             event_stats,
+            subscription_stats,
+            requested_profiles: Arc::new(RwLock::new(HashSet::new())),
         }
     }
 
@@ -216,16 +231,30 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, response_tx } => {
                         debug_log("Worker: Publishing thread");
-                        if let Err(e) = rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
-                            tlog!("ERROR", "Failed to publish thread: {}", e);
+                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
+                            Ok(event_id) => {
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(event_id);
+                                }
+                            }
+                            Err(e) => {
+                                tlog!("ERROR", "Failed to publish thread: {}", e);
+                            }
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey } => {
+                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey, response_tx } => {
                         tlog!("SEND", "Worker received PublishMessage command");
-                        if let Err(e) = rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
-                            tlog!("ERROR", "Failed to publish message: {}", e);
+                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
+                            Ok(event_id) => {
+                                if let Some(tx) = response_tx {
+                                    let _ = tx.send(event_id);
+                                }
+                            }
+                            Err(e) => {
+                                tlog!("ERROR", "Failed to publish message: {}", e);
+                            }
                         }
                     }
                     NostrCommand::BootProject { project_a_tag, project_pubkey } => {
@@ -347,34 +376,55 @@ impl NostrWorker {
 
         // 1. User's projects (kind:31933)
         let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
-        client.subscribe(vec![project_filter], None).await?;
+        let output = client.subscribe(vec![project_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("User projects".to_string(), vec![31933], None),
+        );
         tlog!("CONN", "Subscribed to projects (kind:31933)");
 
-        // 2. Status events (kind:24010, kind:24133) - limit(0) = future events only
+        // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
+        let since_time = Timestamp::now() - 45;
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()])
-            .limit(0);
+            .since(since_time);
         let operations_status_filter = Filter::new()
             .kind(Kind::Custom(24133))
             .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()])
-            .limit(0);
-        client.subscribe(vec![status_filter, operations_status_filter], None).await?;
+            .since(since_time);
+        let output = client.subscribe(vec![status_filter, operations_status_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("Status updates".to_string(), vec![24010, 24133], None),
+        );
         tlog!("CONN", "Subscribed to status events (kind:24010, kind:24133)");
 
         // 3. Agent definitions (kind:4199)
         let agent_filter = Filter::new().kind(Kind::Custom(4199));
-        client.subscribe(vec![agent_filter], None).await?;
+        let output = client.subscribe(vec![agent_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("Agent definitions".to_string(), vec![4199], None),
+        );
         tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
 
         // 4. Nudges (kind:4201)
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
-        client.subscribe(vec![nudge_filter], None).await?;
+        let output = client.subscribe(vec![nudge_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("Nudges".to_string(), vec![4201], None),
+        );
         tlog!("CONN", "Subscribed to nudges (kind:4201)");
 
         // 5. Agent lessons (kind:4129)
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
-        client.subscribe(vec![lesson_filter], None).await?;
+        let output = client.subscribe(vec![lesson_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("Agent lessons".to_string(), vec![4129], None),
+        );
         tlog!("CONN", "Subscribed to agent lessons (kind:4129)");
 
         // 6. Per-project subscriptions (kind:513 metadata, kind:1 messages)
@@ -388,23 +438,50 @@ impl NostrWorker {
             tlog!("CONN", "Setting up subscriptions for {} existing projects", project_atags.len());
 
             for project_a_tag in &project_atags {
+                // Extract project name for description
+                let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+
                 // Metadata subscription (kind:513)
                 let metadata_filter = Filter::new()
                     .kind(Kind::Custom(513))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-                client.subscribe(vec![metadata_filter], None).await?;
+                let output = client.subscribe(vec![metadata_filter], None).await?;
+                self.subscription_stats.register(
+                    output.val.to_string(),
+                    SubscriptionInfo::new(
+                        format!("{} metadata", project_name),
+                        vec![513],
+                        Some(project_a_tag.clone()),
+                    ),
+                );
 
                 // Messages subscription (kind:1)
                 let message_filter = Filter::new()
                     .kind(Kind::from(1))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-                client.subscribe(vec![message_filter], None).await?;
+                let output = client.subscribe(vec![message_filter], None).await?;
+                self.subscription_stats.register(
+                    output.val.to_string(),
+                    SubscriptionInfo::new(
+                        format!("{} messages", project_name),
+                        vec![1],
+                        Some(project_a_tag.clone()),
+                    ),
+                );
 
                 // Long-form content subscription (kind:30023)
                 let longform_filter = Filter::new()
                     .kind(Kind::Custom(30023))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-                client.subscribe(vec![longform_filter], None).await?;
+                let output = client.subscribe(vec![longform_filter], None).await?;
+                self.subscription_stats.register(
+                    output.val.to_string(),
+                    SubscriptionInfo::new(
+                        format!("{} reports", project_name),
+                        vec![30023],
+                        Some(project_a_tag.clone()),
+                    ),
+                );
             }
             tlog!("CONN", "Subscribed to kind:513, kind:1, and kind:30023 for {} projects", project_atags.len());
         } else {
@@ -427,7 +504,9 @@ impl NostrWorker {
             .expect("spawn_notification_handler called before runtime initialized")
             .clone();
         let event_stats = self.event_stats.clone();
+        let subscription_stats = self.subscription_stats.clone();
         let data_tx = self.data_tx.clone();
+        let requested_profiles = self.requested_profiles.clone();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
@@ -437,7 +516,7 @@ impl NostrWorker {
 
             loop {
                 if let Ok(notification) = notifications.recv().await {
-                    if let RelayPoolNotification::Event { relay_url, event, .. } = notification {
+                    if let RelayPoolNotification::Event { relay_url, subscription_id, event } = notification {
                         if first_event {
                             tlog!("CONN", "First event received after {:?}", handler_start.elapsed());
                             first_event = false;
@@ -451,6 +530,9 @@ impl NostrWorker {
                             .map(|s| s.to_string());
                         event_stats.record(event.kind.as_u16(), project_a_tag.as_deref());
 
+                        // Track per-subscription event count
+                        subscription_stats.record_event(&subscription_id.to_string());
+
                         let kind = event.kind.as_u16();
 
                         // Ephemeral events (24010, 24133) go through DataChange channel
@@ -460,8 +542,32 @@ impl NostrWorker {
                             }
                         } else {
                             // All other events go through nostrdb
-                            if let Err(e) = Self::handle_incoming_event(&ndb, *event, relay_url.as_str()) {
+                            if let Err(e) = Self::handle_incoming_event(&ndb, *event.clone(), relay_url.as_str()) {
                                 tlog!("ERROR", "Failed to handle event: {}", e);
+                            }
+
+                            // For kind:1 messages, request author's profile if we haven't already
+                            if kind == 1 {
+                                let author_hex = event.pubkey.to_hex();
+                                let should_request = {
+                                    let profiles = requested_profiles.read().unwrap();
+                                    !profiles.contains(&author_hex)
+                                };
+                                if should_request {
+                                    {
+                                        let mut profiles = requested_profiles.write().unwrap();
+                                        profiles.insert(author_hex.clone());
+                                    }
+                                    // Subscribe to kind:0 for this author
+                                    let profile_filter = Filter::new()
+                                        .kind(Kind::Metadata)
+                                        .author(event.pubkey);
+                                    if let Err(e) = client.subscribe(vec![profile_filter], None).await {
+                                        tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
+                                    } else {
+                                        debug_log(&format!("Subscribed to profile for author {}", &author_hex[..8]));
+                                    }
+                                }
                             }
                         }
                     }
@@ -490,7 +596,7 @@ impl NostrWorker {
         agent_pubkey: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Parse project coordinate for proper a-tag
@@ -537,6 +643,7 @@ impl NostrWorker {
         // Build and sign the event
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
         let signed_event = event.sign_with_keys(keys)?;
+        let event_id = signed_event.id.to_hex();
 
         // Ingest locally into nostrdb so it appears immediately
         ingest_events(&self.ndb, &[signed_event.clone()], None)?;
@@ -552,7 +659,7 @@ impl NostrWorker {
             Err(_) => tlog!("ERROR", "Timeout sending thread to relay (event was saved locally)"),
         }
 
-        Ok(())
+        Ok(event_id)
     }
 
     async fn handle_publish_message(
@@ -565,7 +672,7 @@ impl NostrWorker {
         branch: Option<String>,
         nudge_ids: Vec<String>,
         ask_author_pubkey: Option<String>,
-    ) -> Result<()> {
+    ) -> Result<String> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Parse project coordinate for proper a-tag
@@ -629,6 +736,7 @@ impl NostrWorker {
         tlog!("SEND", "Signing message...");
         let sign_start = std::time::Instant::now();
         let signed_event = event.sign_with_keys(keys)?;
+        let event_id = signed_event.id.to_hex();
         tlog!("SEND", "Signed in {:?}", sign_start.elapsed());
 
         // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
@@ -646,7 +754,7 @@ impl NostrWorker {
             Err(_) => tlog!("SEND", "TIMEOUT after {:?} (event saved locally)", send_start.elapsed()),
         }
 
-        Ok(())
+        Ok(event_id)
     }
 
     async fn handle_boot_project(&self, project_a_tag: String, project_pubkey: Option<String>) -> Result<()> {
@@ -994,6 +1102,9 @@ impl NostrWorker {
 
         tlog!("CONN", "Adding subscription for kind:1 and kind:30023 with a-tag: {}", project_a_tag);
 
+        // Extract project name for description
+        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+
         // Messages (kind:1)
         let message_filter = Filter::new()
             .kind(Kind::from(1))
@@ -1002,9 +1113,17 @@ impl NostrWorker {
         // Long-form content (kind:30023)
         let longform_filter = Filter::new()
             .kind(Kind::Custom(30023))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag]);
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
 
-        client.subscribe(vec![message_filter, longform_filter], None).await?;
+        let output = client.subscribe(vec![message_filter, longform_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new(
+                format!("{} msgs+reports", project_name),
+                vec![1, 30023],
+                Some(project_a_tag),
+            ),
+        );
 
         Ok(())
     }
@@ -1014,11 +1133,22 @@ impl NostrWorker {
 
         tlog!("CONN", "Adding subscription for kind:513 metadata with a-tag: {}", project_a_tag);
 
+        // Extract project name for description
+        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+
         let filter = Filter::new()
             .kind(Kind::Custom(513))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag]);
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
 
-        client.subscribe(vec![filter], None).await?;
+        let output = client.subscribe(vec![filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new(
+                format!("{} metadata", project_name),
+                vec![513],
+                Some(project_a_tag),
+            ),
+        );
 
         Ok(())
     }
