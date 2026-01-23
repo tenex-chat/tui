@@ -341,13 +341,12 @@ impl NostrWorker {
 
         self.start_subscriptions(&user_pubkey).await?;
 
-        // Negentropy sync temporarily disabled - most relays don't support it yet
-        // self.spawn_negentropy_sync(&user_pubkey);
+        // Spawn negentropy sync for efficient reconciliation with relays that support it
+        self.spawn_negentropy_sync(&user_pubkey);
 
         Ok(())
     }
 
-    #[allow(dead_code)]
     fn spawn_negentropy_sync(&self, user_pubkey: &str) {
         let client = self.client.as_ref()
             .expect("spawn_negentropy_sync called before Connect")
@@ -1173,7 +1172,6 @@ impl NostrWorker {
 
 /// Run negentropy sync loop with adaptive timing
 /// Syncs non-ephemeral kinds: 31933, 4199, 513, 4129, 4201, and kind:1 messages
-#[allow(dead_code)]
 async fn run_negentropy_sync(
     client: Client,
     ndb: Arc<Ndb>,
@@ -1208,7 +1206,6 @@ async fn run_negentropy_sync(
 }
 
 /// Sync all non-ephemeral kinds using negentropy reconciliation
-#[allow(dead_code)]
 async fn sync_all_filters(
     client: &Client,
     ndb: &Ndb,
@@ -1263,7 +1260,6 @@ async fn sync_all_filters(
 
 /// Perform negentropy sync for a single filter
 /// Returns the number of new events received
-#[allow(dead_code)]
 async fn sync_filter(
     client: &Client,
     filter: Filter,
