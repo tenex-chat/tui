@@ -1878,22 +1878,31 @@ impl App {
 
     /// Get threads with status metadata, sorted by activity
     /// Returns threads that have status_label OR status_current_activity
+    /// Now properly filters by visible projects FIRST, then applies time filter without arbitrary limits.
     pub fn status_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing
         if self.visible_projects.is_empty() {
             return vec![];
         }
 
-        let threads = self.data_store.borrow().get_all_recent_threads(100);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+
+        // Calculate time cutoff if time filter is active
+        let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
+
+        // Get threads from visible projects with time filter applied at the data layer
+        // This avoids the old bug where a hardcoded limit would truncate before visibility filtering
+        let threads = self.data_store.borrow().get_threads_for_projects(
+            &self.visible_projects,
+            time_cutoff,
+        );
+
         let prefs = self.preferences.borrow();
 
         let mut status_threads: Vec<(Thread, String)> = threads.into_iter()
-            // Project filter
-            .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
             // Must have status metadata (label or current activity)
             .filter(|(thread, _)| {
                 thread.status_label.is_some() || thread.status_current_activity.is_some()
@@ -1901,15 +1910,6 @@ impl App {
             // Archive filter
             .filter(|(thread, _)| {
                 self.show_archived || !prefs.is_thread_archived(&thread.id)
-            })
-            // Time filter
-            .filter(|(thread, _)| {
-                if let Some(ref tf) = self.time_filter {
-                    let cutoff = now.saturating_sub(tf.seconds());
-                    thread.last_activity >= cutoff
-                } else {
-                    true
-                }
             })
             .collect();
 
@@ -1928,34 +1928,34 @@ impl App {
     }
 
     /// Get recent threads across all projects for Home view (filtered by visible_projects, time_filter, archived)
+    /// Now properly filters by visible projects FIRST, then applies time filter without arbitrary limits.
     pub fn recent_threads(&self) -> Vec<(Thread, String)> {
         // Empty visible_projects = show nothing (inverted default)
         if self.visible_projects.is_empty() {
             return vec![];
         }
 
-        let threads = self.data_store.borrow().get_all_recent_threads(50);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+
+        // Calculate time cutoff if time filter is active
+        let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
+
+        // Get threads from visible projects with time filter applied at the data layer
+        // This avoids the old bug where a hardcoded limit would truncate before visibility filtering
+        let threads = self.data_store.borrow().get_threads_for_projects(
+            &self.visible_projects,
+            time_cutoff,
+        );
+
         let prefs = self.preferences.borrow();
 
+        // Only remaining filter is archive status (user preference, not data-layer concern)
         threads.into_iter()
-            // Project filter
-            .filter(|(_, a_tag)| self.visible_projects.contains(a_tag))
-            // Archive filter - hide archived unless show_archived is true
             .filter(|(thread, _)| {
                 self.show_archived || !prefs.is_thread_archived(&thread.id)
-            })
-            // Time filter
-            .filter(|(thread, _)| {
-                if let Some(ref tf) = self.time_filter {
-                    let cutoff = now.saturating_sub(tf.seconds());
-                    thread.last_activity >= cutoff
-                } else {
-                    true
-                }
             })
             .collect()
     }
