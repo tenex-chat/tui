@@ -76,7 +76,7 @@ pub struct Preferences {
     pub archived_thread_ids: HashSet<String>,
     #[serde(default)]
     pub archived_project_ids: HashSet<String>,
-    /// If true, threads with children are collapsed by default in the Recent tab
+    /// If true, threads with children are collapsed by default in the Conversations tab
     #[serde(default)]
     pub threads_default_collapsed: bool,
     /// Backend pubkeys explicitly approved by the user to receive status updates
