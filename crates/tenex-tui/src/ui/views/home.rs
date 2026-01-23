@@ -249,27 +249,30 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
     let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships, default_collapsed);
 
     // Helper to calculate card height
-    // Full mode: 4 lines (title, summary, activity, reply) + spacing, but some may be hidden
-    // Compact mode: 2 lines (title, spacing)
-    // Selected items add 2 lines for half-block borders (top + bottom)
+    // Full mode: title + summary (if present) + activity (if present) + spacing
+    // Compact mode: 2 lines (title + author/time)
+    // Selected/multi-selected items add 2 lines for half-block borders (top + bottom)
+    // and drop spacing line (borders provide visual separation)
     // next_is_selected: if true, this card doesn't need spacing (next card's top border provides it)
-    let calc_card_height = |item: &HierarchicalThread, is_selected: bool, next_is_selected: bool| -> u16 {
+    let calc_card_height = |item: &HierarchicalThread, is_selected: bool, is_multi_selected: bool, next_is_selected: bool| -> u16 {
         let is_compact = item.depth > 0;
         if is_compact {
-            return if is_selected { 4 } else { 2 }; // 2 lines + optional borders
+            // Compact: 2 content lines + optional 2 border lines
+            return if is_selected || is_multi_selected { 4 } else { 2 };
         }
-        // Full mode: title + summary + activity (if present) + reply + spacing
+        // Full mode: title + summary + activity (if present) + spacing
         let has_summary = item.thread.summary.is_some();
         let has_activity = item.thread.status_current_activity.is_some();
-        // Line 1: title, Line 2: summary (or skip), Line 3: activity (or skip), Line 4: reply, Line 5: spacing
+        // Line 1: title, Line 2: summary (or skip), Line 3: activity (or skip)
         let mut lines = 1; // title always
         if has_summary { lines += 1; } // summary
         if has_activity { lines += 1; } // activity
-        lines += 1; // reply preview always
-        if !is_selected && !next_is_selected {
-            lines += 1; // spacing (only when neither this nor next card is selected)
+        // Spacing line only when card is not selected/multi-selected and next card is not selected
+        if !is_selected && !is_multi_selected && !next_is_selected {
+            lines += 1;
         }
-        if is_selected { lines + 2 } else { lines }
+        // Selected/multi-selected cards get 2 extra lines for half-block borders
+        if is_selected || is_multi_selected { lines + 2 } else { lines }
     };
 
     // Calculate scroll offset to keep selected item visible
@@ -281,8 +284,9 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
     let mut selected_height: u16 = 0;
     for (i, item) in hierarchy.iter().enumerate() {
         let item_is_selected = is_focused && i == selected_idx;
+        let item_is_multi_selected = app.is_thread_multi_selected(&item.thread.id);
         let next_is_selected = is_focused && i + 1 == selected_idx;
-        let h = calc_card_height(item, item_is_selected, next_is_selected);
+        let h = calc_card_height(item, item_is_selected, item_is_multi_selected, next_is_selected);
         if i < selected_idx {
             height_before_selected += h;
         } else if i == selected_idx {
@@ -302,8 +306,9 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
 
     for (i, item) in hierarchy.iter().enumerate() {
         let is_selected = is_focused && i == selected_idx;
+        let is_multi_selected = app.is_thread_multi_selected(&item.thread.id);
         let next_is_selected = is_focused && i + 1 == selected_idx;
-        let h = calc_card_height(item, is_selected, next_is_selected);
+        let h = calc_card_height(item, is_selected, is_multi_selected, next_is_selected);
 
         // Skip items completely above visible area
         if y_offset + (h as i32) <= 0 {
@@ -325,7 +330,6 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
         if visible_height > 0 {
             let content_area = Rect::new(area.x, area.y + render_y, area.width, visible_height);
             let is_archived = app.is_thread_archived(&item.thread.id);
-            let is_multi_selected = app.is_thread_multi_selected(&item.thread.id);
 
             render_card_content(
                 f,
@@ -357,8 +361,13 @@ pub fn get_hierarchical_threads(app: &App) -> Vec<HierarchicalThread> {
 }
 
 /// Render card content in table-like format:
-/// [title] [#]            [project]       [status]
-/// [summary]              [author]        [time]
+/// Full mode (depth=0):
+///   Line 1: [title] [#]            [project]       [status]
+///   Line 2: [summary] (if present)
+///   Line 3: [activity] (if present)
+/// Compact mode (depth>0):
+///   Line 1: [title] [#]            [project]       [status]
+///   Line 2: [empty]                [author]        [time]
 fn render_card_content(
     f: &mut Frame,
     app: &App,
@@ -381,23 +390,12 @@ fn render_card_content(
     // Check if this thread has an unsent draft
     let has_draft = app.has_draft_for_thread(&thread.id);
 
-    // Extract data
-    let (project_name, thread_author_name, preview, timestamp, is_busy) = {
+    // Extract data - only fetch what's needed for each mode
+    let (project_name, is_busy) = {
         let store = app.data_store.borrow();
         let project_name = store.get_project_name(a_tag);
-        // Thread author is the person who created/started the thread
-        let thread_author_name = store.get_profile_name(&thread.pubkey);
-        let messages = store.get_messages(&thread.id);
-        let (preview, timestamp) = if let Some(msg) = messages.last() {
-            let preview: String = msg.content.chars().take(80).collect();
-            let preview = preview.replace('\n', " ");
-            (preview, msg.created_at)
-        } else {
-            ("No messages yet".to_string(), thread.last_activity)
-        };
-        // Check if any agents are working on this thread
         let is_busy = store.is_event_busy(&thread.id);
-        (project_name, thread_author_name, preview, timestamp, is_busy)
+        (project_name, is_busy)
     };
 
     // Spinner for busy threads (uses frame counter from App)
@@ -407,7 +405,18 @@ fn render_card_content(
         None
     };
 
-    let time_str = format_relative_time(timestamp);
+    // Compact mode needs author/time; full mode doesn't
+    let (thread_author_name, time_str) = if is_compact {
+        let store = app.data_store.borrow();
+        let author_name = store.get_profile_name(&thread.pubkey);
+        let messages = store.get_messages(&thread.id);
+        let timestamp = messages.last()
+            .map(|msg| msg.created_at)
+            .unwrap_or(thread.last_activity);
+        (author_name, format_relative_time(timestamp))
+    } else {
+        (String::new(), String::new())
+    };
 
     // Column widths for table layout
     // Middle column: project (line 1) / author (line 2) - same width for alignment
@@ -536,8 +545,7 @@ fn render_card_content(
         // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
         // LINE 2: [summary] (if present)
         // LINE 3: [activity] (if present)
-        // LINE 4: [reply preview]       [author]      [time]
-        // LINE 5: spacing
+        // LINE 4: spacing
 
         // LINE 1: [title] [spinner?] [#nested]     [project]     [status]
         let spinner_suffix = spinner_char.map(|c| format!(" {}", c)).unwrap_or_default();
@@ -619,35 +627,6 @@ fn render_card_content(
             line_activity.push(Span::styled(truncate_with_ellipsis(activity, main_col_width.saturating_sub(3)), Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
             lines.push(Line::from(line_activity));
         }
-
-        // LINE 4: [reply preview]       [author]      [time]
-        let preview_max = main_col_width;
-        let preview_truncated = truncate_with_ellipsis(&preview, preview_max);
-        let preview_len = preview_truncated.chars().count();
-        let preview_padding = main_col_width.saturating_sub(preview_len);
-
-        // Author (middle column) - show thread creator
-        let author_display = format!("@{}", thread_author_name);
-        let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
-        let author_len = author_truncated.chars().count();
-        let author_padding = middle_col_width.saturating_sub(author_len);
-
-        // Time (right column, right-aligned)
-        let time_len = time_str.chars().count();
-        let time_padding = right_col_width.saturating_sub(time_len);
-
-        let mut line_reply = Vec::new();
-        if !indent.is_empty() {
-            line_reply.push(Span::styled(indent.clone(), Style::default()));
-        }
-        line_reply.push(Span::styled(" ".repeat(collapse_col_width), Style::default())); // Align with collapse indicator
-        line_reply.push(Span::styled(preview_truncated, Style::default().fg(theme::TEXT_MUTED)));
-        line_reply.push(Span::styled(" ".repeat(preview_padding), Style::default()));
-        line_reply.push(Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)));
-        line_reply.push(Span::styled(" ".repeat(author_padding), Style::default()));
-        line_reply.push(Span::styled(" ".repeat(time_padding), Style::default()));
-        line_reply.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
-        lines.push(Line::from(line_reply));
 
         // Spacing line (only when neither this nor next card is selected)
         if !is_selected && !is_multi_selected && !next_is_selected {
