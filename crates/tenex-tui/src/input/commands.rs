@@ -225,7 +225,7 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'P',
+        key: 'A',
         label: "Show archived projects",
         section: "Filter",
         available: |app| {
@@ -236,7 +236,7 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'P',
+        key: 'A',
         label: "Hide archived projects",
         section: "Filter",
         available: |app| {
@@ -276,7 +276,7 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'A',
+        key: 'B',
         label: "Agent Browser",
         section: "Other",
         available: |app| app.view == View::Home && !app.sidebar_focused,
@@ -285,12 +285,36 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'N',
+        key: 'C',
         label: "Create project",
         section: "Other",
         available: |app| app.view == View::Home && !app.sidebar_focused,
         execute: |app| {
             app.modal_state = ModalState::CreateProject(modal::CreateProjectState::new());
+        },
+    },
+    Command {
+        key: 'N',
+        label: "New conversation (current project)",
+        section: "Conversation",
+        available: |app| {
+            app.view == View::Home
+                && !app.sidebar_focused
+                && app.home_panel_focus == HomeTab::Conversations
+        },
+        execute: new_conversation_current_project,
+    },
+    Command {
+        key: 'P',
+        label: "New conversation (select project)",
+        section: "Conversation",
+        available: |app| {
+            app.view == View::Home
+                && !app.sidebar_focused
+                && app.home_panel_focus == HomeTab::Conversations
+        },
+        execute: |app| {
+            app.open_projects_modal(true);
         },
     },
     // =========================================================================
@@ -738,6 +762,42 @@ fn get_message_id(item: &DisplayItem<'_>) -> Option<String> {
     match item {
         DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
         DisplayItem::DelegationPreview { .. } => None,
+    }
+}
+
+fn new_conversation_current_project(app: &mut App) {
+    // Get the first visible project's info
+    let hierarchy = get_hierarchical_threads(app);
+    let project_info = if let Some(first_item) = hierarchy.first() {
+        let store = app.data_store.borrow();
+        store
+            .get_projects()
+            .iter()
+            .find(|p| p.a_tag() == first_item.a_tag)
+            .map(|p| (p.a_tag(), p.name.clone(), p.clone()))
+    } else {
+        None
+    };
+
+    if let Some((a_tag, name, project)) = project_info {
+        app.selected_project = Some(project);
+
+        // Auto-select PM agent and default branch from status
+        if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
+            if let Some(pm) = status.pm_agent() {
+                app.selected_agent = Some(pm.clone());
+            }
+            if app.selected_branch.is_none() {
+                app.selected_branch = status.default_branch().map(String::from);
+            }
+        }
+
+        let tab_idx = app.open_draft_tab(&a_tag, &name);
+        app.switch_to_tab(tab_idx);
+        app.view = View::Chat;
+        app.chat_editor_mut().clear();
+    } else {
+        app.set_status("No project available for new conversation");
     }
 }
 

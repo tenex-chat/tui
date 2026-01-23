@@ -350,9 +350,24 @@ fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char(c) => {
-                // Execute command directly if it matches a hotkey
-                app.modal_state = ModalState::None;
-                super::commands::execute_command(app, c);
+                // First try to execute a matching command
+                // If no command matches, 'n' and 'p' are fallback for tab navigation
+                let has_command = commands.iter().any(|cmd| cmd.key == c);
+                if has_command {
+                    app.modal_state = ModalState::None;
+                    super::commands::execute_command(app, c);
+                } else if c == 'n' {
+                    // 'n' fallback: next tab
+                    app.modal_state = ModalState::None;
+                    app.next_tab();
+                } else if c == 'p' {
+                    // 'p' fallback: prev tab
+                    app.modal_state = ModalState::None;
+                    app.prev_tab();
+                } else {
+                    // No matching command and not a tab navigation key - just close palette
+                    app.modal_state = ModalState::None;
+                }
             }
             _ => {}
         }
