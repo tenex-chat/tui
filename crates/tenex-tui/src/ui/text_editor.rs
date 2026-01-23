@@ -623,6 +623,20 @@ impl TextEditor {
         self.focused_attachment = None;
     }
 
+    /// Set the text content, clear attachments, and move cursor to end.
+    /// This is used when recalling history entries - attachments are cleared
+    /// to prevent stale attachments from being sent with recalled messages.
+    pub fn set_text(&mut self, text: &str) {
+        self.push_undo_state();
+        self.text = text.to_string();
+        self.cursor = self.text.len();
+        self.selection_anchor = None;
+        // Clear attachments to prevent stale attachment leaks
+        self.attachments.clear();
+        self.image_attachments.clear();
+        self.focused_attachment = None;
+    }
+
     /// Add an image attachment and return its ID
     pub fn add_image_attachment(&mut self, url: String) -> usize {
         let id = self.next_image_id;

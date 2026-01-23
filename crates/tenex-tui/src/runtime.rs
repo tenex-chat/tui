@@ -11,7 +11,7 @@ use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadRe
 use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
-use crate::ui::{App, InputMode, Tui, View};
+use crate::ui::{App, InputMode, ModalState, Tui, View};
 
 fn log_diagnostic(msg: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -86,9 +86,17 @@ pub(crate) async fn run_app(
                                     app.pending_quit = true;
                                 }
                             } else if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                                // Ctrl+V - check clipboard for image
+                                // Ctrl+V - check clipboard for image or pass through to modal
                                 app.pending_quit = false;
-                                if app.view == View::Chat && app.input_mode == InputMode::Editing {
+                                // Check if debug stats modal on e-tag query tab
+                                let is_debug_etag_input = matches!(
+                                    &app.modal_state,
+                                    ModalState::DebugStats(state) if state.active_tab == crate::ui::modal::DebugStatsTab::ETagQuery
+                                );
+                                if is_debug_etag_input {
+                                    // Let modal handler process the paste
+                                    handle_key(app, key, login_step, pending_nsec)?;
+                                } else if app.view == View::Chat && app.input_mode == InputMode::Editing {
                                     if let Some(keys) = app.keys.clone() {
                                         handle_clipboard_paste(app, &keys, upload_tx.clone());
                                     }
@@ -127,11 +135,11 @@ pub(crate) async fn run_app(
                                     if let Some(keys) = app.keys.clone() {
                                         if !handle_image_file_paste(app, &text, &keys, upload_tx.clone()) {
                                             // Not an image file - regular paste
-                                            app.chat_editor.handle_paste(&text);
+                                            app.chat_editor_mut().handle_paste(&text);
                                             app.save_chat_draft();
                                         }
                                     } else {
-                                        app.chat_editor.handle_paste(&text);
+                                        app.chat_editor_mut().handle_paste(&text);
                                         app.save_chat_draft();
                                     }
                                 }
@@ -172,10 +180,10 @@ pub(crate) async fn run_app(
                 upload_events += 1;
                 match result {
                     UploadResult::Success(url) => {
-                        let id = app.chat_editor.add_image_attachment(url);
+                        let id = app.chat_editor_mut().add_image_attachment(url);
                         let marker = format!("[Image #{}] ", id);
                         for c in marker.chars() {
-                            app.chat_editor.insert_char(c);
+                            app.chat_editor_mut().insert_char(c);
                         }
                         app.save_chat_draft();
                         app.dismiss_notification();

@@ -180,8 +180,10 @@ pub struct App {
     /// Named draft storage for user-saved drafts associated with projects
     named_draft_storage: RefCell<NamedDraftStorage>,
 
-    /// Rich text editor for chat input (multiline, attachments)
-    pub chat_editor: TextEditor,
+    /// Fallback text editor for chat input when no tab is active.
+    /// This should rarely be used - only as a fallback when tabs are empty.
+    /// The per-tab editors in OpenTab.editor are the primary editors.
+    fallback_editor: TextEditor,
 
     /// Whether attachment modal is open
     pub showing_attachment_modal: bool,
@@ -198,6 +200,9 @@ pub struct App {
     /// Event stats for debugging (network events received)
     pub event_stats: tenex_core::stats::SharedEventStats,
 
+    /// Subscription stats for debugging (active subscriptions and their event counts)
+    pub subscription_stats: tenex_core::stats::SharedSubscriptionStats,
+
     /// When viewing a subthread, this is the root message ID
     pub subthread_root: Option<String>,
     /// The root message when viewing a subthread (for display and reply tagging)
@@ -212,6 +217,8 @@ pub struct App {
     pub home_panel_focus: HomeTab,
     /// Per-tab selection index (preserves position when switching tabs)
     pub tab_selection: HashMap<HomeTab, usize>,
+    /// Multi-selected thread IDs for batch operations
+    pub multi_selected_threads: HashSet<String>,
     pub report_search_filter: String,
     /// Whether sidebar is focused (vs content area)
     pub sidebar_focused: bool,
@@ -291,6 +298,7 @@ impl App {
         db: Arc<Database>,
         data_store: Rc<RefCell<AppDataStore>>,
         event_stats: tenex_core::stats::SharedEventStats,
+        subscription_stats: tenex_core::stats::SharedSubscriptionStats,
         data_dir: &str,
     ) -> Self {
         Self {
@@ -320,18 +328,20 @@ impl App {
             pending_quit: false,
             draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
             named_draft_storage: RefCell::new(NamedDraftStorage::new("tenex_data")),
-            chat_editor: TextEditor::new(),
+            fallback_editor: TextEditor::new(),
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
             chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
             event_stats,
+            subscription_stats,
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,
             tabs: TabManager::new(),
             home_panel_focus: HomeTab::Recent,
             tab_selection: HashMap::new(),
+            multi_selected_threads: HashSet::new(),
             report_search_filter: String::new(),
             sidebar_focused: false,
             sidebar_project_index: 0,
@@ -414,6 +424,48 @@ impl App {
     #[inline]
     pub fn set_tab_modal_index(&mut self, index: usize) {
         self.tabs.modal_index = index;
+    }
+
+    // =============================================================================
+    // PER-TAB EDITOR ACCESSORS
+    // =============================================================================
+    // These methods provide access to the per-tab TextEditor, ensuring proper
+    // isolation between tabs. Each tab has its own editor state.
+
+    /// Get reference to the current tab's chat editor.
+    /// Falls back to the fallback_editor if no tab is open.
+    /// In debug builds, asserts if fallback is used in chat view (indicates a bug).
+    #[inline]
+    pub fn chat_editor(&self) -> &TextEditor {
+        if let Some(tab) = self.tabs.active_tab() {
+            &tab.editor
+        } else {
+            // Debug assertion: using fallback in chat view indicates cross-tab contamination bug
+            debug_assert!(
+                self.view != View::Chat,
+                "chat_editor() fallback used in Chat view - this indicates a tab isolation bug"
+            );
+            &self.fallback_editor
+        }
+    }
+
+    /// Get mutable reference to the current tab's chat editor.
+    /// Falls back to the fallback_editor if no tab is open.
+    /// In debug builds, asserts if fallback is used in chat view (indicates a bug).
+    #[inline]
+    pub fn chat_editor_mut(&mut self) -> &mut TextEditor {
+        let active_index = self.tabs.active_index();
+        let tabs = self.tabs.tabs_mut();
+        if active_index < tabs.len() {
+            &mut tabs[active_index].editor
+        } else {
+            // Debug assertion: using fallback in chat view indicates cross-tab contamination bug
+            debug_assert!(
+                self.view != View::Chat,
+                "chat_editor_mut() fallback used in Chat view - this indicates a tab isolation bug"
+            );
+            &mut self.fallback_editor
+        }
     }
 
     /// Increment frame counter and update notifications (call on each tick)
@@ -572,15 +624,22 @@ impl App {
         };
 
         if let Some(conversation_id) = draft_key {
-            let agent_pubkey = self.selected_agent.as_ref().map(|a| a.pubkey.clone());
-            tlog!("AGENT", "save_chat_draft: key={}, agent={:?}",
+            // Only save agent to draft if user explicitly selected it
+            // Otherwise let sync_agent_with_conversation() determine it each time
+            let agent_pubkey = if self.user_explicitly_selected_agent {
+                self.selected_agent.as_ref().map(|a| a.pubkey.clone())
+            } else {
+                None
+            };
+            tlog!("AGENT", "save_chat_draft: key={}, explicit={}, agent={:?}",
                 conversation_id,
-                self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+                self.user_explicitly_selected_agent,
+                agent_pubkey.as_ref().map(|p| &p[..8])
             );
 
-            // Convert attachments to draft format
-            let attachments: Vec<DraftPasteAttachment> = self
-                .chat_editor
+            // Convert attachments to draft format (using per-tab editor)
+            let editor = self.chat_editor();
+            let attachments: Vec<DraftPasteAttachment> = editor
                 .attachments
                 .iter()
                 .map(|a| DraftPasteAttachment {
@@ -589,8 +648,7 @@ impl App {
                 })
                 .collect();
 
-            let image_attachments: Vec<DraftImageAttachment> = self
-                .chat_editor
+            let image_attachments: Vec<DraftImageAttachment> = editor
                 .image_attachments
                 .iter()
                 .map(|a| DraftImageAttachment {
@@ -601,11 +659,76 @@ impl App {
 
             let draft = ChatDraft {
                 conversation_id,
-                text: self.chat_editor.text.clone(), // Raw text, not build_full_content()
+                text: editor.text.clone(), // Raw text, not build_full_content()
                 attachments,
                 image_attachments,
                 selected_agent_pubkey: agent_pubkey,
                 selected_branch: self.selected_branch.clone(),
+                last_modified: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            };
+            self.draft_storage.borrow_mut().save(draft);
+        }
+    }
+
+    /// Save draft from a removed tab's editor (used when closing tabs).
+    /// This is needed because after a tab is removed, the per-tab accessor
+    /// would return the wrong editor.
+    pub fn save_draft_from_tab(&self, tab: &crate::ui::state::OpenTab) {
+        // Determine the draft key from the removed tab
+        let draft_key = if !tab.thread_id.is_empty() {
+            Some(tab.thread_id.clone())
+        } else {
+            tab.draft_id.clone()
+        };
+
+        if let Some(conversation_id) = draft_key {
+            // IMPORTANT: Load existing draft to preserve its agent/branch metadata.
+            // We cannot use self.selected_agent/selected_branch because those belong
+            // to the ACTIVE tab, not necessarily the tab being closed.
+            let existing_draft = self.draft_storage.borrow().load(&conversation_id);
+            let (agent_pubkey, branch) = if let Some(ref draft) = existing_draft {
+                (draft.selected_agent_pubkey.clone(), draft.selected_branch.clone())
+            } else {
+                // No existing draft - this is a new draft, use None for both
+                // (the agent/branch will be set when the user selects them for this tab)
+                (None, None)
+            };
+
+            tlog!("AGENT", "save_draft_from_tab: key={}, agent={:?}, branch={:?} (preserved from existing draft)",
+                conversation_id,
+                agent_pubkey,
+                branch
+            );
+
+            // Convert attachments from the removed tab's editor
+            let attachments: Vec<DraftPasteAttachment> = tab.editor
+                .attachments
+                .iter()
+                .map(|a| DraftPasteAttachment {
+                    id: a.id,
+                    content: a.content.clone(),
+                })
+                .collect();
+
+            let image_attachments: Vec<DraftImageAttachment> = tab.editor
+                .image_attachments
+                .iter()
+                .map(|a| DraftImageAttachment {
+                    id: a.id,
+                    url: a.url.clone(),
+                })
+                .collect();
+
+            let draft = ChatDraft {
+                conversation_id,
+                text: tab.editor.text.clone(),
+                attachments,
+                image_attachments,
+                selected_agent_pubkey: agent_pubkey,
+                selected_branch: branch,
                 last_modified: std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -624,12 +747,15 @@ impl App {
         // Reset explicit selection flag when switching conversations
         self.user_explicitly_selected_agent = false;
 
-        // Always clear editor first - each conversation has its own draft
-        self.chat_editor.text.clear();
-        self.chat_editor.cursor = 0;
-        self.chat_editor.attachments.clear();
-        self.chat_editor.image_attachments.clear();
-        self.chat_editor.focused_attachment = None;
+        // Always clear editor first - each conversation has its own draft (per-tab editor)
+        {
+            let editor = self.chat_editor_mut();
+            editor.text.clear();
+            editor.cursor = 0;
+            editor.attachments.clear();
+            editor.image_attachments.clear();
+            editor.focused_attachment = None;
+        }
 
         // Determine the draft key - use thread id or draft_id from active tab
         let draft_key = if let Some(ref thread) = self.selected_thread {
@@ -646,26 +772,30 @@ impl App {
         let mut draft_had_branch = false;
 
         if let Some(key) = draft_key {
-            // Load draft
-            if let Some(draft) = self.draft_storage.borrow().load(&key) {
-                self.chat_editor.text = draft.text;
-                self.chat_editor.cursor = self.chat_editor.text.len();
+            // Load draft into per-tab editor (clone to release borrow before calling chat_editor_mut)
+            let draft_opt = self.draft_storage.borrow().load(&key);
+            if let Some(draft) = draft_opt {
+                {
+                    let editor = self.chat_editor_mut();
+                    editor.text = draft.text.clone();
+                    editor.cursor = editor.text.len();
 
-                // Restore attachments from draft
-                self.chat_editor.attachments = draft
-                    .attachments
-                    .into_iter()
-                    .map(|a| PasteAttachment {
-                        id: a.id,
-                        content: a.content,
-                    })
-                    .collect();
+                    // Restore attachments from draft
+                    editor.attachments = draft
+                        .attachments
+                        .iter()
+                        .map(|a| PasteAttachment {
+                            id: a.id,
+                            content: a.content.clone(),
+                        })
+                        .collect();
 
-                self.chat_editor.image_attachments = draft
-                    .image_attachments
-                    .into_iter()
-                    .map(|a| ImageAttachment { id: a.id, url: a.url })
-                    .collect();
+                    editor.image_attachments = draft
+                        .image_attachments
+                        .iter()
+                        .map(|a| ImageAttachment { id: a.id, url: a.url.clone() })
+                        .collect();
+                }
 
                 tlog!("AGENT", "restore_chat_draft: loaded draft, agent_pubkey={:?}, branch={:?}",
                     draft.selected_agent_pubkey.as_ref().map(|p| &p[..8.min(p.len())]),
@@ -690,7 +820,7 @@ impl App {
                 }
                 // Restore branch from draft if one was saved (takes priority over sync)
                 if draft.selected_branch.is_some() {
-                    self.selected_branch = draft.selected_branch;
+                    self.selected_branch = draft.selected_branch.clone();
                     draft_had_branch = true;
                 }
             } else {
@@ -753,7 +883,7 @@ impl App {
 
     /// Save current chat editor content as a named draft for the current project
     pub fn save_named_draft(&mut self) {
-        let text = self.chat_editor.build_full_content();
+        let text = self.chat_editor().build_full_content();
         if text.trim().is_empty() {
             self.set_status("Cannot save empty draft");
             return;
@@ -818,8 +948,9 @@ impl App {
 
     /// Restore a named draft to the chat editor
     pub fn restore_named_draft(&mut self, draft: &NamedDraft) {
-        self.chat_editor.text = draft.text.clone();
-        self.chat_editor.cursor = draft.text.len();
+        let editor = self.chat_editor_mut();
+        editor.text = draft.text.clone();
+        editor.cursor = draft.text.len();
         self.input_mode = InputMode::Editing;
         self.set_status(&format!("Draft restored: {}", draft.name));
     }
@@ -868,7 +999,7 @@ impl App {
 
     /// Open attachment modal with focused attachment's content
     pub fn open_attachment_modal(&mut self) {
-        if let Some(attachment) = self.chat_editor.get_focused_attachment() {
+        if let Some(attachment) = self.chat_editor().get_focused_attachment() {
             self.attachment_modal_editor.text = attachment.content.clone();
             self.attachment_modal_editor.cursor = 0;
             self.showing_attachment_modal = true;
@@ -878,7 +1009,7 @@ impl App {
     /// Save attachment modal changes and close
     pub fn save_and_close_attachment_modal(&mut self) {
         let new_content = self.attachment_modal_editor.text.clone();
-        self.chat_editor.update_focused_attachment(new_content);
+        self.chat_editor_mut().update_focused_attachment(new_content);
         self.attachment_modal_editor.clear();
         self.showing_attachment_modal = false;
     }
@@ -891,7 +1022,7 @@ impl App {
 
     /// Delete focused attachment and close modal
     pub fn delete_attachment_and_close_modal(&mut self) {
-        self.chat_editor.delete_focused_attachment();
+        self.chat_editor_mut().delete_focused_attachment();
         self.attachment_modal_editor.clear();
         self.showing_attachment_modal = false;
     }
@@ -899,16 +1030,20 @@ impl App {
     /// Open expanded editor modal (Ctrl+E) for full-screen editing
     pub fn open_expanded_editor_modal(&mut self) {
         let mut editor = TextEditor::new();
-        editor.text = self.chat_editor.text.clone();
-        editor.cursor = self.chat_editor.cursor;
+        let chat_ed = self.chat_editor();
+        editor.text = chat_ed.text.clone();
+        editor.cursor = chat_ed.cursor;
         self.modal_state = ModalState::ExpandedEditor { editor };
     }
 
     /// Save expanded editor changes and close
     pub fn save_and_close_expanded_editor(&mut self) {
         if let ModalState::ExpandedEditor { editor } = &self.modal_state {
-            self.chat_editor.text = editor.text.clone();
-            self.chat_editor.cursor = editor.cursor;
+            let text = editor.text.clone();
+            let cursor = editor.cursor;
+            let chat_ed = self.chat_editor_mut();
+            chat_ed.text = text;
+            chat_ed.cursor = cursor;
             self.save_chat_draft();
         }
         self.modal_state = ModalState::None;
@@ -1422,13 +1557,17 @@ impl App {
             return;
         }
 
-        // Close and get the new active index
-        let new_active = self.tabs.close_current();
+        // Close and get both the removed tab and the new active index
+        let (removed_tab, new_active) = self.tabs.close_current();
+
+        // Save draft from the removed tab's editor (before it's lost)
+        if let Some(ref tab) = removed_tab {
+            self.save_draft_from_tab(tab);
+        }
 
         if new_active.is_none() {
             // No more tabs - go back to home view
-            self.save_chat_draft();
-            self.chat_editor.clear();
+            self.fallback_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
         } else {
@@ -1612,12 +1751,16 @@ impl App {
     /// Close tab at specific index (for tab modal)
     pub fn close_tab_at(&mut self, index: usize) {
         let was_active = index == self.tabs.active_index();
-        let new_active = self.tabs.close_at(index);
+        let (removed_tab, new_active) = self.tabs.close_at(index);
+
+        // Save draft from the removed tab's editor (before it's lost)
+        if let Some(ref tab) = removed_tab {
+            self.save_draft_from_tab(tab);
+        }
 
         if new_active.is_none() {
             // No more tabs - go back to home view
-            self.save_chat_draft();
-            self.chat_editor.clear();
+            self.fallback_editor.clear();
             self.selected_thread = None;
             self.view = View::Home;
         } else if was_active {
@@ -1689,6 +1832,43 @@ impl App {
     /// Set the selection index for the current home tab
     pub fn set_current_selection(&mut self, index: usize) {
         self.tab_selection.insert(self.home_panel_focus, index);
+    }
+
+    /// Check if a thread is multi-selected
+    pub fn is_thread_multi_selected(&self, thread_id: &str) -> bool {
+        self.multi_selected_threads.contains(thread_id)
+    }
+
+    /// Toggle multi-selection for a thread
+    pub fn toggle_thread_multi_select(&mut self, thread_id: &str) {
+        if self.multi_selected_threads.contains(thread_id) {
+            self.multi_selected_threads.remove(thread_id);
+        } else {
+            self.multi_selected_threads.insert(thread_id.to_string());
+        }
+    }
+
+    /// Add a thread to multi-selection
+    pub fn add_thread_to_multi_select(&mut self, thread_id: &str) {
+        self.multi_selected_threads.insert(thread_id.to_string());
+    }
+
+    /// Clear all multi-selections
+    pub fn clear_multi_selection(&mut self) {
+        self.multi_selected_threads.clear();
+    }
+
+    /// Archive all multi-selected threads
+    pub fn archive_multi_selected(&mut self) {
+        let count = self.multi_selected_threads.len();
+        if count == 0 {
+            return;
+        }
+        let thread_ids: Vec<String> = self.multi_selected_threads.drain().collect();
+        for thread_id in &thread_ids {
+            self.preferences.borrow_mut().set_thread_archived(thread_id, true);
+        }
+        self.notify(Notification::info(&format!("Archived {} conversations", count)));
     }
 
     /// Get threads with status metadata, sorted by activity
@@ -2039,7 +2219,7 @@ impl App {
             self.creating_thread = true;
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
-            self.chat_editor.clear();
+            self.chat_editor_mut().clear();
         } else {
             // Project not found - clear state to prevent leaks
             self.selected_project = None;
@@ -2111,6 +2291,10 @@ impl App {
             ask_author_pubkey,
         });
         self.input_mode = InputMode::Normal;
+        // Set selection to last message so the view stays at the bottom
+        // (consistent with Escape behavior in editor_handlers.rs)
+        let count = self.display_item_count();
+        self.selected_message_index = count.saturating_sub(1);
     }
 
     /// Close ask UI and return to normal input
@@ -2160,18 +2344,19 @@ impl App {
     }
 
     /// Get the user's response to an ask event (if any)
+    /// Searches ALL messages for a reply to the ask event, not just the current thread
     pub fn get_user_response_to_ask(&self, message_id: &str) -> Option<String> {
-        let messages = self.messages();
+        let store = self.data_store.borrow();
+        let user_pubkey = store.user_pubkey.as_ref()?;
 
-        // Get current user's pubkey
-        let user_pubkey = self.data_store.borrow().user_pubkey.clone()?;
-
-        // Find user's reply to this message
-        for msg in &messages {
-            if msg.pubkey == user_pubkey {
-                if let Some(ref reply_to) = msg.reply_to {
-                    if reply_to == message_id {
-                        return Some(msg.content.clone());
+        // Search all messages across all threads for a reply to this ask event
+        for messages in store.messages_by_thread.values() {
+            for msg in messages {
+                if msg.pubkey == *user_pubkey {
+                    if let Some(ref reply_to) = msg.reply_to {
+                        if reply_to == message_id {
+                            return Some(msg.content.clone());
+                        }
                     }
                 }
             }
@@ -2697,6 +2882,70 @@ impl App {
         }
     }
 
+    // ===== History Search Methods (Ctrl+R) =====
+
+    /// Open the history search modal
+    pub fn open_history_search(&mut self) {
+        use crate::ui::modal::HistorySearchState;
+
+        // Get current project a-tag if available
+        let current_project_a_tag = self.selected_project.as_ref().map(|p| p.a_tag());
+
+        self.modal_state = ModalState::HistorySearch(HistorySearchState::new(current_project_a_tag));
+    }
+
+    /// Update history search results based on current query
+    pub fn update_history_search(&mut self) {
+        use crate::ui::modal::HistorySearchEntry;
+
+        // Get user pubkey
+        let user_pubkey = match self.data_store.borrow().user_pubkey.clone() {
+            Some(pk) => pk,
+            None => return,
+        };
+
+        // Get query and filter settings from modal state
+        let (query, _all_projects, project_a_tag) = match &self.modal_state {
+            ModalState::HistorySearch(state) => {
+                let filter_project = if state.all_projects {
+                    None
+                } else {
+                    state.current_project_a_tag.as_deref()
+                };
+                (state.query.clone(), state.all_projects, filter_project.map(String::from))
+            }
+            _ => return,
+        };
+
+        // Search for messages
+        let results = self.data_store.borrow().search_user_messages(
+            &user_pubkey,
+            &query,
+            project_a_tag.as_deref(),
+            50, // limit
+        );
+
+        // Convert to HistorySearchEntry
+        let entries: Vec<HistorySearchEntry> = results
+            .into_iter()
+            .map(|(event_id, content, created_at, project_a_tag)| HistorySearchEntry {
+                event_id,
+                content,
+                created_at,
+                project_a_tag,
+            })
+            .collect();
+
+        // Update modal state with results
+        if let ModalState::HistorySearch(ref mut state) = self.modal_state {
+            state.results = entries;
+            // Clamp selected index
+            if !state.results.is_empty() && state.selected_index >= state.results.len() {
+                state.selected_index = state.results.len() - 1;
+            }
+        }
+    }
+
     /// Get the thread ID to stop operations on, based on current selection
     /// Returns the delegation's thread_id if a DelegationPreview is selected,
     /// otherwise returns the current thread's ID
@@ -2809,7 +3058,7 @@ impl App {
         match current_index {
             None => {
                 // Save current input as draft and go to last history entry
-                let current_text = self.chat_editor.text.clone();
+                let current_text = self.chat_editor().text.clone();
                 if let Some(tab) = self.tabs.active_tab_mut() {
                     tab.message_history.draft = Some(current_text);
                     tab.message_history.index = Some(messages_len - 1);
@@ -2818,8 +3067,9 @@ impl App {
                     .and_then(|t| t.message_history.messages.last())
                     .cloned()
                     .unwrap_or_default();
-                self.chat_editor.text = last_msg;
-                self.chat_editor.cursor = self.chat_editor.text.len();
+                let editor = self.chat_editor_mut();
+                editor.text = last_msg;
+                editor.cursor = editor.text.len();
             }
             Some(idx) if idx > 0 => {
                 // Go to older entry
@@ -2830,12 +3080,13 @@ impl App {
                     .and_then(|t| t.message_history.messages.get(idx - 1))
                     .cloned()
                     .unwrap_or_default();
-                self.chat_editor.text = msg;
-                self.chat_editor.cursor = self.chat_editor.text.len();
+                let editor = self.chat_editor_mut();
+                editor.text = msg;
+                editor.cursor = editor.text.len();
             }
             _ => {}
         }
-        self.chat_editor.clear_selection();
+        self.chat_editor_mut().clear_selection();
     }
 
     /// Navigate to next message in history (↓ key) - per-tab isolated
@@ -2862,18 +3113,20 @@ impl App {
                     .and_then(|t| t.message_history.messages.get(idx + 1))
                     .cloned()
                     .unwrap_or_default();
-                self.chat_editor.text = msg;
-                self.chat_editor.cursor = self.chat_editor.text.len();
+                let editor = self.chat_editor_mut();
+                editor.text = msg;
+                editor.cursor = editor.text.len();
             } else {
                 // Restore draft and exit history mode
-                self.chat_editor.text = draft.unwrap_or_default();
-                self.chat_editor.cursor = self.chat_editor.text.len();
+                let editor = self.chat_editor_mut();
+                editor.text = draft.unwrap_or_default();
+                editor.cursor = editor.text.len();
                 if let Some(tab) = self.tabs.active_tab_mut() {
                     tab.message_history.index = None;
                     tab.message_history.draft = None;
                 }
             }
-            self.chat_editor.clear_selection();
+            self.chat_editor_mut().clear_selection();
         }
     }
 
@@ -2910,7 +3163,7 @@ impl App {
     /// Enter vim insert mode after cursor (append)
     pub fn vim_enter_append(&mut self) {
         self.vim_mode = VimMode::Insert;
-        self.chat_editor.move_right();
+        self.chat_editor_mut().move_right();
     }
 
     /// Enter vim normal mode

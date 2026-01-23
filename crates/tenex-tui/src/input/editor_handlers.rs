@@ -46,11 +46,11 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         // Shift+Enter or Alt+Enter = newline
         // Also handle Ctrl+J which is what iTerm2/macOS sends for Shift+Enter
         KeyCode::Enter if has_shift || has_alt => {
-            app.chat_editor.insert_newline();
+            app.chat_editor_mut().insert_newline();
             app.save_chat_draft();
         }
         KeyCode::Char('j') | KeyCode::Char('J') if has_ctrl => {
-            app.chat_editor.insert_newline();
+            app.chat_editor_mut().insert_newline();
             app.save_chat_draft();
         }
         // Enter = send message or create new thread
@@ -66,14 +66,14 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.selected_message_index = count.saturating_sub(1);
         }
         // Tab = cycle focus between input and attachments
-        KeyCode::Tab if app.chat_editor.has_attachments() => {
-            app.chat_editor.cycle_focus();
-            if app.chat_editor.get_focused_attachment().is_some() {
+        KeyCode::Tab if app.chat_editor().has_attachments() => {
+            app.chat_editor_mut().cycle_focus();
+            if app.chat_editor().get_focused_attachment().is_some() {
                 app.open_attachment_modal();
             }
         }
         // Up = cycle through message history (when input is empty)
-        KeyCode::Up if app.chat_editor.text.is_empty() && !app.chat_editor.has_attachments() => {
+        KeyCode::Up if app.chat_editor().text.is_empty() && !app.chat_editor().has_attachments() => {
             app.history_prev();
         }
         // Down = cycle forward through message history (when browsing)
@@ -82,29 +82,30 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         }
         // Up = focus attachments (only when on first visual line and there are attachments)
         KeyCode::Up
-            if app.chat_editor.has_attachments()
-                && app.chat_editor.focused_attachment.is_none()
-                && app.chat_editor.is_on_first_visual_line(app.chat_input_wrap_width) =>
+            if app.chat_editor().has_attachments()
+                && app.chat_editor().focused_attachment.is_none()
+                && app.chat_editor().is_on_first_visual_line(app.chat_input_wrap_width) =>
         {
-            app.chat_editor.focus_attachments();
+            app.chat_editor_mut().focus_attachments();
         }
         // Down = unfocus attachments (return to input)
-        KeyCode::Down if app.chat_editor.focused_attachment.is_some() => {
-            app.chat_editor.unfocus_attachments();
+        KeyCode::Down if app.chat_editor().focused_attachment.is_some() => {
+            app.chat_editor_mut().unfocus_attachments();
         }
         // Left/Right = navigate between attachments when focused
-        KeyCode::Left if app.chat_editor.focused_attachment.is_some() => {
-            if let Some(idx) = app.chat_editor.focused_attachment {
+        KeyCode::Left if app.chat_editor().focused_attachment.is_some() => {
+            if let Some(idx) = app.chat_editor().focused_attachment {
                 if idx > 0 {
-                    app.chat_editor.focused_attachment = Some(idx - 1);
+                    app.chat_editor_mut().focused_attachment = Some(idx - 1);
                 }
             }
         }
-        KeyCode::Right if app.chat_editor.focused_attachment.is_some() => {
-            if let Some(idx) = app.chat_editor.focused_attachment {
-                let total = app.chat_editor.total_attachments();
+        KeyCode::Right if app.chat_editor().focused_attachment.is_some() => {
+            let idx = app.chat_editor().focused_attachment;
+            let total = app.chat_editor().total_attachments();
+            if let Some(idx) = idx {
                 if idx + 1 < total {
-                    app.chat_editor.focused_attachment = Some(idx + 1);
+                    app.chat_editor_mut().focused_attachment = Some(idx + 1);
                 }
             }
         }
@@ -112,49 +113,57 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
+        // Ctrl+R = open history search
+        KeyCode::Char('r') if has_ctrl => {
+            app.open_history_search();
+            // Trigger initial search to show recent messages
+            app.update_history_search();
+        }
         // Ctrl+A = move to beginning of visual line
         KeyCode::Char('a') if has_ctrl => {
-            app.chat_editor
-                .move_to_visual_line_start(app.chat_input_wrap_width);
+            let wrap_width = app.chat_input_wrap_width;
+            app.chat_editor_mut()
+                .move_to_visual_line_start(wrap_width);
         }
         // Ctrl+E = move to end of visual line
         KeyCode::Char('e') if has_ctrl => {
-            app.chat_editor
-                .move_to_visual_line_end(app.chat_input_wrap_width);
+            let wrap_width = app.chat_input_wrap_width;
+            app.chat_editor_mut()
+                .move_to_visual_line_end(wrap_width);
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
-            app.chat_editor.kill_to_line_end();
+            app.chat_editor_mut().kill_to_line_end();
             app.save_chat_draft();
         }
         // Ctrl+U = clear entire input (can be restored with Ctrl+Z)
         KeyCode::Char('u') if has_ctrl => {
-            app.chat_editor.clear_input();
+            app.chat_editor_mut().clear_input();
             app.save_chat_draft();
         }
         // Ctrl+W = delete word backward
         KeyCode::Char('w') if has_ctrl => {
-            app.chat_editor.delete_word_backward();
+            app.chat_editor_mut().delete_word_backward();
             app.save_chat_draft();
         }
         // Ctrl+D = delete character at cursor
         KeyCode::Char('d') if has_ctrl => {
-            app.chat_editor.delete_char_at();
+            app.chat_editor_mut().delete_char_at();
             app.save_chat_draft();
         }
         // Ctrl+Shift+Z = redo
         KeyCode::Char('z') if has_ctrl && has_shift => {
-            app.chat_editor.redo();
+            app.chat_editor_mut().redo();
             app.save_chat_draft();
         }
         // Ctrl+Z = undo
         KeyCode::Char('z') if has_ctrl => {
-            app.chat_editor.undo();
+            app.chat_editor_mut().undo();
             app.save_chat_draft();
         }
         // Ctrl+C = copy selection
         KeyCode::Char('c') if has_ctrl => {
-            if let Some(selected) = app.chat_editor.selected_text() {
+            if let Some(selected) = app.chat_editor_mut().selected_text() {
                 use arboard::Clipboard;
                 if let Ok(mut clipboard) = Clipboard::new() {
                     let _ = clipboard.set_text(selected);
@@ -163,78 +172,78 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         }
         // Ctrl+X = cut selection
         KeyCode::Char('x') if has_ctrl => {
-            if let Some(selected) = app.chat_editor.selected_text() {
+            if let Some(selected) = app.chat_editor_mut().selected_text() {
                 use arboard::Clipboard;
                 if let Ok(mut clipboard) = Clipboard::new() {
                     let _ = clipboard.set_text(selected);
                 }
-                app.chat_editor.delete_selection();
+                app.chat_editor_mut().delete_selection();
                 app.save_chat_draft();
             }
         }
         // Shift+Alt+Left = word left extend selection
         KeyCode::Left if has_alt && has_shift => {
-            app.chat_editor.move_word_left_extend_selection();
+            app.chat_editor_mut().move_word_left_extend_selection();
         }
         // Shift+Alt+Right = word right extend selection
         KeyCode::Right if has_alt && has_shift => {
-            app.chat_editor.move_word_right_extend_selection();
+            app.chat_editor_mut().move_word_right_extend_selection();
         }
         // Alt+Left = word left
         KeyCode::Left if has_alt => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_word_left();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_word_left();
         }
         // Alt+Right = word right
         KeyCode::Right if has_alt => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_word_right();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_word_right();
         }
         // Shift+Left = extend selection left
         KeyCode::Left if has_shift => {
-            app.chat_editor.move_left_extend_selection();
+            app.chat_editor_mut().move_left_extend_selection();
         }
         // Shift+Right = extend selection right
         KeyCode::Right if has_shift => {
-            app.chat_editor.move_right_extend_selection();
+            app.chat_editor_mut().move_right_extend_selection();
         }
         // Basic navigation (clears selection)
         KeyCode::Left => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_left();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_left();
         }
         KeyCode::Right => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_right();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_right();
         }
         // Home = move to beginning of line
         KeyCode::Home => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_to_line_start();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_to_line_start();
         }
         // End = move to end of line
         KeyCode::End => {
-            app.chat_editor.clear_selection();
-            app.chat_editor.move_to_line_end();
+            app.chat_editor_mut().clear_selection();
+            app.chat_editor_mut().move_to_line_end();
         }
         // Alt+Backspace = delete word backward
         KeyCode::Backspace if has_alt => {
-            app.chat_editor.delete_word_backward();
+            app.chat_editor_mut().delete_word_backward();
             app.save_chat_draft();
         }
         KeyCode::Backspace => {
-            if app.chat_editor.focused_attachment.is_some() {
-                app.chat_editor.delete_focused_attachment();
+            if app.chat_editor().focused_attachment.is_some() {
+                app.chat_editor_mut().delete_focused_attachment();
             } else {
-                app.chat_editor.delete_char_before();
+                app.chat_editor_mut().delete_char_before();
             }
             app.save_chat_draft();
         }
         KeyCode::Delete => {
-            if app.chat_editor.focused_attachment.is_some() {
-                app.chat_editor.delete_focused_attachment();
+            if app.chat_editor().focused_attachment.is_some() {
+                app.chat_editor_mut().delete_focused_attachment();
             } else {
-                app.chat_editor.delete_char_at();
+                app.chat_editor_mut().delete_char_at();
             }
             app.save_chat_draft();
         }
@@ -247,15 +256,17 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         }
         // Up/Down = move by visual lines (for wrapped text navigation)
         KeyCode::Up => {
-            app.chat_editor.move_up_visual(app.chat_input_wrap_width);
+            let wrap_width = app.chat_input_wrap_width;
+            app.chat_editor_mut().move_up_visual(wrap_width);
         }
         // Down on last line = focus context line (agent/model/branch), otherwise move down
         KeyCode::Down => {
-            if app.chat_editor.is_on_last_visual_line(app.chat_input_wrap_width) {
+            let wrap_width = app.chat_input_wrap_width;
+            if app.chat_editor().is_on_last_visual_line(wrap_width) {
                 // Focus the agent in the context line
                 app.input_context_focus = Some(InputContextFocus::Agent);
             } else {
-                app.chat_editor.move_down_visual(app.chat_input_wrap_width);
+                app.chat_editor_mut().move_down_visual(wrap_width);
             }
         }
         KeyCode::PageUp => {
@@ -269,7 +280,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             // Check if this is a prefix trigger (e.g., @ on empty input)
             if !input_prefix::try_handle_prefix(app, c) {
                 // Not a prefix trigger, insert normally
-                app.chat_editor.insert_char(c);
+                app.chat_editor_mut().insert_char(c);
                 app.save_chat_draft();
             }
         }
@@ -368,7 +379,7 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
         KeyCode::Char('j') | KeyCode::Char('J')
             if key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
-            app.chat_editor.insert_newline();
+            app.chat_editor_mut().insert_newline();
             app.save_chat_draft();
         }
 
@@ -380,72 +391,74 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
             app.vim_enter_append();
         }
         KeyCode::Char('A') => {
-            app.chat_editor.move_to_line_end();
+            app.chat_editor_mut().move_to_line_end();
             app.vim_enter_insert();
         }
         KeyCode::Char('I') => {
-            app.chat_editor.move_to_line_start();
+            app.chat_editor_mut().move_to_line_start();
             app.vim_enter_insert();
         }
         KeyCode::Char('o') => {
-            app.chat_editor.move_to_line_end();
-            app.chat_editor.insert_newline();
+            app.chat_editor_mut().move_to_line_end();
+            app.chat_editor_mut().insert_newline();
             app.vim_enter_insert();
             app.save_chat_draft();
         }
         KeyCode::Char('O') => {
-            app.chat_editor.move_to_line_start();
-            app.chat_editor.insert_newline();
-            app.chat_editor.move_up();
+            app.chat_editor_mut().move_to_line_start();
+            app.chat_editor_mut().insert_newline();
+            app.chat_editor_mut().move_up();
             app.vim_enter_insert();
             app.save_chat_draft();
         }
 
         // Movement
         KeyCode::Char('h') | KeyCode::Left => {
-            app.chat_editor.move_left();
+            app.chat_editor_mut().move_left();
         }
         KeyCode::Char('l') | KeyCode::Right => {
-            app.chat_editor.move_right();
+            app.chat_editor_mut().move_right();
         }
         KeyCode::Char('j') | KeyCode::Down => {
-            app.chat_editor.move_down_visual(app.chat_input_wrap_width);
+            let wrap_width = app.chat_input_wrap_width;
+            app.chat_editor_mut().move_down_visual(wrap_width);
         }
         KeyCode::Char('k') | KeyCode::Up => {
-            app.chat_editor.move_up_visual(app.chat_input_wrap_width);
+            let wrap_width = app.chat_input_wrap_width;
+            app.chat_editor_mut().move_up_visual(wrap_width);
         }
         KeyCode::Char('w') => {
-            app.chat_editor.move_word_right();
+            app.chat_editor_mut().move_word_right();
         }
         KeyCode::Char('b') => {
-            app.chat_editor.move_word_left();
+            app.chat_editor_mut().move_word_left();
         }
         KeyCode::Char('0') => {
-            app.chat_editor.move_to_line_start();
+            app.chat_editor_mut().move_to_line_start();
         }
         KeyCode::Char('$') => {
-            app.chat_editor.move_to_line_end();
+            app.chat_editor_mut().move_to_line_end();
         }
 
         // Editing
         KeyCode::Char('x') => {
-            app.chat_editor.delete_char_at();
+            app.chat_editor_mut().delete_char_at();
             app.save_chat_draft();
         }
         KeyCode::Char('X') => {
-            app.chat_editor.delete_char_before();
+            app.chat_editor_mut().delete_char_before();
             app.save_chat_draft();
         }
         KeyCode::Char('u') => {
-            app.chat_editor.undo();
+            app.chat_editor_mut().undo();
             app.save_chat_draft();
         }
         KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.chat_editor.redo();
+            app.chat_editor_mut().redo();
             app.save_chat_draft();
         }
         KeyCode::Char('D') => {
-            app.chat_editor.kill_to_line_end();
+            app.chat_editor_mut().kill_to_line_end();
             app.save_chat_draft();
         }
 
@@ -463,7 +476,7 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
             if key.modifiers.contains(KeyModifiers::SHIFT)
                 || key.modifiers.contains(KeyModifiers::ALT) =>
         {
-            app.chat_editor.insert_newline();
+            app.chat_editor_mut().insert_newline();
             app.save_chat_draft();
         }
 
@@ -473,7 +486,7 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
 
 /// Handle sending a message or creating a new thread
 fn handle_send_message(app: &mut App) {
-    let content = app.chat_editor.submit();
+    let content = app.chat_editor_mut().submit();
     if !content.is_empty() {
         // Save to message history for ↑/↓ navigation
         app.add_to_message_history(content.clone());
@@ -506,6 +519,7 @@ fn handle_send_message(app: &mut App) {
                     branch,
                     nudge_ids,
                     ask_author_pubkey: None,
+                    response_tx: None,
                 }) {
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
@@ -527,6 +541,7 @@ fn handle_send_message(app: &mut App) {
                     agent_pubkey,
                     branch,
                     nudge_ids,
+                    response_tx: None,
                 }) {
                     app.set_status(&format!("Failed to create thread: {}", e));
                 } else {
