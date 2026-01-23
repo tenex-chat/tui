@@ -140,24 +140,36 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('f') => {
             app.cycle_time_filter();
         }
-        KeyCode::Char('A') => {
+        KeyCode::Char('B') if has_shift => {
             app.open_agent_browser();
         }
-        KeyCode::Char('N') if has_shift => {
+        KeyCode::Char('C') if has_shift => {
             app.modal_state =
                 ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
         }
-        KeyCode::Char('H') if has_shift => {
-            // Show/hide archived items based on focus
-            if app.sidebar_focused {
-                app.toggle_show_archived_projects();
-            } else {
-                app.toggle_show_archived();
+        KeyCode::Char('N') if has_shift => {
+            // New conversation in current project (no picker)
+            if !app.sidebar_focused && app.home_panel_focus == HomeTab::Conversations {
+                new_conversation_current_project(app);
             }
         }
         KeyCode::Char('P') if has_shift => {
-            // Show/hide archived projects from main panel
+            // New conversation with project picker
+            if !app.sidebar_focused && app.home_panel_focus == HomeTab::Conversations {
+                app.open_projects_modal(true);
+            }
+        }
+        KeyCode::Char('H') if has_shift => {
+            // Show/hide archived conversations
             if !app.sidebar_focused {
+                app.toggle_show_archived();
+            }
+        }
+        KeyCode::Char('A') if has_shift => {
+            // Show/hide archived projects
+            if app.sidebar_focused {
+                app.toggle_show_archived_projects();
+            } else {
                 app.toggle_show_archived_projects();
             }
         }
@@ -545,6 +557,43 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         _ => {}
     }
     Ok(())
+}
+
+/// Helper function to start a new conversation in the current project
+fn new_conversation_current_project(app: &mut App) {
+    // Get the first visible project's info
+    let hierarchy = get_hierarchical_threads(app);
+    let project_info = if let Some(first_item) = hierarchy.first() {
+        let store = app.data_store.borrow();
+        store
+            .get_projects()
+            .iter()
+            .find(|p| p.a_tag() == first_item.a_tag)
+            .map(|p| (p.a_tag(), p.name.clone(), p.clone()))
+    } else {
+        None
+    };
+
+    if let Some((a_tag, name, project)) = project_info {
+        app.selected_project = Some(project);
+
+        // Auto-select PM agent and default branch from status
+        if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
+            if let Some(pm) = status.pm_agent() {
+                app.selected_agent = Some(pm.clone());
+            }
+            if app.selected_branch.is_none() {
+                app.selected_branch = status.default_branch().map(String::from);
+            }
+        }
+
+        let tab_idx = app.open_draft_tab(&a_tag, &name);
+        app.switch_to_tab(tab_idx);
+        app.view = View::Chat;
+        app.chat_editor_mut().clear();
+    } else {
+        app.set_status("No project available for new conversation");
+    }
 }
 
 fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
