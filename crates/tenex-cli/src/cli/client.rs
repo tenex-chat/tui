@@ -13,6 +13,9 @@ use super::protocol::{CliCommand, Response};
 
 const MAX_WAIT_SECONDS: u64 = 10;
 const POLL_INTERVAL_MS: u64 = 100;
+const BOOT_WAIT_TIMEOUT_SECS: u64 = 60;
+const BOOT_POLL_INTERVAL_MS: u64 = 500;
+const REPLY_POLL_INTERVAL_MS: u64 = 500;
 
 /// Connect to the daemon, auto-spawning if needed
 fn connect_to_daemon(data_dir: &Path, config: Option<&CliConfig>) -> Result<UnixStream> {
@@ -71,14 +74,14 @@ fn spawn_daemon(data_dir: &Path, config: Option<&CliConfig>) -> Result<()> {
     Ok(())
 }
 
-/// Send a command to the daemon and get the response
-pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: Option<CliConfig>) -> Result<()> {
+/// Send a command to the daemon and return the response
+fn send_command_raw(command: &CliCommand, data_dir: &Path, config: Option<&CliConfig>) -> Result<Response> {
     let request = match command.to_request(1) {
         Some(r) => r,
         None => anyhow::bail!("Command cannot be sent to daemon"),
     };
 
-    let stream = connect_to_daemon(data_dir, config.as_ref())?;
+    let stream = connect_to_daemon(data_dir, config)?;
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut writer = stream;
 
@@ -91,7 +94,175 @@ pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: 
     let mut response_line = String::new();
     reader.read_line(&mut response_line)?;
 
-    let response: Response = serde_json::from_str(&response_line)?;
+    Ok(serde_json::from_str(&response_line)?)
+}
+
+/// Get project info if online, None otherwise
+fn get_booted_project(project_slug: &str, data_dir: &Path, config: Option<&CliConfig>) -> Result<Option<serde_json::Value>> {
+    let response = send_command_raw(&CliCommand::ListProjects, data_dir, config)?;
+
+    if let Some(result) = response.result {
+        if let Some(projects) = result.as_array() {
+            for project in projects {
+                if project.get("slug").and_then(|s| s.as_str()) == Some(project_slug) {
+                    if project.get("booted").and_then(|b| b.as_bool()).unwrap_or(false) {
+                        return Ok(Some(project.clone()));
+                    }
+                    return Ok(None);
+                }
+            }
+        }
+    }
+    Ok(None)
+}
+
+/// Get messages from a thread, returns Vec of message objects
+fn get_thread_messages(thread_id: &str, data_dir: &Path, config: Option<&CliConfig>) -> Result<Vec<serde_json::Value>> {
+    let response = send_command_raw(
+        &CliCommand::ListMessages { thread_id: thread_id.to_string() },
+        data_dir,
+        config,
+    )?;
+
+    if let Some(result) = response.result {
+        if let Some(messages) = result.as_array() {
+            return Ok(messages.clone());
+        }
+    }
+    Ok(vec![])
+}
+
+/// Wait for a reply message in the thread that wasn't sent by us (different from our_message_id)
+fn wait_for_reply(
+    thread_id: &str,
+    our_message_id: &str,
+    wait_secs: u64,
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+    pretty: bool,
+) -> Result<bool> {
+    let start = std::time::Instant::now();
+    let timeout = Duration::from_secs(wait_secs);
+
+    eprintln!("Waiting up to {} seconds for agent reply...", wait_secs);
+
+    // Get current message IDs to know what's new
+    let initial_messages = get_thread_messages(thread_id, data_dir, config)?;
+    let initial_ids: std::collections::HashSet<String> = initial_messages
+        .iter()
+        .filter_map(|m| m.get("id").and_then(|id| id.as_str()).map(String::from))
+        .collect();
+
+    while start.elapsed() < timeout {
+        thread::sleep(Duration::from_millis(REPLY_POLL_INTERVAL_MS));
+
+        let messages = get_thread_messages(thread_id, data_dir, config)?;
+
+        // Find new messages that weren't in the initial set and aren't our message
+        for msg in &messages {
+            let msg_id = msg.get("id").and_then(|id| id.as_str()).unwrap_or("");
+            if !initial_ids.contains(msg_id) && msg_id != our_message_id {
+                // Found a reply!
+                eprintln!("Received reply:");
+                if pretty {
+                    println!("{}", serde_json::to_string_pretty(msg)?);
+                } else {
+                    println!("{}", serde_json::to_string(msg)?);
+                }
+                return Ok(true);
+            }
+        }
+    }
+
+    eprintln!("Timeout waiting for reply");
+    Ok(false)
+}
+
+/// Send a command to the daemon and print the response
+pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: Option<CliConfig>) -> Result<()> {
+    // Handle boot-project --wait specially
+    if let CliCommand::BootProject { ref project_slug, wait: true } = command {
+        let response = send_command_raw(&command, data_dir, config.as_ref())?;
+
+        if let Some(error) = response.error {
+            eprintln!("Error [{}]: {}", error.code, error.message);
+            std::process::exit(1);
+        }
+
+        // Poll until project is online
+        eprintln!("Waiting for project '{}' to come online...", project_slug);
+        let start = std::time::Instant::now();
+        while start.elapsed().as_secs() < BOOT_WAIT_TIMEOUT_SECS {
+            if let Some(project) = get_booted_project(project_slug, data_dir, config.as_ref())? {
+                if pretty {
+                    println!("{}", serde_json::to_string_pretty(&project)?);
+                } else {
+                    println!("{}", serde_json::to_string(&project)?);
+                }
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(BOOT_POLL_INTERVAL_MS));
+        }
+
+        eprintln!("Timeout waiting for project to come online");
+        std::process::exit(1);
+    }
+
+    // Handle create-thread with --wait
+    if let CliCommand::CreateThread { wait_secs: Some(wait_secs), .. } = command {
+        let response = send_command_raw(&command, data_dir, config.as_ref())?;
+
+        if let Some(error) = response.error {
+            eprintln!("Error [{}]: {}", error.code, error.message);
+            std::process::exit(1);
+        }
+
+        if let Some(result) = response.result {
+            // Always print the create result first (contains thread_id)
+            if pretty {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{}", serde_json::to_string(&result)?);
+            }
+
+            // Extract thread_id for waiting
+            if let Some(thread_id) = result.get("thread_id").and_then(|t| t.as_str()) {
+                wait_for_reply(thread_id, thread_id, wait_secs, data_dir, config.as_ref(), pretty)?;
+            } else {
+                eprintln!("Warning: Could not get thread_id, cannot wait for reply");
+            }
+        }
+
+        return Ok(());
+    }
+
+    // Handle send-message with --wait
+    if let CliCommand::SendMessage { ref thread_id, wait_secs: Some(wait_secs), .. } = command {
+        let thread_id_for_wait = thread_id.clone();
+        let response = send_command_raw(&command, data_dir, config.as_ref())?;
+
+        if let Some(error) = response.error {
+            eprintln!("Error [{}]: {}", error.code, error.message);
+            std::process::exit(1);
+        }
+
+        if let Some(result) = response.result {
+            // Always print the send result first (contains message_id)
+            if pretty {
+                println!("{}", serde_json::to_string_pretty(&result)?);
+            } else {
+                println!("{}", serde_json::to_string(&result)?);
+            }
+
+            // Extract message_id for waiting
+            let our_message_id = result.get("message_id").and_then(|m| m.as_str()).unwrap_or("");
+            wait_for_reply(&thread_id_for_wait, our_message_id, wait_secs, data_dir, config.as_ref(), pretty)?;
+        }
+
+        return Ok(());
+    }
+
+    let response = send_command_raw(&command, data_dir, config.as_ref())?;
 
     // Print result
     if let Some(error) = response.error {

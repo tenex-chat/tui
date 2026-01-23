@@ -11,7 +11,7 @@ use tokio::net::UnixListener;
 use anyhow::Result;
 use serde::Deserialize;
 
-use crate::nostr::{self, NostrCommand};
+use crate::nostr::{self, DataChange, NostrCommand};
 use crate::store::AppDataStore;
 use tenex_core::config::CoreConfig;
 use tenex_core::models::PreferencesStorage;
@@ -63,9 +63,17 @@ pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
     let data_store = core_runtime.data_store();
     let core_handle = core_runtime.handle();
+    let data_rx = core_runtime.take_data_rx().expect("data_rx should be available");
 
-    // Initialize preferences for credential storage
+    // Initialize preferences for credential storage and trusted backends
     let prefs = PreferencesStorage::new(data_dir.to_str().unwrap_or("tenex_data"));
+
+    // Set trusted backends from preferences
+    {
+        let approved = prefs.approved_backend_pubkeys().clone();
+        let blocked = prefs.blocked_backend_pubkeys().clone();
+        data_store.borrow_mut().set_trusted_backends(approved, blocked);
+    }
 
     // Try to auto-login: config credentials take priority over stored credentials
     let keys = try_auto_login_with_config(config.as_ref(), &prefs, &core_handle);
@@ -80,6 +88,16 @@ pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<
 
     // Handle connections - use async accept to allow batch exporter to run
     loop {
+        // Drain any pending DataChange events (non-blocking)
+        while let Ok(data_change) = data_rx.try_recv() {
+            match data_change {
+                DataChange::ProjectStatus { json } => {
+                    data_store.borrow_mut().handle_status_event_json(&json);
+                }
+                _ => {}
+            }
+        }
+
         tokio::select! {
             accept_result = listener.accept() => {
                 match accept_result {
@@ -110,6 +128,8 @@ pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<
                     eprintln!("Failed to process core events: {}", e);
                 }
             }
+            // Small timeout to periodically check for DataChange events
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
         }
     }
 
@@ -298,22 +318,53 @@ fn handle_request(
                 .get_projects()
                 .iter()
                 .map(|p| {
-                    serde_json::json!({
-                        "id": p.a_tag(),
+                    let a_tag = p.a_tag();
+                    let online_agents = store.get_online_agents(&a_tag);
+                    let mut obj = serde_json::json!({
+                        "slug": p.id,
                         "name": p.name,
-                        "pubkey": p.pubkey,
-                        "participants": p.participants,
-                    })
+                        "booted": online_agents.is_some(),
+                    });
+                    if let Some(agents) = online_agents {
+                        obj["participants"] = serde_json::json!(
+                            agents.iter().map(agent_to_json).collect::<Vec<_>>()
+                        );
+                    }
+                    obj
                 })
                 .collect();
             (Response::success(id, serde_json::json!(projects)), false)
         }
 
         "list_threads" => {
-            let project_id = request.params["project_id"].as_str().unwrap_or("");
+            let project_slug = request.params["project_slug"].as_str().unwrap_or("");
+            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                    return err_response;
+                }
+            }
+
             let store = data_store.borrow();
+
+            let project_a_tag = match find_project_a_tag_by_slug(&store, project_slug) {
+                Some(a_tag) => a_tag,
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "PROJECT_NOT_FOUND",
+                            &format!("Project '{}' not found", project_slug),
+                        ),
+                        false,
+                    );
+                }
+            };
+
             let threads: Vec<_> = store
-                .get_threads(project_id)
+                .get_threads(&project_a_tag)
                 .iter()
                 .map(|t| {
                     serde_json::json!({
@@ -327,6 +378,40 @@ fn handle_request(
             (Response::success(id, serde_json::json!(threads)), false)
         }
 
+        "list_agents" => {
+            let project_slug = request.params["project_slug"].as_str().unwrap_or("");
+            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                    return err_response;
+                }
+            }
+
+            let store = data_store.borrow();
+
+            let project_a_tag = match find_project_a_tag_by_slug(&store, project_slug) {
+                Some(a_tag) => a_tag,
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "PROJECT_NOT_FOUND",
+                            &format!("Project '{}' not found", project_slug),
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            let agents: Vec<_> = store
+                .get_online_agents(&project_a_tag)
+                .map(|agents| agents.iter().map(agent_to_json).collect())
+                .unwrap_or_default();
+            (Response::success(id, serde_json::json!(agents)), false)
+        }
+
         "list_messages" => {
             let thread_id = request.params["thread_id"].as_str().unwrap_or("");
             let store = data_store.borrow();
@@ -334,13 +419,16 @@ fn handle_request(
                 .get_messages(thread_id)
                 .iter()
                 .map(|m| {
-                    serde_json::json!({
+                    let mut obj = serde_json::json!({
                         "id": m.id,
                         "content": m.content,
                         "created_at": m.created_at,
                         "pubkey": m.pubkey,
-                        "author_name": store.get_profile_name(&m.pubkey),
-                    })
+                    });
+                    if let Some(name) = resolve_author_name(&store, &m.pubkey) {
+                        obj["author_name"] = serde_json::json!(name);
+                    }
+                    obj
                 })
                 .collect();
             (Response::success(id, serde_json::json!(messages)), false)
@@ -376,121 +464,267 @@ fn handle_request(
         }
 
         "send_message" => {
-            let thread_id = request.params["thread_id"].as_str().unwrap_or("");
-            let content = request.params["content"].as_str().unwrap_or("");
+            let project_slug = request.params["project_slug"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let thread_id = request.params["thread_id"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let recipient_slug = request.params["recipient_slug"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let content = request.params["content"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
 
-            if thread_id.is_empty() || content.is_empty() {
-                return (
-                    Response::error(id, "INVALID_PARAMS", "thread_id and content are required"),
-                    false,
-                );
-            }
-
-            // Find the project for this thread
-            let store = data_store.borrow();
-            let mut project_a_tag = None;
-            for project in store.get_projects() {
-                for thread in store.get_threads(&project.a_tag()) {
-                    if thread.id == thread_id {
-                        project_a_tag = Some(project.a_tag());
-                        break;
+            let (project_slug, thread_id, recipient_slug, content) =
+                match (project_slug, thread_id, recipient_slug, content) {
+                    (Some(p), Some(t), Some(r), Some(c)) => (p, t, r, c),
+                    _ => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_PARAMS",
+                                "project_slug, thread_id, recipient_slug, and content are required",
+                            ),
+                            false,
+                        );
                     }
-                }
-                if project_a_tag.is_some() {
-                    break;
+                };
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                    return err_response;
                 }
             }
+
+            let store = data_store.borrow();
+            let lookup = find_agent_in_project(&store, project_slug, recipient_slug);
             drop(store);
 
-            match project_a_tag {
-                Some(project_a_tag) => {
-                    if core_handle
-                        .send(NostrCommand::PublishMessage {
-                            thread_id: thread_id.to_string(),
-                            project_a_tag,
-                            content: content.to_string(),
-                            agent_pubkey: None,
-                            reply_to: Some(thread_id.to_string()),
-                            branch: None,
-                            nudge_ids: vec![],
-                            ask_author_pubkey: None,
-                        })
-                        .is_ok()
-                    {
-                        (
-                            Response::success(id, serde_json::json!({"status": "sent"})),
+            match lookup {
+                Ok(result) => {
+                    // Create response channel to get the event ID back
+                    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+                    match core_handle.send(NostrCommand::PublishMessage {
+                        thread_id: thread_id.to_string(),
+                        project_a_tag: result.project_a_tag,
+                        content: content.to_string(),
+                        agent_pubkey: Some(result.agent_pubkey),
+                        reply_to: Some(thread_id.to_string()),
+                        branch: None,
+                        nudge_ids: vec![],
+                        ask_author_pubkey: None,
+                        response_tx: Some(response_tx),
+                    }) {
+                        Ok(_) => {
+                            // Wait for the event ID (with timeout)
+                            match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                                Ok(message_id) => (
+                                    Response::success(id, serde_json::json!({
+                                        "status": "sent",
+                                        "message_id": message_id
+                                    })),
+                                    false,
+                                ),
+                                Err(_) => (
+                                    Response::success(id, serde_json::json!({
+                                        "status": "sent",
+                                        "message_id": null
+                                    })),
+                                    false,
+                                ),
+                            }
+                        }
+                        Err(e) => (
+                            Response::error(
+                                id,
+                                "SEND_FAILED",
+                                &format!("Failed to send message: {}", e),
+                            ),
                             false,
-                        )
-                    } else {
-                        (
-                            Response::error(id, "SEND_FAILED", "Failed to send message"),
-                            false,
-                        )
+                        ),
                     }
                 }
-                None => (
-                    Response::error(id, "NOT_FOUND", "Thread not found"),
+                Err(AgentLookupError::ProjectNotFound) => (
+                    Response::error(
+                        id,
+                        "PROJECT_NOT_FOUND",
+                        &format!("Project '{}' not found", project_slug),
+                    ),
+                    false,
+                ),
+                Err(AgentLookupError::AgentNotFound) => (
+                    Response::error(
+                        id,
+                        "AGENT_NOT_FOUND",
+                        &format!(
+                            "Agent with slug '{}' not found in project '{}'",
+                            recipient_slug, project_slug
+                        ),
+                    ),
                     false,
                 ),
             }
         }
 
         "create_thread" => {
-            let project_id = request.params["project_id"].as_str().unwrap_or("");
-            let title = request.params["title"].as_str().unwrap_or("");
+            let project_slug = request.params["project_slug"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let recipient_slug = request.params["recipient_slug"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let content = request.params["content"]
+                .as_str()
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty());
+            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
 
-            if project_id.is_empty() || title.is_empty() {
-                return (
-                    Response::error(id, "INVALID_PARAMS", "project_id and title are required"),
-                    false,
-                );
+            let (project_slug, recipient_slug, content) =
+                match (project_slug, recipient_slug, content) {
+                    (Some(p), Some(r), Some(c)) => (p, r, c),
+                    _ => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_PARAMS",
+                                "project_slug, recipient_slug, and content are required",
+                            ),
+                            false,
+                        );
+                    }
+                };
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                    return err_response;
+                }
             }
 
-            if core_handle
-                .send(NostrCommand::PublishThread {
-                    project_a_tag: project_id.to_string(),
-                    title: title.to_string(),
-                    content: title.to_string(),
-                    agent_pubkey: None,
-                    branch: None,
-                    nudge_ids: vec![],
-                })
-                .is_ok()
-            {
-                (
-                    Response::success(id, serde_json::json!({"status": "created"})),
+            let store = data_store.borrow();
+            let lookup = find_agent_in_project(&store, project_slug, recipient_slug);
+            drop(store);
+
+            match lookup {
+                Ok(result) => {
+                    // Use a truncated version of content for the title (first 50 chars)
+                    // Use chars() to safely handle multi-byte UTF-8 characters
+                    let title: String = if content.chars().count() > 50 {
+                        format!("{}...", content.chars().take(50).collect::<String>())
+                    } else {
+                        content.to_string()
+                    };
+
+                    // Create response channel to get the event ID back
+                    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+                    match core_handle.send(NostrCommand::PublishThread {
+                        project_a_tag: result.project_a_tag,
+                        title,
+                        content: content.to_string(),
+                        agent_pubkey: Some(result.agent_pubkey),
+                        branch: None,
+                        nudge_ids: vec![],
+                        response_tx: Some(response_tx),
+                    }) {
+                        Ok(_) => {
+                            // Wait for the event ID (with timeout)
+                            match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+                                Ok(thread_id) => (
+                                    Response::success(id, serde_json::json!({
+                                        "status": "created",
+                                        "thread_id": thread_id
+                                    })),
+                                    false,
+                                ),
+                                Err(_) => (
+                                    Response::success(id, serde_json::json!({
+                                        "status": "created",
+                                        "thread_id": null
+                                    })),
+                                    false,
+                                ),
+                            }
+                        }
+                        Err(e) => (
+                            Response::error(
+                                id,
+                                "CREATE_FAILED",
+                                &format!("Failed to create thread: {}", e),
+                            ),
+                            false,
+                        ),
+                    }
+                }
+                Err(AgentLookupError::ProjectNotFound) => (
+                    Response::error(
+                        id,
+                        "PROJECT_NOT_FOUND",
+                        &format!("Project '{}' not found", project_slug),
+                    ),
                     false,
-                )
-            } else {
-                (
-                    Response::error(id, "CREATE_FAILED", "Failed to create thread"),
+                ),
+                Err(AgentLookupError::AgentNotFound) => (
+                    Response::error(
+                        id,
+                        "AGENT_NOT_FOUND",
+                        &format!(
+                            "Agent with slug '{}' not found in project '{}'",
+                            recipient_slug, project_slug
+                        ),
+                    ),
                     false,
-                )
+                ),
             }
         }
 
         "boot_project" => {
-            let project_id = request.params["project_id"].as_str().unwrap_or("");
+            let project_slug = request.params["project_slug"].as_str().unwrap_or("");
 
-            if project_id.is_empty() {
+            if project_slug.is_empty() {
                 return (
-                    Response::error(id, "INVALID_PARAMS", "project_id is required"),
+                    Response::error(id, "INVALID_PARAMS", "project_slug is required"),
                     false,
                 );
             }
 
-            // Find the project to get its pubkey
+            // Find the project by slug to get its a_tag and pubkey
             let store = data_store.borrow();
-            let project_pubkey = store
+            let project = store
                 .get_projects()
                 .iter()
-                .find(|p| p.a_tag() == project_id)
-                .map(|p| p.pubkey.clone());
+                .find(|p| p.id == project_slug)
+                .map(|p| (p.a_tag(), p.pubkey.clone()));
             drop(store);
+
+            let (project_a_tag, project_pubkey) = match project {
+                Some((a_tag, pubkey)) => (a_tag, Some(pubkey)),
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "PROJECT_NOT_FOUND",
+                            &format!("Project '{}' not found", project_slug),
+                        ),
+                        false,
+                    );
+                }
+            };
 
             if core_handle
                 .send(NostrCommand::BootProject {
-                    project_a_tag: project_id.to_string(),
+                    project_a_tag,
                     project_pubkey,
                 })
                 .is_ok()
@@ -553,6 +787,95 @@ fn handle_request(
             (Response::success(id, serde_json::json!(agent_defs)), false)
         }
 
+        "show_project" => {
+            let project_slug = request.params["project_slug"].as_str().unwrap_or("");
+            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, project_slug, id) {
+                    return err_response;
+                }
+            }
+
+            let store = data_store.borrow();
+
+            // Find the project by slug
+            let project = store
+                .get_projects()
+                .iter()
+                .find(|p| p.id == project_slug)
+                .cloned();
+
+            let project = match project {
+                Some(p) => p,
+                None => {
+                    return (
+                        Response::error(
+                            id,
+                            "PROJECT_NOT_FOUND",
+                            &format!("Project '{}' not found", project_slug),
+                        ),
+                        false,
+                    );
+                }
+            };
+
+            let a_tag = project.a_tag();
+
+            // Get full project status (kind:24010)
+            let status = store.get_project_status(&a_tag);
+
+            let response = match status {
+                Some(status) => {
+                    // Build detailed agents array with models and tools
+                    let agents: Vec<_> = status
+                        .agents
+                        .iter()
+                        .map(|a| {
+                            serde_json::json!({
+                                "name": a.name,
+                                "pubkey": a.pubkey,
+                                "is_pm": a.is_pm,
+                                "model": a.model,
+                                "tools": a.tools,
+                            })
+                        })
+                        .collect();
+
+                    serde_json::json!({
+                        "slug": project.id,
+                        "name": project.name,
+                        "pubkey": project.pubkey,
+                        "booted": status.is_online(),
+                        "agents": agents,
+                        "branches": status.branches,
+                        "all_models": status.all_models,
+                        "all_tools": status.all_tools,
+                        "backend_pubkey": status.backend_pubkey,
+                        "created_at": status.created_at,
+                    })
+                }
+                None => {
+                    // Project exists but no status event (not booted)
+                    serde_json::json!({
+                        "slug": project.id,
+                        "name": project.name,
+                        "pubkey": project.pubkey,
+                        "booted": false,
+                        "agents": [],
+                        "branches": [],
+                        "all_models": [],
+                        "all_tools": [],
+                        "backend_pubkey": null,
+                        "created_at": null,
+                    })
+                }
+            };
+
+            (Response::success(id, response), false)
+        }
+
         "create_project" => {
             #[derive(Deserialize)]
             struct CreateProjectParams {
@@ -601,6 +924,136 @@ fn handle_request(
             }
         }
 
+        "set_agent_settings" => {
+            #[derive(Deserialize)]
+            struct SetAgentSettingsParams {
+                project_slug: String,
+                agent_slug: String,
+                model: String,
+                #[serde(default)]
+                tools: Vec<String>,
+                #[serde(default)]
+                wait_for_project: bool,
+                #[serde(default)]
+                wait: bool,
+            }
+
+            let params: SetAgentSettingsParams = match serde_json::from_value(request.params.clone()) {
+                Ok(p) => p,
+                Err(_) => {
+                    return (
+                        Response::error(id, "INVALID_PARAMS", "Invalid set_agent_settings params"),
+                        false,
+                    );
+                }
+            };
+
+            // If wait_for_project is true, wait for the 24010 event first
+            if params.wait_for_project {
+                if let Err(err_response) = wait_for_project_status(data_store, &params.project_slug, id) {
+                    return err_response;
+                }
+            }
+
+            let store = data_store.borrow();
+            let lookup = find_agent_in_project(&store, &params.project_slug, &params.agent_slug);
+
+            // Get the current status timestamp for wait comparison
+            let current_timestamp = store
+                .get_project_status(&find_project_a_tag_by_slug(&store, &params.project_slug).unwrap_or_default())
+                .map(|s| s.created_at)
+                .unwrap_or(0);
+            drop(store);
+
+            match lookup {
+                Ok(result) => {
+                    match core_handle.send(NostrCommand::UpdateAgentConfig {
+                        project_a_tag: result.project_a_tag.clone(),
+                        agent_pubkey: result.agent_pubkey.clone(),
+                        model: Some(params.model.clone()),
+                        tools: params.tools.clone(),
+                    }) {
+                        Ok(_) => {
+                            if params.wait {
+                                // Wait for a new 24010 event with updated timestamp
+                                let start = std::time::Instant::now();
+                                let timeout = std::time::Duration::from_secs(30);
+
+                                loop {
+                                    if start.elapsed() > timeout {
+                                        return (
+                                            Response::success(id, serde_json::json!({
+                                                "status": "sent",
+                                                "warning": "Timeout waiting for confirmation - settings may still be applied"
+                                            })),
+                                            false,
+                                        );
+                                    }
+
+                                    std::thread::sleep(std::time::Duration::from_millis(500));
+
+                                    let store = data_store.borrow();
+                                    if let Some(status) = store.get_project_status(&result.project_a_tag) {
+                                        if status.created_at > current_timestamp {
+                                            // New status received - check if settings were applied
+                                            let agent_updated = status.agents.iter().any(|a| {
+                                                a.pubkey == result.agent_pubkey &&
+                                                a.model.as_deref() == Some(&params.model)
+                                            });
+
+                                            return (
+                                                Response::success(id, serde_json::json!({
+                                                    "status": "confirmed",
+                                                    "agent_updated": agent_updated,
+                                                    "new_timestamp": status.created_at
+                                                })),
+                                                false,
+                                            );
+                                        }
+                                    }
+                                }
+                            } else {
+                                (
+                                    Response::success(id, serde_json::json!({
+                                        "status": "sent",
+                                        "message": "Agent settings update sent. Use --wait to confirm application."
+                                    })),
+                                    false,
+                                )
+                            }
+                        }
+                        Err(e) => (
+                            Response::error(
+                                id,
+                                "SEND_FAILED",
+                                &format!("Failed to send agent settings update: {}", e),
+                            ),
+                            false,
+                        ),
+                    }
+                }
+                Err(AgentLookupError::ProjectNotFound) => (
+                    Response::error(
+                        id,
+                        "PROJECT_NOT_FOUND",
+                        &format!("Project '{}' not found", params.project_slug),
+                    ),
+                    false,
+                ),
+                Err(AgentLookupError::AgentNotFound) => (
+                    Response::error(
+                        id,
+                        "AGENT_NOT_FOUND",
+                        &format!(
+                            "Agent with slug '{}' not found in project '{}'",
+                            params.agent_slug, params.project_slug
+                        ),
+                    ),
+                    false,
+                ),
+            }
+        }
+
         _ => (
             Response::error(
                 id,
@@ -610,4 +1063,130 @@ fn handle_request(
             false,
         ),
     }
+}
+
+/// Serialize a ProjectAgent to JSON for CLI output
+fn agent_to_json(a: &tenex_core::models::ProjectAgent) -> serde_json::Value {
+    serde_json::json!({
+        "name": a.name,
+        "pubkey": a.pubkey,
+        "is_pm": a.is_pm,
+        "model": a.model,
+    })
+}
+
+/// Resolve an author name from pubkey:
+/// 1. Check if pubkey belongs to an online agent -> return agent name
+/// 2. Otherwise check profile name from kind:0
+/// 3. Return None if no real name found (don't return truncated pubkey)
+fn resolve_author_name(store: &AppDataStore, pubkey: &str) -> Option<String> {
+    // Check all online agents across all projects
+    for project in store.get_projects() {
+        if let Some(agents) = store.get_online_agents(&project.a_tag()) {
+            for agent in agents {
+                if agent.pubkey == pubkey {
+                    return Some(agent.name.clone());
+                }
+            }
+        }
+    }
+
+    // Fall back to profile name - but only if it's a real name (not truncated pubkey)
+    let profile_name = store.get_profile_name(pubkey);
+    if profile_name.len() > 16 || !profile_name.chars().all(|c| c.is_ascii_hexdigit() || c == '.') {
+        Some(profile_name)
+    } else {
+        None
+    }
+}
+
+/// Default timeout for waiting for project status (30 seconds)
+const WAIT_FOR_PROJECT_TIMEOUT_SECS: u64 = 30;
+
+/// Wait for a project's 24010 status event to appear.
+/// Returns Ok(a_tag) if found within timeout, or an error response if not found.
+fn wait_for_project_status(
+    data_store: &Rc<RefCell<AppDataStore>>,
+    project_slug: &str,
+    id: u64,
+) -> Result<String, (Response, bool)> {
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(WAIT_FOR_PROJECT_TIMEOUT_SECS);
+
+    loop {
+        if start.elapsed() > timeout {
+            return Err((
+                Response::error(
+                    id,
+                    "TIMEOUT",
+                    &format!(
+                        "Timeout waiting for project status (24010 event) for '{}'. Project may not be booted.",
+                        project_slug
+                    ),
+                ),
+                false,
+            ));
+        }
+
+        let store = data_store.borrow();
+        if let Some(a_tag) = find_project_a_tag_by_slug(&store, project_slug) {
+            if store.get_project_status(&a_tag).is_some() {
+                return Ok(a_tag);
+            }
+        }
+        drop(store);
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Error type for agent lookup failures
+enum AgentLookupError {
+    ProjectNotFound,
+    AgentNotFound,
+}
+
+/// Find a project's a_tag by its slug (d-tag).
+/// Returns None if no project with that slug is found.
+fn find_project_a_tag_by_slug(store: &AppDataStore, slug: &str) -> Option<String> {
+    store
+        .get_projects()
+        .iter()
+        .find(|p| p.id == slug)
+        .map(|p| p.a_tag())
+}
+
+/// Result of looking up an agent by slug within a project
+struct AgentLookupResult {
+    project_a_tag: String,
+    agent_pubkey: String,
+}
+
+/// Find an agent's pubkey by their name within a specific project (identified by slug).
+/// Uses the online agents from ProjectStatus (kind:24010).
+/// Also returns the project's a_tag to avoid a second lookup.
+fn find_agent_in_project(
+    store: &AppDataStore,
+    project_slug: &str,
+    agent_name: &str,
+) -> Result<AgentLookupResult, AgentLookupError> {
+    // Find the project by slug to get its a_tag
+    let project_a_tag = find_project_a_tag_by_slug(store, project_slug)
+        .ok_or(AgentLookupError::ProjectNotFound)?;
+
+    // Look through the online agents from ProjectStatus
+    let agents = store
+        .get_online_agents(&project_a_tag)
+        .ok_or(AgentLookupError::AgentNotFound)?;
+
+    for agent in agents {
+        if agent.name == agent_name {
+            return Ok(AgentLookupResult {
+                project_a_tag,
+                agent_pubkey: agent.pubkey.clone(),
+            });
+        }
+    }
+
+    Err(AgentLookupError::AgentNotFound)
 }

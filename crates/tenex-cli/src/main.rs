@@ -31,8 +31,20 @@ enum Commands {
 
     /// List threads in a project
     ListThreads {
-        /// Project ID (a-tag format)
-        project_id: String,
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait: bool,
+    },
+
+    /// List agents in a project
+    ListAgents {
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait: bool,
     },
 
     /// List messages in a thread
@@ -44,26 +56,49 @@ enum Commands {
     /// Get full state dump
     GetState,
 
-    /// Send a message to a thread
+    /// Send a message to a thread (with recipient targeting)
     SendMessage {
+        /// Project slug (d-tag)
+        project_slug: String,
         /// Thread ID (event ID)
         thread_id: String,
-        /// Message content
-        content: String,
+        /// Agent slug (d-tag) within the project to target
+        recipient_slug: String,
+        /// Wait for agent reply (max seconds to wait)
+        #[arg(long, short)]
+        wait: Option<u64>,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait_for_project: bool,
+        /// Message content (all remaining arguments are joined)
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
     },
 
-    /// Create a new thread in a project
+    /// Create a new thread in a project (with recipient targeting)
     CreateThread {
-        /// Project ID (a-tag format)
-        project_id: String,
-        /// Thread title
-        title: String,
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Agent slug (d-tag) within the project to target
+        recipient_slug: String,
+        /// Wait for agent reply (max seconds to wait)
+        #[arg(long, short)]
+        wait: Option<u64>,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait_for_project: bool,
+        /// Message content (all remaining arguments are joined)
+        #[arg(trailing_var_arg = true, num_args = 1..)]
+        message: Vec<String>,
     },
 
     /// Boot/start a project (sends kind 24000 event)
     BootProject {
-        /// Project ID (a-tag format)
-        project_id: String,
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Wait until the project is online
+        #[arg(long, short)]
+        wait: bool,
     },
 
     /// Get daemon status
@@ -79,6 +114,15 @@ enum Commands {
     /// List all agent definitions (kind:4199 events)
     ListAgentDefinitions,
 
+    /// Show detailed project information (from kind:24010)
+    ShowProject {
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait: bool,
+    },
+
     /// Create a new project (kind:31933 event)
     CreateProject {
         /// Project name
@@ -90,6 +134,25 @@ enum Commands {
         /// Agent IDs to include in the project (can be specified multiple times)
         #[arg(long, short = 'a')]
         agent: Vec<String>,
+    },
+
+    /// Set agent settings (publishes kind:24020 event to override model/tools)
+    SetAgentSettings {
+        /// Project slug (d-tag)
+        project_slug: String,
+        /// Agent slug (name) within the project
+        agent_slug: String,
+        /// Model to use for this agent
+        model: String,
+        /// Tools to enable for this agent (can be specified multiple times)
+        #[arg(long, short = 't')]
+        tool: Vec<String>,
+        /// Wait for project status (24010 event) before proceeding
+        #[arg(long, short = 'W')]
+        wait_for_project: bool,
+        /// Wait for confirmation via updated kind:24010 event
+        #[arg(long, short)]
+        wait: bool,
     },
 }
 
@@ -114,16 +177,30 @@ fn main() {
     // Convert subcommand to CliCommand
     let command = match cli.command {
         Some(Commands::ListProjects) => CliCommand::ListProjects,
-        Some(Commands::ListThreads { project_id }) => CliCommand::ListThreads { project_id },
+        Some(Commands::ListThreads { project_slug, wait }) => CliCommand::ListThreads { project_slug, wait_for_project: wait },
+        Some(Commands::ListAgents { project_slug, wait }) => CliCommand::ListAgents { project_slug, wait_for_project: wait },
         Some(Commands::ListMessages { thread_id }) => CliCommand::ListMessages { thread_id },
         Some(Commands::GetState) => CliCommand::GetState,
-        Some(Commands::SendMessage { thread_id, content }) => {
-            CliCommand::SendMessage { thread_id, content }
+        Some(Commands::SendMessage { project_slug, thread_id, recipient_slug, wait, wait_for_project, message }) => {
+            CliCommand::SendMessage {
+                project_slug,
+                thread_id,
+                recipient_slug,
+                content: message.join(" "),
+                wait_secs: wait,
+                wait_for_project,
+            }
         }
-        Some(Commands::CreateThread { project_id, title }) => {
-            CliCommand::CreateThread { project_id, title }
+        Some(Commands::CreateThread { project_slug, recipient_slug, wait, wait_for_project, message }) => {
+            CliCommand::CreateThread {
+                project_slug,
+                recipient_slug,
+                content: message.join(" "),
+                wait_secs: wait,
+                wait_for_project,
+            }
         }
-        Some(Commands::BootProject { project_id }) => CliCommand::BootProject { project_id },
+        Some(Commands::BootProject { project_slug, wait }) => CliCommand::BootProject { project_slug, wait },
         Some(Commands::Status { running }) => {
             if running {
                 // Quick check without auto-starting daemon
@@ -154,11 +231,22 @@ fn main() {
         }
         Some(Commands::Shutdown) => CliCommand::Shutdown,
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
+        Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
         Some(Commands::CreateProject { name, description, agent }) => {
             CliCommand::CreateProject {
                 name,
                 description,
                 agent_ids: agent,
+            }
+        }
+        Some(Commands::SetAgentSettings { project_slug, agent_slug, model, tool, wait_for_project, wait }) => {
+            CliCommand::SetAgentSettings {
+                project_slug,
+                agent_slug,
+                model,
+                tools: tool,
+                wait_for_project,
+                wait,
             }
         }
         None => {

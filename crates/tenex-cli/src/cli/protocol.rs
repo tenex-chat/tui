@@ -54,28 +54,54 @@ pub enum CliCommand {
     /// List all projects
     ListProjects,
     /// List threads for a project
-    ListThreads { project_id: String },
+    ListThreads { project_slug: String, wait_for_project: bool },
+    /// List agents for a project
+    ListAgents { project_slug: String, wait_for_project: bool },
     /// List messages in a thread
     ListMessages { thread_id: String },
     /// Get full state dump
     GetState,
-    /// Send a message to a thread
-    SendMessage { thread_id: String, content: String },
-    /// Create a new thread in a project
-    CreateThread { project_id: String, title: String },
+    /// Send a message to a thread (with recipient targeting)
+    SendMessage {
+        project_slug: String,
+        thread_id: String,
+        recipient_slug: String,
+        content: String,
+        wait_secs: Option<u64>,
+        wait_for_project: bool,
+    },
+    /// Create a new thread in a project (with recipient targeting)
+    CreateThread {
+        project_slug: String,
+        recipient_slug: String,
+        content: String,
+        wait_secs: Option<u64>,
+        wait_for_project: bool,
+    },
     /// Boot/start a project
-    BootProject { project_id: String },
+    BootProject { project_slug: String, wait: bool },
     /// Get daemon status
     Status,
     /// Shutdown the daemon
     Shutdown,
     /// List all agent definitions (kind:4199)
     ListAgentDefinitions,
+    /// Show detailed project information (kind:24010)
+    ShowProject { project_slug: String, wait_for_project: bool },
     /// Create a new project (kind:31933)
     CreateProject {
         name: String,
         description: String,
         agent_ids: Vec<String>,
+    },
+    /// Set agent settings (kind:24020)
+    SetAgentSettings {
+        project_slug: String,
+        agent_slug: String,
+        model: String,
+        tools: Vec<String>,
+        wait_for_project: bool,
+        wait: bool,
     },
 }
 
@@ -85,33 +111,61 @@ impl CliCommand {
         let (method, params) = match self {
             CliCommand::Daemon => return None, // Not sent to daemon
             CliCommand::ListProjects => ("list_projects", serde_json::json!({})),
-            CliCommand::ListThreads { project_id } => {
-                ("list_threads", serde_json::json!({ "project_id": project_id }))
+            CliCommand::ListThreads { project_slug, wait_for_project } => {
+                ("list_threads", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
+            }
+            CliCommand::ListAgents { project_slug, wait_for_project } => {
+                ("list_agents", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
             }
             CliCommand::ListMessages { thread_id } => {
                 ("list_messages", serde_json::json!({ "thread_id": thread_id }))
             }
             CliCommand::GetState => ("get_state", serde_json::json!({})),
-            CliCommand::SendMessage { thread_id, content } => (
+            CliCommand::SendMessage { project_slug, thread_id, recipient_slug, content, wait_for_project, .. } => (
                 "send_message",
-                serde_json::json!({ "thread_id": thread_id, "content": content }),
+                serde_json::json!({
+                    "project_slug": project_slug,
+                    "thread_id": thread_id,
+                    "recipient_slug": recipient_slug,
+                    "content": content,
+                    "wait_for_project": wait_for_project
+                }),
             ),
-            CliCommand::CreateThread { project_id, title } => (
+            CliCommand::CreateThread { project_slug, recipient_slug, content, wait_for_project, .. } => (
                 "create_thread",
-                serde_json::json!({ "project_id": project_id, "title": title }),
+                serde_json::json!({
+                    "project_slug": project_slug,
+                    "recipient_slug": recipient_slug,
+                    "content": content,
+                    "wait_for_project": wait_for_project
+                }),
             ),
-            CliCommand::BootProject { project_id } => {
-                ("boot_project", serde_json::json!({ "project_id": project_id }))
+            CliCommand::BootProject { project_slug, .. } => {
+                ("boot_project", serde_json::json!({ "project_slug": project_slug }))
             }
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
             CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
+            CliCommand::ShowProject { project_slug, wait_for_project } => {
+                ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
+            }
             CliCommand::CreateProject { name, description, agent_ids } => (
                 "create_project",
                 serde_json::json!({
                     "name": name,
                     "description": description,
                     "agent_ids": agent_ids
+                }),
+            ),
+            CliCommand::SetAgentSettings { project_slug, agent_slug, model, tools, wait_for_project, wait } => (
+                "set_agent_settings",
+                serde_json::json!({
+                    "project_slug": project_slug,
+                    "agent_slug": agent_slug,
+                    "model": model,
+                    "tools": tools,
+                    "wait_for_project": wait_for_project,
+                    "wait": wait
                 }),
             ),
         };
