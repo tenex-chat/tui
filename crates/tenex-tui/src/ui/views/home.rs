@@ -240,7 +240,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     // Full mode: 4 lines (title, summary, activity, reply) + spacing, but some may be hidden
     // Compact mode: 2 lines (title, spacing)
     // Selected items add 2 lines for half-block borders (top + bottom)
-    let calc_card_height = |item: &HierarchicalThread, is_selected: bool| -> u16 {
+    // next_is_selected: if true, this card doesn't need spacing (next card's top border provides it)
+    let calc_card_height = |item: &HierarchicalThread, is_selected: bool, next_is_selected: bool| -> u16 {
         let is_compact = item.depth > 0;
         if is_compact {
             return if is_selected { 4 } else { 2 }; // 2 lines + optional borders
@@ -253,7 +254,9 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
         if has_summary { lines += 1; } // summary
         if has_activity { lines += 1; } // activity
         lines += 1; // reply preview always
-        lines += 1; // spacing
+        if !is_selected && !next_is_selected {
+            lines += 1; // spacing (only when neither this nor next card is selected)
+        }
         if is_selected { lines + 2 } else { lines }
     };
 
@@ -266,7 +269,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let mut selected_height: u16 = 0;
     for (i, item) in hierarchy.iter().enumerate() {
         let item_is_selected = is_focused && i == selected_idx;
-        let h = calc_card_height(item, item_is_selected);
+        let next_is_selected = is_focused && i + 1 == selected_idx;
+        let h = calc_card_height(item, item_is_selected, next_is_selected);
         if i < selected_idx {
             height_before_selected += h;
         } else if i == selected_idx {
@@ -286,7 +290,8 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
 
     for (i, item) in hierarchy.iter().enumerate() {
         let is_selected = is_focused && i == selected_idx;
-        let h = calc_card_height(item, is_selected);
+        let next_is_selected = is_focused && i + 1 == selected_idx;
+        let h = calc_card_height(item, is_selected, next_is_selected);
 
         // Skip items completely above visible area
         if y_offset + (h as i32) <= 0 {
@@ -317,6 +322,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
                 &item.a_tag,
                 is_selected,
                 is_multi_selected,
+                next_is_selected,
                 item.depth,
                 item.has_children,
                 item.child_count,
@@ -348,6 +354,7 @@ fn render_card_content(
     a_tag: &str,
     is_selected: bool,
     is_multi_selected: bool,
+    next_is_selected: bool,
     depth: usize,
     has_children: bool,
     child_count: usize,
@@ -624,8 +631,10 @@ fn render_card_content(
         line_reply.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
         lines.push(Line::from(line_reply));
 
-        // Spacing line
-        lines.push(Line::from(""));
+        // Spacing line (only when neither this nor next card is selected)
+        if !is_selected && !is_multi_selected && !next_is_selected {
+            lines.push(Line::from(""));
+        }
     }
 
     if is_selected || is_multi_selected {

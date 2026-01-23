@@ -93,10 +93,18 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                     })
                     .collect()
             };
+            // Normalize summary: treat empty/whitespace-only as None
+            let summary = thread
+                .summary
+                .as_ref()
+                .filter(|s| !s.trim().is_empty())
+                .cloned();
+
             ConversationMetadata {
                 title: Some(thread.title.clone()),
                 status_label: thread.status_label.clone(),
                 status_current_activity: thread.status_current_activity.clone(),
+                summary,
                 working_agents,
                 total_llm_runtime_ms,
             }

@@ -183,6 +183,14 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     bottom_spans.push(half_block_span(home_title, UPPER_HALF_BLOCK, home_active));
     bottom_spans.push(half_block_span(home_right_pad, UPPER_HALF_BLOCK, home_active));
 
+    // Spacing after home
+    if !app.open_tabs().is_empty() {
+        let gap = "  ";
+        top_spans.push(Span::raw(gap));
+        title_spans.push(Span::raw(gap));
+        project_spans.push(Span::raw(gap));
+        bottom_spans.push(Span::raw(gap));
+    }
 
     // === Conversation Tabs ===
     let max_title_width = 18;
@@ -297,6 +305,14 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         bottom_spans.push(half_block_span(&title, UPPER_HALF_BLOCK, is_active));
         bottom_spans.push(half_block_span(right_pad, UPPER_HALF_BLOCK, is_active));
 
+        // Spacing between tabs
+        if i < app.open_tabs().len() - 1 {
+            let gap = "  ";
+            top_spans.push(Span::raw(gap));
+            title_spans.push(Span::raw(gap));
+            project_spans.push(Span::raw(gap));
+            bottom_spans.push(Span::raw(gap));
+        }
     }
 
     // Render all four lines

@@ -9,7 +9,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
-use tenex_core::stats::{query_ndb_stats, NegentropySyncStatus};
+use tenex_core::stats::{query_ndb_stats, query_project_thread_stats, NegentropySyncStatus};
 
 fn kind_name(kind: u16) -> &'static str {
     match kind {
@@ -930,6 +930,81 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
             Style::default().fg(theme::TEXT_DIM),
         )]));
     }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Direct database query section - find what's actually in the DB
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Raw Database Query (Direct) ═══",
+        Style::default().fg(theme::ACCENT_ERROR),
+    )]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        "  Querying kind:1 events with a-tags directly from nostrdb...",
+        Style::default().fg(theme::TEXT_DIM),
+    )]));
+    lines.push(Line::from(""));
+
+    // Get project a-tags for the query
+    let store = app.data_store.borrow();
+    let project_a_tags: Vec<String> = store.projects.iter().map(|p| p.a_tag()).collect();
+    drop(store); // Release borrow before query
+
+    // Query the database directly for each project
+    let db_stats = query_project_thread_stats(&app.db.ndb, &project_a_tags);
+
+    lines.push(Line::from(vec![
+        Span::styled("  Project", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw("               "),
+        Span::styled("DB", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw("     "),
+        Span::styled("Threads", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw("  "),
+        Span::styled("Msgs", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw("  "),
+        Span::styled("InMem", Style::default().fg(theme::TEXT_MUTED)),
+    ]));
+    lines.push(Line::from("  ─────────────────────────────────────────────────────"));
+
+    let store = app.data_store.borrow();
+    for info in &db_stats {
+        let display_name = if info.name.len() > 18 {
+            format!("{}...", &info.name[..15])
+        } else {
+            info.name.clone()
+        };
+
+        // Get in-memory count for comparison
+        let in_mem_count = store
+            .threads_by_project
+            .get(&info.a_tag)
+            .map(|v| v.len())
+            .unwrap_or(0);
+
+        // Highlight discrepancy if DB has more threads than memory
+        let in_mem_style = if info.threads_count > in_mem_count && in_mem_count < 100 {
+            Style::default().fg(theme::ACCENT_ERROR) // Problem: should have more
+        } else {
+            Style::default().fg(theme::TEXT_DIM)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(format!("  {:<18}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
+            Span::styled(format!("{:>6}", info.raw_db_kind1_count), Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(format!("{:>9}", info.threads_count), Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(format!("{:>6}", info.messages_count), Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(format!("{:>7}", in_mem_count), in_mem_style),
+        ]));
+    }
+    drop(store);
+
+    // Add legend
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![Span::styled(
+        "  Legend: DB=total kind:1, Threads=root events, Msgs=replies, InMem=loaded",
+        Style::default().fg(theme::TEXT_DIM),
+    )]));
 
     lines
 }

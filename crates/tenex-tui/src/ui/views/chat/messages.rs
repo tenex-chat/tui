@@ -377,7 +377,7 @@ pub(crate) fn render_messages_panel(
                     parent_pubkey,
                     is_consecutive,
                     has_next_consecutive,
-                    branch,
+                    branch: _, // branch from delegation tool-call is incorrect; we fetch from thread root below
                 } => {
                     // Check if this delegation preview is selected
                     let is_selected =
@@ -571,7 +571,9 @@ pub(crate) fn render_messages_panel(
                     } else {
                         // Not an ask event - show normal delegation card
                         // Get thread info from data store
-                        let (title, agent_name, status, activity, is_busy) = {
+                        // NOTE: We get branch from the delegated thread's root message,
+                        // NOT from the delegation tool-call event (which has the wrong branch)
+                        let (title, agent_name, status, activity, is_busy, thread_branch) = {
                             let store = app.data_store.borrow();
                             // Check if any agents are working on this delegation
                             let is_busy = store.is_event_busy(thread_id);
@@ -581,18 +583,24 @@ pub(crate) fn render_messages_panel(
                                 } else {
                                     t.title.clone()
                                 };
+                                let messages = store.get_messages(thread_id);
                                 let activity = t.status_current_activity.clone().unwrap_or_else(|| {
-                                    store.get_messages(thread_id)
+                                    messages
                                         .last()
                                         .map(|m| m.content.chars().take(60).collect())
                                         .unwrap_or_default()
                                 });
+                                // Get branch from the root message of the delegated thread (by ID, not ordering)
+                                let root_branch = messages.iter()
+                                    .find(|m| m.id == *thread_id)
+                                    .and_then(|m| m.branch.clone());
                                 (
                                     title,
                                     store.get_profile_name(&t.pubkey),
                                     t.status_label.clone(),
                                     activity,
                                     is_busy,
+                                    root_branch,
                                 )
                             } else {
                                 (
@@ -601,6 +609,7 @@ pub(crate) fn render_messages_panel(
                                     None,
                                     String::new(),
                                     is_busy,
+                                    None,
                                 )
                             }
                         };
@@ -660,7 +669,7 @@ pub(crate) fn render_messages_panel(
                             } else if let Some(ref status_label) = status {
                                 agent_content.push_str(&format!(" · {}", status_label));
                             }
-                            if let Some(ref branch_name) = branch {
+                            if let Some(ref branch_name) = thread_branch {
                                 agent_content.push_str(&format!(" ·  {}", branch_name));
                             }
                             let agent_display: String = agent_content.chars().take(card_inner_width).collect();
@@ -691,7 +700,7 @@ pub(crate) fn render_messages_panel(
                                 agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
                                 agent_spans.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
                             }
-                            if let Some(ref branch_name) = branch {
+                            if let Some(ref branch_name) = thread_branch {
                                 agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
                                 agent_spans.push(Span::styled(
                                     format!(" {}", branch_name),

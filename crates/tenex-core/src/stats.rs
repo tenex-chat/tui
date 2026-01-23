@@ -543,3 +543,75 @@ impl SharedNegentropySyncStats {
         self.inner.read().clone()
     }
 }
+
+/// Debug info for threads in a project
+#[derive(Debug, Clone, Default)]
+pub struct ProjectThreadDebugInfo {
+    /// Project a-tag
+    pub a_tag: String,
+    /// Human-readable project name
+    pub name: String,
+    /// Total kind:1 events with this a-tag in the database
+    pub raw_db_kind1_count: usize,
+    /// How many of those have e-tags (messages, not threads)
+    pub messages_count: usize,
+    /// How many pass Thread::from_note (no e-tags, valid threads)
+    pub threads_count: usize,
+}
+
+/// Query nostrdb directly for detailed thread statistics per project
+/// This bypasses the AppDataStore and queries raw DB
+pub fn query_project_thread_stats(
+    ndb: &nostrdb::Ndb,
+    project_a_tags: &[String],
+) -> Vec<ProjectThreadDebugInfo> {
+    use nostrdb::{Filter, Transaction};
+    use crate::models::Thread;
+
+    let mut results = Vec::new();
+
+    let txn = match Transaction::new(ndb) {
+        Ok(t) => t,
+        Err(_) => return results,
+    };
+
+    for a_tag in project_a_tags {
+        let project_name = a_tag.split(':').nth(2).unwrap_or(a_tag).to_string();
+
+        // Query all kind:1 with this a-tag
+        let filter = Filter::new()
+            .kinds([1])
+            .tags([a_tag.as_str()], 'a')
+            .build();
+
+        let mut info = ProjectThreadDebugInfo {
+            a_tag: a_tag.clone(),
+            name: project_name,
+            ..Default::default()
+        };
+
+        // Use a very high limit to get everything
+        if let Ok(query_results) = ndb.query(&txn, &[filter], 1_000_000) {
+            info.raw_db_kind1_count = query_results.len();
+
+            for r in query_results.iter() {
+                if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
+                    // Check if this note has e-tags
+                    let has_e_tag = note.tags().iter().any(|tag| {
+                        tag.get(0).and_then(|t| t.variant().str()) == Some("e")
+                    });
+
+                    if has_e_tag {
+                        info.messages_count += 1;
+                    } else if Thread::from_note(&note).is_some() {
+                        info.threads_count += 1;
+                    }
+                }
+            }
+        }
+
+        results.push(info);
+    }
+
+    results
+}
