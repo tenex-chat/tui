@@ -512,6 +512,13 @@ pub static COMMANDS: &[Command] = &[
         execute: open_conversation_trace,
     },
     Command {
+        key: 'r',
+        label: "Reference conversation",
+        section: "Conversation",
+        available: |app| app.view == View::Chat && app.selected_thread.is_some(),
+        execute: reference_conversation,
+    },
+    Command {
         key: 'x',
         label: "Close tab",
         section: "Tab",
@@ -1161,4 +1168,74 @@ fn copy_conversation_id(app: &mut App) {
     } else {
         app.set_status("No conversation selected");
     }
+}
+
+/// Create a new conversation referencing the current one with a "context" tag.
+/// The new conversation:
+/// 1. Has the same agent, branch, and project as the current one
+/// 2. Is pre-filled with a message instructing the agent to inspect the source conversation
+/// 3. Includes a "context" tag pointing to the source conversation's event ID
+///    (NOTE: "context" is used instead of "q" because "q" is reserved for delegation/child links)
+fn reference_conversation(app: &mut App) {
+    // Get required context from current state
+    let (source_thread_id, project_a_tag, project_name, agent, branch) = {
+        let thread = match &app.selected_thread {
+            Some(t) => t,
+            None => {
+                app.set_status("No conversation to reference");
+                return;
+            }
+        };
+        let project = match &app.selected_project {
+            Some(p) => p,
+            None => {
+                app.set_status("No project selected");
+                return;
+            }
+        };
+        (
+            thread.id.clone(),
+            project.a_tag(),
+            project.name.clone(),
+            app.selected_agent.clone(),
+            app.selected_branch.clone(),
+        )
+    };
+
+    // Calculate approximate token count from current conversation history
+    // Using chars / 4 as a rough approximation
+    let messages = app.messages();
+    let total_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+    let approx_tokens = total_chars / 4;
+
+    // Create new draft tab with same project/agent/branch
+    app.save_chat_draft();
+    let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+    app.switch_to_tab(tab_idx);
+
+    // Restore agent and branch from source conversation
+    app.selected_agent = agent.clone();
+    app.selected_branch = branch;
+
+    // Pre-fill the editor with the context message
+    let context_message = format!(
+        "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
+        source_thread_id,
+        approx_tokens
+    );
+
+    app.chat_editor_mut().set_text(&context_message);
+
+    // Store the reference conversation ID in the active tab for when the message is sent
+    if let Some(tab) = app.tabs.active_tab_mut() {
+        tab.reference_conversation_id = Some(source_thread_id.clone());
+    }
+
+    app.view = View::Chat;
+    app.input_mode = InputMode::Editing;
+    app.set_status(&format!(
+        "New conversation referencing {} (~{} tokens)",
+        &source_thread_id[..8.min(source_thread_id.len())],
+        approx_tokens
+    ));
 }
