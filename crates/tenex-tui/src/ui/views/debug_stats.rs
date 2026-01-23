@@ -852,17 +852,20 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
         lines.push(Line::from(vec![
             Span::styled("  Project", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw("                    "),
-            Span::styled("Threads", Style::default().fg(theme::TEXT_MUTED)),
-            Span::raw("   "),
-            Span::styled("Visible", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Indexed", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("  "),
+            Span::styled("Loaded", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("  "),
+            Span::styled("Vis", Style::default().fg(theme::TEXT_MUTED)),
         ]));
-        lines.push(Line::from("  ─────────────────────────────────────────"));
+        lines.push(Line::from("  ─────────────────────────────────────────────"));
 
-        for (a_tag, count) in &project_counts {
+        for (a_tag, loaded_count) in &project_counts {
             let project_name = format_project_name(a_tag);
             let is_visible = app.visible_projects.contains(*a_tag);
-            let display_name = if project_name.len() > 25 {
-                format!("{}...", &project_name[..22])
+            let index_count = store.get_thread_root_count(a_tag);
+            let display_name = if project_name.len() > 20 {
+                format!("{}...", &project_name[..17])
             } else {
                 project_name
             };
@@ -873,9 +876,17 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
                 Span::styled("  ✗", Style::default().fg(theme::TEXT_DIM))
             };
 
+            // Highlight if indexed != loaded (potential issue)
+            let index_style = if index_count != *loaded_count {
+                Style::default().fg(theme::ACCENT_WARNING)
+            } else {
+                Style::default().fg(theme::ACCENT_PRIMARY)
+            };
+
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<25}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
-                Span::styled(format!("{:>7}", count), Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(format!("  {:<22}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::styled(format!("{:>7}", index_count), index_style),
+                Span::styled(format!("{:>7}", loaded_count), Style::default().fg(theme::ACCENT_PRIMARY)),
                 visibility_indicator,
             ]));
         }
