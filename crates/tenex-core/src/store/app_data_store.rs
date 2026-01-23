@@ -52,6 +52,10 @@ pub struct AppDataStore {
     approved_backends: HashSet<String>,
     blocked_backends: HashSet<String>,
     pending_backend_approvals: Vec<PendingBackendApproval>,
+
+    // Thread root index - maps project a_tag -> set of known thread root event IDs
+    // This avoids expensive full-table scans when loading threads
+    thread_root_index: HashMap<String, HashSet<String>>,
 }
 
 impl AppDataStore {
@@ -78,6 +82,7 @@ impl AppDataStore {
             approved_backends: HashSet::new(),
             blocked_backends: HashSet::new(),
             pending_backend_approvals: Vec::new(),
+            thread_root_index: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -175,10 +180,18 @@ impl AppDataStore {
 
         let a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
 
-        for a_tag in a_tags {
-            // Pre-load threads for each project
-            if let Ok(threads) = crate::store::get_threads_for_project(&self.ndb, &a_tag) {
-                self.threads_by_project.insert(a_tag.clone(), threads);
+        // Step 1: Build thread root index for all projects
+        // This scans kind:1 events once and identifies thread roots (no e-tags)
+        if let Ok(index) = crate::store::build_thread_root_index(&self.ndb, &a_tags) {
+            self.thread_root_index = index;
+        }
+
+        // Step 2: Load full thread data using the index (query by known IDs)
+        for a_tag in &a_tags {
+            if let Some(root_ids) = self.thread_root_index.get(a_tag) {
+                if let Ok(threads) = crate::store::get_threads_by_ids(&self.ndb, root_ids) {
+                    self.threads_by_project.insert(a_tag.clone(), threads);
+                }
             }
         }
 
@@ -565,6 +578,12 @@ impl AppDataStore {
             let thread_id = thread.id.clone();
 
             if let Some(a_tag) = Self::extract_project_a_tag(note) {
+                // Add to thread root index
+                self.thread_root_index
+                    .entry(a_tag.clone())
+                    .or_default()
+                    .insert(thread_id.clone());
+
                 // Add to existing threads list, maintaining sort order by last_activity
                 let threads = self.threads_by_project.entry(a_tag).or_default();
 
@@ -856,6 +875,18 @@ impl AppDataStore {
         self.threads_by_project.get(project_a_tag)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
+    }
+
+    /// Get thread root index for a project (set of known root event IDs)
+    pub fn get_thread_root_index(&self, project_a_tag: &str) -> Option<&HashSet<String>> {
+        self.thread_root_index.get(project_a_tag)
+    }
+
+    /// Get count of known thread roots for a project
+    pub fn get_thread_root_count(&self, project_a_tag: &str) -> usize {
+        self.thread_root_index.get(project_a_tag)
+            .map(|s| s.len())
+            .unwrap_or(0)
     }
 
     pub fn get_messages(&self, thread_id: &str) -> &[Message] {

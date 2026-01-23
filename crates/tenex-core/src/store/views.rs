@@ -1,7 +1,7 @@
 use crate::models::{ConversationMetadata, Message, Project, Thread};
 use anyhow::Result;
 use nostrdb::{Filter, Ndb, Transaction};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
     let txn = Transaction::new(ndb)?;
@@ -37,6 +37,47 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
     projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     Ok(projects)
+}
+
+/// Build thread root index for all given projects in a single pass.
+/// This is more efficient than calling get_threads_for_project for each project
+/// because it scans all kind:1 events ONCE and groups them by project.
+///
+/// Returns: HashMap<project_a_tag, HashSet<thread_root_id>>
+pub fn build_thread_root_index(ndb: &Ndb, project_a_tags: &[String]) -> Result<HashMap<String, HashSet<String>>> {
+    let txn = Transaction::new(ndb)?;
+    let mut index: HashMap<String, HashSet<String>> = HashMap::new();
+
+    // Initialize empty sets for all projects
+    for a_tag in project_a_tags {
+        index.insert(a_tag.clone(), HashSet::new());
+    }
+
+    // Query all kind:1 events for all projects at once
+    // Build a filter with all project a_tags
+    for a_tag in project_a_tags {
+        let filter = Filter::new()
+            .kinds([1])
+            .tags([a_tag.as_str()], 'a')
+            .build();
+
+        // Query with high limit to get all events
+        let results = ndb.query(&txn, &[filter], 100_000)?;
+
+        for result in results {
+            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                // Check if this is a thread root (no e-tags)
+                if Thread::from_note(&note).is_some() {
+                    let event_id = hex::encode(note.id());
+                    if let Some(set) = index.get_mut(a_tag) {
+                        set.insert(event_id);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(index)
 }
 
 /// Get threads for a project - fast version that skips expensive message activity calculation
@@ -90,6 +131,39 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
         if let Some(metadata) = metadata_map.get(&thread.id) {
             if let Some(title) = &metadata.title {
                 thread.title = title.clone();
+            }
+        }
+    }
+
+    // Sort by last_activity descending (most recent activity first)
+    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+
+    Ok(threads)
+}
+
+/// Fast thread loading using a pre-computed index of known root IDs.
+/// Instead of scanning all kind:1 events, we query directly by event ID.
+pub fn get_threads_by_ids(ndb: &Ndb, root_ids: &std::collections::HashSet<String>) -> Result<Vec<Thread>> {
+    if root_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let txn = Transaction::new(ndb)?;
+    let mut threads: Vec<Thread> = Vec::new();
+
+    // Query each root ID directly - much faster than scanning all kind:1 events
+    for root_id in root_ids {
+        if let Ok(id_bytes) = hex::decode(root_id) {
+            if id_bytes.len() == 32 {
+                let mut id_arr = [0u8; 32];
+                id_arr.copy_from_slice(&id_bytes);
+                if let Ok(note_key) = ndb.get_notekey_by_id(&txn, &id_arr) {
+                    if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
+                        if let Some(thread) = Thread::from_note(&note) {
+                            threads.push(thread);
+                        }
+                    }
+                }
             }
         }
     }
