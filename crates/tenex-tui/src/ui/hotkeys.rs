@@ -85,6 +85,7 @@ pub enum HotkeyId {
     ExpandEditor,
     InsertNewline,
     CancelEdit,
+    HistorySearch,
 
     // === Agent Browser ===
     ViewAgent,
@@ -175,6 +176,9 @@ pub enum HotkeyContext {
 
     /// Draft navigator modal
     DraftNavigatorModal,
+
+    /// History search modal (Ctrl+R)
+    HistorySearchModal,
 }
 
 impl HotkeyContext {
@@ -212,6 +216,7 @@ impl HotkeyContext {
             ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
             ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
             ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
+            ModalState::HistorySearch(_) => return HotkeyContext::HistorySearchModal,
             ModalState::None => {}
         }
 
@@ -762,6 +767,13 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Input",
         &[HotkeyContext::ChatEditing],
     ).with_priority(50),
+    HotkeyBinding::ctrl(
+        HotkeyId::HistorySearch,
+        KeyCode::Char('r'),
+        "Search History",
+        "Input",
+        &[HotkeyContext::ChatEditing],
+    ),
 
     // === Agent Browser ===
     HotkeyBinding::new(
