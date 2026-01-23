@@ -48,7 +48,7 @@ pub(crate) fn handle_clipboard_paste(
         // Check if clipboard text is a file path to an image
         if !handle_image_file_paste(app, &text, keys, upload_tx) {
             // Fall back to regular text paste
-            app.chat_editor.handle_paste(&text);
+            app.chat_editor_mut().handle_paste(&text);
             app.save_chat_draft();
         }
     }
