@@ -70,6 +70,8 @@ pub enum NostrCommand {
         agent_pubkey: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
+        /// Optional reference to another conversation (adds "context" tag for referencing source conversations)
+        reference_conversation_id: Option<String>,
         /// Optional channel to send back the event ID after signing
         response_tx: Option<EventIdSender>,
     },
@@ -231,9 +233,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, response_tx } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, response_tx } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids)) {
+                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -596,6 +598,7 @@ impl NostrWorker {
         agent_pubkey: Option<String>,
         branch: Option<String>,
         nudge_ids: Vec<String>,
+        reference_conversation_id: Option<String>,
     ) -> Result<String> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
@@ -637,6 +640,15 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("nudge")),
                 vec![nudge_id],
+            ));
+        }
+
+        // Reference conversation tag ("context" tag) for linking to source conversation
+        // NOTE: Using "context" instead of "q" because "q" is reserved for delegation/child links
+        if let Some(ref_id) = reference_conversation_id {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("context")),
+                vec![ref_id],
             ));
         }
 

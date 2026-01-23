@@ -405,6 +405,10 @@ pub struct OpenTab {
     /// Per-tab text editor for chat input (ISOLATED from other tabs)
     /// This ensures each tab has its own input state - no cross-tab contamination
     pub editor: TextEditor,
+    /// Reference conversation ID for the "context" tag when creating a new thread
+    /// This is set when using "Reference conversation" command and consumed when sending
+    /// NOTE: Uses "context" instead of "q" because "q" is reserved for delegation/child links
+    pub reference_conversation_id: Option<String>,
 }
 
 impl OpenTab {
@@ -426,6 +430,7 @@ impl OpenTab {
             chat_search: ChatSearchState::default(),
             selected_nudge_ids: Vec::new(),
             editor: TextEditor::new(),
+            reference_conversation_id: None,
         }
     }
 
@@ -449,6 +454,7 @@ impl OpenTab {
             chat_search: ChatSearchState::default(),
             selected_nudge_ids: Vec::new(),
             editor: TextEditor::new(),
+            reference_conversation_id: None,
         }
     }
 }
