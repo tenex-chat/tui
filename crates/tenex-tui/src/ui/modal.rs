@@ -1008,13 +1008,15 @@ pub enum DebugStatsTab {
     #[default]
     Events,
     Subscriptions,
+    Negentropy,
     ETagQuery,
 }
 
 impl DebugStatsTab {
-    pub const ALL: [DebugStatsTab; 3] = [
+    pub const ALL: [DebugStatsTab; 4] = [
         DebugStatsTab::Events,
         DebugStatsTab::Subscriptions,
+        DebugStatsTab::Negentropy,
         DebugStatsTab::ETagQuery,
     ];
 
@@ -1022,6 +1024,7 @@ impl DebugStatsTab {
         match self {
             DebugStatsTab::Events => "Events",
             DebugStatsTab::Subscriptions => "Subscriptions",
+            DebugStatsTab::Negentropy => "Negentropy",
             DebugStatsTab::ETagQuery => "E-Tag Query",
         }
     }
@@ -1030,7 +1033,8 @@ impl DebugStatsTab {
         match self {
             DebugStatsTab::Events => 0,
             DebugStatsTab::Subscriptions => 1,
-            DebugStatsTab::ETagQuery => 2,
+            DebugStatsTab::Negentropy => 2,
+            DebugStatsTab::ETagQuery => 3,
         }
     }
 
@@ -1038,7 +1042,8 @@ impl DebugStatsTab {
         match index {
             0 => DebugStatsTab::Events,
             1 => DebugStatsTab::Subscriptions,
-            2 => DebugStatsTab::ETagQuery,
+            2 => DebugStatsTab::Negentropy,
+            3 => DebugStatsTab::ETagQuery,
             _ => DebugStatsTab::Events,
         }
     }

@@ -203,6 +203,9 @@ pub struct App {
     /// Subscription stats for debugging (active subscriptions and their event counts)
     pub subscription_stats: tenex_core::stats::SharedSubscriptionStats,
 
+    /// Negentropy sync stats for debugging
+    pub negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
+
     /// When viewing a subthread, this is the root message ID
     pub subthread_root: Option<String>,
     /// The root message when viewing a subthread (for display and reply tagging)
@@ -299,6 +302,7 @@ impl App {
         data_store: Rc<RefCell<AppDataStore>>,
         event_stats: tenex_core::stats::SharedEventStats,
         subscription_stats: tenex_core::stats::SharedSubscriptionStats,
+        negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
         data_dir: &str,
     ) -> Self {
         Self {
@@ -335,6 +339,7 @@ impl App {
             data_store,
             event_stats,
             subscription_stats,
+            negentropy_stats,
             subthread_root: None,
             subthread_root_message: None,
             selected_message_index: 0,

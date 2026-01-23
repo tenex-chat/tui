@@ -4545,6 +4545,7 @@ dependencies = [
  "libc",
  "nostr-sdk",
  "nostrdb",
+ "parking_lot",
  "reqwest",
  "serde",
  "serde_json",

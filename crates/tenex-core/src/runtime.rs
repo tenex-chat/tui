@@ -12,7 +12,7 @@ use crate::config::CoreConfig;
 use crate::events::CoreEvent;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::models::Message;
-use crate::stats::{SharedEventStats, SharedSubscriptionStats};
+use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::{AppDataStore, Database};
 
 #[derive(Clone)]
@@ -36,6 +36,7 @@ pub struct CoreRuntime {
     ndb_stream: SubscriptionStream,
     event_stats: SharedEventStats,
     subscription_stats: SharedSubscriptionStats,
+    negentropy_stats: SharedNegentropySyncStats,
 }
 
 impl CoreRuntime {
@@ -54,7 +55,15 @@ impl CoreRuntime {
 
         let event_stats = SharedEventStats::new();
         let subscription_stats = SharedSubscriptionStats::new();
-        let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx, event_stats.clone(), subscription_stats.clone());
+        let negentropy_stats = SharedNegentropySyncStats::new();
+        let worker = NostrWorker::new(
+            ndb.clone(),
+            data_tx,
+            command_rx,
+            event_stats.clone(),
+            subscription_stats.clone(),
+            negentropy_stats.clone(),
+        );
         let worker_handle = std::thread::spawn(move || {
             worker.run();
         });
@@ -77,6 +86,7 @@ impl CoreRuntime {
             ndb_stream,
             event_stats,
             subscription_stats,
+            negentropy_stats,
         })
     }
 
@@ -102,6 +112,10 @@ impl CoreRuntime {
 
     pub fn subscription_stats(&self) -> SharedSubscriptionStats {
         self.subscription_stats.clone()
+    }
+
+    pub fn negentropy_stats(&self) -> SharedNegentropySyncStats {
+        self.negentropy_stats.clone()
     }
 
     pub fn take_data_rx(&mut self) -> Option<Receiver<DataChange>> {
