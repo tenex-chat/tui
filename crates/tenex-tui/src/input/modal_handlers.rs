@@ -9,6 +9,7 @@ use crate::nostr::NostrCommand;
 use crate::ui;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::{App, InputMode, ModalState, View};
+use tenex_core::stats::query_events_by_e_tag;
 
 /// Routes input to the appropriate modal handler.
 /// Returns `true` if the input was handled by a modal, `false` otherwise.
@@ -139,6 +140,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle history search modal when open
+    if matches!(app.modal_state, ModalState::HistorySearch(_)) {
+        handle_history_search_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -192,25 +199,69 @@ fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
 
     match input_state.mode {
         AskInputMode::Selection => match code {
-            KeyCode::Up | KeyCode::Char('k') => input_state.prev_option(),
-            KeyCode::Down | KeyCode::Char('j') => input_state.next_option(),
-            KeyCode::Right => {
+            KeyCode::Up | KeyCode::Char('k') if !input_state.is_custom_option_selected() => input_state.prev_option(),
+            KeyCode::Up if input_state.is_custom_option_selected() && input_state.custom_input.is_empty() => input_state.prev_option(),
+            KeyCode::Down | KeyCode::Char('j') if !input_state.is_custom_option_selected() => input_state.next_option(),
+            KeyCode::Right if !input_state.is_custom_option_selected() => {
                 input_state.skip_question();
                 if input_state.is_complete() {
                     submit_ask_response(app);
                 }
             }
-            KeyCode::Left => input_state.prev_question(),
-            KeyCode::Char(' ') if input_state.is_multi_select() => {
+            KeyCode::Left if !input_state.is_custom_option_selected() => input_state.prev_question(),
+            // When on custom option with text, Left/Right move cursor
+            KeyCode::Left if input_state.is_custom_option_selected() => {
+                if input_state.custom_input.is_empty() {
+                    input_state.prev_question();
+                } else {
+                    input_state.move_cursor_left();
+                }
+            }
+            KeyCode::Right if input_state.is_custom_option_selected() => {
+                if input_state.custom_input.is_empty() {
+                    input_state.skip_question();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                } else {
+                    input_state.move_cursor_right();
+                }
+            }
+            KeyCode::Char(' ') if input_state.is_multi_select() && !input_state.is_custom_option_selected() => {
                 input_state.toggle_multi_select();
             }
             KeyCode::Enter => {
-                input_state.select_current_option();
-                if input_state.is_complete() {
-                    submit_ask_response(app);
+                // If on custom option with text, submit the custom answer
+                if input_state.is_custom_option_selected() && !input_state.custom_input.trim().is_empty() {
+                    input_state.submit_custom_answer();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                } else if !input_state.is_custom_option_selected() {
+                    input_state.select_current_option();
+                    if input_state.is_complete() {
+                        submit_ask_response(app);
+                    }
+                }
+                // If on custom option with no text, Enter does nothing (need to type something)
+            }
+            KeyCode::Esc => {
+                // If on custom option with text, clear the text first
+                if input_state.is_custom_option_selected() && !input_state.custom_input.is_empty() {
+                    input_state.custom_input.clear();
+                    input_state.custom_cursor = 0;
+                } else {
+                    app.close_ask_modal();
                 }
             }
-            KeyCode::Esc => app.close_ask_modal(),
+            // Backspace on custom option deletes characters
+            KeyCode::Backspace if input_state.is_custom_option_selected() => {
+                input_state.delete_char();
+            }
+            // Any character typed on custom option starts inline input
+            KeyCode::Char(c) if input_state.is_custom_option_selected() => {
+                input_state.insert_char(c);
+            }
             _ => {}
         },
         AskInputMode::CustomInput => match code {
@@ -256,6 +307,7 @@ fn submit_ask_response(app: &mut App) {
             branch: None,
             nudge_ids: vec![],
             ask_author_pubkey: Some(ask_author_pubkey),
+            response_tx: None,
         });
     }
 
@@ -917,7 +969,7 @@ fn execute_project_action(
                 app.modal_state = ModalState::None;
                 let tab_idx = app.open_draft_tab(&a_tag, &project_name);
                 app.switch_to_tab(tab_idx);
-                app.chat_editor.clear();
+                app.chat_editor_mut().clear();
             } else {
                 app.modal_state = ModalState::None;
                 app.set_status("Project not found");
@@ -1313,7 +1365,7 @@ fn execute_chat_action(
             app.save_chat_draft();
             let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
             app.switch_to_tab(tab_idx);
-            app.chat_editor.clear();
+            app.chat_editor_mut().clear();
             app.set_status("New conversation (same project, agent, and branch)");
         }
         ChatAction::GoToParent => {
@@ -1670,18 +1722,209 @@ fn execute_backend_approval_action(
 // =============================================================================
 
 fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
+    use crate::ui::modal::DebugStatsTab;
+
+    let has_ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+
+    // Check if we're on the E-Tag Query tab - always accept input there
+    let is_e_tag_query_tab = matches!(
+        &app.modal_state,
+        ModalState::DebugStats(state) if state.active_tab == DebugStatsTab::ETagQuery
+    );
+
+    if is_e_tag_query_tab {
+        match key.code {
+            KeyCode::Esc => {
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    if !state.e_tag_query_input.is_empty() {
+                        // Clear input first
+                        state.e_tag_query_input.clear();
+                        state.e_tag_query_results.clear();
+                    } else {
+                        app.modal_state = ModalState::None;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                // Execute the query
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    if !state.e_tag_query_input.is_empty() {
+                        let results = query_events_by_e_tag(&app.db.ndb, &state.e_tag_query_input);
+                        state.e_tag_query_results = results;
+                        state.e_tag_selected_index = 0;
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    state.e_tag_query_input.pop();
+                }
+            }
+            // Ctrl+V to paste from clipboard
+            KeyCode::Char('v') if has_ctrl => {
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                        if let Ok(text) = clipboard.get_text() {
+                            // Filter to only hex characters and limit to 64
+                            let hex_only: String = text
+                                .chars()
+                                .filter(|c| c.is_ascii_hexdigit())
+                                .take(64 - state.e_tag_query_input.len())
+                                .map(|c| c.to_ascii_lowercase())
+                                .collect();
+                            state.e_tag_query_input.push_str(&hex_only);
+                        }
+                    }
+                }
+            }
+            // Ctrl+A to clear
+            KeyCode::Char('a') if has_ctrl => {
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    state.e_tag_query_input.clear();
+                }
+            }
+            KeyCode::Char(c) => {
+                // Accept hex characters directly - this is the main input handler
+                if c.is_ascii_hexdigit() {
+                    if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                        if state.e_tag_query_input.len() < 64 {
+                            state.e_tag_query_input.push(c.to_ascii_lowercase());
+                        }
+                    }
+                }
+            }
+            KeyCode::Tab => {
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    if key.modifiers.contains(KeyModifiers::SHIFT) {
+                        state.prev_tab();
+                    } else {
+                        state.next_tab();
+                    }
+                }
+            }
+            KeyCode::Up | KeyCode::Down => {
+                // Navigate results if we have any
+                if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                    if !state.e_tag_query_results.is_empty() {
+                        if key.code == KeyCode::Up {
+                            state.e_tag_selected_index = state.e_tag_selected_index.saturating_sub(1);
+                        } else if state.e_tag_selected_index + 1 < state.e_tag_query_results.len() {
+                            state.e_tag_selected_index += 1;
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    // Get subscription stats snapshot upfront (before mutable borrow)
+    let sub_stats_snapshot = app.subscription_stats.snapshot();
+
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('D') => {
             app.modal_state = ModalState::None;
         }
+        // Tab navigation: Tab key cycles through tabs
+        KeyCode::Tab => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                if key.modifiers.contains(KeyModifiers::SHIFT) {
+                    state.prev_tab();
+                } else {
+                    state.next_tab();
+                }
+                if state.active_tab == DebugStatsTab::Subscriptions {
+                    state.update_project_filters(&sub_stats_snapshot);
+                }
+            }
+        }
+        // Number keys for direct tab access
+        KeyCode::Char('1') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.switch_tab(DebugStatsTab::Events);
+            }
+        }
+        KeyCode::Char('2') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.switch_tab(DebugStatsTab::Subscriptions);
+                state.update_project_filters(&sub_stats_snapshot);
+            }
+        }
+        KeyCode::Char('3') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.switch_tab(DebugStatsTab::ETagQuery);
+            }
+        }
+        // Left/Right arrows - switch tabs or panes depending on context
+        KeyCode::Left | KeyCode::Char('h') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                if state.active_tab == DebugStatsTab::Subscriptions && !state.sub_sidebar_focused {
+                    // Switch from content to sidebar
+                    state.sub_sidebar_focused = true;
+                } else {
+                    state.prev_tab();
+                    if state.active_tab == DebugStatsTab::Subscriptions {
+                        state.update_project_filters(&sub_stats_snapshot);
+                    }
+                }
+            }
+        }
+        KeyCode::Right | KeyCode::Char('l') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                if state.active_tab == DebugStatsTab::Subscriptions && state.sub_sidebar_focused {
+                    // Switch from sidebar to content (no-op for now, sidebar is main navigation)
+                    state.sub_sidebar_focused = false;
+                } else {
+                    state.next_tab();
+                    if state.active_tab == DebugStatsTab::Subscriptions {
+                        state.update_project_filters(&sub_stats_snapshot);
+                    }
+                }
+            }
+        }
+        // Up/Down navigation
         KeyCode::Up | KeyCode::Char('k') => {
             if let ModalState::DebugStats(ref mut state) = app.modal_state {
-                state.scroll_offset = state.scroll_offset.saturating_sub(1);
+                match state.active_tab {
+                    DebugStatsTab::ETagQuery if !state.e_tag_query_results.is_empty() => {
+                        state.e_tag_selected_index = state.e_tag_selected_index.saturating_sub(1);
+                    }
+                    DebugStatsTab::Subscriptions if state.sub_sidebar_focused => {
+                        state.sub_selected_filter_index = state.sub_selected_filter_index.saturating_sub(1);
+                    }
+                    _ => {
+                        state.scroll_offset = state.scroll_offset.saturating_sub(1);
+                    }
+                }
             }
         }
         KeyCode::Down | KeyCode::Char('j') => {
             if let ModalState::DebugStats(ref mut state) = app.modal_state {
-                state.scroll_offset = state.scroll_offset.saturating_add(1);
+                match state.active_tab {
+                    DebugStatsTab::ETagQuery if !state.e_tag_query_results.is_empty() => {
+                        if state.e_tag_selected_index + 1 < state.e_tag_query_results.len() {
+                            state.e_tag_selected_index += 1;
+                        }
+                    }
+                    DebugStatsTab::Subscriptions if state.sub_sidebar_focused => {
+                        if state.sub_selected_filter_index + 1 < state.sub_project_filters.len() {
+                            state.sub_selected_filter_index += 1;
+                        }
+                    }
+                    _ => {
+                        state.scroll_offset = state.scroll_offset.saturating_add(1);
+                    }
+                }
+            }
+        }
+        // Enter to select filter on subscriptions tab
+        KeyCode::Enter => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                if state.active_tab == DebugStatsTab::Subscriptions {
+                    // Selection is immediate via sub_selected_filter_index, Enter just confirms
+                    state.sub_sidebar_focused = false;
+                }
             }
         }
         KeyCode::PageUp => {
@@ -1694,6 +1937,96 @@ fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
                 state.scroll_offset = state.scroll_offset.saturating_add(10);
             }
         }
+        // Focus input on E-Tag Query tab
+        KeyCode::Char('i') | KeyCode::Char('/') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                if state.active_tab == DebugStatsTab::ETagQuery {
+                    state.e_tag_input_focused = true;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+// =============================================================================
+// HISTORY SEARCH MODAL (Ctrl+R)
+// =============================================================================
+
+fn handle_history_search_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+    let modifiers = key.modifiers;
+    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+    match code {
+        // Close modal
+        KeyCode::Esc => {
+            app.modal_state = ModalState::None;
+        }
+
+        // Navigate results
+        KeyCode::Up | KeyCode::Char('k') if has_ctrl => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.move_up();
+            }
+        }
+        KeyCode::Down | KeyCode::Char('j') if has_ctrl => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.move_down();
+            }
+        }
+        // Arrow keys also navigate
+        KeyCode::Up => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.move_up();
+            }
+        }
+        KeyCode::Down => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.move_down();
+            }
+        }
+
+        // Toggle all projects vs current project
+        KeyCode::Tab => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.toggle_all_projects();
+                // Re-run search with new filter
+                app.update_history_search();
+            }
+        }
+
+        // Select entry and put content in input
+        KeyCode::Enter => {
+            let content = if let ModalState::HistorySearch(ref state) = app.modal_state {
+                state.selected_entry().map(|e| e.content.clone())
+            } else {
+                None
+            };
+
+            if let Some(content) = content {
+                app.modal_state = ModalState::None;
+                // Set the content in the chat editor
+                app.chat_editor_mut().set_text(&content);
+            } else {
+                app.modal_state = ModalState::None;
+            }
+        }
+
+        // Search input - ignore control/alt modifiers to prevent Ctrl+R inserting "r"
+        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.add_char(c);
+            }
+            app.update_history_search();
+        }
+        KeyCode::Backspace => {
+            if let ModalState::HistorySearch(ref mut state) = app.modal_state {
+                state.backspace();
+            }
+            app.update_history_search();
+        }
+
         _ => {}
     }
 }
