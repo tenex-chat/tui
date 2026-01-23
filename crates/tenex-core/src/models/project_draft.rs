@@ -169,6 +169,15 @@ impl PreferencesStorage {
         is_now_archived
     }
 
+    pub fn set_thread_archived(&mut self, thread_id: &str, archived: bool) {
+        if archived {
+            self.prefs.archived_thread_ids.insert(thread_id.to_string());
+        } else {
+            self.prefs.archived_thread_ids.remove(thread_id);
+        }
+        self.save_to_file();
+    }
+
     pub fn archived_project_ids(&self) -> &HashSet<String> {
         &self.prefs.archived_project_ids
     }
