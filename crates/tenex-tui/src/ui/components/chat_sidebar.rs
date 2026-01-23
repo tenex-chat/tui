@@ -16,6 +16,8 @@ pub struct ConversationMetadata {
     pub title: Option<String>,
     pub status_label: Option<String>,
     pub status_current_activity: Option<String>,
+    /// Brief summary/description of the conversation
+    pub summary: Option<String>,
     /// Agent names currently working on this conversation (from kind:24133)
     pub working_agents: Vec<String>,
     /// Aggregate LLM runtime across all messages in milliseconds
@@ -24,7 +26,7 @@ pub struct ConversationMetadata {
 
 impl ConversationMetadata {
     pub fn has_content(&self) -> bool {
-        self.title.is_some() || self.status_label.is_some() || self.status_current_activity.is_some() || self.total_llm_runtime_ms > 0
+        self.title.is_some() || self.status_label.is_some() || self.status_current_activity.is_some() || self.summary.is_some() || self.total_llm_runtime_ms > 0
     }
 
     pub fn is_busy(&self) -> bool {
@@ -54,7 +56,7 @@ impl ConversationMetadata {
 }
 
 /// Render the conversation sidebar on the right side of the chat.
-/// Shows work indicator (if busy), todos (if any), and metadata below.
+/// Shows summary (first), work indicator (if busy), todos (if any), and metadata below.
 pub fn render_chat_sidebar(
     f: &mut Frame,
     todo_state: &TodoState,
@@ -67,15 +69,25 @@ pub fn render_chat_sidebar(
     let h_padding = 2;
     let content_width = (area.width as usize).saturating_sub(h_padding * 2);
 
+    // === SUMMARY SECTION (FIRST) ===
+    let has_summary = metadata.summary.is_some();
+    if has_summary {
+        render_summary_section(&mut lines, metadata, content_width, h_padding);
+    }
+
     // === WORK INDICATOR SECTION ===
     if metadata.is_busy() {
+        // Add separator if we had summary
+        if has_summary {
+            lines.push(Line::from(""));
+        }
         render_work_indicator_section(&mut lines, metadata, spinner_char, content_width, h_padding);
     }
 
     // === TODOS SECTION ===
     if todo_state.has_todos() {
-        // Add separator if we had work indicator
-        if metadata.is_busy() {
+        // Add separator if we had work indicator or summary
+        if metadata.is_busy() || has_summary {
             lines.push(Line::from(""));
         }
         render_todos_section(&mut lines, todo_state, content_width, h_padding);
@@ -83,8 +95,8 @@ pub fn render_chat_sidebar(
 
     // === METADATA SECTION ===
     if metadata.has_content() {
-        // Add separator if we had todos or work indicator
-        if todo_state.has_todos() || metadata.is_busy() {
+        // Add separator if we had todos, work indicator, or summary
+        if todo_state.has_todos() || metadata.is_busy() || has_summary {
             lines.push(Line::from(""));
         }
         render_metadata_section(&mut lines, metadata, content_width, h_padding);
@@ -103,6 +115,28 @@ pub fn render_chat_sidebar(
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
+}
+
+fn render_summary_section<'a>(
+    lines: &mut Vec<Line<'a>>,
+    metadata: &'a ConversationMetadata,
+    content_width: usize,
+    h_padding: usize,
+) {
+    let padding = " ".repeat(h_padding);
+
+    if let Some(ref summary) = metadata.summary {
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled("Summary", theme::text_muted()),
+        ]));
+        for line in wrap_text(summary, content_width) {
+            lines.push(Line::from(vec![
+                Span::raw(padding.clone()),
+                Span::styled(line, Style::default().fg(theme::TEXT_PRIMARY)),
+            ]));
+        }
+    }
 }
 
 fn render_work_indicator_section(
@@ -237,12 +271,12 @@ fn render_metadata_section<'a>(
     let padding = " ".repeat(h_padding);
 
     // Total LLM runtime
-    if let Some(runtime) = metadata.formatted_runtime() {
+    if let Some(ref runtime_str) = metadata.formatted_runtime() {
         lines.push(Line::from(vec![
             Span::raw(padding.clone()),
             Span::styled("⏱ ", Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled("Runtime: ", theme::text_muted()),
-            Span::styled(runtime, Style::default().fg(theme::TEXT_PRIMARY)),
+            Span::styled(runtime_str.clone(), Style::default().fg(theme::TEXT_PRIMARY)),
         ]));
     }
 
