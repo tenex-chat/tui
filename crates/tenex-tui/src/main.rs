@@ -45,7 +45,8 @@ async fn main() -> Result<()> {
     let db = core_runtime.database();
     let event_stats = core_runtime.event_stats();
     let subscription_stats = core_runtime.subscription_stats();
-    let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, &data_dir);
+    let negentropy_stats = core_runtime.negentropy_stats();
+    let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, negentropy_stats, &data_dir);
     let mut terminal = ui::init_terminal()?;
     let core_handle = core_runtime.handle();
     let data_rx = core_runtime

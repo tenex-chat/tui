@@ -1,5 +1,8 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::time::Instant;
+
+use parking_lot::RwLock;
 
 /// Stats for events received from the network
 #[derive(Debug, Default, Clone)]
@@ -75,13 +78,11 @@ impl SharedEventStats {
     }
 
     pub fn record(&self, kind: u16, project_a_tag: Option<&str>) {
-        if let Ok(mut stats) = self.inner.write() {
-            stats.record(kind, project_a_tag);
-        }
+        self.inner.write().record(kind, project_a_tag);
     }
 
     pub fn snapshot(&self) -> EventStats {
-        self.inner.read().map(|s| s.clone()).unwrap_or_default()
+        self.inner.read().clone()
     }
 }
 
@@ -327,24 +328,218 @@ impl SharedSubscriptionStats {
     }
 
     pub fn register(&self, sub_id: String, info: SubscriptionInfo) {
-        if let Ok(mut stats) = self.inner.write() {
-            stats.register(sub_id, info);
-        }
+        self.inner.write().register(sub_id, info);
     }
 
     pub fn record_event(&self, sub_id: &str) {
-        if let Ok(mut stats) = self.inner.write() {
-            stats.record_event(sub_id);
-        }
+        self.inner.write().record_event(sub_id);
     }
 
     pub fn remove(&self, sub_id: &str) {
-        if let Ok(mut stats) = self.inner.write() {
-            stats.remove(sub_id);
-        }
+        self.inner.write().remove(sub_id);
     }
 
     pub fn snapshot(&self) -> SubscriptionStats {
-        self.inner.read().map(|s| s.clone()).unwrap_or_default()
+        self.inner.read().clone()
+    }
+}
+
+/// Status of a negentropy sync operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NegentropySyncStatus {
+    /// Sync completed successfully
+    Ok,
+    /// Relay doesn't support negentropy
+    Unsupported,
+    /// Sync failed with an error
+    Failed,
+}
+
+/// Result of a single negentropy sync operation
+#[derive(Debug, Clone)]
+pub struct NegentropySyncResult {
+    /// Event kind label (e.g., "31933", "4199")
+    pub kind_label: String,
+    /// Number of new events received
+    pub events_received: u64,
+    /// Status of the sync operation
+    pub status: NegentropySyncStatus,
+    /// Error message if failed (only populated for Failed status)
+    pub error: Option<String>,
+    /// Timestamp when this sync completed
+    pub completed_at: Instant,
+}
+
+/// Statistics for negentropy synchronization
+#[derive(Debug, Clone)]
+pub struct NegentropySyncStats {
+    /// Last time a full sync cycle completed (all filters synced)
+    pub last_cycle_completed_at: Option<Instant>,
+    /// Last time any individual filter sync completed
+    pub last_filter_sync_at: Option<Instant>,
+    /// Number of successful syncs (individual filter syncs)
+    pub successful_syncs: u64,
+    /// Number of failed/unsupported syncs
+    pub failed_syncs: u64,
+    /// Number of syncs where relay didn't support negentropy (subset of failed)
+    pub unsupported_syncs: u64,
+    /// Total events reconciled across all syncs
+    pub total_events_reconciled: u64,
+    /// Current sync interval in seconds
+    pub current_interval_secs: u64,
+    /// Whether negentropy sync is currently enabled
+    pub enabled: bool,
+    /// Whether a sync is currently in progress
+    pub sync_in_progress: bool,
+    /// Recent sync results (last N syncs per kind)
+    pub recent_results: Vec<NegentropySyncResult>,
+    /// Maximum recent results to keep
+    max_recent_results: usize,
+}
+
+impl Default for NegentropySyncStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NegentropySyncStats {
+    pub fn new() -> Self {
+        Self {
+            last_cycle_completed_at: None,
+            last_filter_sync_at: None,
+            successful_syncs: 0,
+            failed_syncs: 0,
+            unsupported_syncs: 0,
+            total_events_reconciled: 0,
+            current_interval_secs: 60,
+            enabled: false,
+            sync_in_progress: false,
+            recent_results: Vec::new(),
+            max_recent_results: 20,
+        }
+    }
+
+    /// Record a successful sync
+    pub fn record_success(&mut self, kind_label: &str, events_received: u64) {
+        self.successful_syncs += 1;
+        self.total_events_reconciled += events_received;
+        self.last_filter_sync_at = Some(Instant::now());
+
+        self.recent_results.push(NegentropySyncResult {
+            kind_label: kind_label.to_string(),
+            events_received,
+            status: NegentropySyncStatus::Ok,
+            error: None,
+            completed_at: Instant::now(),
+        });
+
+        self.trim_recent_results();
+    }
+
+    /// Record a failed sync
+    pub fn record_failure(&mut self, kind_label: &str, error: &str, is_unsupported: bool) {
+        self.failed_syncs += 1;
+        let status = if is_unsupported {
+            self.unsupported_syncs += 1;
+            NegentropySyncStatus::Unsupported
+        } else {
+            NegentropySyncStatus::Failed
+        };
+        self.last_filter_sync_at = Some(Instant::now());
+
+        self.recent_results.push(NegentropySyncResult {
+            kind_label: kind_label.to_string(),
+            events_received: 0,
+            status,
+            error: if is_unsupported { None } else { Some(error.to_string()) },
+            completed_at: Instant::now(),
+        });
+
+        self.trim_recent_results();
+    }
+
+    /// Record that a full sync cycle has completed
+    pub fn record_cycle_complete(&mut self) {
+        self.last_cycle_completed_at = Some(Instant::now());
+    }
+
+    /// Update the current sync interval
+    pub fn set_interval(&mut self, secs: u64) {
+        self.current_interval_secs = secs;
+    }
+
+    /// Set whether sync is enabled
+    pub fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
+
+    /// Set whether sync is in progress
+    pub fn set_in_progress(&mut self, in_progress: bool) {
+        self.sync_in_progress = in_progress;
+    }
+
+    fn trim_recent_results(&mut self) {
+        while self.recent_results.len() > self.max_recent_results {
+            self.recent_results.remove(0);
+        }
+    }
+
+    /// Get the instant when the last full sync cycle completed
+    pub fn last_cycle_time(&self) -> Option<Instant> {
+        self.last_cycle_completed_at
+    }
+
+    /// Get the instant when any filter was last synced
+    pub fn last_filter_time(&self) -> Option<Instant> {
+        self.last_filter_sync_at
+    }
+}
+
+/// Thread-safe wrapper for negentropy sync stats
+#[derive(Debug, Clone)]
+pub struct SharedNegentropySyncStats {
+    inner: Arc<RwLock<NegentropySyncStats>>,
+}
+
+impl Default for SharedNegentropySyncStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SharedNegentropySyncStats {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(NegentropySyncStats::new())),
+        }
+    }
+
+    pub fn record_success(&self, kind_label: &str, events_received: u64) {
+        self.inner.write().record_success(kind_label, events_received);
+    }
+
+    pub fn record_failure(&self, kind_label: &str, error: &str, is_unsupported: bool) {
+        self.inner.write().record_failure(kind_label, error, is_unsupported);
+    }
+
+    pub fn record_cycle_complete(&self) {
+        self.inner.write().record_cycle_complete();
+    }
+
+    pub fn set_interval(&self, secs: u64) {
+        self.inner.write().set_interval(secs);
+    }
+
+    pub fn set_enabled(&self, enabled: bool) {
+        self.inner.write().set_enabled(enabled);
+    }
+
+    pub fn set_in_progress(&self, in_progress: bool) {
+        self.inner.write().set_in_progress(in_progress);
+    }
+
+    pub fn snapshot(&self) -> NegentropySyncStats {
+        self.inner.read().clone()
     }
 }

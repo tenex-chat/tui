@@ -12,7 +12,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::constants::RELAY_URL;
-use crate::stats::{SharedEventStats, SharedSubscriptionStats, SubscriptionInfo};
+use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
 use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
@@ -162,6 +162,7 @@ pub struct NostrWorker {
     rt_handle: Option<tokio::runtime::Handle>,
     event_stats: SharedEventStats,
     subscription_stats: SharedSubscriptionStats,
+    negentropy_stats: SharedNegentropySyncStats,
     /// Pubkeys for which we've already requested kind:0 profiles
     requested_profiles: Arc<RwLock<HashSet<String>>>,
 }
@@ -173,6 +174,7 @@ impl NostrWorker {
         command_rx: Receiver<NostrCommand>,
         event_stats: SharedEventStats,
         subscription_stats: SharedSubscriptionStats,
+        negentropy_stats: SharedNegentropySyncStats,
     ) -> Self {
         Self {
             client: None,
@@ -184,6 +186,7 @@ impl NostrWorker {
             rt_handle: None,
             event_stats,
             subscription_stats,
+            negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
         }
     }
@@ -360,9 +363,13 @@ impl NostrWorker {
         let rt_handle = self.rt_handle.as_ref()
             .expect("spawn_negentropy_sync called before runtime initialized")
             .clone();
+        let negentropy_stats = self.negentropy_stats.clone();
+
+        // Mark negentropy sync as enabled
+        negentropy_stats.set_enabled(true);
 
         rt_handle.spawn(async move {
-            run_negentropy_sync(client, ndb, pubkey).await;
+            run_negentropy_sync(client, ndb, pubkey, negentropy_stats).await;
         });
     }
 
@@ -1167,16 +1174,25 @@ impl NostrWorker {
 /// Run negentropy sync loop with adaptive timing
 /// Syncs non-ephemeral kinds: 31933, 4199, 513, 4129, 4201, and kind:1 messages
 #[allow(dead_code)]
-async fn run_negentropy_sync(client: Client, ndb: Arc<Ndb>, user_pubkey: PublicKey) {
+async fn run_negentropy_sync(
+    client: Client,
+    ndb: Arc<Ndb>,
+    user_pubkey: PublicKey,
+    stats: SharedNegentropySyncStats,
+) {
     use std::time::Duration;
 
     let mut interval_secs: u64 = 60;
     const MAX_INTERVAL: u64 = 900; // 15 minutes cap
 
     tlog!("SYNC", "Starting initial negentropy sync...");
+    stats.set_interval(interval_secs);
 
     loop {
-        let total_new = sync_all_filters(&client, &ndb, &user_pubkey).await;
+        stats.set_in_progress(true);
+        let total_new = sync_all_filters(&client, &ndb, &user_pubkey, &stats).await;
+        stats.record_cycle_complete();
+        stats.set_in_progress(false);
 
         if total_new == 0 {
             interval_secs = (interval_secs * 2).min(MAX_INTERVAL);
@@ -1186,36 +1202,42 @@ async fn run_negentropy_sync(client: Client, ndb: Arc<Ndb>, user_pubkey: PublicK
             tlog!("SYNC", "Found {} new events. Next sync in {}s", total_new, interval_secs);
         }
 
+        stats.set_interval(interval_secs);
         tokio::time::sleep(Duration::from_secs(interval_secs)).await;
     }
 }
 
 /// Sync all non-ephemeral kinds using negentropy reconciliation
 #[allow(dead_code)]
-async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -> usize {
-    let mut total_new = 0;
+async fn sync_all_filters(
+    client: &Client,
+    ndb: &Ndb,
+    user_pubkey: &PublicKey,
+    stats: &SharedNegentropySyncStats,
+) -> u64 {
+    let mut total_new: u64 = 0;
 
     // User's projects (kind 31933)
     let project_filter = Filter::new()
         .kind(Kind::Custom(31933))
         .author(*user_pubkey);
-    total_new += sync_filter(client, project_filter, "31933").await;
+    total_new += sync_filter(client, project_filter, "31933", stats).await;
 
     // Agent definitions (kind 4199)
     let agent_filter = Filter::new().kind(Kind::Custom(4199));
-    total_new += sync_filter(client, agent_filter, "4199").await;
+    total_new += sync_filter(client, agent_filter, "4199", stats).await;
 
     // Conversation metadata (kind 513)
     let metadata_filter = Filter::new().kind(Kind::Custom(513));
-    total_new += sync_filter(client, metadata_filter, "513").await;
+    total_new += sync_filter(client, metadata_filter, "513", stats).await;
 
     // Agent lessons (kind 4129)
     let lesson_filter = Filter::new().kind(Kind::Custom(4129));
-    total_new += sync_filter(client, lesson_filter, "4129").await;
+    total_new += sync_filter(client, lesson_filter, "4129", stats).await;
 
     // Nudges (kind 4201)
     let nudge_filter = Filter::new().kind(Kind::Custom(4201));
-    total_new += sync_filter(client, nudge_filter, "4201").await;
+    total_new += sync_filter(client, nudge_filter, "4201", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
     if let Ok(projects) = get_projects(ndb) {
@@ -1226,12 +1248,12 @@ async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -
                 let msg_filter = Filter::new()
                     .kind(Kind::from(1))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
-                total_new += sync_filter(client, msg_filter, "1").await;
+                total_new += sync_filter(client, msg_filter, "1", stats).await;
 
                 let longform_filter = Filter::new()
                     .kind(Kind::Custom(30023))
                     .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
-                total_new += sync_filter(client, longform_filter, "30023").await;
+                total_new += sync_filter(client, longform_filter, "30023", stats).await;
             }
         }
     }
@@ -1242,26 +1264,40 @@ async fn sync_all_filters(client: &Client, ndb: &Ndb, user_pubkey: &PublicKey) -
 /// Perform negentropy sync for a single filter
 /// Returns the number of new events received
 #[allow(dead_code)]
-async fn sync_filter(client: &Client, filter: Filter, label: &str) -> usize {
+async fn sync_filter(
+    client: &Client,
+    filter: Filter,
+    label: &str,
+    stats: &SharedNegentropySyncStats,
+) -> u64 {
     let opts = SyncOptions::default();
 
     match client.sync(filter, &opts).await {
         Ok(output) => {
             // output.val is Reconciliation, output.success is HashSet<RelayUrl>
-            let count = output.val.received.len();
+            let count = output.val.received.len() as u64;
 
             if count > 0 {
                 tlog!("SYNC", "kind:{} -> {} new events", label, count);
             }
 
+            // Record success
+            stats.record_success(label, count);
+
             count
         }
         Err(e) => {
-            // Only log if it's not a "not supported" error (common for relays without negentropy)
             let err_str = format!("{}", e);
-            if !err_str.contains("not supported") && !err_str.contains("NEG-ERR") {
+            let is_unsupported = err_str.contains("not supported") || err_str.contains("NEG-ERR");
+
+            // Only log if it's not a "not supported" error (common for relays without negentropy)
+            if !is_unsupported {
                 tlog!("SYNC", "kind:{} failed: {}", label, e);
             }
+
+            // Record failure
+            stats.record_failure(label, &err_str, is_unsupported);
+
             0
         }
     }

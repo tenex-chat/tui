@@ -9,7 +9,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
-use tenex_core::stats::query_ndb_stats;
+use tenex_core::stats::{query_ndb_stats, NegentropySyncStatus};
 
 fn kind_name(kind: u16) -> &'static str {
     match kind {
@@ -23,6 +23,18 @@ fn kind_name(kind: u16) -> &'static str {
         30023 => "Long-form",
         31933 => "Projects",
         _ => "Unknown",
+    }
+}
+
+/// Format a duration as a human-readable "time ago" string
+fn format_time_ago(instant: std::time::Instant) -> String {
+    let elapsed = instant.elapsed();
+    if elapsed.as_secs() < 60 {
+        format!("{}s ago", elapsed.as_secs())
+    } else if elapsed.as_secs() < 3600 {
+        format!("{}m ago", elapsed.as_secs() / 60)
+    } else {
+        format!("{}h ago", elapsed.as_secs() / 3600)
     }
 }
 
@@ -441,6 +453,191 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
     lines
 }
 
+/// Render the Negentropy tab content
+fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Get negentropy stats
+    let neg_stats = app.negentropy_stats.snapshot();
+
+    // Header
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Negentropy Synchronization ═══",
+        Style::default().fg(theme::ACCENT_PRIMARY),
+    )]));
+    lines.push(Line::from(""));
+
+    // Status section
+    let status_indicator = if neg_stats.enabled {
+        if neg_stats.sync_in_progress {
+            Span::styled("● SYNCING", Style::default().fg(theme::ACCENT_WARNING))
+        } else {
+            Span::styled("● ENABLED", Style::default().fg(theme::ACCENT_SUCCESS))
+        }
+    } else {
+        Span::styled("○ DISABLED", Style::default().fg(theme::TEXT_MUTED))
+    };
+
+    lines.push(Line::from(vec![
+        Span::styled("  Status: ", Style::default().fg(theme::TEXT_MUTED)),
+        status_indicator,
+    ]));
+
+    // Last full sync cycle time
+    if let Some(instant) = neg_stats.last_cycle_time() {
+        lines.push(Line::from(vec![
+            Span::styled("  Last cycle: ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(format_time_ago(instant), Style::default().fg(theme::TEXT_PRIMARY)),
+        ]));
+    } else {
+        lines.push(Line::from(vec![
+            Span::styled("  Last cycle: ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Never", Style::default().fg(theme::TEXT_DIM)),
+        ]));
+    }
+
+    // Last filter sync time (any individual filter)
+    if let Some(instant) = neg_stats.last_filter_time() {
+        lines.push(Line::from(vec![
+            Span::styled("  Last filter: ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(format_time_ago(instant), Style::default().fg(theme::TEXT_DIM)),
+        ]));
+    }
+
+    // Current interval
+    lines.push(Line::from(vec![
+        Span::styled("  Sync interval: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}s", neg_stats.current_interval_secs),
+            Style::default().fg(theme::TEXT_PRIMARY),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Statistics section
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Sync Statistics ═══",
+        Style::default().fg(theme::ACCENT_SUCCESS),
+    )]));
+    lines.push(Line::from(""));
+
+    // Success/failure counts
+    lines.push(Line::from(vec![
+        Span::styled("  Successful syncs: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", neg_stats.successful_syncs),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("  Failed syncs: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", neg_stats.failed_syncs),
+            Style::default().fg(if neg_stats.failed_syncs > 0 {
+                theme::ACCENT_ERROR
+            } else {
+                theme::TEXT_PRIMARY
+            }),
+        ),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("  Unsupported (relay): ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", neg_stats.unsupported_syncs),
+            Style::default().fg(theme::TEXT_DIM),
+        ),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("  Events reconciled: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", neg_stats.total_events_reconciled),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Recent results section
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Recent Sync Results ═══",
+        Style::default().fg(theme::ACCENT_WARNING),
+    )]));
+    lines.push(Line::from(""));
+
+    if neg_stats.recent_results.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No sync results yet",
+            Style::default().fg(theme::TEXT_MUTED),
+        )));
+        if !neg_stats.enabled {
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Note: Negentropy sync is currently disabled.",
+                Style::default().fg(theme::TEXT_DIM),
+            )));
+            lines.push(Line::from(Span::styled(
+                "  Most relays don't support it yet.",
+                Style::default().fg(theme::TEXT_DIM),
+            )));
+        }
+    } else {
+        // Table header
+        lines.push(Line::from(vec![
+            Span::styled("  Kind", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("      "),
+            Span::styled("Status", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("      "),
+            Span::styled("Events", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("    "),
+            Span::styled("Time", Style::default().fg(theme::TEXT_MUTED)),
+        ]));
+        lines.push(Line::from("  ─────────────────────────────────────────"));
+
+        // Show last 15 results (most recent first)
+        let results_to_show: Vec<_> = neg_stats.recent_results.iter().rev().take(15).collect();
+
+        for result in results_to_show {
+            let status_span = match result.status {
+                NegentropySyncStatus::Ok => {
+                    Span::styled("  OK  ", Style::default().fg(theme::ACCENT_SUCCESS))
+                }
+                NegentropySyncStatus::Unsupported => {
+                    Span::styled("UNSUP ", Style::default().fg(theme::TEXT_DIM))
+                }
+                NegentropySyncStatus::Failed => {
+                    Span::styled("FAIL  ", Style::default().fg(theme::ACCENT_ERROR))
+                }
+            };
+
+            let events_str = if result.status == NegentropySyncStatus::Ok && result.events_received > 0 {
+                format!("{:>5}", result.events_received)
+            } else {
+                "    -".to_string()
+            };
+
+            let time_str = format_time_ago(result.completed_at);
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:6}", result.kind_label), Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::raw("    "),
+                status_span,
+                Span::raw("    "),
+                Span::styled(events_str, Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::raw("    "),
+                Span::styled(time_str, Style::default().fg(theme::TEXT_DIM)),
+            ]));
+        }
+    }
+
+    lines
+}
+
 /// Render the E-Tag Query tab content
 fn render_e_tag_query_tab(state: &DebugStatsState) -> Vec<Line<'static>> {
     let mut lines: Vec<Line> = Vec::new();
@@ -589,6 +786,9 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::Subscriptions => {
             lines.extend(render_subscriptions_tab(app, state, content_width));
         }
+        DebugStatsTab::Negentropy => {
+            lines.extend(render_negentropy_tab(app));
+        }
         DebugStatsTab::ETagQuery => {
             lines.extend(render_e_tag_query_tab(state));
         }
@@ -602,7 +802,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::ETagQuery => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-3", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Enter", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" search • "),
@@ -612,7 +812,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::Subscriptions => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-3", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" tabs • "),
             Span::styled("↑↓", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" select • "),
@@ -624,7 +824,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         _ => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-3", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Esc", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" close"),
