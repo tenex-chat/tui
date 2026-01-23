@@ -30,7 +30,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             Constraint::Length(2), // Tab header
             Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Help bar
-            Constraint::Length(2), // Open tabs bar (2 lines: title + project)
+            Constraint::Length(layout::TAB_BAR_HEIGHT), // Open tabs bar
         ])
         .split(area)
     } else {
@@ -308,6 +308,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
         if visible_height > 0 {
             let content_area = Rect::new(area.x, area.y + render_y, area.width, visible_height);
             let is_archived = app.is_thread_archived(&item.thread.id);
+            let is_multi_selected = app.is_thread_multi_selected(&item.thread.id);
 
             render_card_content(
                 f,
@@ -315,6 +316,7 @@ fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
                 &item.thread,
                 &item.a_tag,
                 is_selected,
+                is_multi_selected,
                 item.depth,
                 item.has_children,
                 item.child_count,
@@ -345,6 +347,7 @@ fn render_card_content(
     thread: &Thread,
     a_tag: &str,
     is_selected: bool,
+    is_multi_selected: bool,
     depth: usize,
     has_children: bool,
     child_count: usize,
@@ -625,8 +628,8 @@ fn render_card_content(
         lines.push(Line::from(""));
     }
 
-    if is_selected {
-        // For selected cards, render half-block borders separately from content
+    if is_selected || is_multi_selected {
+        // For selected/multi-selected cards, render half-block borders separately from content
         // This creates the visual effect of half-line padding
         let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄
         let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER.horizontal_top.repeat(area.width as usize); // ▀
@@ -681,7 +684,10 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, item)| {
             let is_selected = i == selected_idx;
-            render_inbox_card(app, item, is_selected)
+            let is_multi_selected = item.thread_id.as_ref()
+                .map(|id| app.is_thread_multi_selected(id))
+                .unwrap_or(false);
+            render_inbox_card(app, item, is_selected, is_multi_selected)
         })
         .collect();
 
@@ -693,7 +699,7 @@ fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem<'static> {
+fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_selected: bool) -> ListItem<'static> {
     // Single borrow to extract all needed data
     let (project_name, author_name) = {
         let store = app.data_store.borrow();
@@ -716,7 +722,7 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     };
 
     // Unread indicator
-    let unread_indicator = if !item.is_read {
+    let indicator = if !item.is_read {
         Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_PRIMARY))
     } else {
         Span::styled(card::SPACER, Style::default())
@@ -724,7 +730,7 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
 
     // Line 1: Title + time
     let line1_spans = vec![
-        unread_indicator,
+        indicator,
         Span::styled(truncate_with_ellipsis(&item.title, 55), title_style),
         Span::styled(card::SPACER, Style::default()),
         Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
@@ -742,11 +748,17 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool) -> ListItem
     // Line 3: Spacing line
     let line3_spans = vec![Span::styled(card::SPACER, Style::default())];
 
-    ListItem::new(vec![
+    let list_item = ListItem::new(vec![
         Line::from(line1_spans),
         Line::from(line2_spans),
         Line::from(line3_spans),
-    ])
+    ]);
+
+    if is_multi_selected {
+        list_item.style(Style::default().bg(theme::BG_SELECTED))
+    } else {
+        list_item
+    }
 }
 
 /// Render the reports list with search
@@ -887,6 +899,7 @@ fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
 
     for (i, (thread, a_tag)) in status_threads.iter().enumerate() {
         let is_selected = i == selected_idx;
+        let is_multi_selected = app.is_thread_multi_selected(&thread.id);
         let card_height = 4u16; // title, summary, activity, spacing
 
         if y_offset + card_height > area.height {
@@ -900,7 +913,7 @@ fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
             card_height,
         );
 
-        render_status_card(f, app, thread, a_tag, is_selected, card_area);
+        render_status_card(f, app, thread, a_tag, is_selected, is_multi_selected, card_area);
         y_offset += card_height;
     }
 }
@@ -915,6 +928,7 @@ fn render_status_card(
     thread: &Thread,
     a_tag: &str,
     is_selected: bool,
+    is_multi_selected: bool,
     area: Rect,
 ) {
     let store = app.data_store.borrow();
@@ -1039,7 +1053,7 @@ fn render_status_card(
 
     let content = Paragraph::new(lines);
 
-    if is_selected {
+    if is_selected || is_multi_selected {
         f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
     } else {
         f.render_widget(content, area);
@@ -1095,6 +1109,7 @@ fn render_search_tab(f: &mut Frame, app: &App, area: Rect) {
 
     for (i, result) in results.iter().enumerate() {
         let is_selected = i == selected_idx;
+        let is_multi_selected = app.is_thread_multi_selected(&result.thread.id);
 
         // Calculate card height based on content
         // Line 1: Title + project + time
@@ -1129,7 +1144,7 @@ fn render_search_tab(f: &mut Frame, app: &App, area: Rect) {
             card_height,
         );
 
-        render_search_result_card(f, app, result, is_selected, card_area, &store);
+        render_search_result_card(f, app, result, is_selected, is_multi_selected, card_area, &store);
         y_offset += card_height;
     }
 }
@@ -1140,6 +1155,7 @@ fn render_search_result_card(
     app: &App,
     result: &crate::ui::app::SearchResult,
     is_selected: bool,
+    is_multi_selected: bool,
     area: Rect,
     store: &std::cell::Ref<crate::store::AppDataStore>,
 ) {
@@ -1154,6 +1170,7 @@ fn render_search_result_card(
     };
 
     let bullet = if is_selected { card::BULLET } else { card::SPACER };
+    let bullet_color = theme::ACCENT_PRIMARY;
 
     // Line 1: Title + match type indicator + project + timestamp
     let title_max = area.width as usize - 40;
@@ -1166,7 +1183,7 @@ fn render_search_result_card(
     };
 
     let line1 = Line::from(vec![
-        Span::styled(bullet, Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(bullet, Style::default().fg(bullet_color)),
         Span::styled(type_indicator, Style::default().fg(type_color)),
         Span::styled(" ", Style::default()),
         Span::styled(title, title_style),
@@ -1285,7 +1302,7 @@ fn render_search_result_card(
 
     let content = Paragraph::new(lines);
 
-    if is_selected {
+    if is_selected || is_multi_selected {
         f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
     } else {
         f.render_widget(content, area);
@@ -1671,7 +1688,16 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
         let is_active = i == app.active_tab_index() && app.view == View::Chat;
 
         let project_name = data_store.get_project_name(&tab.project_a_tag);
-        let title_display = truncate_with_ellipsis(&tab.thread_title, 30);
+        // Look up title from store for real threads (gets kind:513 metadata title), use cached for drafts
+        let thread_title = if tab.is_draft() {
+            tab.thread_title.clone()
+        } else {
+            data_store
+                .get_thread_by_id(&tab.thread_id)
+                .map(|t| t.title.clone())
+                .unwrap_or_else(|| tab.thread_title.clone())
+        };
+        let title_display = truncate_with_ellipsis(&thread_title, 30);
 
         let active_marker = if is_active { card::BULLET } else { card::SPACER };
         let text = format!("{}{} · {}", active_marker, project_name, title_display);
