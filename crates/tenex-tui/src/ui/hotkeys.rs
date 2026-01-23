@@ -133,7 +133,7 @@ pub enum HotkeyContext {
     Global,
 
     /// Home view contexts
-    HomeRecent,
+    HomeConversations,
     HomeInbox,
     HomeReports,
     HomeStatus,
@@ -228,7 +228,7 @@ impl HotkeyContext {
                     HotkeyContext::HomeSidebar
                 } else {
                     match home_panel_focus {
-                        HomeTab::Recent => HotkeyContext::HomeRecent,
+                        HomeTab::Conversations => HotkeyContext::HomeConversations,
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
                         HomeTab::Reports => HotkeyContext::HomeReports,
                         HomeTab::Status => HotkeyContext::HomeStatus,
@@ -540,70 +540,70 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('n'),
         "New Conversation",
         "Conversation",
-        &[HotkeyContext::HomeRecent, HotkeyContext::HomeSidebar, HotkeyContext::ChatNormal],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeSidebar, HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::OpenSelected,
         KeyCode::Char('o'),
         "Open Selected",
         "Conversation",
-        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
     ),
     HotkeyBinding::new(
         HotkeyId::ArchiveToggle,
         KeyCode::Char('a'),
         "Archive/Unarchive",
         "Conversation",
-        &[HotkeyContext::HomeRecent],
+        &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::new(
         HotkeyId::ExportJsonl,
         KeyCode::Char('e'),
         "Export JSONL",
         "Conversation",
-        &[HotkeyContext::HomeRecent, HotkeyContext::ChatNormal],
+        &[HotkeyContext::HomeConversations, HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::SwitchProject,
         KeyCode::Char('p'),
         "Switch Project",
         "Filter",
-        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
     ),
     HotkeyBinding::new(
         HotkeyId::TimeFilter,
         KeyCode::Char('f'),
         "Time Filter",
         "Filter",
-        &[HotkeyContext::HomeRecent],
+        &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::AgentBrowser,
         KeyCode::Char('A'),
         "Agent Browser",
         "Other",
-        &[HotkeyContext::HomeRecent],
+        &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::CreateProject,
         KeyCode::Char('N'),
         "Create Project",
         "Other",
-        &[HotkeyContext::HomeRecent],
+        &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchived,
         KeyCode::Char('H'),
         "Show/Hide Archived Conversations",
         "Filter",
-        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
         KeyCode::Char('P'),
         "Show/Hide Archived Projects",
         "Filter",
-        &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
@@ -979,10 +979,10 @@ mod tests {
             KeyCode::Char('o'),
             "Open",
             "Test",
-            &[HotkeyContext::HomeRecent, HotkeyContext::HomeInbox],
+            &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox],
         );
 
-        assert!(binding.is_active_in(HotkeyContext::HomeRecent));
+        assert!(binding.is_active_in(HotkeyContext::HomeConversations));
         assert!(binding.is_active_in(HotkeyContext::HomeInbox));
         assert!(!binding.is_active_in(HotkeyContext::ChatNormal));
     }
@@ -998,7 +998,7 @@ mod tests {
         );
 
         // Global hotkeys should be active in any context
-        assert!(binding.is_active_in(HotkeyContext::HomeRecent));
+        assert!(binding.is_active_in(HotkeyContext::HomeConversations));
         assert!(binding.is_active_in(HotkeyContext::ChatNormal));
         assert!(binding.is_active_in(HotkeyContext::AnyModal));
     }
@@ -1011,7 +1011,7 @@ mod tests {
         let result = resolver.resolve(
             KeyCode::Char('t'),
             KeyModifiers::CONTROL,
-            HotkeyContext::HomeRecent,
+            HotkeyContext::HomeConversations,
         );
         assert_eq!(result, Some(HotkeyId::CommandPalette));
 

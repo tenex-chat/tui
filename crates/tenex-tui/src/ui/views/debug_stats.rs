@@ -791,7 +791,7 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
 
     if app.visible_projects.is_empty() {
         lines.push(Line::from(vec![Span::styled(
-            "  ⚠ EMPTY - No conversations will be shown in Recents tab!",
+            "  ⚠ EMPTY - No conversations will be shown in Conversations tab!",
             Style::default().fg(theme::ACCENT_ERROR),
         )]));
     } else {

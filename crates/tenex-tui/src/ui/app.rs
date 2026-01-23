@@ -91,7 +91,7 @@ pub enum InputMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HomeTab {
-    Recent,
+    Conversations,
     Inbox,
     Reports,
     Status,
@@ -344,7 +344,7 @@ impl App {
             subthread_root_message: None,
             selected_message_index: 0,
             tabs: TabManager::new(),
-            home_panel_focus: HomeTab::Recent,
+            home_panel_focus: HomeTab::Conversations,
             tab_selection: HashMap::new(),
             multi_selected_threads: HashSet::new(),
             report_search_filter: String::new(),

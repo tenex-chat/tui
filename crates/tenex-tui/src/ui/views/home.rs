@@ -56,7 +56,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     let content_area = main_chunks[0];
     let padded_content = layout::with_content_padding(content_area);
     match app.home_panel_focus {
-        HomeTab::Recent => render_recent_with_feed(f, app, padded_content),
+        HomeTab::Conversations => render_conversations_with_feed(f, app, padded_content),
         HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
         HomeTab::Reports => render_reports_list(f, app, padded_content),
         HomeTab::Status => render_status_list(f, app, padded_content),
@@ -151,7 +151,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let mut spans = vec![
         Span::styled("  TENEX", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
         Span::styled("    ", Style::default()),
-        Span::styled("Recent", tab_style(HomeTab::Recent)),
+        Span::styled("Conversations", tab_style(HomeTab::Conversations)),
         Span::styled("   ", Style::default()),
         Span::styled("Inbox", tab_style(HomeTab::Inbox)),
     ];
@@ -192,8 +192,8 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     let indicator_spans = vec![
         Span::styled("         ", blank), // Padding for "  TENEX  "
-        Span::styled(if app.home_panel_focus == HomeTab::Recent { "──────" } else { "      " },
-            if app.home_panel_focus == HomeTab::Recent { accent } else { blank }),
+        Span::styled(if app.home_panel_focus == HomeTab::Conversations { "─────────────" } else { "             " },
+            if app.home_panel_focus == HomeTab::Conversations { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Inbox { accent } else { blank }),
@@ -215,11 +215,11 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(header, area);
 }
 
-fn render_recent_with_feed(f: &mut Frame, app: &App, area: Rect) {
-    render_recent_cards(f, app, area, true);
+fn render_conversations_with_feed(f: &mut Frame, app: &App, area: Rect) {
+    render_conversations_cards(f, app, area, true);
 }
 
-fn render_recent_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
+fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: bool) {
     let recent = app.recent_threads();
 
     if recent.is_empty() {
@@ -928,7 +928,7 @@ fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Render a single status card with table-aligned columns
-/// Layout matches Recent tab:
+/// Layout matches Conversations tab:
 /// [bullet] [title]                    [project]       [status]
 ///          [summary/activity]         [author]        [time]
 fn render_status_card(
@@ -955,7 +955,7 @@ fn render_status_card(
 
     let has_activity = thread.status_current_activity.is_some();
 
-    // Column widths for table layout (matching Recent tab)
+    // Column widths for table layout (matching Conversations tab)
     let middle_col_width = 22;
     let right_col_width = 14;
     let total_width = area.width as usize;
@@ -1550,7 +1550,7 @@ fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
         }
     } else {
         match app.home_panel_focus {
-            HomeTab::Recent => "→ projects · ↑↓ navigate · Space fold · c fold all · Enter open · n new · m filter · f time · A agents · q quit",
+            HomeTab::Conversations => "→ projects · ↑↓ navigate · Space fold · c fold all · Enter open · n new · m filter · f time · A agents · q quit",
             HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
             HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
             HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",

@@ -775,7 +775,7 @@ impl TabManager {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum HomeTab {
     #[default]
-    Recent,
+    Conversations,
     Inbox,
     Reports,
     Status,
@@ -821,19 +821,19 @@ impl HomeViewState {
     /// Cycle to next tab
     pub fn next_tab(&mut self) {
         self.panel_focus = match self.panel_focus {
-            HomeTab::Recent => HomeTab::Inbox,
+            HomeTab::Conversations => HomeTab::Inbox,
             HomeTab::Inbox => HomeTab::Reports,
             HomeTab::Reports => HomeTab::Status,
             HomeTab::Status => HomeTab::Search,
-            HomeTab::Search => HomeTab::Recent,
+            HomeTab::Search => HomeTab::Conversations,
         };
     }
 
     /// Cycle to previous tab
     pub fn prev_tab(&mut self) {
         self.panel_focus = match self.panel_focus {
-            HomeTab::Recent => HomeTab::Search,
-            HomeTab::Inbox => HomeTab::Recent,
+            HomeTab::Conversations => HomeTab::Search,
+            HomeTab::Inbox => HomeTab::Conversations,
             HomeTab::Reports => HomeTab::Inbox,
             HomeTab::Status => HomeTab::Reports,
             HomeTab::Search => HomeTab::Status,
@@ -1161,7 +1161,7 @@ mod tests {
     fn test_home_view_state() {
         let mut state = HomeViewState::new();
 
-        assert_eq!(state.panel_focus, HomeTab::Recent);
+        assert_eq!(state.panel_focus, HomeTab::Conversations);
         assert_eq!(state.current_selection(), 0);
 
         state.set_current_selection(5);
