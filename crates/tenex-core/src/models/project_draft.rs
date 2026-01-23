@@ -88,6 +88,9 @@ pub struct Preferences {
     /// Stored credentials (nsec or ncryptsec)
     #[serde(default)]
     pub stored_credentials: Option<String>,
+    /// If true, hide scheduled events from conversation list (default: false = show all)
+    #[serde(default)]
+    pub hide_scheduled: bool,
 }
 
 pub struct PreferencesStorage {
@@ -273,5 +276,22 @@ impl PreferencesStorage {
             .as_ref()
             .map(|c| c.starts_with("ncryptsec"))
             .unwrap_or(false)
+    }
+
+    // ===== Scheduled Events Filter Methods =====
+
+    pub fn hide_scheduled(&self) -> bool {
+        self.prefs.hide_scheduled
+    }
+
+    pub fn set_hide_scheduled(&mut self, value: bool) {
+        self.prefs.hide_scheduled = value;
+        self.save_to_file();
+    }
+
+    pub fn toggle_hide_scheduled(&mut self) -> bool {
+        self.prefs.hide_scheduled = !self.prefs.hide_scheduled;
+        self.save_to_file();
+        self.prefs.hide_scheduled
     }
 }
