@@ -681,7 +681,7 @@ impl AppDataStore {
                 let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
                 messages.insert(insert_pos, message);
 
-                // Update thread's last_activity so it appears in Recent tab
+                // Update thread's last_activity so it appears in Conversations tab
                 for threads in self.threads_by_project.values_mut() {
                     if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
                         // Only update if this message is newer than current last_activity
