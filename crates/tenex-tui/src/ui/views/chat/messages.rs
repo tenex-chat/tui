@@ -13,7 +13,7 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::cards::{author_line, author_line_with_recipient, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines};
+use super::cards::{author_line, author_line_with_recipient, bottom_half_block_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines, top_half_block_line};
 use super::grouping::{group_messages, DisplayItem};
 
 pub(crate) fn render_messages_panel(
@@ -173,6 +173,8 @@ pub(crate) fn render_messages_panel(
 
                     // Check if this is a tool use message (has tool tag) or delegation (has q_tags)
                     let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
+                    // Check if message has p-tags (recipients) - needed for padding decisions
+                    let has_p_tags = !msg.p_tags.is_empty();
 
                     if is_tool_use {
                         // Tool use message: render muted tool line only, no card background
@@ -240,8 +242,14 @@ pub(crate) fn render_messages_panel(
                     } else {
                         // Non-tool message: render full card with background
 
-                        // Check if message has p-tags (recipients)
-                        let has_p_tags = !msg.p_tags.is_empty();
+                        // Determine if this message starts a new visual card
+                        // (first in group, or has p-tags which show full header breaking the visual grouping)
+                        let starts_new_card = !is_consecutive || has_p_tags;
+
+                        // Top half-block padding for new cards
+                        if starts_new_card {
+                            messages_text.push(top_half_block_line(indicator_color, bg, content_width));
+                        }
 
                         // First line: author header OR dot indicator for consecutive messages
                         // Always show header with recipient if message has p-tags
@@ -353,9 +361,14 @@ pub(crate) fn render_messages_panel(
                         }
                     }
 
-                    // Only add empty line if no next consecutive (end of author group)
-                    if !has_next_consecutive {
-                        messages_text.push(Line::from(""));
+                    // Bottom half-block padding (for messages that end a visual card)
+                    // This includes: last in group, or p-tag messages (which form their own card)
+                    let ends_card = !has_next_consecutive || has_p_tags;
+                    if ends_card {
+                        // Only add half-block for non-tool, non-reasoning messages (those have card bg)
+                        if !is_tool_use && !msg.is_reasoning {
+                            messages_text.push(bottom_half_block_line(indicator_color, bg, content_width));
+                        }
                     }
                 }
 

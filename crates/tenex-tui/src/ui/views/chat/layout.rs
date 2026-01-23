@@ -24,6 +24,27 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
     f.render_widget(bg_block, area);
 
+    // Create top-level layout: header + content
+    let main_chunks = Layout::vertical([
+        Constraint::Length(layout::HEADER_HEIGHT_CHAT),
+        Constraint::Min(0),
+    ])
+    .split(area);
+
+    // Render header
+    let chrome_color = if app.pending_quit { theme::ACCENT_ERROR } else { theme::ACCENT_PRIMARY };
+    let title = app.selected_thread.as_ref()
+        .map(|t| t.title.clone())
+        .or_else(|| app.open_tabs().get(app.active_tab_index()).map(|tab| tab.thread_title.clone()))
+        .unwrap_or_else(|| "Chat".to_string());
+    let padding = " ".repeat(layout::CONTENT_PADDING_H as usize);
+    let header = Paragraph::new(format!("\n{}{}", padding, title))
+        .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
+    f.render_widget(header, main_chunks[0]);
+
+    // Content area (everything below header)
+    let content_area = main_chunks[1];
+
     let all_messages = app.messages();
 
     // Aggregate todo state from all messages
@@ -89,7 +110,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Build layout based on whether we have attachments, status, and tabs
     // Context line is now INSIDE the input card, not separate
-    let chunks = build_layout(area, input_height, has_attachments, has_status, has_tabs);
+    let chunks = build_layout(content_area, input_height, has_attachments, has_status, has_tabs);
 
     // Split messages area horizontally - always show sidebar when visible
     let (messages_area_raw, sidebar_area) =
@@ -190,6 +211,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_draft_navigator(f, area, state);
     }
 
+    // Render history search modal if showing (Ctrl+R)
+    if let ModalState::HistorySearch(ref state) = app.modal_state {
+        super::super::render_history_search(f, area, state);
+    }
+
     // Render backend approval modal if showing
     if let ModalState::BackendApproval(ref state) = app.modal_state {
         super::super::render_backend_approval_modal(f, area, state);
@@ -223,14 +249,13 @@ fn build_layout(
     has_status: bool,
     has_tabs: bool,
 ) -> Rc<[Rect]> {
-    // Tab bar now uses 2 lines (title + project)
     match (has_attachments, has_status, has_tabs) {
         (true, true, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Status line
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(2),         // Tab bar (2 lines)
+            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
         ])
         .split(area),
         (true, true, false) => Layout::vertical([
@@ -244,7 +269,7 @@ fn build_layout(
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(2),         // Tab bar (2 lines)
+            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
         ])
         .split(area),
         (true, false, false) => Layout::vertical([
@@ -257,7 +282,7 @@ fn build_layout(
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Status line
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(2),         // Tab bar (2 lines)
+            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
         ])
         .split(area),
         (false, true, false) => Layout::vertical([
@@ -269,7 +294,7 @@ fn build_layout(
         (false, false, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(2),         // Tab bar (2 lines)
+            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
         ])
         .split(area),
         (false, false, false) => Layout::vertical([
@@ -306,7 +331,7 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, popup_area);
 
     // Get attachment info for title
-    let title = if let Some(attachment) = app.chat_editor.get_focused_attachment() {
+    let title = if let Some(attachment) = app.chat_editor().get_focused_attachment() {
         format!(
             "Paste #{} ({} lines, {} chars) - Ctrl+S save, Ctrl+D delete, Esc cancel",
             attachment.id,

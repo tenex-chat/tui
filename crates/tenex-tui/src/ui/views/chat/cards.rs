@@ -4,6 +4,44 @@ use ratatui::{
     text::{Line, Span},
 };
 
+/// Half-block characters for vertical padding
+const LOWER_HALF_BLOCK: char = '▄';
+const UPPER_HALF_BLOCK: char = '▀';
+
+/// Create a top padding line using lower half blocks (creates bottom-half fill effect)
+pub(crate) fn top_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
+    let mut spans = vec![
+        // Indicator uses half-block with indicator color as fg (visible half)
+        Span::styled(
+            LOWER_HALF_BLOCK.to_string(),
+            Style::default().fg(indicator_color),
+        ),
+    ];
+    // Rest of the line uses half-block with bg color as fg
+    if width > 1 {
+        let fill: String = std::iter::repeat(LOWER_HALF_BLOCK).take(width - 1).collect();
+        spans.push(Span::styled(fill, Style::default().fg(bg)));
+    }
+    Line::from(spans)
+}
+
+/// Create a bottom padding line using upper half blocks (creates top-half fill effect)
+pub(crate) fn bottom_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
+    let mut spans = vec![
+        // Indicator uses half-block with indicator color as fg (visible half)
+        Span::styled(
+            UPPER_HALF_BLOCK.to_string(),
+            Style::default().fg(indicator_color),
+        ),
+    ];
+    // Rest of the line uses half-block with bg color as fg
+    if width > 1 {
+        let fill: String = std::iter::repeat(UPPER_HALF_BLOCK).take(width - 1).collect();
+        spans.push(Span::styled(fill, Style::default().fg(bg)));
+    }
+    Line::from(spans)
+}
+
 /// Wrap spans to fit within max_width, splitting at word boundaries
 fn wrap_spans(spans: &[Span], max_width: usize) -> Vec<Vec<Span<'static>>> {
     if max_width == 0 {
