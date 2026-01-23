@@ -42,8 +42,14 @@ pub(crate) fn handle_key(
     // Only the highest-priority hotkeys should be here (e.g., Ctrl+T for command palette).
 
     // Check if we're in a text input context where single keys should not be intercepted
+    // Check specifically for DebugStats on ETagQuery tab
+    let in_debug_etag_input = matches!(
+        &app.modal_state,
+        ModalState::DebugStats(state) if state.active_tab == crate::ui::modal::DebugStatsTab::ETagQuery
+    );
     let in_text_input_context = app.view == View::Login
         || app.input_mode == InputMode::Editing
+        || in_debug_etag_input
         || matches!(
             app.modal_state,
             ModalState::CommandPalette(_)
