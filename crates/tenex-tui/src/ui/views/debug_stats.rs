@@ -767,6 +767,173 @@ fn render_e_tag_query_tab(state: &DebugStatsState) -> Vec<Line<'static>> {
     lines
 }
 
+/// Render the Data Store tab content - shows thread counts and visibility state
+fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
+
+    let store = app.data_store.borrow();
+
+    // Header: Visibility state
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Visibility State ═══",
+        Style::default().fg(theme::ACCENT_PRIMARY),
+    )]));
+    lines.push(Line::from(""));
+
+    // Show visible_projects
+    lines.push(Line::from(vec![
+        Span::styled("  Visible projects: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", app.visible_projects.len()),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ),
+    ]));
+
+    if app.visible_projects.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  ⚠ EMPTY - No conversations will be shown in Recents tab!",
+            Style::default().fg(theme::ACCENT_ERROR),
+        )]));
+    } else {
+        for a_tag in &app.visible_projects {
+            let project_name = format_project_name(a_tag);
+            lines.push(Line::from(vec![
+                Span::raw("    ✓ "),
+                Span::styled(project_name, Style::default().fg(theme::TEXT_PRIMARY)),
+            ]));
+        }
+    }
+
+    lines.push(Line::from(""));
+
+    // Time filter state
+    lines.push(Line::from(vec![
+        Span::styled("  Time filter: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            app.time_filter.as_ref().map(|tf| tf.label()).unwrap_or("None"),
+            Style::default().fg(theme::TEXT_PRIMARY),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Thread counts by project
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Threads in Memory (by Project) ═══",
+        Style::default().fg(theme::ACCENT_SUCCESS),
+    )]));
+    lines.push(Line::from(""));
+
+    let total_threads: usize = store.threads_by_project.values().map(|v| v.len()).sum();
+    lines.push(Line::from(vec![
+        Span::styled("  Total threads in memory: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", total_threads),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    if store.threads_by_project.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  ⚠ No threads loaded in memory!",
+            Style::default().fg(theme::ACCENT_ERROR),
+        )]));
+    } else {
+        // Sort projects by thread count (descending)
+        let mut project_counts: Vec<(&String, usize)> = store
+            .threads_by_project
+            .iter()
+            .map(|(a_tag, threads)| (a_tag, threads.len()))
+            .collect();
+        project_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+        lines.push(Line::from(vec![
+            Span::styled("  Project", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("                    "),
+            Span::styled("Threads", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw("   "),
+            Span::styled("Visible", Style::default().fg(theme::TEXT_MUTED)),
+        ]));
+        lines.push(Line::from("  ─────────────────────────────────────────"));
+
+        for (a_tag, count) in &project_counts {
+            let project_name = format_project_name(a_tag);
+            let is_visible = app.visible_projects.contains(*a_tag);
+            let display_name = if project_name.len() > 25 {
+                format!("{}...", &project_name[..22])
+            } else {
+                project_name
+            };
+
+            let visibility_indicator = if is_visible {
+                Span::styled("  ✓", Style::default().fg(theme::ACCENT_SUCCESS))
+            } else {
+                Span::styled("  ✗", Style::default().fg(theme::TEXT_DIM))
+            };
+
+            lines.push(Line::from(vec![
+                Span::styled(format!("  {:<25}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::styled(format!("{:>7}", count), Style::default().fg(theme::ACCENT_PRIMARY)),
+                visibility_indicator,
+            ]));
+        }
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(""));
+
+    // Known projects count
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Known Projects ═══",
+        Style::default().fg(theme::ACCENT_WARNING),
+    )]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  Projects loaded: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", store.projects.len()),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ),
+    ]));
+
+    lines.push(Line::from(""));
+
+    // Show recent_threads result to understand filtering
+    drop(store); // Release borrow before calling recent_threads
+    let recent = app.recent_threads();
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Recents Tab Output ═══",
+        Style::default().fg(theme::ACCENT_PRIMARY),
+    )]));
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  recent_threads() returned: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{} threads", recent.len()),
+            Style::default().fg(if recent.is_empty() { theme::ACCENT_ERROR } else { theme::ACCENT_SUCCESS }),
+        ),
+    ]));
+
+    if recent.is_empty() && !app.visible_projects.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "  ⚠ Visible projects selected but no threads returned!",
+            Style::default().fg(theme::ACCENT_WARNING),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            "    Possible causes: time filter too restrictive, all threads archived,",
+            Style::default().fg(theme::TEXT_DIM),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            "    or threads_by_project doesn't have entries for visible projects",
+            Style::default().fg(theme::TEXT_DIM),
+        )]));
+    }
+
+    lines
+}
+
 pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugStatsState) {
     // Calculate modal content width (approximate based on max_width and area)
     let modal_width = 120u16.min(area.width.saturating_sub(4));
@@ -792,6 +959,9 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::ETagQuery => {
             lines.extend(render_e_tag_query_tab(state));
         }
+        DebugStatsTab::DataStore => {
+            lines.extend(render_data_store_tab(app));
+        }
     }
 
     lines.push(Line::from(""));
@@ -802,7 +972,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::ETagQuery => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Enter", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" search • "),
@@ -812,7 +982,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::Subscriptions => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" tabs • "),
             Span::styled("↑↓", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" select • "),
@@ -824,7 +994,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         _ => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-4", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Esc", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" close"),

@@ -1853,7 +1853,17 @@ fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('3') => {
             if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.switch_tab(DebugStatsTab::Negentropy);
+            }
+        }
+        KeyCode::Char('4') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
                 state.switch_tab(DebugStatsTab::ETagQuery);
+            }
+        }
+        KeyCode::Char('5') => {
+            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                state.switch_tab(DebugStatsTab::DataStore);
             }
         }
         // Left/Right arrows - switch tabs or panes depending on context
