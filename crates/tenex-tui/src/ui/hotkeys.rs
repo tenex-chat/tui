@@ -73,7 +73,6 @@ pub enum HotkeyId {
     CopyMessage,
     ViewRawEvent,
     OpenTrace,
-    AgentSettings,
     StopAgent,
     GoToParent,
     ToggleSidebar,
@@ -694,13 +693,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Open Trace",
         "Message",
         &[HotkeyContext::ChatNormal],
-    ),
-    HotkeyBinding::shift(
-        HotkeyId::AgentSettings,
-        KeyCode::Char('S'),
-        "Agent Settings",
-        "Agent",
-        &[HotkeyContext::ChatNormal, HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::new(
         HotkeyId::StopAgent,

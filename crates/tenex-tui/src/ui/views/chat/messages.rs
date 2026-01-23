@@ -573,10 +573,12 @@ pub(crate) fn render_messages_panel(
                         // Get thread info from data store
                         // NOTE: We get branch from the delegated thread's root message,
                         // NOT from the delegation tool-call event (which has the wrong branch)
-                        let (title, agent_name, status, activity, is_busy, thread_branch) = {
+                        let (title, from_agent_name, to_agent_name, status, activity, is_busy, thread_branch) = {
                             let store = app.data_store.borrow();
                             // Check if any agents are working on this delegation
                             let is_busy = store.is_event_busy(thread_id);
+                            // Get the "from" agent name (who made the delegation call)
+                            let from_name = store.get_profile_name(parent_pubkey);
                             if let Some(t) = store.get_thread_by_id(thread_id) {
                                 let title = if t.title == "Untitled" || t.title.is_empty() {
                                     t.content.chars().take(50).collect::<String>()
@@ -594,9 +596,17 @@ pub(crate) fn render_messages_panel(
                                 let root_branch = messages.iter()
                                     .find(|m| m.id == *thread_id)
                                     .and_then(|m| m.branch.clone());
+                                // Get the "to" agent name from the thread's p_tags (who was delegated TO)
+                                // If no p_tags, fall back to the thread creator's pubkey
+                                let to_name = if !t.p_tags.is_empty() {
+                                    store.get_profile_name(&t.p_tags[0])
+                                } else {
+                                    store.get_profile_name(&t.pubkey)
+                                };
                                 (
                                     title,
-                                    store.get_profile_name(&t.pubkey),
+                                    from_name,
+                                    to_name,
                                     t.status_label.clone(),
                                     activity,
                                     is_busy,
@@ -605,6 +615,7 @@ pub(crate) fn render_messages_panel(
                             } else {
                                 (
                                     format!("delegation: {}", &thread_id[..8.min(thread_id.len())]),
+                                    from_name,
                                     String::new(),
                                     None,
                                     String::new(),
@@ -614,7 +625,7 @@ pub(crate) fn render_messages_panel(
                             }
                         };
 
-                        if agent_name.is_empty() {
+                        if to_agent_name.is_empty() {
                             // Thread not found - show ID only
                             messages_text.push(Line::from(vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
@@ -662,33 +673,32 @@ pub(crate) fn render_messages_panel(
                                 Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                             ]));
 
-                            // Agent and status line: │  │ @agent · Done ·  branch        │
-                            let mut agent_content = format!(" @{}", agent_name);
-                            if is_busy {
-                                agent_content.push_str(&format!(" · {} working...", app.spinner_char()));
-                            } else if let Some(ref status_label) = status {
-                                agent_content.push_str(&format!(" · {}", status_label));
-                            }
-                            if let Some(ref branch_name) = thread_branch {
-                                agent_content.push_str(&format!(" ·  {}", branch_name));
-                            }
-                            let agent_display: String = agent_content.chars().take(card_inner_width).collect();
-                            let agent_padding = card_inner_width.saturating_sub(agent_display.chars().count());
-                            let agent_pad_str: String = " ".repeat(agent_padding);
-
+                            // Agent and status line: │  │ @from -> @to · Done ·  branch        │
                             // Build agent line with proper coloring
                             let mut agent_spans = vec![
                                 Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
                                 Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
                                 Span::styled(
-                                    format!(" @{}", agent_name),
+                                    format!(" @{}", from_agent_name),
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
                                 ),
+                                Span::styled(
+                                    " → ",
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ),
+                                Span::styled(
+                                    format!("@{}", to_agent_name),
+                                    Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
+                                ),
                             ];
+                            // Calculate content length for padding
+                            let mut content_len = 1 + from_agent_name.len() + 4 + to_agent_name.len(); // " @from -> @to" = 1 + len + 4 + len
                             if is_busy {
                                 agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                let working_text = format!("{} working...", app.spinner_char());
+                                content_len += 3 + working_text.len();
                                 agent_spans.push(Span::styled(
-                                    format!("{} working...", app.spinner_char()),
+                                    working_text,
                                     Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
                                 ));
                             } else if let Some(ref status_label) = status {
@@ -698,15 +708,20 @@ pub(crate) fn render_messages_panel(
                                     theme::ACCENT_WARNING
                                 };
                                 agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                content_len += 3 + status_label.len();
                                 agent_spans.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
                             }
                             if let Some(ref branch_name) = thread_branch {
                                 agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                let branch_display = format!(" {}", branch_name);
+                                content_len += 3 + branch_display.len();
                                 agent_spans.push(Span::styled(
-                                    format!(" {}", branch_name),
+                                    branch_display,
                                     Style::default().fg(theme::ACCENT_SPECIAL).bg(bg),
                                 ));
                             }
+                            let agent_padding = card_inner_width.saturating_sub(content_len);
+                            let agent_pad_str: String = " ".repeat(agent_padding);
                             agent_spans.push(Span::styled(agent_pad_str, Style::default().bg(bg)));
                             agent_spans.push(Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)));
                             messages_text.push(Line::from(agent_spans));
