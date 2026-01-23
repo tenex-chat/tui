@@ -17,6 +17,29 @@ use crate::ui::{App, HomeTab, InputMode, ModalState, View};
 // HOME VIEW
 // =============================================================================
 
+/// Get thread ID at a given index for the current home tab
+fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
+    match app.home_panel_focus {
+        HomeTab::Recent => {
+            let threads = get_hierarchical_threads(app);
+            threads.get(index).map(|h| h.thread.id.clone())
+        }
+        HomeTab::Inbox => {
+            let items = app.inbox_items();
+            items.get(index).and_then(|item| item.thread_id.clone())
+        }
+        HomeTab::Status => {
+            let items = app.status_threads();
+            items.get(index).map(|(thread, _)| thread.id.clone())
+        }
+        HomeTab::Search => {
+            let items = app.search_results();
+            items.get(index).map(|result| result.thread.id.clone())
+        }
+        HomeTab::Reports => None, // Reports are not threads
+    }
+}
+
 pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let code = key.code;
     let modifiers = key.modifiers;
@@ -165,8 +188,23 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             } else {
                 let current = app.current_selection();
+                // If Shift is held, add current item to multi-selection before moving
+                if has_shift {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                        app.add_thread_to_multi_select(&thread_id);
+                    }
+                } else {
+                    // Clear multi-selection when navigating without Shift
+                    app.clear_multi_selection();
+                }
                 if current > 0 {
                     app.set_current_selection(current - 1);
+                    // Also add the new position to selection when Shift is held
+                    if has_shift {
+                        if let Some(thread_id) = get_thread_id_at_index(app, current - 1) {
+                            app.add_thread_to_multi_select(&thread_id);
+                        }
+                    }
                 }
             }
         }
@@ -186,8 +224,23 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Search => app.search_results().len().saturating_sub(1),
                 };
+                // If Shift is held, add current item to multi-selection before moving
+                if has_shift {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                        app.add_thread_to_multi_select(&thread_id);
+                    }
+                } else {
+                    // Clear multi-selection when navigating without Shift
+                    app.clear_multi_selection();
+                }
                 if current < max {
                     app.set_current_selection(current + 1);
+                    // Also add the new position to selection when Shift is held
+                    if has_shift {
+                        if let Some(thread_id) = get_thread_id_at_index(app, current + 1) {
+                            app.add_thread_to_multi_select(&thread_id);
+                        }
+                    }
                 }
             }
         }
@@ -380,14 +433,26 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.set_status("All threads expanded");
             }
         }
-        // Vim-style navigation (j/k)
-        KeyCode::Char('k') if !app.sidebar_focused => {
+        // Vim-style navigation (j/k) with Shift support for multi-select
+        KeyCode::Char('k') | KeyCode::Char('K') if !app.sidebar_focused => {
             let current = app.current_selection();
+            if has_shift {
+                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                    app.add_thread_to_multi_select(&thread_id);
+                }
+            } else {
+                app.clear_multi_selection();
+            }
             if current > 0 {
                 app.set_current_selection(current - 1);
+                if has_shift {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current - 1) {
+                        app.add_thread_to_multi_select(&thread_id);
+                    }
+                }
             }
         }
-        KeyCode::Char('j') if !app.sidebar_focused => {
+        KeyCode::Char('j') | KeyCode::Char('J') if !app.sidebar_focused => {
             let current = app.current_selection();
             let max = match app.home_panel_focus {
                 HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
@@ -396,8 +461,38 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
                 HomeTab::Search => app.search_results().len().saturating_sub(1),
             };
+            if has_shift {
+                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                    app.add_thread_to_multi_select(&thread_id);
+                }
+            } else {
+                app.clear_multi_selection();
+            }
             if current < max {
                 app.set_current_selection(current + 1);
+                if has_shift {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current + 1) {
+                        app.add_thread_to_multi_select(&thread_id);
+                    }
+                }
+            }
+        }
+        // Archive selected conversations ('a')
+        KeyCode::Char('a') if !app.sidebar_focused && app.home_panel_focus != HomeTab::Reports => {
+            if !app.multi_selected_threads.is_empty() {
+                // Archive all multi-selected
+                app.archive_multi_selected();
+            } else {
+                // Archive just the current selection
+                let current = app.current_selection();
+                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                    let is_archived = app.toggle_thread_archived(&thread_id);
+                    if is_archived {
+                        app.set_status("Archived conversation");
+                    } else {
+                        app.set_status("Unarchived conversation");
+                    }
+                }
             }
         }
         // Esc to clear Reports search filter
@@ -469,7 +564,7 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         .unwrap_or_else(|| "New".to_string());
                     let tab_idx = app.open_draft_tab(&a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
-                    app.chat_editor.clear();
+                    app.chat_editor_mut().clear();
                 } else {
                     app.visible_projects.clear();
                     app.visible_projects.insert(a_tag);
