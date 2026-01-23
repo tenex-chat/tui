@@ -1,6 +1,5 @@
 use crate::models::AskQuestion;
 use crate::ui::modal::AskModalState;
-use crate::ui::ask_input::InputMode;
 use crate::ui::card;
 use crate::ui::theme;
 use ratatui::{
@@ -94,20 +93,7 @@ pub fn render_inline_ask_lines(
     }
 
     // === Options ===
-    if input_state.mode == InputMode::CustomInput {
-        // Show custom input mode
-        let custom_text = format!("  {}", input_state.custom_input);
-        let cursor_indicator = "▌";
-        let mut custom_spans: Vec<Span<'static>> = vec![
-            Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-            Span::styled(" ", Style::default().bg(bg)),
-            Span::styled(custom_text.clone(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
-            Span::styled(cursor_indicator.to_string(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
-        ];
-        let custom_len = 2 + custom_text.len() + cursor_indicator.len();
-        pad_to_width(&mut custom_spans, custom_len);
-        lines.push(Line::from(custom_spans));
-    } else if let Some(question) = input_state.current_question() {
+    if let Some(question) = input_state.current_question() {
         match question {
             AskQuestion::SingleSelect { suggestions, .. } => {
                 // Render options
@@ -131,26 +117,38 @@ pub fn render_inline_ask_lines(
                     lines.push(Line::from(opt_spans));
                 }
 
-                // Custom input option at the end
+                // Custom input option at the end - show inline input when selected
                 let custom_idx = suggestions.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
                 let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-                let custom_style = if is_custom_selected {
-                    Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED).bg(bg)
-                };
 
-                let custom_option_text =
-                    format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
-                let mut custom_opt_spans: Vec<Span<'static>> = vec![
-                    Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                    Span::styled(" ", Style::default().bg(bg)),
-                    Span::styled(custom_option_text.clone(), custom_style),
-                ];
-                let custom_opt_len = 2 + custom_option_text.len();
-                pad_to_width(&mut custom_opt_spans, custom_opt_len);
-                lines.push(Line::from(custom_opt_spans));
+                if is_custom_selected {
+                    // Show inline input at this option
+                    let prefix = format!("{}{}. ", custom_marker, custom_idx + 1);
+                    let cursor_indicator = "▌";
+                    let mut custom_opt_spans: Vec<Span<'static>> = vec![
+                        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                        Span::styled(" ", Style::default().bg(bg)),
+                        Span::styled(prefix.clone(), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)),
+                        Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                        Span::styled(cursor_indicator.to_string(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                    ];
+                    let custom_opt_len = 2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
+                    pad_to_width(&mut custom_opt_spans, custom_opt_len);
+                    lines.push(Line::from(custom_opt_spans));
+                } else {
+                    let custom_style = Style::default().fg(theme::TEXT_MUTED).bg(bg);
+                    let custom_option_text =
+                        format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
+                    let mut custom_opt_spans: Vec<Span<'static>> = vec![
+                        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                        Span::styled(" ", Style::default().bg(bg)),
+                        Span::styled(custom_option_text.clone(), custom_style),
+                    ];
+                    let custom_opt_len = 2 + custom_option_text.len();
+                    pad_to_width(&mut custom_opt_spans, custom_opt_len);
+                    lines.push(Line::from(custom_opt_spans));
+                }
             }
             AskQuestion::MultiSelect { options, .. } => {
                 // Render options with checkboxes
@@ -177,33 +175,50 @@ pub fn render_inline_ask_lines(
                     lines.push(Line::from(opt_spans));
                 }
 
-                // Custom input option
+                // Custom input option - show inline input when selected
                 let custom_idx = options.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
                 let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-                let custom_style = if is_custom_selected {
-                    Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED).bg(bg)
-                };
 
-                let custom_option_text =
-                    format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
-                let mut custom_opt_spans: Vec<Span<'static>> = vec![
-                    Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
-                    Span::styled(" ", Style::default().bg(bg)),
-                    Span::styled(custom_option_text.clone(), custom_style),
-                ];
-                let custom_opt_len = 2 + custom_option_text.len();
-                pad_to_width(&mut custom_opt_spans, custom_opt_len);
-                lines.push(Line::from(custom_opt_spans));
+                if is_custom_selected {
+                    // Show inline input at this option
+                    let prefix = format!("{}{}. ", custom_marker, custom_idx + 1);
+                    let cursor_indicator = "▌";
+                    let mut custom_opt_spans: Vec<Span<'static>> = vec![
+                        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                        Span::styled(" ", Style::default().bg(bg)),
+                        Span::styled(prefix.clone(), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)),
+                        Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                        Span::styled(cursor_indicator.to_string(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                    ];
+                    let custom_opt_len = 2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
+                    pad_to_width(&mut custom_opt_spans, custom_opt_len);
+                    lines.push(Line::from(custom_opt_spans));
+                } else {
+                    let custom_style = Style::default().fg(theme::TEXT_MUTED).bg(bg);
+                    // No "Or" for multiselect - just "Type your own answer..."
+                    let custom_option_text =
+                        format!("{}{}. Type your own answer...", custom_marker, custom_idx + 1);
+                    let mut custom_opt_spans: Vec<Span<'static>> = vec![
+                        Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
+                        Span::styled(" ", Style::default().bg(bg)),
+                        Span::styled(custom_option_text.clone(), custom_style),
+                    ];
+                    let custom_opt_len = 2 + custom_option_text.len();
+                    pad_to_width(&mut custom_opt_spans, custom_opt_len);
+                    lines.push(Line::from(custom_opt_spans));
+                }
             }
         }
     }
 
     // === Help bar ===
-    let help_text = if input_state.mode == InputMode::CustomInput {
-        "Enter submit · Esc cancel"
+    let help_text = if input_state.is_custom_option_selected() {
+        if input_state.custom_input.is_empty() {
+            "Type to enter custom answer · ↑ previous option · Esc cancel"
+        } else {
+            "Enter submit · Esc clear · ← → cursor"
+        }
     } else if input_state.is_multi_select() {
         "Enter select · Space toggle · ↑↓ navigate · ← back · → skip · Esc cancel"
     } else {
@@ -326,67 +341,54 @@ fn render_single_select(
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
-    // Custom input mode - show the text input
-    if input_state.mode == InputMode::CustomInput {
-        let custom_text = format!("  {}", input_state.custom_input);
-        let cursor_pos = input_state.custom_cursor + 2;
+    // Show numbered options with selection indicator
+    let items: Vec<ListItem> = suggestions
+        .iter()
+        .enumerate()
+        .map(|(i, suggestion)| {
+            let is_selected = i == input_state.selected_option_index;
+            let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
 
-        let input_widget = Paragraph::new(custom_text)
-            .style(Style::default().fg(theme::ACCENT_WARNING))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme::ACCENT_SUCCESS))
-                    .title(" Type your answer ")
-            );
+            let style = if is_selected {
+                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::TEXT_PRIMARY)
+            };
 
-        f.render_widget(input_widget, layout[1]);
-        f.set_cursor_position((
-            layout[1].x + cursor_pos as u16 + 1,
-            layout[1].y + 1,
-        ));
-    } else {
-        // Show numbered options with selection indicator
-        let items: Vec<ListItem> = suggestions
-            .iter()
-            .enumerate()
-            .map(|(i, suggestion)| {
-                let is_selected = i == input_state.selected_option_index;
-                let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+            ListItem::new(Line::from(vec![
+                Span::raw(marker),
+                Span::styled(format!("{}. ", i + 1), style),
+                Span::styled(suggestion, style),
+            ]))
+        })
+        .collect();
 
-                let style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                };
+    // Custom input option at the end - show inline input when selected
+    let custom_idx = suggestions.len();
+    let is_custom_selected = custom_idx == input_state.selected_option_index;
+    let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
 
-                ListItem::new(Line::from(vec![
-                    Span::raw(marker),
-                    Span::styled(format!("{}. ", i + 1), style),
-                    Span::styled(suggestion, style),
-                ]))
-            })
-            .collect();
-
-        // Add "Or type your own answer..." option at the end
-        let custom_idx = suggestions.len();
-        let is_custom_selected = custom_idx == input_state.selected_option_index;
-        let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let custom_style = if is_custom_selected {
-            Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-
-        let mut all_items = items;
+    let mut all_items = items;
+    if is_custom_selected {
+        // Show inline input at this option
+        let cursor_indicator = "▌";
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
+            Span::styled(format!("{}. ", custom_idx + 1), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(cursor_indicator, Style::default().fg(theme::ACCENT_WARNING)),
+        ])));
+    } else {
+        let custom_style = Style::default().fg(theme::TEXT_MUTED);
+        all_items.push(ListItem::new(Line::from(vec![
+            Span::raw(custom_marker),
+            Span::styled(format!("{}. ", custom_idx + 1), custom_style),
             Span::styled("Or type your own answer...", custom_style),
         ])));
-
-        let list = List::new(all_items);
-        f.render_widget(list, layout[1]);
     }
+
+    let list = List::new(all_items);
+    f.render_widget(list, layout[1]);
 }
 
 /// Render multi-select question with checkboxes
@@ -409,84 +411,82 @@ fn render_multi_select(
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
-    // Custom input mode - show the text input
-    if input_state.mode == InputMode::CustomInput {
-        let custom_text = format!("  {}", input_state.custom_input);
-        let cursor_pos = input_state.custom_cursor + 2;
+    // Show numbered options with checkboxes
+    let items: Vec<ListItem> = options
+        .iter()
+        .enumerate()
+        .map(|(i, option)| {
+            let is_selected = i == input_state.selected_option_index;
+            let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
 
-        let input_widget = Paragraph::new(custom_text)
-            .style(Style::default().fg(theme::ACCENT_WARNING))
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme::ACCENT_SUCCESS))
-                    .title(" Type your answer ")
-            );
+            let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+            let checkbox = if is_checked { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
 
-        f.render_widget(input_widget, layout[1]);
-        f.set_cursor_position((
-            layout[1].x + cursor_pos as u16 + 1,
-            layout[1].y + 1,
-        ));
-    } else {
-        // Show numbered options with checkboxes
-        let items: Vec<ListItem> = options
-            .iter()
-            .enumerate()
-            .map(|(i, option)| {
-                let is_selected = i == input_state.selected_option_index;
-                let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
+            let style = if is_selected {
+                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::TEXT_PRIMARY)
+            };
 
-                let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-                let checkbox = if is_checked { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
+            ListItem::new(Line::from(vec![
+                Span::raw(marker),
+                Span::styled(format!("{}. ", i + 1), style),
+                Span::styled(checkbox, style),
+                Span::styled(option, style),
+            ]))
+        })
+        .collect();
 
-                let style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                };
+    // Custom input option - show inline input when selected
+    let custom_idx = options.len();
+    let is_custom_selected = custom_idx == input_state.selected_option_index;
+    let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
 
-                ListItem::new(Line::from(vec![
-                    Span::raw(marker),
-                    Span::styled(format!("{}. ", i + 1), style),
-                    Span::styled(checkbox, style),
-                    Span::styled(option, style),
-                ]))
-            })
-            .collect();
-
-        // Add "Or type your own answer..." option
-        let custom_idx = options.len();
-        let is_custom_selected = custom_idx == input_state.selected_option_index;
-        let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-        let custom_style = if is_custom_selected {
-            Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(theme::TEXT_MUTED)
-        };
-
-        let mut all_items = items;
+    let mut all_items = items;
+    if is_custom_selected {
+        // Show inline input at this option
+        let cursor_indicator = "▌";
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
-            Span::styled("Or type your own answer...", custom_style),
+            Span::styled(format!("{}. ", custom_idx + 1), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(cursor_indicator, Style::default().fg(theme::ACCENT_WARNING)),
         ])));
-
-        let list = List::new(all_items);
-        f.render_widget(list, layout[1]);
+    } else {
+        let custom_style = Style::default().fg(theme::TEXT_MUTED);
+        // No "Or" for multiselect - just "Type your own answer..."
+        all_items.push(ListItem::new(Line::from(vec![
+            Span::raw(custom_marker),
+            Span::styled(format!("{}. ", custom_idx + 1), custom_style),
+            Span::styled("Type your own answer...", custom_style),
+        ])));
     }
+
+    let list = List::new(all_items);
+    f.render_widget(list, layout[1]);
 }
 
 /// Render help bar showing keyboard shortcuts
 fn render_help_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputState, area: Rect) {
-    let help_text = if input_state.mode == InputMode::CustomInput {
-        vec![
-            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
-            Span::raw(" submit · "),
-            Span::styled("Shift+Enter", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-            Span::raw(" newline · "),
-            Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
-            Span::raw(" cancel"),
-        ]
+    let help_text = if input_state.is_custom_option_selected() {
+        if input_state.custom_input.is_empty() {
+            vec![
+                Span::raw("Type to enter custom answer · "),
+                Span::styled("↑", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::raw(" previous option · "),
+                Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+                Span::raw(" cancel"),
+            ]
+        } else {
+            vec![
+                Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::raw(" submit · "),
+                Span::styled("← →", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::raw(" cursor · "),
+                Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+                Span::raw(" clear"),
+            ]
+        }
     } else if input_state.is_multi_select() {
         vec![
             Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
