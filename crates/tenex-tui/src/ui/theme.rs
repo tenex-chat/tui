@@ -16,6 +16,9 @@ pub const BG_CARD: Color = Color::Rgb(18, 18, 18);
 /// Selected item background - subtle highlight (like bg-neutral-800)
 pub const BG_SELECTED: Color = Color::Rgb(32, 32, 32);
 
+/// Active tab background - very subtle lift
+pub const BG_TAB_ACTIVE: Color = Color::Rgb(28, 28, 32);
+
 /// Search match highlight background - subtle yellow tint
 pub const BG_SEARCH_MATCH: Color = Color::Rgb(60, 55, 30);
 
@@ -262,7 +265,10 @@ pub fn markdown_image() -> Style {
 // -----------------------------------------------------------------------------
 
 pub fn tab_active() -> Style {
-    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(TEXT_PRIMARY)
+        .bg(BG_TAB_ACTIVE)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn tab_inactive() -> Style {

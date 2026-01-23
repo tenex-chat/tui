@@ -15,9 +15,13 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     let bg_block = Block::default().style(Style::default().bg(ui::theme::BG_APP));
     f.render_widget(bg_block, f.area());
 
-    // Home view has its own chrome - give it full area
+    // Home and Chat views have their own chrome - give them full area
     if app.view == View::Home {
         ui::views::render_home(f, app, f.area());
+        return;
+    }
+    if app.view == View::Chat {
+        ui::views::render_chat(f, app, f.area());
         return;
     }
 

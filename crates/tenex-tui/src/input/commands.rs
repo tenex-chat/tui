@@ -485,7 +485,7 @@ pub static COMMANDS: &[Command] = &[
 
                 app.selected_agent = inherited_agent;
                 app.selected_branch = inherited_branch;
-                app.chat_editor.clear();
+                app.chat_editor_mut().clear();
                 app.set_status("New conversation (same project, agent, and branch)");
             }
         },
@@ -676,8 +676,20 @@ pub static COMMANDS: &[Command] = &[
 ];
 
 /// Get commands available for the current app state.
+/// Returns commands in display order (sorted by section name, then by definition order within section).
 pub fn available_commands(app: &App) -> Vec<&'static Command> {
-    COMMANDS.iter().filter(|c| (c.available)(app)).collect()
+    use std::collections::BTreeMap;
+
+    let available: Vec<&'static Command> = COMMANDS.iter().filter(|c| (c.available)(app)).collect();
+
+    // Group by section (BTreeMap sorts alphabetically by key)
+    let mut sections_map: BTreeMap<&str, Vec<&'static Command>> = BTreeMap::new();
+    for cmd in available {
+        sections_map.entry(cmd.section).or_default().push(cmd);
+    }
+
+    // Flatten back to a single vec in section-sorted order
+    sections_map.into_values().flatten().collect()
 }
 
 /// Execute a command by its key. Returns true if a command was executed.

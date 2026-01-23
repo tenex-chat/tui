@@ -58,7 +58,7 @@ impl PrefixTrigger {
 ///
 /// Returns `true` if the input text is completely empty (no text, no attachments).
 pub fn should_check_prefix(app: &App) -> bool {
-    app.chat_editor.text.is_empty() && !app.chat_editor.has_attachments()
+    app.chat_editor().text.is_empty() && !app.chat_editor().has_attachments()
 }
 
 /// Attempts to handle a character as a prefix trigger.
