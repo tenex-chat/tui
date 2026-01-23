@@ -23,6 +23,8 @@ pub struct ProjectStatus {
     pub branches: Vec<String>,
     /// All available models from model tags (including unassigned ones)
     pub all_models: Vec<String>,
+    /// All available tools from tool tags (including unassigned ones)
+    pub all_tools: Vec<String>,
     pub created_at: u64,
     /// The pubkey of the backend that published this status event
     pub backend_pubkey: String,
@@ -89,9 +91,10 @@ impl ProjectStatus {
         let mut agent_map: HashMap<String, ProjectAgent> = HashMap::new();
         let mut branches: Vec<String> = Vec::new();
         let mut all_models: Vec<String> = Vec::new();
+        let mut all_tools: Vec<String> = Vec::new();
         let mut is_first_agent = true;
 
-        // First pass: collect project coordinate, agents, branches, and all models
+        // First pass: collect project coordinate, agents, branches, all models, and all tools
         for tag in &tags {
             if tag.is_empty() {
                 continue;
@@ -127,13 +130,21 @@ impl ProjectStatus {
                         all_models.push(tag[1].clone());
                     }
                 }
+                "tool" => {
+                    // Collect tool name (tag[1]) regardless of agent assignments
+                    if tag.len() >= 2 {
+                        all_tools.push(tag[1].clone());
+                    }
+                }
                 _ => {}
             }
         }
 
-        // Deduplicate and sort models
+        // Deduplicate and sort models and tools
         all_models.sort();
         all_models.dedup();
+        all_tools.sort();
+        all_tools.dedup();
 
         // Second pass: apply model and tool tags to agents
         for tag in &tags {
@@ -174,6 +185,7 @@ impl ProjectStatus {
             agents,
             branches,
             all_models,
+            all_tools,
             created_at,
             backend_pubkey,
         })
