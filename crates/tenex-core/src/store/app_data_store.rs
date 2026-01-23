@@ -913,7 +913,10 @@ impl AppDataStore {
 
     /// Get all threads across all projects, sorted by last_activity descending
     /// Returns (Thread, project_a_tag) tuples
-    /// DEPRECATED: Use get_threads_for_projects instead to avoid pre-filter truncation
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use get_recent_threads_for_projects instead to avoid pre-filter truncation"
+    )]
     pub fn get_all_recent_threads(&self, limit: usize) -> Vec<(Thread, String)> {
         let mut all_threads: Vec<(Thread, String)> = self.threads_by_project
             .iter()
@@ -927,22 +930,25 @@ impl AppDataStore {
         all_threads
     }
 
-    /// Get threads for specific projects, sorted by last_activity descending.
-    /// Filters by project first (before any truncation), then applies optional time filter.
+    /// Get recent threads for specific projects, sorted by last_activity descending.
+    /// Filters by project first (before any truncation), then applies optional time filter,
+    /// then applies optional limit to final sorted results.
     /// Returns (Thread, project_a_tag) tuples.
     ///
     /// # Arguments
     /// * `visible_projects` - Set of project a_tags to include threads from
     /// * `time_cutoff` - Optional Unix timestamp; only threads with last_activity >= cutoff are included
-    pub fn get_threads_for_projects(
+    /// * `limit` - Optional limit on the number of threads returned (applied AFTER sorting)
+    pub fn get_recent_threads_for_projects(
         &self,
         visible_projects: &std::collections::HashSet<String>,
         time_cutoff: Option<u64>,
+        limit: Option<usize>,
     ) -> Vec<(Thread, String)> {
         let mut threads: Vec<(Thread, String)> = self.threads_by_project
             .iter()
             // Filter by visible projects FIRST (before any collection)
-            .filter(|(a_tag, _)| visible_projects.contains(*a_tag))
+            .filter(|(a_tag, _)| visible_projects.contains(a_tag.as_str()))
             .flat_map(|(a_tag, threads)| {
                 threads.iter().map(|t| (t.clone(), a_tag.clone()))
             })
@@ -957,6 +963,12 @@ impl AppDataStore {
 
         // Sort by last_activity descending (most recent first)
         threads.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
+
+        // Apply optional limit AFTER sorting
+        if let Some(max) = limit {
+            threads.truncate(max);
+        }
+
         threads
     }
 
