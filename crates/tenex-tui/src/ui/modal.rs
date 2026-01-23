@@ -757,6 +757,76 @@ impl AgentSettingsState {
     }
 }
 
+/// A history search result entry
+#[derive(Debug, Clone)]
+pub struct HistorySearchEntry {
+    /// Event ID of the message
+    pub event_id: String,
+    /// Message content
+    pub content: String,
+    /// Created at timestamp
+    pub created_at: u64,
+    /// Project a-tag (if available)
+    pub project_a_tag: Option<String>,
+}
+
+/// State for the history search modal (Ctrl+R to search previous messages)
+#[derive(Debug, Clone)]
+pub struct HistorySearchState {
+    /// Search query text
+    pub query: String,
+    /// Selected index in results
+    pub selected_index: usize,
+    /// Whether to search across all projects (false = current project only)
+    pub all_projects: bool,
+    /// Current project a-tag (for filtering)
+    pub current_project_a_tag: Option<String>,
+    /// Cached search results
+    pub results: Vec<HistorySearchEntry>,
+}
+
+impl HistorySearchState {
+    pub fn new(current_project_a_tag: Option<String>) -> Self {
+        Self {
+            query: String::new(),
+            selected_index: 0,
+            all_projects: false,
+            current_project_a_tag,
+            results: Vec::new(),
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if !self.results.is_empty() && self.selected_index + 1 < self.results.len() {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn selected_entry(&self) -> Option<&HistorySearchEntry> {
+        self.results.get(self.selected_index)
+    }
+
+    pub fn toggle_all_projects(&mut self) {
+        self.all_projects = !self.all_projects;
+    }
+
+    pub fn add_char(&mut self, c: char) {
+        self.query.push(c);
+        self.selected_index = 0;
+    }
+
+    pub fn backspace(&mut self) {
+        self.query.pop();
+        self.selected_index = 0;
+    }
+}
+
 /// State for the draft navigator modal (shows saved named drafts)
 #[derive(Debug, Clone)]
 pub struct DraftNavigatorState {
@@ -932,15 +1002,145 @@ impl ReportCopyOption {
     }
 }
 
+/// Tab options for the debug stats modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DebugStatsTab {
+    #[default]
+    Events,
+    Subscriptions,
+    ETagQuery,
+}
+
+impl DebugStatsTab {
+    pub const ALL: [DebugStatsTab; 3] = [
+        DebugStatsTab::Events,
+        DebugStatsTab::Subscriptions,
+        DebugStatsTab::ETagQuery,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            DebugStatsTab::Events => "Events",
+            DebugStatsTab::Subscriptions => "Subscriptions",
+            DebugStatsTab::ETagQuery => "E-Tag Query",
+        }
+    }
+
+    pub fn index(&self) -> usize {
+        match self {
+            DebugStatsTab::Events => 0,
+            DebugStatsTab::Subscriptions => 1,
+            DebugStatsTab::ETagQuery => 2,
+        }
+    }
+
+    pub fn from_index(index: usize) -> Self {
+        match index {
+            0 => DebugStatsTab::Events,
+            1 => DebugStatsTab::Subscriptions,
+            2 => DebugStatsTab::ETagQuery,
+            _ => DebugStatsTab::Events,
+        }
+    }
+
+    pub fn next(&self) -> Self {
+        Self::from_index((self.index() + 1) % Self::ALL.len())
+    }
+
+    pub fn prev(&self) -> Self {
+        let len = Self::ALL.len();
+        Self::from_index((self.index() + len - 1) % len)
+    }
+}
+
+pub use tenex_core::stats::ETagQueryResult;
+
 /// Debug stats modal state
 #[derive(Debug, Clone, Default)]
 pub struct DebugStatsState {
+    pub active_tab: DebugStatsTab,
     pub scroll_offset: usize,
+    /// Input text for e-tag query (event ID to search for)
+    pub e_tag_query_input: String,
+    /// Results of the last e-tag query
+    pub e_tag_query_results: Vec<ETagQueryResult>,
+    /// Whether the query input is focused
+    pub e_tag_input_focused: bool,
+    /// Selected result index for scrolling through results
+    pub e_tag_selected_index: usize,
+    /// For subscriptions tab: list of available project filters (None = "All", Some = project a-tag)
+    pub sub_project_filters: Vec<Option<String>>,
+    /// Currently selected project filter index in sidebar
+    pub sub_selected_filter_index: usize,
+    /// Whether the sidebar is focused (vs the subscription list)
+    pub sub_sidebar_focused: bool,
 }
 
 impl DebugStatsState {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            active_tab: DebugStatsTab::Events,
+            scroll_offset: 0,
+            e_tag_query_input: String::new(),
+            e_tag_query_results: Vec::new(),
+            e_tag_input_focused: false,
+            e_tag_selected_index: 0,
+            sub_project_filters: vec![None], // Start with just "All"
+            sub_selected_filter_index: 0,
+            sub_sidebar_focused: true, // Start with sidebar focused
+        }
+    }
+
+    pub fn switch_tab(&mut self, tab: DebugStatsTab) {
+        self.active_tab = tab;
+        self.scroll_offset = 0; // Reset scroll when switching tabs
+        // Auto-focus input when switching to E-Tag Query tab
+        self.e_tag_input_focused = tab == DebugStatsTab::ETagQuery;
+        // Focus sidebar when switching to subscriptions tab
+        if tab == DebugStatsTab::Subscriptions {
+            self.sub_sidebar_focused = true;
+        }
+    }
+
+    /// Update the project filters from subscription stats
+    pub fn update_project_filters(&mut self, stats: &tenex_core::stats::SubscriptionStats) {
+        use std::collections::HashSet;
+
+        let mut projects: HashSet<String> = HashSet::new();
+        for info in stats.subscriptions.values() {
+            if let Some(ref a_tag) = info.project_a_tag {
+                projects.insert(a_tag.clone());
+            }
+        }
+
+        // Build filter list: None (All), then sorted projects
+        let mut filters: Vec<Option<String>> = vec![None];
+        let mut sorted_projects: Vec<_> = projects.into_iter().collect();
+        sorted_projects.sort();
+        for project in sorted_projects {
+            filters.push(Some(project));
+        }
+
+        self.sub_project_filters = filters;
+        // Ensure selected index is still valid
+        if self.sub_selected_filter_index >= self.sub_project_filters.len() {
+            self.sub_selected_filter_index = 0;
+        }
+    }
+
+    /// Get the currently selected project filter (None = All)
+    pub fn selected_project_filter(&self) -> Option<&str> {
+        self.sub_project_filters
+            .get(self.sub_selected_filter_index)
+            .and_then(|f| f.as_deref())
+    }
+
+    pub fn next_tab(&mut self) {
+        self.switch_tab(self.active_tab.next());
+    }
+
+    pub fn prev_tab(&mut self) {
+        self.switch_tab(self.active_tab.prev());
     }
 }
 
@@ -1000,6 +1200,8 @@ pub enum ModalState {
     BackendApproval(BackendApprovalState),
     /// Debug stats modal (Ctrl+T D)
     DebugStats(DebugStatsState),
+    /// History search modal (Ctrl+R) - search through previous messages sent by user
+    HistorySearch(HistorySearchState),
 }
 
 impl Default for ModalState {
