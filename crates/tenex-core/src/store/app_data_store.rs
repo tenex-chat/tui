@@ -1,5 +1,5 @@
 use crate::events::PendingBackendApproval;
-use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectStatus, Report, Thread};
+use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -841,10 +841,15 @@ impl AppDataStore {
         self.project_statuses.get(a_tag)
     }
 
-    pub fn is_project_online(&self, a_tag: &str) -> bool {
+    /// Get online agents for a project (from ProjectStatus if online)
+    pub fn get_online_agents(&self, a_tag: &str) -> Option<&[ProjectAgent]> {
         self.project_statuses.get(a_tag)
-            .map(|s| s.is_online())
-            .unwrap_or(false)
+            .filter(|s| s.is_online())
+            .map(|s| s.agents.as_slice())
+    }
+
+    pub fn is_project_online(&self, a_tag: &str) -> bool {
+        self.get_online_agents(a_tag).is_some()
     }
 
     pub fn get_threads(&self, project_a_tag: &str) -> &[Thread] {
@@ -1248,23 +1253,14 @@ impl AppDataStore {
     /// Returns (event_id, thread_id, content, kind) for matching events.
     /// thread_id is extracted from e-tags (root marker) or is the event itself if it's a thread root.
     pub fn text_search(&self, query: &str, limit: i32) -> Vec<(String, Option<String>, String, u32)> {
-        eprintln!("[SEARCH] query='{}' limit={}", query, limit);
-
         let Ok(txn) = Transaction::new(&self.ndb) else {
-            eprintln!("[SEARCH] failed to create txn");
             return vec![];
         };
 
         // nostrdb only fulltext indexes kind:1 and kind:30023, so no need to filter
-        let result = self.ndb.text_search(&txn, query, None, limit);
-        eprintln!("[SEARCH] result={:?}", result.as_ref().map(|v| v.len()));
-
-        let Ok(notes) = result else {
-            eprintln!("[SEARCH] error from text_search");
+        let Ok(notes) = self.ndb.text_search(&txn, query, None, limit) else {
             return vec![];
         };
-
-        eprintln!("[SEARCH] found {} notes", notes.len());
         notes
             .iter()
             .map(|note| {
@@ -1278,6 +1274,123 @@ impl AppDataStore {
                 (event_id, thread_id, content, kind)
             })
             .collect()
+    }
+
+    /// Search for kind:1 messages sent by a specific pubkey.
+    /// Returns (event_id, content, created_at, project_a_tag) sorted by recency.
+    /// If query is empty, returns all messages from the pubkey (up to limit).
+    /// If project_a_tag is Some, filters to only that project.
+    pub fn search_user_messages(
+        &self,
+        user_pubkey: &str,
+        query: &str,
+        project_a_tag: Option<&str>,
+        limit: usize,
+    ) -> Vec<(String, String, u64, Option<String>)> {
+        // Use nostrdb text search if we have a query
+        if !query.trim().is_empty() {
+            let Ok(txn) = Transaction::new(&self.ndb) else {
+                return vec![];
+            };
+
+            let Ok(notes) = self.ndb.text_search(&txn, query, None, (limit * 8) as i32) else {
+                return vec![];
+            };
+
+            // Fail closed: if pubkey is invalid, return empty results (don't leak other users' messages)
+            let user_pubkey_bytes: [u8; 32] = match hex::decode(user_pubkey)
+                .ok()
+                .and_then(|b| b.try_into().ok())
+            {
+                Some(bytes) => bytes,
+                None => return vec![], // Invalid pubkey - fail closed
+            };
+
+            let mut results: Vec<(String, String, u64, Option<String>)> = notes
+                .iter()
+                .filter(|note| {
+                    // Filter by pubkey (always enforced now)
+                    if note.pubkey() != &user_pubkey_bytes {
+                        return false;
+                    }
+                    // Filter by kind:1
+                    if note.kind() != 1 {
+                        return false;
+                    }
+                    true
+                })
+                .filter_map(|note| {
+                    let event_id = hex::encode(note.id());
+                    let content = note.content().to_string();
+                    let created_at = note.created_at();
+
+                    // Extract project a-tag
+                    let note_project_a_tag = Self::extract_a_tag_from_note(note);
+
+                    // Filter by project if specified
+                    if let Some(filter_a_tag) = project_a_tag {
+                        if note_project_a_tag.as_deref() != Some(filter_a_tag) {
+                            return None;
+                        }
+                    }
+
+                    Some((event_id, content, created_at, note_project_a_tag))
+                })
+                .collect();
+
+            // Sort by recency (newest first)
+            results.sort_by(|a, b| b.2.cmp(&a.2));
+            results.truncate(limit);
+            results
+        } else {
+            // No query: use in-memory search from messages_by_thread
+            let user_pubkey_str = user_pubkey;
+            let mut results: Vec<(String, String, u64, Option<String>)> = Vec::new();
+
+            for (thread_id, messages) in &self.messages_by_thread {
+                // Find project a-tag for this thread
+                let thread_project_a_tag = self.threads_by_project
+                    .iter()
+                    .find_map(|(a_tag, threads)| {
+                        threads.iter().find(|t| t.id == *thread_id).map(|_| a_tag.clone())
+                    });
+
+                // Filter by project if specified
+                if let Some(filter_a_tag) = project_a_tag {
+                    if thread_project_a_tag.as_deref() != Some(filter_a_tag) {
+                        continue;
+                    }
+                }
+
+                for message in messages {
+                    if message.pubkey == user_pubkey_str {
+                        results.push((
+                            message.id.clone(),
+                            message.content.clone(),
+                            message.created_at,
+                            thread_project_a_tag.clone(),
+                        ));
+                    }
+                }
+            }
+
+            // Sort by recency (newest first)
+            results.sort_by(|a, b| b.2.cmp(&a.2));
+            results.truncate(limit);
+            results
+        }
+    }
+
+    /// Extract a-tag from a note's tags
+    fn extract_a_tag_from_note(note: &nostrdb::Note) -> Option<String> {
+        for tag in note.tags() {
+            if tag.get(0).and_then(|t| t.variant().str()) == Some("a") {
+                if let Some(a_tag_value) = tag.get(1).and_then(|t| t.variant().str()) {
+                    return Some(a_tag_value.to_string());
+                }
+            }
+        }
+        None
     }
 
     /// Extract thread ID from a note's e-tags (looking for "root" marker per NIP-10)
