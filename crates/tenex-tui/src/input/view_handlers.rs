@@ -157,6 +157,10 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.toggle_show_archived_projects();
             }
         }
+        KeyCode::Char('S') if has_shift && !app.sidebar_focused => {
+            // Toggle scheduled events filter from main panel
+            app.toggle_hide_scheduled();
+        }
         KeyCode::Tab => {
             app.home_panel_focus = match app.home_panel_focus {
                 HomeTab::Conversations => HomeTab::Inbox,

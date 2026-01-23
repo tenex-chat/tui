@@ -184,6 +184,12 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled("[showing archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
     }
 
+    // Show scheduled filter indicator
+    if app.hide_scheduled {
+        spans.push(Span::styled("   ", Style::default()));
+        spans.push(Span::styled("[hiding scheduled]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+    }
+
     let header_line = Line::from(spans);
 
     // Second line: tab indicator underline
@@ -476,6 +482,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if thread.is_scheduled {
+            line1.push(Span::styled(" ⏰ SCHED", Style::default().fg(theme::TEXT_MUTED)));
+        }
         if is_archived {
             line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
         }
@@ -559,6 +568,9 @@ fn render_card_content(
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
+        if thread.is_scheduled {
+            line1.push(Span::styled(" ⏰ SCHED", Style::default().fg(theme::TEXT_MUTED)));
+        }
         if is_archived {
             line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
         }
