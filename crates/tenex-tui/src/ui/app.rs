@@ -662,6 +662,10 @@ impl App {
                 })
                 .collect();
 
+            // Get reference_conversation_id from active tab if it exists
+            let reference_conversation_id = self.tabs.active_tab()
+                .and_then(|t| t.reference_conversation_id.clone());
+
             let draft = ChatDraft {
                 conversation_id,
                 text: editor.text.clone(), // Raw text, not build_full_content()
@@ -673,6 +677,7 @@ impl App {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
+                reference_conversation_id,
             };
             self.draft_storage.borrow_mut().save(draft);
         }
@@ -738,6 +743,7 @@ impl App {
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
+                reference_conversation_id: tab.reference_conversation_id.clone(),
             };
             self.draft_storage.borrow_mut().save(draft);
         }
@@ -827,6 +833,11 @@ impl App {
                 if draft.selected_branch.is_some() {
                     self.selected_branch = draft.selected_branch.clone();
                     draft_had_branch = true;
+                }
+
+                // Restore reference_conversation_id from draft into the active tab
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.reference_conversation_id = draft.reference_conversation_id.clone();
                 }
             } else {
                 tlog!("AGENT", "restore_chat_draft: no draft found for key");
