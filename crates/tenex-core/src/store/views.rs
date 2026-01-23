@@ -49,7 +49,10 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
             .kinds([1])
             .tags([project_a_tag], 'a')
             .build();
-        let thread_results = ndb.query(&txn, &[thread_filter], 1000)?;
+        // NOTE: We query ALL kind:1 events because nostrdb doesn't support filtering by "no e-tag".
+        // The limit must be high enough to capture all events; Thread::from_note will filter
+        // out messages (which have e-tags) keeping only thread roots.
+        let thread_results = ndb.query(&txn, &[thread_filter], 100_000)?;
 
         thread_results
             .iter()
