@@ -23,6 +23,8 @@ pub struct Thread {
     pub p_tags: Vec<String>,
     /// Ask event data if this thread contains questions
     pub ask_event: Option<AskEvent>,
+    /// Whether this thread is a scheduled event (has scheduled-task-id tag)
+    pub is_scheduled: bool,
 }
 
 impl Thread {
@@ -49,6 +51,7 @@ impl Thread {
         let mut has_e_tag = false;
         let mut parent_conversation_id: Option<String> = None;
         let mut p_tags = Vec::new();
+        let mut is_scheduled = false;
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -85,6 +88,9 @@ impl Thread {
                         p_tags.push(hex::encode(id_bytes));
                     }
                 }
+                Some("scheduled-task-id") => {
+                    is_scheduled = true;
+                }
                 _ => {}
             }
         }
@@ -111,6 +117,7 @@ impl Thread {
             parent_conversation_id,
             p_tags,
             ask_event,
+            is_scheduled,
         })
     }
 }

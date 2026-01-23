@@ -287,6 +287,8 @@ pub struct App {
     pub show_archived: bool,
     /// Whether to show archived projects in the sidebar
     pub show_archived_projects: bool,
+    /// Whether to hide scheduled events from conversation list
+    pub hide_scheduled: bool,
     /// Whether user explicitly selected an agent in the current conversation
     /// When true, don't auto-sync agent from conversation messages
     pub user_explicitly_selected_agent: bool,
@@ -377,6 +379,7 @@ impl App {
             vim_mode: VimMode::Normal,
             show_archived: false,
             show_archived_projects: false,
+            hide_scheduled: false,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
             input_context_focus: None,
@@ -1954,10 +1957,14 @@ impl App {
 
         let prefs = self.preferences.borrow();
 
-        // Only remaining filter is archive status (user preference, not data-layer concern)
+        // Remaining filters: archive status and scheduled events (user preferences)
         threads.into_iter()
             .filter(|(thread, _)| {
-                self.show_archived || !prefs.is_thread_archived(&thread.id)
+                // Archive filter
+                let archive_ok = self.show_archived || !prefs.is_thread_archived(&thread.id);
+                // Scheduled filter - hide scheduled if hide_scheduled is true
+                let scheduled_ok = !self.hide_scheduled || !thread.is_scheduled;
+                archive_ok && scheduled_ok
             })
             .collect()
     }
@@ -2424,6 +2431,7 @@ impl App {
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
         self.time_filter = prefs.time_filter();
         self.show_llm_metadata = prefs.show_llm_metadata();
+        self.hide_scheduled = prefs.hide_scheduled();
     }
 
     /// Save selected projects to preferences
@@ -3218,6 +3226,20 @@ impl App {
     /// Toggle archive status of a project
     pub fn toggle_project_archived(&mut self, project_a_tag: &str) -> bool {
         self.preferences.borrow_mut().toggle_project_archived(project_a_tag)
+    }
+
+    // ===== Scheduled Events Filter Methods =====
+
+    /// Toggle visibility of scheduled events
+    pub fn toggle_hide_scheduled(&mut self) {
+        self.hide_scheduled = !self.hide_scheduled;
+        // Persist to preferences
+        self.preferences.borrow_mut().set_hide_scheduled(self.hide_scheduled);
+        if self.hide_scheduled {
+            self.notify(Notification::info("Hiding scheduled events"));
+        } else {
+            self.notify(Notification::info("Showing scheduled events"));
+        }
     }
 
     // ===== Backend Trust Methods =====
