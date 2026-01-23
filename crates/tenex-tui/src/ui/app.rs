@@ -1894,10 +1894,11 @@ impl App {
         let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
 
         // Get threads from visible projects with time filter applied at the data layer
-        // This avoids the old bug where a hardcoded limit would truncate before visibility filtering
-        let threads = self.data_store.borrow().get_threads_for_projects(
+        // Limit to 100 for status view to prevent UI performance issues
+        let threads = self.data_store.borrow().get_recent_threads_for_projects(
             &self.visible_projects,
             time_cutoff,
+            Some(100),
         );
 
         let prefs = self.preferences.borrow();
@@ -1944,10 +1945,11 @@ impl App {
         let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
 
         // Get threads from visible projects with time filter applied at the data layer
-        // This avoids the old bug where a hardcoded limit would truncate before visibility filtering
-        let threads = self.data_store.borrow().get_threads_for_projects(
+        // Limit to 50 for recents tab to prevent UI/memory issues
+        let threads = self.data_store.borrow().get_recent_threads_for_projects(
             &self.visible_projects,
             time_cutoff,
+            Some(50),
         );
 
         let prefs = self.preferences.borrow();
