@@ -1010,14 +1010,16 @@ pub enum DebugStatsTab {
     Subscriptions,
     Negentropy,
     ETagQuery,
+    DataStore,
 }
 
 impl DebugStatsTab {
-    pub const ALL: [DebugStatsTab; 4] = [
+    pub const ALL: [DebugStatsTab; 5] = [
         DebugStatsTab::Events,
         DebugStatsTab::Subscriptions,
         DebugStatsTab::Negentropy,
         DebugStatsTab::ETagQuery,
+        DebugStatsTab::DataStore,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -1026,6 +1028,7 @@ impl DebugStatsTab {
             DebugStatsTab::Subscriptions => "Subscriptions",
             DebugStatsTab::Negentropy => "Negentropy",
             DebugStatsTab::ETagQuery => "E-Tag Query",
+            DebugStatsTab::DataStore => "Data Store",
         }
     }
 
@@ -1035,6 +1038,7 @@ impl DebugStatsTab {
             DebugStatsTab::Subscriptions => 1,
             DebugStatsTab::Negentropy => 2,
             DebugStatsTab::ETagQuery => 3,
+            DebugStatsTab::DataStore => 4,
         }
     }
 
@@ -1044,6 +1048,7 @@ impl DebugStatsTab {
             1 => DebugStatsTab::Subscriptions,
             2 => DebugStatsTab::Negentropy,
             3 => DebugStatsTab::ETagQuery,
+            4 => DebugStatsTab::DataStore,
             _ => DebugStatsTab::Events,
         }
     }
