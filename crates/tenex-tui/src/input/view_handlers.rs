@@ -36,6 +36,10 @@ fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
             let items = app.search_results();
             items.get(index).map(|result| result.thread.id.clone())
         }
+        HomeTab::Feed => {
+            let items = app.feed_items();
+            items.get(index).map(|item| item.thread_id.clone())
+        }
         HomeTab::Reports => None, // Reports are not threads
     }
 }
@@ -167,16 +171,18 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => HomeTab::Reports,
                 HomeTab::Reports => HomeTab::Status,
                 HomeTab::Status => HomeTab::Search,
-                HomeTab::Search => HomeTab::Conversations,
+                HomeTab::Search => HomeTab::Feed,
+                HomeTab::Feed => HomeTab::Conversations,
             };
         }
         KeyCode::BackTab if has_shift => {
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Search,
+                HomeTab::Conversations => HomeTab::Feed,
                 HomeTab::Inbox => HomeTab::Conversations,
                 HomeTab::Reports => HomeTab::Inbox,
                 HomeTab::Status => HomeTab::Reports,
                 HomeTab::Search => HomeTab::Status,
+                HomeTab::Feed => HomeTab::Search,
             };
         }
         KeyCode::Right => {
@@ -227,6 +233,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Search => app.search_results().len().saturating_sub(1),
+                    HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                 };
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
@@ -268,6 +275,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Search => app.search_results().len().saturating_sub(1),
+                    HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                 };
                 if current > max {
                     app.set_current_selection(max);
@@ -410,6 +418,22 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.open_thread_from_home(&result.thread, &result.project_a_tag);
                         }
                     }
+                    HomeTab::Feed => {
+                        let items = app.feed_items();
+                        if let Some(item) = items.get(idx) {
+                            // Find the thread and open it
+                            let thread = app.data_store.borrow()
+                                .get_threads(&item.project_a_tag)
+                                .iter()
+                                .find(|t| t.id == item.thread_id)
+                                .cloned();
+
+                            if let Some(thread) = thread {
+                                let project_a_tag = item.project_a_tag.clone();
+                                app.open_thread_from_home(&thread, &project_a_tag);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -464,6 +488,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
                 HomeTab::Search => app.search_results().len().saturating_sub(1),
+                HomeTab::Feed => app.feed_items().len().saturating_sub(1),
             };
             if has_shift {
                 if let Some(thread_id) = get_thread_id_at_index(app, current) {
