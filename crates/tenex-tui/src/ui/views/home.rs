@@ -24,12 +24,12 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
     let has_tabs = !app.open_tabs().is_empty();
 
-    // Layout: Header tabs | Main area | Help bar | Optional tab bar
+    // Layout: Header tabs | Main area | Bottom padding | Optional tab bar
     let chunks = if has_tabs {
         Layout::vertical([
             Constraint::Length(2), // Tab header
             Constraint::Min(0),    // Main area (sidebar + content)
-            Constraint::Length(1), // Help bar
+            Constraint::Length(1), // Bottom padding
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Open tabs bar
         ])
         .split(area)
@@ -37,7 +37,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         Layout::vertical([
             Constraint::Length(2), // Tab header
             Constraint::Min(0),    // Main area (sidebar + content)
-            Constraint::Length(1), // Help bar
+            Constraint::Length(1), // Bottom padding
         ])
         .split(area)
     };
@@ -67,8 +67,8 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Render sidebar on the right
     render_project_sidebar(f, app, main_chunks[1]);
 
-    // Single consolidated help bar
-    render_help_bar(f, app, chunks[2]);
+    // Bottom padding
+    render_bottom_padding(f, chunks[2]);
 
     // Open tabs bar (if tabs exist)
     if has_tabs {
@@ -1690,37 +1690,9 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(filter_widget, area);
 }
 
-fn render_help_bar(f: &mut Frame, app: &App, area: Rect) {
-    let hints = if app.sidebar_focused {
-        // Check if focused project is busy or offline
-        let (online, offline) = app.filtered_projects();
-        let online_count = online.len();
-        let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-        let is_busy = all_projects.get(app.sidebar_project_index)
-            .map(|p| app.data_store.borrow().is_project_busy(&p.a_tag()))
-            .unwrap_or(false);
-        let is_offline = app.sidebar_project_index >= online_count;
-
-        if is_busy {
-            "← back · ↑↓ navigate · Space toggle · S stop · Enter actions · q quit"
-        } else if is_offline {
-            "← back · ↑↓ navigate · Space toggle · b boot · Enter actions · q quit"
-        } else {
-            "← back · ↑↓ navigate · Space toggle · Enter actions · q quit"
-        }
-    } else {
-        match app.home_panel_focus {
-            HomeTab::Conversations => "→ projects · ↑↓ navigate · Space fold · c fold all · Enter open · n new · m filter · f time · A agents · q quit",
-            HomeTab::Inbox => "→ projects · ↑↓ navigate · Enter open · r mark read · m filter · f time · A agents · q quit",
-            HomeTab::Reports => "→ projects · / search · ↑↓ navigate · Enter view · Esc clear · A agents · q quit",
-            HomeTab::Status => "→ projects · ↑↓ navigate · Enter open · x archive · m filter · f time · A agents · q quit",
-            HomeTab::Search => "/ search · ↑↓ navigate · Enter open conversation · Esc clear · A agents · q quit",
-            HomeTab::Feed => "→ projects · ↑↓ navigate · Enter open thread · f time · A agents · q quit",
-        }
-    };
-
-    let help = Paragraph::new(hints).style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(help, area);
+fn render_bottom_padding(f: &mut Frame, area: Rect) {
+    let padding = Paragraph::new("").style(Style::default().bg(theme::BG_APP));
+    f.render_widget(padding, area);
 }
 
 /// Get the actual project at the given selection index
