@@ -66,15 +66,8 @@ pub static COMMANDS: &[Command] = &[
     // =========================================================================
     // HOME VIEW - Conversations/Inbox/Status tabs (main panel, not sidebar)
     // =========================================================================
-    Command {
-        key: 'n',
-        label: "New conversation",
-        section: "Conversation",
-        available: |app| app.view == View::Home && !app.sidebar_focused,
-        execute: |app| {
-            app.open_projects_modal(true);
-        },
-    },
+    // NOTE: 'n' is reserved as a fallback for "next tab" in command palette
+    // Use 'N' (Shift+N) for new conversation instead
     Command {
         key: 'o',
         label: "Open selected",
@@ -174,15 +167,8 @@ pub static COMMANDS: &[Command] = &[
             }
         },
     },
-    Command {
-        key: 'p',
-        label: "Switch project",
-        section: "Filter",
-        available: |app| app.view == View::Home && !app.sidebar_focused,
-        execute: |app| {
-            app.open_projects_modal(false);
-        },
-    },
+    // NOTE: 'p' is reserved as a fallback for "prev tab" in command palette
+    // Switch project is available via direct 'p' key in Home view (not via command palette)
     Command {
         key: 'f',
         label: "Time filter",
@@ -298,20 +284,48 @@ pub static COMMANDS: &[Command] = &[
         label: "New conversation (current project)",
         section: "Conversation",
         available: |app| {
-            app.view == View::Home
+            // Available in Home view (Conversations tab, not sidebar focused)
+            (app.view == View::Home
                 && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Conversations
+                && app.home_panel_focus == HomeTab::Conversations)
+            // Also available in Chat view
+            || app.view == View::Chat
         },
-        execute: new_conversation_current_project,
+        execute: |app| {
+            if app.view == View::Chat {
+                // Chat view: new conversation with same project/agent/branch
+                if let Some(ref project) = app.selected_project {
+                    let project_a_tag = project.a_tag();
+                    let project_name = project.name.clone();
+                    let inherited_agent = app.selected_agent.clone();
+                    let inherited_branch = app.selected_branch.clone();
+
+                    app.save_chat_draft();
+                    let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+                    app.switch_to_tab(tab_idx);
+
+                    app.selected_agent = inherited_agent;
+                    app.selected_branch = inherited_branch;
+                    app.chat_editor_mut().clear();
+                    app.set_status("New conversation (same project, agent, and branch)");
+                }
+            } else {
+                // Home view: use the existing new_conversation_current_project function
+                new_conversation_current_project(app);
+            }
+        },
     },
     Command {
         key: 'P',
         label: "New conversation (select project)",
         section: "Conversation",
         available: |app| {
-            app.view == View::Home
+            // Available in Home view (Conversations tab, not sidebar focused)
+            (app.view == View::Home
                 && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Conversations
+                && app.home_panel_focus == HomeTab::Conversations)
+            // Also available in Chat view
+            || app.view == View::Chat
         },
         execute: |app| {
             app.open_projects_modal(true);
@@ -327,24 +341,8 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::Home && app.sidebar_focused,
         execute: toggle_project_visibility,
     },
-    Command {
-        key: 'n',
-        label: "New conversation",
-        section: "Project",
-        available: |app| app.view == View::Home && app.sidebar_focused,
-        execute: |app| {
-            // Start new conversation for selected project
-            let (online, offline) = app.filtered_projects();
-            let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
-            if let Some(project) = all_projects.get(app.sidebar_project_index) {
-                let a_tag = project.a_tag();
-                let name = project.name.clone();
-                let tab_idx = app.open_draft_tab(&a_tag, &name);
-                app.switch_to_tab(tab_idx);
-                app.view = View::Chat;
-            }
-        },
-    },
+    // NOTE: 'n' is reserved as a fallback for "next tab" in command palette
+    // New conversation in sidebar is available via direct 'n' key (not via command palette)
     Command {
         key: 's',
         label: "Settings",
@@ -484,29 +482,8 @@ pub static COMMANDS: &[Command] = &[
             app.open_draft_navigator();
         },
     },
-    Command {
-        key: 'n',
-        label: "New conversation",
-        section: "Conversation",
-        available: |app| app.view == View::Chat,
-        execute: |app| {
-            if let Some(ref project) = app.selected_project {
-                let project_a_tag = project.a_tag();
-                let project_name = project.name.clone();
-                let inherited_agent = app.selected_agent.clone();
-                let inherited_branch = app.selected_branch.clone();
-
-                app.save_chat_draft();
-                let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
-                app.switch_to_tab(tab_idx);
-
-                app.selected_agent = inherited_agent;
-                app.selected_branch = inherited_branch;
-                app.chat_editor_mut().clear();
-                app.set_status("New conversation (same project, agent, and branch)");
-            }
-        },
-    },
+    // NOTE: 'n' is reserved as a fallback for "next tab" in command palette
+    // New conversation in Chat view is available via Shift+N (which is handled by the 'N' command below)
     Command {
         key: 'g',
         label: "Go to parent",
@@ -660,15 +637,8 @@ pub static COMMANDS: &[Command] = &[
             }
         },
     },
-    Command {
-        key: 'n',
-        label: "Create new agent",
-        section: "Agent",
-        available: |app| app.view == View::AgentBrowser && !app.agent_browser_in_detail,
-        execute: |app| {
-            app.modal_state = ModalState::CreateAgent(modal::CreateAgentState::new());
-        },
-    },
+    // NOTE: 'n' is reserved as a fallback for "next tab" in command palette
+    // Create new agent is available via direct 'n' key in Agent Browser (not via command palette)
     Command {
         key: 'f',
         label: "Fork agent",
@@ -1277,14 +1247,16 @@ fn reference_conversation(app: &mut App) {
     app.selected_agent = agent.clone();
     app.selected_branch = branch;
 
-    // Pre-fill the editor with the context message
+    // Pre-fill the editor with the context message as a text attachment
+    // This keeps the input clean while providing full context
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
         source_thread_id,
         approx_tokens
     );
 
-    app.chat_editor_mut().set_text(&context_message);
+    // Add context as a text attachment (like large pastes) instead of inline text
+    app.chat_editor_mut().add_text_attachment(&context_message);
 
     // Store the reference conversation ID in the active tab for when the message is sent
     if let Some(tab) = app.tabs.active_tab_mut() {
