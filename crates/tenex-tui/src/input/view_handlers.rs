@@ -20,7 +20,7 @@ use crate::ui::{App, HomeTab, InputMode, ModalState, View};
 /// Get thread ID at a given index for the current home tab
 fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
     match app.home_panel_focus {
-        HomeTab::Recent => {
+        HomeTab::Conversations => {
             let threads = get_hierarchical_threads(app);
             threads.get(index).map(|h| h.thread.id.clone())
         }
@@ -159,17 +159,17 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         }
         KeyCode::Tab => {
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Inbox,
+                HomeTab::Conversations => HomeTab::Inbox,
                 HomeTab::Inbox => HomeTab::Reports,
                 HomeTab::Reports => HomeTab::Status,
                 HomeTab::Status => HomeTab::Search,
-                HomeTab::Search => HomeTab::Recent,
+                HomeTab::Search => HomeTab::Conversations,
             };
         }
         KeyCode::BackTab if has_shift => {
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Recent => HomeTab::Search,
-                HomeTab::Inbox => HomeTab::Recent,
+                HomeTab::Conversations => HomeTab::Search,
+                HomeTab::Inbox => HomeTab::Conversations,
                 HomeTab::Reports => HomeTab::Inbox,
                 HomeTab::Status => HomeTab::Reports,
                 HomeTab::Search => HomeTab::Status,
@@ -219,7 +219,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let current = app.current_selection();
                 let max = match app.home_panel_focus {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
-                    HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                    HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Search => app.search_results().len().saturating_sub(1),
@@ -260,7 +260,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let current = app.current_selection();
                 let max = match app.home_panel_focus {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
-                    HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                    HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Search => app.search_results().len().saturating_sub(1),
@@ -378,7 +378,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             }
                         }
                     }
-                    HomeTab::Recent => {
+                    HomeTab::Conversations => {
                         let hierarchy = get_hierarchical_threads(app);
                         if let Some(item) = hierarchy.get(idx) {
                             let thread = item.thread.clone();
@@ -416,7 +416,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.data_store.borrow_mut().mark_inbox_read(&item_id);
             }
         }
-        KeyCode::Char(' ') if app.home_panel_focus == HomeTab::Recent => {
+        KeyCode::Char(' ') if app.home_panel_focus == HomeTab::Conversations => {
             let hierarchy = get_hierarchical_threads(app);
             if let Some(item) = hierarchy.get(app.current_selection()) {
                 if item.has_children {
@@ -424,7 +424,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 }
             }
         }
-        KeyCode::Char('c') if app.home_panel_focus == HomeTab::Recent => {
+        KeyCode::Char('c') if app.home_panel_focus == HomeTab::Conversations => {
             // Toggle collapse/expand all threads
             let now_collapsed = app.toggle_collapse_all_threads();
             if now_collapsed {
@@ -456,7 +456,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let current = app.current_selection();
             let max = match app.home_panel_focus {
                 HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
-                HomeTab::Recent => get_hierarchical_threads(app).len().saturating_sub(1),
+                HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
                 HomeTab::Search => app.search_results().len().saturating_sub(1),

@@ -64,7 +64,7 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     // =========================================================================
-    // HOME VIEW - Recent/Inbox/Status tabs (main panel, not sidebar)
+    // HOME VIEW - Conversations/Inbox/Status tabs (main panel, not sidebar)
     // =========================================================================
     Command {
         key: 'n',
@@ -82,7 +82,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Recent | HomeTab::Status)
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Status)
         },
         execute: |app| {
             let threads = app.recent_threads();
@@ -145,7 +145,7 @@ pub static COMMANDS: &[Command] = &[
                 && !app.sidebar_focused
                 && matches!(
                     app.home_panel_focus,
-                    HomeTab::Recent | HomeTab::Inbox | HomeTab::Status
+                    HomeTab::Conversations | HomeTab::Inbox | HomeTab::Status
                 ))
                 || app.view == View::Chat
         },
@@ -158,7 +158,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             (app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Recent | HomeTab::Status))
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Status))
                 || app.view == View::Chat
         },
         execute: |app| {
@@ -190,7 +190,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Recent
+                && app.home_panel_focus == HomeTab::Conversations
         },
         execute: |app| {
             app.cycle_time_filter();
@@ -203,7 +203,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Recent | HomeTab::Inbox)
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
                 && !app.show_archived
         },
         execute: |app| {
@@ -217,7 +217,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Recent | HomeTab::Inbox)
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
                 && app.show_archived
         },
         execute: |app| {
@@ -938,7 +938,7 @@ fn archive_toggle(app: &mut App) {
         } else {
             // Archive/unarchive thread based on current home tab
             match app.home_panel_focus {
-                HomeTab::Recent => {
+                HomeTab::Conversations => {
                     let hierarchy = get_hierarchical_threads(app);
                     if let Some(item) = hierarchy.get(app.current_selection()) {
                         let thread_id = item.thread.id.clone();
