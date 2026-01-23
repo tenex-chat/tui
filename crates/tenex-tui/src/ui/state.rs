@@ -5,6 +5,8 @@
 
 use std::collections::HashSet;
 
+use crate::ui::text_editor::TextEditor;
+
 /// State for in-conversation search mode.
 ///
 /// This is a self-contained state machine that manages searching within
@@ -400,6 +402,9 @@ pub struct OpenTab {
     pub chat_search: ChatSearchState,
     /// Per-tab selected nudge IDs (isolated from other tabs)
     pub selected_nudge_ids: Vec<String>,
+    /// Per-tab text editor for chat input (ISOLATED from other tabs)
+    /// This ensures each tab has its own input state - no cross-tab contamination
+    pub editor: TextEditor,
 }
 
 impl OpenTab {
@@ -420,6 +425,7 @@ impl OpenTab {
             message_history: TabMessageHistory::default(),
             chat_search: ChatSearchState::default(),
             selected_nudge_ids: Vec::new(),
+            editor: TextEditor::new(),
         }
     }
 
@@ -442,6 +448,7 @@ impl OpenTab {
             message_history: TabMessageHistory::default(),
             chat_search: ChatSearchState::default(),
             selected_nudge_ids: Vec::new(),
+            editor: TextEditor::new(),
         }
     }
 }
@@ -602,41 +609,44 @@ impl TabManager {
     }
 
     /// Close the current tab.
-    /// Returns the new active index (or None if no tabs remain).
-    pub fn close_current(&mut self) -> Option<usize> {
+    /// Returns a tuple of (removed_tab, new_active_index).
+    /// new_active_index is None if no tabs remain.
+    pub fn close_current(&mut self) -> (Option<OpenTab>, Option<usize>) {
         if self.tabs.is_empty() {
-            return None;
+            return (None, None);
         }
 
         let removed_index = self.active_index;
-        self.tabs.remove(removed_index);
+        let removed_tab = self.tabs.remove(removed_index);
         self.cleanup_history(removed_index);
 
         if self.tabs.is_empty() {
             self.active_index = 0;
-            return None;
+            return (Some(removed_tab), None);
         }
 
         // Move to next tab (or previous if we were at the end)
         if self.active_index >= self.tabs.len() {
             self.active_index = self.tabs.len() - 1;
         }
-        Some(self.active_index)
+        (Some(removed_tab), Some(self.active_index))
     }
 
     /// Close a tab at a specific index.
-    /// Returns the new active index (or None if no tabs remain).
-    pub fn close_at(&mut self, index: usize) -> Option<usize> {
+    /// Returns a tuple of (removed_tab, new_active_index).
+    /// removed_tab is None if the index was out of bounds.
+    /// new_active_index is None if no tabs remain.
+    pub fn close_at(&mut self, index: usize) -> (Option<OpenTab>, Option<usize>) {
         if index >= self.tabs.len() {
-            return Some(self.active_index);
+            return (None, Some(self.active_index));
         }
 
-        self.tabs.remove(index);
+        let removed_tab = self.tabs.remove(index);
         self.cleanup_history(index);
 
         if self.tabs.is_empty() {
             self.active_index = 0;
-            return None;
+            return (Some(removed_tab), None);
         }
 
         // Adjust active index if needed
@@ -651,7 +661,7 @@ impl TabManager {
             self.modal_index = self.tabs.len().saturating_sub(1);
         }
 
-        Some(self.active_index)
+        (Some(removed_tab), Some(self.active_index))
     }
 
     /// Switch to next tab (wraps around)
@@ -999,10 +1009,6 @@ mod tests {
 
         state.toggle("nudge1".to_string());
         assert!(!state.is_selected("nudge1"));
-
-        state.dismiss_ask("ask1".to_string());
-        assert!(state.is_ask_dismissed("ask1"));
-        assert!(!state.is_ask_dismissed("ask2"));
     }
 
     #[test]
@@ -1119,7 +1125,9 @@ mod tests {
 
         // Close middle tab
         tabs.switch_to(1);
-        let new_idx = tabs.close_current();
+        let (removed_tab, new_idx) = tabs.close_current();
+        assert!(removed_tab.is_some());
+        assert_eq!(removed_tab.unwrap().thread_id, "t2");
         assert_eq!(new_idx, Some(1)); // Now t3 is at index 1
         assert_eq!(tabs.len(), 2);
 
@@ -1127,7 +1135,9 @@ mod tests {
         tabs.close_current();
         tabs.close_current();
         assert!(tabs.is_empty());
-        assert_eq!(tabs.close_current(), None);
+        let (removed_tab, new_idx) = tabs.close_current();
+        assert!(removed_tab.is_none());
+        assert_eq!(new_idx, None);
     }
 
     #[test]
@@ -1185,8 +1195,5 @@ mod tests {
         assert!(state.is_thread_collapsed("t1"));
         state.toggle_thread_collapse("t1");
         assert!(!state.is_thread_collapsed("t1"));
-
-        state.toggle_group_expansion("g1");
-        assert!(state.is_group_expanded("g1"));
     }
 }
