@@ -1189,12 +1189,14 @@ fn archive_and_close_tab(app: &mut App) {
 fn copy_conversation_id(app: &mut App) {
     if let Some(ref thread) = app.selected_thread {
         let conversation_id = &thread.id;
+        // Truncate to first 12 characters (short ID format)
+        let short_id: String = conversation_id.chars().take(12).collect();
 
         use arboard::Clipboard;
         match Clipboard::new() {
             Ok(mut clipboard) => {
-                if clipboard.set_text(conversation_id).is_ok() {
-                    app.set_status(&format!("Copied conversation ID: {}", conversation_id));
+                if clipboard.set_text(&short_id).is_ok() {
+                    app.set_status(&format!("Copied short ID: {}", short_id));
                 } else {
                     app.set_status("Failed to copy to clipboard");
                 }
