@@ -47,6 +47,7 @@ pub enum HotkeyId {
 
     // === Home View - Recent Tab ===
     NewConversation,
+    NewConversationWithPicker,
     OpenSelected,
     ArchiveToggle,
     ShowHideArchived,      // Toggle visibility of archived conversations
@@ -580,16 +581,30 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     ),
     HotkeyBinding::shift(
         HotkeyId::AgentBrowser,
-        KeyCode::Char('A'),
+        KeyCode::Char('B'),
         "Agent Browser",
         "Other",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::CreateProject,
-        KeyCode::Char('N'),
+        KeyCode::Char('C'),
         "Create Project",
         "Other",
+        &[HotkeyContext::HomeConversations],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::NewConversation,
+        KeyCode::Char('N'),
+        "New Conversation (current project)",
+        "Conversation",
+        &[HotkeyContext::HomeConversations],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::NewConversationWithPicker,
+        KeyCode::Char('P'),
+        "New Conversation (select project)",
+        "Conversation",
         &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
@@ -601,14 +616,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
-        KeyCode::Char('P'),
+        KeyCode::Char('A'),
         "Show/Hide Archived Projects",
         "Filter",
         &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
-        KeyCode::Char('H'),
+        KeyCode::Char('A'),
         "Show/Hide Archived Projects",
         "Filter",
         &[HotkeyContext::HomeSidebar],
