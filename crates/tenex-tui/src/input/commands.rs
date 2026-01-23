@@ -461,13 +461,6 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'S',
-        label: "Agent settings",
-        section: "Agent",
-        available: |app| app.view == View::Chat && app.selected_agent.is_some(),
-        execute: open_agent_settings,
-    },
-    Command {
         key: 'n',
         label: "New conversation",
         section: "Conversation",
@@ -910,46 +903,6 @@ fn go_to_parent(app: &mut App) {
             }
         }
     }
-}
-
-fn open_agent_settings(app: &mut App) {
-    let agent = match &app.selected_agent {
-        Some(a) => a.clone(),
-        None => {
-            app.set_status("No agent selected");
-            return;
-        }
-    };
-
-    let project = match &app.selected_project {
-        Some(p) => p.clone(),
-        None => {
-            app.set_status("No project selected");
-            return;
-        }
-    };
-
-    let (all_tools, all_models) = app
-        .data_store
-        .borrow()
-        .get_project_status(&project.a_tag())
-        .map(|status| {
-            let tools = status.tools().iter().map(|s| s.to_string()).collect();
-            let models = status.models().iter().map(|s| s.to_string()).collect();
-            (tools, models)
-        })
-        .unwrap_or_default();
-
-    let settings_state = modal::AgentSettingsState::new(
-        agent.name.clone(),
-        agent.pubkey.clone(),
-        project.a_tag(),
-        agent.model.clone(),
-        agent.tools.clone(),
-        all_models,
-        all_tools,
-    );
-    app.modal_state = ModalState::AgentSettings(settings_state);
 }
 
 fn archive_toggle(app: &mut App) {
