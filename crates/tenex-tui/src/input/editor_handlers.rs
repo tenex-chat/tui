@@ -534,6 +534,10 @@ fn handle_send_message(app: &mut App) {
                     .find_draft_tab(&project_a_tag)
                     .map(|(_, id)| id.to_string());
 
+                // Get reference_conversation_id from current tab (if set by "Reference conversation" command)
+                let reference_conversation_id = app.tabs.active_tab()
+                    .and_then(|tab| tab.reference_conversation_id.clone());
+
                 if let Err(e) = core_handle.send(NostrCommand::PublishThread {
                     project_a_tag: project_a_tag.clone(),
                     title,
@@ -541,6 +545,7 @@ fn handle_send_message(app: &mut App) {
                     agent_pubkey,
                     branch,
                     nudge_ids,
+                    reference_conversation_id,
                     response_tx: None,
                 }) {
                     app.set_status(&format!("Failed to create thread: {}", e));
@@ -548,6 +553,10 @@ fn handle_send_message(app: &mut App) {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
                     app.clear_selected_nudges();
+                    // Clear the reference_conversation_id after sending
+                    if let Some(tab) = app.tabs.active_tab_mut() {
+                        tab.reference_conversation_id = None;
+                    }
                 }
             }
         }

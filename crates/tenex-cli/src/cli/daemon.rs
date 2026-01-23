@@ -636,6 +636,7 @@ fn handle_request(
                         agent_pubkey: Some(result.agent_pubkey),
                         branch: None,
                         nudge_ids: vec![],
+                        reference_conversation_id: None,
                         response_tx: Some(response_tx),
                     }) {
                         Ok(_) => {

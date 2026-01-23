@@ -66,6 +66,10 @@ pub struct ChatDraft {
     pub selected_agent_pubkey: Option<String>,
     pub selected_branch: Option<String>,
     pub last_modified: u64,
+    /// Reference to a source conversation that this draft is created from
+    /// (for "Reference conversation" command, results in a "context" tag when sent)
+    #[serde(default)]
+    pub reference_conversation_id: Option<String>,
 }
 
 // =============================================================================
@@ -283,14 +287,15 @@ impl NamedDraftStorage {
 }
 
 impl ChatDraft {
-    /// A draft is considered empty only if it has no text, no attachments, AND no agent/branch selection
-    /// This ensures agent selection and attachments are persisted even if user hasn't typed anything yet
+    /// A draft is considered empty only if it has no text, no attachments, no agent/branch selection,
+    /// AND no reference conversation. This ensures all state is persisted even if user hasn't typed anything yet.
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
             && self.attachments.is_empty()
             && self.image_attachments.is_empty()
             && self.selected_agent_pubkey.is_none()
             && self.selected_branch.is_none()
+            && self.reference_conversation_id.is_none()
     }
 }
 
