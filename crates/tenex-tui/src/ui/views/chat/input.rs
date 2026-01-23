@@ -16,14 +16,14 @@ pub(crate) const MAX_VISIBLE_LINES: usize = 15;
 
 pub(crate) fn input_height(app: &App) -> u16 {
     // +5 = 1 for padding top, 1 for context line at bottom, 2 for half-block borders, 1 extra
-    let line_count = app.chat_editor.line_count().max(1);
+    let line_count = app.chat_editor().line_count().max(1);
     // Allow up to MAX_VISIBLE_LINES (15) content lines, then scroll
     // Min height 6 (1 line + chrome), max height 20 (15 lines + chrome)
     (line_count as u16 + 5).clamp(6, MAX_VISIBLE_LINES as u16 + 5)
 }
 
 pub(crate) fn has_attachments(app: &App) -> bool {
-    !app.chat_editor.attachments.is_empty() || !app.chat_editor.image_attachments.is_empty()
+    !app.chat_editor().attachments.is_empty() || !app.chat_editor().image_attachments.is_empty()
 }
 
 pub(crate) fn has_status(app: &App) -> bool {
@@ -60,11 +60,11 @@ pub(crate) fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
     let mut attachment_spans: Vec<Span> =
         vec![Span::styled("Attachments: ", Style::default().fg(theme::TEXT_MUTED))];
-    let img_count = app.chat_editor.image_attachments.len();
+    let img_count = app.chat_editor().image_attachments.len();
 
     // Show image attachments (focus index 0..img_count)
-    for (i, img) in app.chat_editor.image_attachments.iter().enumerate() {
-        let is_focused = app.chat_editor.focused_attachment == Some(i);
+    for (i, img) in app.chat_editor().image_attachments.iter().enumerate() {
+        let is_focused = app.chat_editor().focused_attachment == Some(i);
         let style = if is_focused {
             Style::default()
                 .fg(Color::Black)
@@ -77,8 +77,8 @@ pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Show paste attachments (focus index img_count..)
-    for (i, attachment) in app.chat_editor.attachments.iter().enumerate() {
-        let is_focused = app.chat_editor.focused_attachment == Some(img_count + i);
+    for (i, attachment) in app.chat_editor().attachments.iter().enumerate() {
+        let is_focused = app.chat_editor().focused_attachment == Some(img_count + i);
         let style = if is_focused {
             Style::default()
                 .fg(Color::Black)
@@ -91,7 +91,7 @@ pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Show hint based on what's focused
-    if app.chat_editor.focused_attachment.is_some() {
+    if app.chat_editor().focused_attachment.is_some() {
         attachment_spans.push(Span::styled(
             "(Backspace to delete, ↓ to exit)",
             Style::default().fg(theme::TEXT_MUTED),
@@ -164,11 +164,11 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         .unwrap_or_default();
 
     // Build input card with padding and context line at bottom
-    let input_text = app.chat_editor.text.as_str();
+    let input_text = app.chat_editor().text.as_str();
     let input_content_width = input_content_width_val;
 
     // Calculate cursor's visual row and column with proper wrapping
-    let cursor_pos = app.chat_editor.cursor;
+    let cursor_pos = app.chat_editor().cursor;
     let before_cursor = &input_text[..cursor_pos.min(input_text.len())];
 
     // Count visual rows by iterating through all logical lines before cursor
