@@ -43,8 +43,8 @@ pub const FOOTER_HEIGHT_CHAT: u16 = 2;
 /// Footer height for other views (help bar)
 pub const FOOTER_HEIGHT_DEFAULT: u16 = 1;
 
-/// Tab bar height (title + project line)
-pub const TAB_BAR_HEIGHT: u16 = 2;
+/// Tab bar height (top padding + title + project + bottom padding)
+pub const TAB_BAR_HEIGHT: u16 = 4;
 
 // =============================================================================
 // MODAL CONSTANTS - Sizing for popup modals
