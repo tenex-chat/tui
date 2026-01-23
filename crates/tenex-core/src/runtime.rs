@@ -12,7 +12,7 @@ use crate::config::CoreConfig;
 use crate::events::CoreEvent;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::models::Message;
-use crate::stats::SharedEventStats;
+use crate::stats::{SharedEventStats, SharedSubscriptionStats};
 use crate::store::{AppDataStore, Database};
 
 #[derive(Clone)]
@@ -35,6 +35,7 @@ pub struct CoreRuntime {
     worker_handle: Option<JoinHandle<()>>,
     ndb_stream: SubscriptionStream,
     event_stats: SharedEventStats,
+    subscription_stats: SharedSubscriptionStats,
 }
 
 impl CoreRuntime {
@@ -52,7 +53,8 @@ impl CoreRuntime {
         let (data_tx, data_rx) = mpsc::channel::<DataChange>();
 
         let event_stats = SharedEventStats::new();
-        let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx, event_stats.clone());
+        let subscription_stats = SharedSubscriptionStats::new();
+        let worker = NostrWorker::new(ndb.clone(), data_tx, command_rx, event_stats.clone(), subscription_stats.clone());
         let worker_handle = std::thread::spawn(move || {
             worker.run();
         });
@@ -74,6 +76,7 @@ impl CoreRuntime {
             worker_handle: Some(worker_handle),
             ndb_stream,
             event_stats,
+            subscription_stats,
         })
     }
 
@@ -95,6 +98,10 @@ impl CoreRuntime {
 
     pub fn event_stats(&self) -> SharedEventStats {
         self.event_stats.clone()
+    }
+
+    pub fn subscription_stats(&self) -> SharedSubscriptionStats {
+        self.subscription_stats.clone()
     }
 
     pub fn take_data_rx(&mut self) -> Option<Receiver<DataChange>> {
