@@ -137,6 +137,7 @@ pub enum HotkeyContext {
     HomeReports,
     HomeStatus,
     HomeSearch,
+    HomeFeed,
     HomeSidebar,
 
     /// Chat view contexts
@@ -232,6 +233,7 @@ impl HotkeyContext {
                         HomeTab::Reports => HotkeyContext::HomeReports,
                         HomeTab::Status => HotkeyContext::HomeStatus,
                         HomeTab::Search => HotkeyContext::HomeSearch,
+                        HomeTab::Feed => HotkeyContext::HomeFeed,
                     }
                 }
             }
@@ -574,7 +576,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('f'),
         "Time Filter",
         "Filter",
-        &[HotkeyContext::HomeConversations],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::AgentBrowser,
@@ -595,14 +597,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('H'),
         "Show/Hide Archived Conversations",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
         KeyCode::Char('P'),
         "Show/Hide Archived Projects",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
