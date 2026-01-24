@@ -162,8 +162,7 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
     match code {
         // Option+1 on macOS produces '¡' - go to dashboard
         KeyCode::Char('¡') => {
-            app.save_chat_draft();
-            app.view = View::Home;
+            app.go_home();
             return Ok(true);
         }
         // Option+2..9 on macOS produces special chars - switch to tab
@@ -193,8 +192,7 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
         match code {
             // Alt+1 = go to dashboard (home) - always first tab
             KeyCode::Char('1') => {
-                app.save_chat_draft();
-                app.view = View::Home;
+                app.go_home();
                 return Ok(true);
             }
             // Alt+2..9 = jump directly to tab N-1 (since 1 is Home)

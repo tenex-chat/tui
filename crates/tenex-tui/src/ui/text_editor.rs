@@ -227,6 +227,23 @@ impl TextEditor {
         }
     }
 
+    /// Add content as a text attachment, regardless of size.
+    /// Inserts a [Text Attachment N] marker at the current cursor position.
+    /// Use this when you want to force content into an attachment (e.g., reference conversation context).
+    pub fn add_text_attachment(&mut self, content: &str) {
+        let id = self.next_attachment_id;
+        let attachment = PasteAttachment {
+            id,
+            content: content.to_string(),
+        };
+        self.next_attachment_id += 1;
+        self.attachments.push(attachment);
+        // Insert marker at cursor position so the model knows where the attachment belongs
+        let marker = format!("[Text Attachment {}]", id);
+        self.text.insert_str(self.cursor, &marker);
+        self.cursor += marker.len();
+    }
+
     /// Detect content type and wrap in appropriate markdown code block
     fn smart_format_paste(&self, text: &str) -> String {
         let trimmed = text.trim();

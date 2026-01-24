@@ -891,8 +891,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
         }
         // Number keys 1-9 to navigate (1 = Home, 2-9 = tabs) in Normal mode
         KeyCode::Char('1') => {
-            app.save_chat_draft();
-            app.view = View::Home;
+            app.go_home();
             return Ok(true);
         }
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
@@ -1047,7 +1046,7 @@ pub(super) fn handle_normal_mode(
                 }
             }
             View::LessonViewer => {
-                app.view = View::Home;
+                app.go_home();
                 app.viewing_lesson_id = None;
                 app.lesson_viewer_section = 0;
                 app.scroll_offset = 0;
@@ -1058,7 +1057,7 @@ pub(super) fn handle_normal_mode(
                     app.viewing_agent_id = None;
                     app.scroll_offset = 0;
                 } else {
-                    app.view = View::Home;
+                    app.go_home();
                     app.agent_browser_filter.clear();
                     app.agent_browser_index = 0;
                 }
