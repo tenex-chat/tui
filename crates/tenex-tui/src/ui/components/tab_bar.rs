@@ -227,9 +227,10 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         };
         let (title, title_width) = truncate_to_width(&thread_title, max_title_width);
 
-        // Project name
+        // Project name - truncate to match the title width (not max_title_width)
+        // This ensures the project name fits within the tab's actual width
         let project_name = data_store.get_project_name(&tab.project_a_tag);
-        let (project, _) = truncate_plain_to_width(&project_name, max_title_width);
+        let (project, _) = truncate_plain_to_width(&project_name, title_width);
 
         let right_pad = " ";
 
@@ -292,9 +293,16 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         title_spans.push(Span::styled(right_pad, pad_style));
 
         // Project line - align project under title
+        // The project line must have the same total width as the title line
+        // Title line width = left_pad + shortcut + indicator + title + right_pad
         let prefix_width = left_pad.width() + shortcut.width() + indicator.width();
         let prefix = " ".repeat(prefix_width);
-        let project_padded = format!("{}{}", project, " ".repeat(title_width.saturating_sub(project.width()) + right_pad.width()));
+        // Project text area should match: title_width + right_pad width
+        let project_area_width = title_width + right_pad.width();
+        // Use unicode-aware padding (format! uses char count, not display width)
+        let project_display_width = project.width();
+        let padding_needed = project_area_width.saturating_sub(project_display_width);
+        let project_padded = format!("{}{}", project, " ".repeat(padding_needed));
         project_spans.push(Span::styled(prefix, pad_style));
         project_spans.push(Span::styled(project_padded, project_style));
 
