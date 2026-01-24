@@ -1,7 +1,0 @@
-[package]
-name = "tenex_gui_egui_mock"
-version = "0.1.0"
-edition = "2021"
-
-[dependencies]
-eframe = "0.29"
