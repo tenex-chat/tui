@@ -5,7 +5,7 @@ use crate::ui::ask_input::AskInputState;
 use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -1588,22 +1588,26 @@ impl App {
             return;
         }
 
-        // Close and get both the removed tab and the new active index
-        let (removed_tab, new_active) = self.tabs.close_current();
+        // Close and get both the removed tab and the previous view location
+        let (removed_tab, previous_view) = self.tabs.close_current();
 
         // Save draft from the removed tab's editor (before it's lost)
         if let Some(ref tab) = removed_tab {
             self.save_draft_from_tab(tab);
         }
 
-        if new_active.is_none() {
-            // No more tabs - go back to home view
-            self.fallback_editor.clear();
-            self.selected_thread = None;
-            self.view = View::Home;
-        } else {
-            // Switch to the new active tab
-            self.switch_to_tab(self.tabs.active_index());
+        // Navigate to the previous view location from history
+        match previous_view {
+            Some(ViewLocation::Home) | None => {
+                // Go back to home view
+                self.fallback_editor.clear();
+                self.selected_thread = None;
+                self.view = View::Home;
+            }
+            Some(ViewLocation::Tab(index)) => {
+                // Switch to the previous tab from history
+                self.switch_to_tab(index);
+            }
         }
     }
 
@@ -1793,6 +1797,7 @@ impl App {
             // No more tabs - go back to home view
             self.fallback_editor.clear();
             self.selected_thread = None;
+            self.tabs.record_home_visit();
             self.view = View::Home;
         } else if was_active {
             // If the closed tab was active, switch to the new active tab
@@ -1815,8 +1820,7 @@ impl App {
             let current = self.tabs.active_index();
             if current + 1 >= self.tabs.len() {
                 // At last conversation tab, wrap to Home
-                self.save_chat_draft();
-                self.view = View::Home;
+                self.go_home();
             } else {
                 // Go to next conversation tab
                 self.switch_to_tab(current + 1);
@@ -1839,13 +1843,21 @@ impl App {
             let current = self.tabs.active_index();
             if current == 0 {
                 // At first conversation tab, go to Home
-                self.save_chat_draft();
-                self.view = View::Home;
+                self.go_home();
             } else {
                 // Go to previous conversation tab
                 self.switch_to_tab(current - 1);
             }
         }
+    }
+
+    /// Navigate to Home view and record it in view history
+    /// Use this instead of directly setting `self.view = View::Home` to ensure
+    /// the navigation is tracked for the "go back to previous view" feature
+    pub fn go_home(&mut self) {
+        self.save_chat_draft();
+        self.tabs.record_home_visit();
+        self.view = View::Home;
     }
 
     /// Mark a thread as having unread messages (if it's open in a tab but not active)

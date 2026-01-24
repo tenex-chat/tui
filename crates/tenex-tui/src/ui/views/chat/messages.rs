@@ -16,6 +16,35 @@ use std::collections::HashMap;
 use super::cards::{author_line, author_line_with_recipient, bottom_half_block_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines, top_half_block_line};
 use super::grouping::{group_messages, DisplayItem};
 
+/// Render markdown content with a custom indicator and padding.
+/// Used for ask event context rendering in both answered and unanswered paths.
+fn render_markdown_with_indicator(
+    content: &str,
+    indicator: &str,
+    indicator_color: ratatui::style::Color,
+    pad: &str,
+    bg: ratatui::style::Color,
+    content_width: usize,
+) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    let context_rendered = render_markdown(content);
+    for md_line in context_rendered.iter() {
+        let mut spans = vec![
+            Span::styled(indicator.to_string(), Style::default().fg(indicator_color).bg(bg)),
+            Span::styled(pad.to_string(), Style::default().bg(bg)),
+        ];
+        for span in md_line.spans.iter() {
+            let mut new_span = span.clone();
+            new_span.style = new_span.style.bg(bg);
+            spans.push(new_span);
+        }
+        let line_len: usize = md_line.spans.iter().map(|s| s.content.chars().count()).sum();
+        pad_line(&mut spans, 1 + pad.len() + line_len, content_width, bg);
+        lines.push(Line::from(spans));
+    }
+    lines
+}
+
 pub(crate) fn render_messages_panel(
     f: &mut Frame,
     app: &mut App,
@@ -388,9 +417,6 @@ pub(crate) fn render_messages_panel(
                     let card_bg_selected = theme::BG_SELECTED;
                     let bg = if is_selected { card_bg_selected } else { card_bg };
 
-                    // Calculate available width for delegation text
-                    let delegation_text_width = content_width.saturating_sub(10); // Account for borders/padding
-
                     let indicator = if *is_consecutive { "·  " } else { "│  " };
 
                     // Check if this is an ask event (q-tag pointing to ask event instead of thread)
@@ -430,21 +456,15 @@ pub(crate) fn render_messages_panel(
                                 pad_line(&mut empty1, 1, content_width, bg);
                                 messages_text.push(Line::from(empty1));
 
-                                let context_rendered = render_markdown(&ask_event.context);
-                                for md_line in context_rendered.iter() {
-                                    let mut spans = vec![
-                                        Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                        Span::styled(pad, Style::default().bg(bg)),
-                                    ];
-                                    for span in md_line.spans.iter() {
-                                        let mut new_span = span.clone();
-                                        new_span.style = new_span.style.bg(bg);
-                                        spans.push(new_span);
-                                    }
-                                    let line_len: usize = md_line.spans.iter().map(|s| s.content.len()).sum();
-                                    pad_line(&mut spans, 1 + pad.len() + line_len, content_width, bg);
-                                    messages_text.push(Line::from(spans));
-                                }
+                                let context_lines = render_markdown_with_indicator(
+                                    &ask_event.context,
+                                    indicator,
+                                    indicator_color,
+                                    pad,
+                                    bg,
+                                    content_width,
+                                );
+                                messages_text.extend(context_lines);
                             }
 
                             // Empty line before status
@@ -541,18 +561,23 @@ pub(crate) fn render_messages_panel(
                             pad_line(&mut header_spans, header_len, content_width, bg);
                             messages_text.push(Line::from(header_spans));
 
-                            // Context line (if present and not empty)
+                            // Context (with proper markdown rendering, not truncated)
                             if !ask_event.context.is_empty() {
-                                let context_display: String = ask_event.context.chars().take(delegation_text_width).collect();
-                                let mut context_spans = vec![
-                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                    Span::styled(
-                                        context_display.clone(),
-                                        Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                                    ),
-                                ];
-                                pad_line(&mut context_spans, 1 + context_display.len(), content_width, bg);
-                                messages_text.push(Line::from(context_spans));
+                                // Empty line after title
+                                let mut empty1 = vec![Span::styled(indicator, Style::default().fg(indicator_color).bg(bg))];
+                                pad_line(&mut empty1, 1, content_width, bg);
+                                messages_text.push(Line::from(empty1));
+
+                                let pad = "   "; // 3-space padding for content
+                                let context_lines = render_markdown_with_indicator(
+                                    &ask_event.context,
+                                    indicator,
+                                    indicator_color,
+                                    pad,
+                                    bg,
+                                    content_width,
+                                );
+                                messages_text.extend(context_lines);
                             }
 
                             // Render inline ask UI if modal is open for this event

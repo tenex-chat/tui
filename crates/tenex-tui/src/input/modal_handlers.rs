@@ -410,8 +410,7 @@ fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('1') => {
             app.close_tab_modal();
-            app.save_chat_draft();
-            app.view = View::Home;
+            app.go_home();
         }
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
             let tab_index = (c as usize) - ('2' as usize);

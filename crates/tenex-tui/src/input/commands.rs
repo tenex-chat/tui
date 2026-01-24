@@ -32,7 +32,7 @@ pub static COMMANDS: &[Command] = &[
         section: "Navigation",
         available: |_| true,
         execute: |app| {
-            app.view = View::Home;
+            app.go_home();
             app.input_mode = InputMode::Normal;
         },
     },

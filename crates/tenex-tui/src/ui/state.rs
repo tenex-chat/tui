@@ -459,6 +459,15 @@ impl OpenTab {
     }
 }
 
+/// Represents a location in the view history (either Home or a specific tab)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewLocation {
+    /// The Home view
+    Home,
+    /// A specific tab by its index
+    Tab(usize),
+}
+
 /// Manages open tabs with LRU eviction and history tracking.
 ///
 /// This is a self-contained state machine for tab management.
@@ -475,6 +484,9 @@ pub struct TabManager {
     active_index: usize,
     /// Tab visit history for Alt+Tab cycling (most recent last)
     history: Vec<usize>,
+    /// View navigation history including Home (most recent last)
+    /// Used to navigate back to previous view when closing a tab
+    view_history: Vec<ViewLocation>,
     /// Whether the tab modal is showing
     pub modal_open: bool,
     /// Selected index in tab modal
@@ -609,15 +621,23 @@ impl TabManager {
         }
 
         self.push_history(index);
+        self.push_view_history(ViewLocation::Tab(index));
         self.active_index = index;
         self.tabs[index].has_unread = false;
         true
     }
 
+    /// Record that the user navigated to Home view
+    /// This is called by the App when navigating to Home to track view history
+    pub fn record_home_visit(&mut self) {
+        self.push_view_history(ViewLocation::Home);
+    }
+
     /// Close the current tab.
-    /// Returns a tuple of (removed_tab, new_active_index).
-    /// new_active_index is None if no tabs remain.
-    pub fn close_current(&mut self) -> (Option<OpenTab>, Option<usize>) {
+    /// Returns a tuple of (removed_tab, previous_view_location).
+    /// previous_view_location is the view to navigate back to (from history).
+    /// Returns None for previous_view_location if no tabs remain (should go to Home).
+    pub fn close_current(&mut self) -> (Option<OpenTab>, Option<ViewLocation>) {
         if self.tabs.is_empty() {
             return (None, None);
         }
@@ -626,16 +646,45 @@ impl TabManager {
         let removed_tab = self.tabs.remove(removed_index);
         self.cleanup_history(removed_index);
 
+        // Get the previous view from history BEFORE cleaning up view history
+        let previous_view = self.pop_previous_view();
+
+        // Clean up view history for the removed tab
+        self.cleanup_view_history(removed_index);
+
         if self.tabs.is_empty() {
             self.active_index = 0;
-            return (Some(removed_tab), None);
+            // No tabs remain, should go to Home
+            return (Some(removed_tab), Some(ViewLocation::Home));
         }
 
-        // Move to next tab (or previous if we were at the end)
-        if self.active_index >= self.tabs.len() {
-            self.active_index = self.tabs.len() - 1;
-        }
-        (Some(removed_tab), Some(self.active_index))
+        // Determine where to go based on history
+        let target_view = match previous_view {
+            Some(ViewLocation::Home) => {
+                // Go back to Home
+                Some(ViewLocation::Home)
+            }
+            Some(ViewLocation::Tab(idx)) => {
+                // Go back to the previous tab (index already adjusted by cleanup_view_history)
+                if idx < self.tabs.len() {
+                    self.active_index = idx;
+                    Some(ViewLocation::Tab(idx))
+                } else {
+                    // Fallback: tab index is now invalid, go to last tab
+                    self.active_index = self.tabs.len() - 1;
+                    Some(ViewLocation::Tab(self.active_index))
+                }
+            }
+            None => {
+                // No history, fallback to adjacent tab behavior
+                if self.active_index >= self.tabs.len() {
+                    self.active_index = self.tabs.len() - 1;
+                }
+                Some(ViewLocation::Tab(self.active_index))
+            }
+        };
+
+        (Some(removed_tab), target_view)
     }
 
     /// Close a tab at a specific index.
@@ -649,6 +698,7 @@ impl TabManager {
 
         let removed_tab = self.tabs.remove(index);
         self.cleanup_history(index);
+        self.cleanup_view_history(index);
 
         if self.tabs.is_empty() {
             self.active_index = 0;
@@ -745,6 +795,40 @@ impl TabManager {
                 *idx -= 1;
             }
         }
+    }
+
+    /// Push a view location to the view history
+    fn push_view_history(&mut self, location: ViewLocation) {
+        // Don't push duplicates if already the last entry
+        if self.view_history.last() == Some(&location) {
+            return;
+        }
+        self.view_history.push(location);
+        if self.view_history.len() > Self::MAX_HISTORY {
+            self.view_history.remove(0);
+        }
+    }
+
+    /// Clean up view history after a tab is removed
+    fn cleanup_view_history(&mut self, removed_index: usize) {
+        // Remove references to the removed tab
+        self.view_history.retain(|loc| *loc != ViewLocation::Tab(removed_index));
+        // Adjust indices for tabs that shifted down
+        for loc in self.view_history.iter_mut() {
+            if let ViewLocation::Tab(idx) = loc {
+                if *idx > removed_index {
+                    *idx -= 1;
+                }
+            }
+        }
+    }
+
+    /// Get the previous view location from history (for navigating back when closing a tab)
+    fn pop_previous_view(&mut self) -> Option<ViewLocation> {
+        // Pop the current location (which is the tab being closed)
+        self.view_history.pop();
+        // Return the previous location (don't pop it - it becomes current)
+        self.view_history.last().copied()
     }
 
     fn evict_if_needed(&mut self, prefer_non_drafts: bool) {
@@ -1084,17 +1168,17 @@ mod tests {
         assert_eq!(idx, 0);
         assert!(tabs.active_tab().unwrap().is_draft());
 
-        // Opening same project draft should reuse
+        // Opening same project draft creates a new draft (multiple drafts allowed)
         let idx = tabs.open_draft("project1".to_string(), "Project 1".to_string());
-        assert_eq!(idx, 0);
-        assert_eq!(tabs.len(), 1);
-
-        // Different project should create new draft
-        let idx = tabs.open_draft("project2".to_string(), "Project 2".to_string());
         assert_eq!(idx, 1);
         assert_eq!(tabs.len(), 2);
 
-        // Convert draft to real tab
+        // Different project should also create new draft
+        let idx = tabs.open_draft("project2".to_string(), "Project 2".to_string());
+        assert_eq!(idx, 2);
+        assert_eq!(tabs.len(), 3);
+
+        // Convert first draft to real tab
         let draft_id = tabs.tabs()[0].draft_id.clone().unwrap();
         tabs.convert_draft(&draft_id, "thread1".to_string(), "Real Thread".to_string());
         assert!(!tabs.tabs()[0].is_draft());
@@ -1132,21 +1216,40 @@ mod tests {
         tabs.open_thread("t2".to_string(), "T2".to_string(), "p".to_string());
         tabs.open_thread("t3".to_string(), "T3".to_string(), "p".to_string());
 
-        // Close middle tab
-        tabs.switch_to(1);
-        let (removed_tab, new_idx) = tabs.close_current();
+        // Close middle tab - should go back to previously viewed tab
+        tabs.switch_to(0); // View t1
+        tabs.switch_to(1); // View t2
+        let (removed_tab, prev_view) = tabs.close_current();
         assert!(removed_tab.is_some());
         assert_eq!(removed_tab.unwrap().thread_id, "t2");
-        assert_eq!(new_idx, Some(1)); // Now t3 is at index 1
+        // Should return to previous view (t1, now at index 0)
+        assert_eq!(prev_view, Some(ViewLocation::Tab(0)));
         assert_eq!(tabs.len(), 2);
 
         // Close all
         tabs.close_current();
         tabs.close_current();
         assert!(tabs.is_empty());
-        let (removed_tab, new_idx) = tabs.close_current();
+        let (removed_tab, prev_view) = tabs.close_current();
         assert!(removed_tab.is_none());
-        assert_eq!(new_idx, None);
+        assert_eq!(prev_view, None);
+    }
+
+    #[test]
+    fn test_tab_manager_close_returns_to_home() {
+        let mut tabs = TabManager::new();
+
+        // Record Home visit first
+        tabs.record_home_visit();
+
+        // Open a tab and switch to it
+        tabs.open_thread("t1".to_string(), "T1".to_string(), "p".to_string());
+        tabs.switch_to(0);
+
+        // Close the tab - should go back to Home
+        let (removed_tab, prev_view) = tabs.close_current();
+        assert!(removed_tab.is_some());
+        assert_eq!(prev_view, Some(ViewLocation::Home));
     }
 
     #[test]
