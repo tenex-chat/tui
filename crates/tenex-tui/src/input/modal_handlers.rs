@@ -352,19 +352,30 @@ fn handle_command_palette_key(app: &mut App, key: KeyEvent) {
     // Get available commands before matching on state (to avoid mutable borrow conflict)
     let commands = super::commands::available_commands(app);
     let cmd_count = commands.len();
+    let modifiers = key.modifiers;
+    let has_modifiers = modifiers.contains(KeyModifiers::ALT)
+        || modifiers.contains(KeyModifiers::CONTROL)
+        || modifiers.contains(KeyModifiers::SHIFT);
 
     if let ModalState::CommandPalette(ref mut state) = app.modal_state {
         match key.code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;
             }
-            KeyCode::Left => {
+            // Only trigger tab navigation for plain Left/Right (no modifiers)
+            // Alt+Left/Right should NOT switch tabs - just close the palette
+            KeyCode::Left if !has_modifiers => {
                 app.modal_state = ModalState::None;
                 app.prev_tab();
             }
-            KeyCode::Right => {
+            KeyCode::Right if !has_modifiers => {
                 app.modal_state = ModalState::None;
                 app.next_tab();
+            }
+            // Alt+Left/Right closes palette without side effects
+            // (user probably meant to do word navigation, which doesn't apply in palette context)
+            KeyCode::Left | KeyCode::Right if has_modifiers => {
+                app.modal_state = ModalState::None;
             }
             KeyCode::Up => {
                 state.move_up();
