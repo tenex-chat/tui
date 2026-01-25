@@ -1,5 +1,6 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
+use crate::store::RuntimeHierarchy;
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -56,6 +57,10 @@ pub struct AppDataStore {
     // Thread root index - maps project a_tag -> set of known thread root event IDs
     // This avoids expensive full-table scans when loading threads
     thread_root_index: HashMap<String, HashSet<String>>,
+
+    // Runtime hierarchy - tracks individual conversation runtimes and parent-child relationships
+    // for hierarchical runtime aggregation (parent runtime = own + all children recursively)
+    pub runtime_hierarchy: RuntimeHierarchy,
 }
 
 impl AppDataStore {
@@ -83,6 +88,7 @@ impl AppDataStore {
             blocked_backends: HashSet::new(),
             pending_backend_approvals: Vec::new(),
             thread_root_index: HashMap::new(),
+            runtime_hierarchy: RuntimeHierarchy::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -222,6 +228,9 @@ impl AppDataStore {
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
 
+        // Build runtime hierarchy from loaded data
+        self.rebuild_runtime_hierarchy();
+
         // Load agent definitions (kind:4199)
         self.load_agent_definitions();
 
@@ -274,13 +283,26 @@ impl AppDataStore {
         };
 
         // Loading nudges (kind:4201)
-
+        // First pass: collect all nudges and their supersedes relationships
+        let mut all_nudges: Vec<Nudge> = Vec::new();
         for result in results {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
                 if let Some(nudge) = Nudge::from_note(&note) {
-                    self.nudges.insert(nudge.id.clone(), nudge);
+                    all_nudges.push(nudge);
                 }
             }
+        }
+
+        // Sort by created_at to process in chronological order
+        all_nudges.sort_by_key(|n| n.created_at);
+
+        // Second pass: insert nudges, honoring supersedes
+        for nudge in all_nudges {
+            // Remove superseded nudge if present
+            if let Some(ref superseded_id) = nudge.supersedes {
+                self.nudges.remove(superseded_id);
+            }
+            self.nudges.insert(nudge.id.clone(), nudge);
         }
     }
 
@@ -345,6 +367,148 @@ impl AppDataStore {
     // NOTE: load_operations_status() was removed because ephemeral events (kind:24133)
     // should NOT be read from nostrdb. Operations status is only received via live
     // subscriptions and stored in memory (operations_by_event).
+
+    // ===== Runtime Hierarchy Methods =====
+
+    /// Rebuild the runtime hierarchy from loaded messages and threads
+    /// Called during startup after messages_by_thread is populated
+    fn rebuild_runtime_hierarchy(&mut self) {
+        self.runtime_hierarchy.clear();
+
+        // Build parent-child relationships from threads (delegation tags)
+        for threads in self.threads_by_project.values() {
+            for thread in threads {
+                if let Some(ref parent_id) = thread.parent_conversation_id {
+                    self.runtime_hierarchy.set_parent(&thread.id, parent_id);
+                }
+            }
+        }
+
+        // Step 2: Build parent-child relationships from q-tags in messages
+        // Also determine conversation creation timestamps (earliest message)
+        for (thread_id, messages) in &self.messages_by_thread {
+            // Find the earliest message timestamp as the conversation creation time
+            if let Some(earliest_created_at) = messages.iter().map(|m| m.created_at).min() {
+                self.runtime_hierarchy
+                    .set_conversation_created_at(thread_id, earliest_created_at);
+            }
+
+            for message in messages {
+                // q-tags indicate children of this conversation
+                for child_id in &message.q_tags {
+                    self.runtime_hierarchy.add_child(thread_id, child_id);
+                }
+                // delegation tags indicate this is a child of another conversation
+                if let Some(ref parent_id) = message.delegation_tag {
+                    if parent_id != thread_id {
+                        self.runtime_hierarchy.set_parent(thread_id, parent_id);
+                    }
+                }
+            }
+        }
+
+        // Step 3: Calculate individual runtimes for each conversation
+        for (thread_id, messages) in &self.messages_by_thread {
+            let runtime_ms = Self::calculate_runtime_from_messages(messages);
+            if runtime_ms > 0 {
+                self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
+            }
+        }
+    }
+
+    /// Calculate total LLM runtime from a set of messages.
+    ///
+    /// NOTE: Performance consideration - This scans all messages in the conversation
+    /// each time it's called. For conversations with M messages, this is O(M).
+    /// When called for each new message, total complexity becomes O(M^2) over the
+    /// lifetime of the conversation. For most conversations this is acceptable,
+    /// but extremely long conversations (1000+ messages) may see degraded performance.
+    /// A future optimization could maintain a running sum delta.
+    fn calculate_runtime_from_messages(messages: &[Message]) -> u64 {
+        messages
+            .iter()
+            .flat_map(|msg| {
+                msg.llm_metadata
+                    .iter()
+                    .filter(|(key, _)| key == "runtime")
+                    .filter_map(|(_, value)| value.parse::<u64>().ok())
+            })
+            .sum()
+    }
+
+    /// Update runtime hierarchy for a thread after messages change
+    /// Called from handle_message_event after the message is added
+    fn update_runtime_hierarchy_for_thread_id(&mut self, thread_id: &str) {
+        if let Some(messages) = self.messages_by_thread.get(thread_id) {
+            // Update conversation creation time if not already set
+            // (Use the earliest message timestamp as the creation time)
+            if self.runtime_hierarchy.get_conversation_created_at(thread_id).is_none() {
+                if let Some(earliest_created_at) = messages.iter().map(|m| m.created_at).min() {
+                    self.runtime_hierarchy
+                        .set_conversation_created_at(thread_id, earliest_created_at);
+                }
+            }
+
+            // Update relationships from all messages
+            for message in messages {
+                // Update q-tag relationships (this message's children)
+                for child_id in &message.q_tags {
+                    self.runtime_hierarchy.add_child(thread_id, child_id);
+                }
+
+                // Update delegation relationship (this conversation's parent)
+                if let Some(ref parent_id) = message.delegation_tag {
+                    if parent_id != thread_id {
+                        self.runtime_hierarchy.set_parent(thread_id, parent_id);
+                    }
+                }
+            }
+
+            // Recalculate this conversation's individual runtime
+            let runtime_ms = Self::calculate_runtime_from_messages(messages);
+            self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
+        }
+    }
+
+    /// Update runtime hierarchy when a new thread is discovered
+    /// Called from handle_thread_event after the thread is added
+    fn update_runtime_hierarchy_for_thread(&mut self, thread: &Thread) {
+        if let Some(ref parent_id) = thread.parent_conversation_id {
+            self.runtime_hierarchy.set_parent(&thread.id, parent_id);
+        }
+        // Set the thread's creation time from last_activity (which equals created_at for new threads)
+        self.runtime_hierarchy
+            .set_conversation_created_at(&thread.id, thread.last_activity);
+    }
+
+    /// Get the total hierarchical runtime for a conversation (own + all children recursively)
+    pub fn get_hierarchical_runtime(&self, thread_id: &str) -> u64 {
+        self.runtime_hierarchy.get_total_runtime(thread_id)
+    }
+
+    /// Get the individual (net) runtime for a conversation (just this conversation, no children)
+    pub fn get_individual_runtime(&self, thread_id: &str) -> u64 {
+        self.runtime_hierarchy.get_individual_runtime(thread_id)
+    }
+
+    /// Get all ancestor conversation IDs that would be affected by this conversation's runtime change
+    pub fn get_runtime_ancestors(&self, thread_id: &str) -> Vec<String> {
+        self.runtime_hierarchy.get_ancestors(thread_id)
+    }
+
+    /// Get the total unique runtime across all conversations (flat aggregation).
+    /// Each conversation's runtime is counted exactly once, regardless of hierarchy.
+    /// Used for the global status bar cumulative runtime display.
+    pub fn get_total_unique_runtime(&self) -> u64 {
+        self.runtime_hierarchy.get_total_unique_runtime()
+    }
+
+    /// Get the total unique runtime for conversations created TODAY only.
+    /// Filters conversations by creation date (today in UTC), then sums their runtimes.
+    /// Used for the global status bar to show today's cumulative runtime.
+    pub fn get_today_unique_runtime(&mut self) -> u64 {
+        self.runtime_hierarchy.get_today_unique_runtime()
+    }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
     /// Only applies the MOST RECENT metadata event for each thread
@@ -577,6 +741,9 @@ impl AppDataStore {
         if let Some(thread) = Thread::from_note(note) {
             let thread_id = thread.id.clone();
 
+            // Update runtime hierarchy for parent-child relationship
+            self.update_runtime_hierarchy_for_thread(&thread);
+
             if let Some(a_tag) = Self::extract_project_a_tag(note) {
                 // Add to thread root index
                 self.thread_root_index
@@ -680,6 +847,10 @@ impl AppDataStore {
                 // Insert in sorted position (oldest first)
                 let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
                 messages.insert(insert_pos, message);
+
+                // Update runtime hierarchy after inserting message
+                // (captures q-tags and delegation tags, then recalculates runtime from messages)
+                self.update_runtime_hierarchy_for_thread_id(&thread_id);
 
                 // Update thread's last_activity so it appears in Conversations tab
                 for threads in self.threads_by_project.values_mut() {
@@ -1137,6 +1308,10 @@ impl AppDataStore {
 
     fn handle_nudge_event(&mut self, note: &Note) {
         if let Some(nudge) = Nudge::from_note(note) {
+            // Honor supersedes tag - remove the old nudge if this one supersedes it
+            if let Some(ref superseded_id) = nudge.supersedes {
+                self.nudges.remove(superseded_id);
+            }
             self.nudges.insert(nudge.id.clone(), nudge);
         }
     }
