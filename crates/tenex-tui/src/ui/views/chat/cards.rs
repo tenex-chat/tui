@@ -9,35 +9,39 @@ const LOWER_HALF_BLOCK: char = '▄';
 const UPPER_HALF_BLOCK: char = '▀';
 
 /// Create a top padding line using lower half blocks (creates bottom-half fill effect)
+/// The ▄ character: fg fills bottom half, bg fills top half
+/// We want: top = terminal bg (BG_APP), bottom = card color
 pub(crate) fn top_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
     let mut spans = vec![
-        // Indicator uses half-block with indicator color as fg (visible half)
+        // Indicator: bottom-half = indicator color, top-half = terminal bg
         Span::styled(
             LOWER_HALF_BLOCK.to_string(),
-            Style::default().fg(indicator_color),
+            Style::default().fg(indicator_color).bg(theme::BG_APP),
         ),
     ];
-    // Rest of the line uses half-block with bg color as fg
+    // Rest of the line: bottom-half = card bg, top-half = terminal bg
     if width > 1 {
         let fill: String = std::iter::repeat(LOWER_HALF_BLOCK).take(width - 1).collect();
-        spans.push(Span::styled(fill, Style::default().fg(bg)));
+        spans.push(Span::styled(fill, Style::default().fg(bg).bg(theme::BG_APP)));
     }
     Line::from(spans)
 }
 
 /// Create a bottom padding line using upper half blocks (creates top-half fill effect)
+/// The ▀ character: fg fills top half, bg fills bottom half
+/// We want: top = card color, bottom = terminal bg (BG_APP)
 pub(crate) fn bottom_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
     let mut spans = vec![
-        // Indicator uses half-block with indicator color as fg (visible half)
+        // Indicator: top-half = indicator color, bottom-half = terminal bg
         Span::styled(
             UPPER_HALF_BLOCK.to_string(),
-            Style::default().fg(indicator_color),
+            Style::default().fg(indicator_color).bg(theme::BG_APP),
         ),
     ];
-    // Rest of the line uses half-block with bg color as fg
+    // Rest of the line: top-half = card bg, bottom-half = terminal bg
     if width > 1 {
         let fill: String = std::iter::repeat(UPPER_HALF_BLOCK).take(width - 1).collect();
-        spans.push(Span::styled(fill, Style::default().fg(bg)));
+        spans.push(Span::styled(fill, Style::default().fg(bg).bg(theme::BG_APP)));
     }
     Line::from(spans)
 }
