@@ -8,6 +8,7 @@ pub mod layout;
 pub mod markdown;
 pub mod modal;
 pub mod notifications;
+pub mod nudge;
 pub mod selector;
 pub mod state;
 pub mod terminal;

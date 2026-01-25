@@ -146,6 +146,36 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle nudge list modal when open
+    if matches!(app.modal_state, ModalState::NudgeList(_)) {
+        handle_nudge_list_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle nudge create form when open
+    if matches!(app.modal_state, ModalState::NudgeCreate(_)) {
+        handle_nudge_form_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle nudge edit form when open
+    if matches!(app.modal_state, ModalState::NudgeEdit(_)) {
+        handle_nudge_form_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle nudge detail view when open
+    if matches!(app.modal_state, ModalState::NudgeDetail(_)) {
+        handle_nudge_detail_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle nudge delete confirmation when open
+    if matches!(app.modal_state, ModalState::NudgeDeleteConfirm(_)) {
+        handle_nudge_delete_confirm_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -2052,5 +2082,579 @@ fn handle_history_search_key(app: &mut App, key: KeyEvent) {
         }
 
         _ => {}
+    }
+}
+
+// =============================================================================
+// NUDGE LIST MODAL
+// =============================================================================
+
+fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{NudgeDetailState, NudgeDeleteConfirmState};
+    use ui::nudge::NudgeFormState;
+
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::NudgeList(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    // Get nudge count for navigation
+    let nudge_count = app.data_store.borrow().nudges.len();
+
+    match key.code {
+        KeyCode::Esc => {
+            // Close modal
+            app.modal_state = ModalState::None;
+            return;
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let mut new_state = state;
+            new_state.move_up();
+            app.modal_state = ModalState::NudgeList(new_state);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            let mut new_state = state;
+            new_state.move_down(nudge_count);
+            app.modal_state = ModalState::NudgeList(new_state);
+        }
+        KeyCode::Char('n') => {
+            // Create new nudge
+            app.modal_state = ModalState::NudgeCreate(NudgeFormState::new());
+        }
+        KeyCode::Char('e') => {
+            // Edit selected nudge
+            let nudge_id = get_selected_nudge_id(app, &state);
+            if let Some(id) = nudge_id {
+                let nudge = app.data_store.borrow().nudges.get(&id).cloned();
+                if let Some(nudge) = nudge {
+                    app.modal_state = ModalState::NudgeEdit(NudgeFormState::from_nudge(&nudge));
+                } else {
+                    app.modal_state = ModalState::NudgeList(state);
+                }
+            } else {
+                app.modal_state = ModalState::NudgeList(state);
+            }
+        }
+        KeyCode::Char('d') => {
+            // Delete selected nudge
+            let nudge_id = get_selected_nudge_id(app, &state);
+            if let Some(id) = nudge_id {
+                app.modal_state = ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new(id));
+            } else {
+                app.modal_state = ModalState::NudgeList(state);
+            }
+        }
+        KeyCode::Enter => {
+            // View selected nudge
+            let nudge_id = get_selected_nudge_id(app, &state);
+            if let Some(id) = nudge_id {
+                app.modal_state = ModalState::NudgeDetail(NudgeDetailState::new(id));
+            } else {
+                app.modal_state = ModalState::NudgeList(state);
+            }
+        }
+        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+            // Filter input
+            let mut new_state = state;
+            new_state.add_filter_char(c);
+            app.modal_state = ModalState::NudgeList(new_state);
+        }
+        KeyCode::Backspace => {
+            let mut new_state = state;
+            new_state.backspace_filter();
+            app.modal_state = ModalState::NudgeList(new_state);
+        }
+        _ => {
+            app.modal_state = ModalState::NudgeList(state);
+        }
+    }
+}
+
+/// Get the nudge ID at the selected index (filtered)
+fn get_selected_nudge_id(app: &App, state: &ui::modal::NudgeListState) -> Option<String> {
+    let data_store = app.data_store.borrow();
+    let filter_lower = state.filter.to_lowercase();
+
+    let mut filtered: Vec<&tenex_core::models::Nudge> = data_store
+        .nudges
+        .values()
+        .filter(|n| {
+            if state.filter.is_empty() {
+                return true;
+            }
+            n.title.to_lowercase().contains(&filter_lower)
+                || n.description.to_lowercase().contains(&filter_lower)
+                || n.content.to_lowercase().contains(&filter_lower)
+                || n.hashtags.iter().any(|h| h.to_lowercase().contains(&filter_lower))
+        })
+        .collect();
+
+    filtered.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    filtered.get(state.selected_index).map(|n| n.id.clone())
+}
+
+// =============================================================================
+// NUDGE FORM (CREATE/EDIT)
+// =============================================================================
+
+fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
+    use ui::nudge::{NudgeFormFocus, NudgeFormStep, PermissionMode};
+
+    let (is_edit, state) = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::NudgeCreate(s) => (false, s),
+        ModalState::NudgeEdit(s) => (true, s),
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    let mut state = state;
+
+    match state.step {
+        NudgeFormStep::Basics => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Tab => {
+                    state.focus = state.focus.next();
+                }
+                KeyCode::BackTab => {
+                    state.focus = state.focus.prev();
+                }
+                KeyCode::Enter => {
+                    if state.focus == NudgeFormFocus::Hashtags {
+                        // Add hashtag
+                        state.add_hashtag();
+                    } else if state.can_proceed() {
+                        state.next_step();
+                    }
+                }
+                KeyCode::Char(' ') if state.focus == NudgeFormFocus::Hashtags => {
+                    // Space adds hashtag in hashtag field
+                    state.add_hashtag();
+                }
+                KeyCode::Char(c) => {
+                    match state.focus {
+                        NudgeFormFocus::Title => state.title.push(c),
+                        NudgeFormFocus::Description => state.description.push(c),
+                        NudgeFormFocus::Hashtags => state.hashtag_input.push(c),
+                    }
+                }
+                KeyCode::Backspace => {
+                    match state.focus {
+                        NudgeFormFocus::Title => { state.title.pop(); }
+                        NudgeFormFocus::Description => { state.description.pop(); }
+                        NudgeFormFocus::Hashtags => {
+                            if state.hashtag_input.is_empty() {
+                                state.hashtags.pop();
+                            } else {
+                                state.hashtag_input.pop();
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        NudgeFormStep::Content => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                    // Shift+Tab to go back
+                    state.prev_step();
+                }
+                KeyCode::Tab => {
+                    // Tab to proceed to next step
+                    if state.can_proceed() {
+                        state.next_step();
+                    }
+                }
+                KeyCode::Enter => {
+                    state.insert_content_char('\n');
+                }
+                KeyCode::Backspace => {
+                    state.backspace_content();
+                }
+                KeyCode::Up => {
+                    state.move_content_up();
+                }
+                KeyCode::Down => {
+                    state.move_content_down();
+                }
+                KeyCode::Left => {
+                    state.move_content_left();
+                }
+                KeyCode::Right => {
+                    state.move_content_right();
+                }
+                KeyCode::Char(c) => {
+                    state.insert_content_char(c);
+                }
+                _ => {}
+            }
+        }
+        NudgeFormStep::Permissions => {
+            match state.permission_mode {
+                PermissionMode::Browse => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            app.modal_state = ModalState::None;
+                            return;
+                        }
+                        KeyCode::Enter => {
+                            state.next_step();
+                        }
+                        KeyCode::Backspace => {
+                            state.prev_step();
+                        }
+                        KeyCode::Char('a') => {
+                            state.permission_mode = PermissionMode::AddAllow;
+                            state.tool_filter.clear();
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        KeyCode::Char('d') => {
+                            state.permission_mode = PermissionMode::AddDeny;
+                            state.tool_filter.clear();
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        KeyCode::Char('x') => {
+                            // Remove selected tool from both lists
+                            // (simplified - removes from both if present)
+                            // Fix #5: Sort tools for deterministic ordering
+                            let mut tools: Vec<String> = {
+                                let data_store = app.data_store.borrow();
+                                data_store
+                                    .project_statuses
+                                    .values()
+                                    .flat_map(|s| s.all_tools.iter().cloned())
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect()
+                            };
+                            tools.sort();
+                            let filtered = state.filter_tools(&tools);
+                            if let Some(tool) = filtered.get(state.tool_index) {
+                                state.permissions.remove_allow_tool(tool);
+                                state.permissions.remove_deny_tool(tool);
+                            }
+                        }
+                        KeyCode::Up => {
+                            if state.tool_index > 0 {
+                                state.tool_index -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            // Fix #5 & #6: Sort tools and use filtered length for bounds
+                            let mut tools: Vec<String> = {
+                                let data_store = app.data_store.borrow();
+                                data_store
+                                    .project_statuses
+                                    .values()
+                                    .flat_map(|s| s.all_tools.iter().cloned())
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect()
+                            };
+                            tools.sort();
+                            let filtered_count = state.filter_tools(&tools).len();
+                            if filtered_count > 0 && state.tool_index + 1 < filtered_count {
+                                state.tool_index += 1;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                PermissionMode::AddAllow | PermissionMode::AddDeny => {
+                    match key.code {
+                        KeyCode::Esc => {
+                            state.permission_mode = PermissionMode::Browse;
+                            state.tool_filter.clear();
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        KeyCode::Enter => {
+                            // Add selected tool
+                            // Fix #5: Sort tools for deterministic ordering
+                            let mut tools: Vec<String> = {
+                                let data_store = app.data_store.borrow();
+                                data_store
+                                    .project_statuses
+                                    .values()
+                                    .flat_map(|s| s.all_tools.iter().cloned())
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect()
+                            };
+                            tools.sort();
+                            let filtered = state.filter_tools(&tools);
+                            if let Some(tool) = filtered.get(state.tool_index) {
+                                if state.permission_mode == PermissionMode::AddAllow {
+                                    state.permissions.add_allow_tool(tool.to_string());
+                                } else {
+                                    state.permissions.add_deny_tool(tool.to_string());
+                                }
+                            }
+                            state.permission_mode = PermissionMode::Browse;
+                            state.tool_filter.clear();
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        KeyCode::Up => {
+                            if state.tool_index > 0 {
+                                state.tool_index -= 1;
+                            }
+                        }
+                        KeyCode::Down => {
+                            // Fix #5 & #6: Sort tools and use filtered length for bounds
+                            let mut tools: Vec<String> = {
+                                let data_store = app.data_store.borrow();
+                                data_store
+                                    .project_statuses
+                                    .values()
+                                    .flat_map(|s| s.all_tools.iter().cloned())
+                                    .collect::<std::collections::HashSet<_>>()
+                                    .into_iter()
+                                    .collect()
+                            };
+                            tools.sort();
+                            let filtered_count = state.filter_tools(&tools).len();
+                            if filtered_count > 0 && state.tool_index + 1 < filtered_count {
+                                state.tool_index += 1;
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            state.tool_filter.push(c);
+                            // Fix #6: Reset index when filter changes and clamp to new bounds
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        KeyCode::Backspace => {
+                            state.tool_filter.pop();
+                            // Fix #6: Reset index when filter changes
+                            state.tool_index = 0;
+                            state.tool_scroll = 0;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        NudgeFormStep::Review => {
+            match key.code {
+                KeyCode::Esc => {
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Backspace => {
+                    state.prev_step();
+                }
+                KeyCode::Enter => {
+                    if state.can_submit() {
+                        // Submit the nudge
+                        if let Some(ref core_handle) = app.core_handle {
+                            // Fix #3: Sanitize allow list - remove any tools that also appear in deny list
+                            // "Deny wins" conflict resolution: if a tool is in both, only keep it in deny
+                            let deny_set: std::collections::HashSet<_> = state.permissions.deny_tools.iter().collect();
+                            let sanitized_allow_tools: Vec<String> = state.permissions.allow_tools
+                                .iter()
+                                .filter(|tool| !deny_set.contains(tool))
+                                .cloned()
+                                .collect();
+
+                            let result = if is_edit {
+                                core_handle.send(NostrCommand::UpdateNudge {
+                                    original_id: state.original_id.clone().unwrap_or_default(),
+                                    title: state.title.clone(),
+                                    description: state.description.clone(),
+                                    content: state.content.clone(),
+                                    hashtags: state.hashtags.clone(),
+                                    allow_tools: sanitized_allow_tools,
+                                    deny_tools: state.permissions.deny_tools.clone(),
+                                })
+                            } else {
+                                core_handle.send(NostrCommand::CreateNudge {
+                                    title: state.title.clone(),
+                                    description: state.description.clone(),
+                                    content: state.content.clone(),
+                                    hashtags: state.hashtags.clone(),
+                                    allow_tools: sanitized_allow_tools,
+                                    deny_tools: state.permissions.deny_tools.clone(),
+                                })
+                            };
+
+                            match result {
+                                Ok(_) => {
+                                    let action = if is_edit { "updated" } else { "created" };
+                                    app.set_status(&format!("Nudge '{}' {}", state.title, action));
+                                }
+                                Err(e) => {
+                                    let action = if is_edit { "update" } else { "create" };
+                                    app.set_status(&format!("Failed to {} nudge: {}", action, e));
+                                }
+                            }
+                        } else {
+                            // Fix #9: Show error status when core_handle is missing
+                            app.set_status("Error: Not connected to backend");
+                        }
+                        app.modal_state = ModalState::None;
+                        return;
+                    }
+                }
+                KeyCode::Up => {
+                    if state.review_scroll > 0 {
+                        state.review_scroll -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    state.review_scroll += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Restore state
+    if is_edit {
+        app.modal_state = ModalState::NudgeEdit(state);
+    } else {
+        app.modal_state = ModalState::NudgeCreate(state);
+    }
+}
+
+// =============================================================================
+// NUDGE DETAIL VIEW
+// =============================================================================
+
+fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{NudgeDeleteConfirmState, NudgeListState};
+    use ui::nudge::NudgeFormState;
+
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::NudgeDetail(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            // Go back to list
+            app.modal_state = ModalState::NudgeList(NudgeListState::new());
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            let mut new_state = state;
+            new_state.scroll_up();
+            app.modal_state = ModalState::NudgeDetail(new_state);
+        }
+        KeyCode::Down | KeyCode::Char('j') => {
+            // Calculate max scroll to prevent scrolling past content
+            // The visible height in detail view is approximately 20 lines
+            // (80% modal height minus ~10 lines for header, metadata, borders, hints)
+            let visible_height = 20;
+            let nudge = app.data_store.borrow().nudges.get(&state.nudge_id).cloned();
+            let max_scroll = nudge
+                .map(|n| n.content.lines().count().saturating_sub(visible_height))
+                .unwrap_or(0);
+            let mut new_state = state;
+            new_state.scroll_down(max_scroll);
+            app.modal_state = ModalState::NudgeDetail(new_state);
+        }
+        KeyCode::Char('e') => {
+            // Edit this nudge
+            let nudge = app.data_store.borrow().nudges.get(&state.nudge_id).cloned();
+            if let Some(nudge) = nudge {
+                app.modal_state = ModalState::NudgeEdit(NudgeFormState::from_nudge(&nudge));
+            } else {
+                app.modal_state = ModalState::NudgeDetail(state);
+            }
+        }
+        KeyCode::Char('d') => {
+            // Delete this nudge
+            app.modal_state = ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new(state.nudge_id));
+        }
+        KeyCode::Char('c') => {
+            // Copy nudge ID to clipboard
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if clipboard.set_text(&state.nudge_id).is_ok() {
+                    app.set_status("Nudge ID copied to clipboard");
+                }
+            }
+            app.modal_state = ModalState::NudgeDetail(state);
+        }
+        _ => {
+            app.modal_state = ModalState::NudgeDetail(state);
+        }
+    }
+}
+
+// =============================================================================
+// NUDGE DELETE CONFIRMATION
+// =============================================================================
+
+fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::NudgeListState;
+
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::NudgeDeleteConfirm(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    match key.code {
+        KeyCode::Esc => {
+            // Cancel - go back to list
+            app.modal_state = ModalState::NudgeList(NudgeListState::new());
+        }
+        KeyCode::Up | KeyCode::Down => {
+            let mut new_state = state;
+            new_state.toggle();
+            app.modal_state = ModalState::NudgeDeleteConfirm(new_state);
+        }
+        KeyCode::Enter => {
+            if state.selected_index == 1 {
+                // Delete confirmed
+                if let Some(ref core_handle) = app.core_handle {
+                    if let Err(e) = core_handle.send(NostrCommand::DeleteNudge {
+                        nudge_id: state.nudge_id.clone(),
+                    }) {
+                        app.set_status(&format!("Failed to delete nudge: {}", e));
+                    } else {
+                        app.set_status("Nudge deleted");
+                    }
+                }
+            }
+            // Go back to list
+            app.modal_state = ModalState::NudgeList(NudgeListState::new());
+        }
+        KeyCode::Char('d') => {
+            // Quick delete
+            if let Some(ref core_handle) = app.core_handle {
+                if let Err(e) = core_handle.send(NostrCommand::DeleteNudge {
+                    nudge_id: state.nudge_id.clone(),
+                }) {
+                    app.set_status(&format!("Failed to delete nudge: {}", e));
+                } else {
+                    app.set_status("Nudge deleted");
+                }
+            }
+            app.modal_state = ModalState::NudgeList(NudgeListState::new());
+        }
+        _ => {
+            app.modal_state = ModalState::NudgeDeleteConfirm(state);
+        }
     }
 }

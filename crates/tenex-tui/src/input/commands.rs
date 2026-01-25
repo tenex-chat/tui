@@ -271,6 +271,15 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
+        key: 'U',
+        label: "Nudge Manager",
+        section: "Other",
+        available: |app| app.view == View::Home && !app.sidebar_focused,
+        execute: |app| {
+            app.modal_state = ModalState::NudgeList(modal::NudgeListState::new());
+        },
+    },
+    Command {
         key: 'C',
         label: "Create project",
         section: "Other",

@@ -1,5 +1,6 @@
 use crate::models::AskEvent;
 use crate::ui::ask_input::AskInputState;
+use crate::ui::nudge::NudgeFormState;
 use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use tenex_core::models::NamedDraft;
@@ -19,6 +20,98 @@ pub struct AskModalState {
 pub struct NudgeSelectorState {
     pub selector: SelectorState,
     pub selected_nudge_ids: Vec<String>,  // Multi-select
+}
+
+/// State for nudge list view (browse/manage nudges)
+#[derive(Debug, Clone)]
+pub struct NudgeListState {
+    pub filter: String,
+    pub selected_index: usize,
+}
+
+impl NudgeListState {
+    pub fn new() -> Self {
+        Self {
+            filter: String::new(),
+            selected_index: 0,
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn add_filter_char(&mut self, c: char) {
+        self.filter.push(c);
+        self.selected_index = 0;
+    }
+
+    pub fn backspace_filter(&mut self) {
+        self.filter.pop();
+        self.selected_index = 0;
+    }
+}
+
+impl Default for NudgeListState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// State for nudge detail view (read-only view)
+#[derive(Debug, Clone)]
+pub struct NudgeDetailState {
+    pub nudge_id: String,
+    pub scroll_offset: usize,
+}
+
+impl NudgeDetailState {
+    pub fn new(nudge_id: String) -> Self {
+        Self {
+            nudge_id,
+            scroll_offset: 0,
+        }
+    }
+
+    pub fn scroll_up(&mut self) {
+        if self.scroll_offset > 0 {
+            self.scroll_offset -= 1;
+        }
+    }
+
+    pub fn scroll_down(&mut self, max_scroll: usize) {
+        if self.scroll_offset < max_scroll {
+            self.scroll_offset += 1;
+        }
+    }
+}
+
+/// State for nudge delete confirmation
+#[derive(Debug, Clone)]
+pub struct NudgeDeleteConfirmState {
+    pub nudge_id: String,
+    pub selected_index: usize, // 0 = Cancel, 1 = Delete
+}
+
+impl NudgeDeleteConfirmState {
+    pub fn new(nudge_id: String) -> Self {
+        Self {
+            nudge_id,
+            selected_index: 0, // Default to Cancel
+        }
+    }
+
+    pub fn toggle(&mut self) {
+        self.selected_index = 1 - self.selected_index;
+    }
 }
 
 /// State for project settings modal
@@ -1212,6 +1305,16 @@ pub enum ModalState {
     DebugStats(DebugStatsState),
     /// History search modal (Ctrl+R) - search through previous messages sent by user
     HistorySearch(HistorySearchState),
+    /// Nudge list view - browse and manage nudges
+    NudgeList(NudgeListState),
+    /// Nudge create form - multi-step wizard for creating nudges
+    NudgeCreate(NudgeFormState),
+    /// Nudge edit form - edit existing nudge
+    NudgeEdit(NudgeFormState),
+    /// Nudge detail view - read-only view of a nudge
+    NudgeDetail(NudgeDetailState),
+    /// Nudge delete confirmation - confirm deletion of a nudge
+    NudgeDeleteConfirm(NudgeDeleteConfirmState),
 }
 
 impl Default for ModalState {

@@ -218,6 +218,11 @@ impl HotkeyContext {
             ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
             ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
             ModalState::HistorySearch(_) => return HotkeyContext::HistorySearchModal,
+            ModalState::NudgeList(_) => return HotkeyContext::AnyModal,
+            ModalState::NudgeCreate(_) => return HotkeyContext::AnyModal,
+            ModalState::NudgeEdit(_) => return HotkeyContext::AnyModal,
+            ModalState::NudgeDetail(_) => return HotkeyContext::AnyModal,
+            ModalState::NudgeDeleteConfirm(_) => return HotkeyContext::AnyModal,
             ModalState::None => {}
         }
 

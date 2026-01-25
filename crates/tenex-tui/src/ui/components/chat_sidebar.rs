@@ -10,6 +10,164 @@ use ratatui::{
     Frame,
 };
 
+/// A delegation item extracted from q-tags in conversation messages
+#[derive(Debug, Clone)]
+pub struct SidebarDelegation {
+    /// Thread ID of the delegation (q-tag value)
+    pub thread_id: String,
+    /// Title of the delegated conversation
+    pub title: String,
+    /// Target agent name (or short pubkey if unknown)
+    pub target: String,
+}
+
+/// A report reference extracted from a-tags in conversation messages
+#[derive(Debug, Clone)]
+pub struct SidebarReport {
+    /// The a-tag coordinate (30023:pubkey:slug)
+    pub a_tag: String,
+    /// Report title
+    pub title: String,
+    /// Report slug (for display)
+    pub slug: String,
+}
+
+/// Parsed report a-tag coordinate
+/// Format: "30023:pubkey:slug" where slug may contain colons
+#[derive(Debug, Clone)]
+pub struct ReportCoordinate {
+    pub kind: u32,
+    pub pubkey: String,
+    pub slug: String,
+}
+
+impl ReportCoordinate {
+    /// Parse a report a-tag into its components
+    /// Returns None if the format is invalid
+    pub fn parse(a_tag: &str) -> Option<Self> {
+        let parts: Vec<&str> = a_tag.split(':').collect();
+        if parts.len() >= 3 {
+            let kind = parts[0].parse::<u32>().ok()?;
+            let pubkey = parts[1].to_string();
+            // Slug may contain colons, so join the rest
+            let slug = parts[2..].join(":");
+            Some(ReportCoordinate { kind, pubkey, slug })
+        } else {
+            None
+        }
+    }
+}
+
+/// State for the interactive sidebar with delegations and reports
+#[derive(Debug, Clone, Default)]
+pub struct SidebarState {
+    /// Whether the sidebar currently has focus
+    pub focused: bool,
+    /// Currently selected item index (across all selectable items)
+    pub selected_index: usize,
+    /// Delegations extracted from conversation
+    pub delegations: Vec<SidebarDelegation>,
+    /// Reports referenced in conversation (deduped)
+    pub reports: Vec<SidebarReport>,
+}
+
+/// The type of item selected in the sidebar
+#[derive(Debug, Clone)]
+pub enum SidebarSelection {
+    /// A delegation was selected (thread_id)
+    Delegation(String),
+    /// A report was selected (a_tag)
+    Report(String),
+}
+
+impl SidebarState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Update the sidebar with new delegations and reports
+    pub fn update(&mut self, delegations: Vec<SidebarDelegation>, reports: Vec<SidebarReport>) {
+        self.delegations = delegations;
+        self.reports = reports;
+        // Reset selection if out of bounds
+        let total = self.total_items();
+        if total == 0 {
+            self.selected_index = 0;
+        } else if self.selected_index >= total {
+            self.selected_index = total.saturating_sub(1);
+        }
+    }
+
+    /// Total number of selectable items
+    pub fn total_items(&self) -> usize {
+        self.delegations.len() + self.reports.len()
+    }
+
+    /// Check if sidebar has any selectable items
+    pub fn has_items(&self) -> bool {
+        !self.delegations.is_empty() || !self.reports.is_empty()
+    }
+
+    /// Move selection up
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    /// Move selection down
+    pub fn move_down(&mut self) {
+        let max = self.total_items();
+        if max > 0 && self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Get the currently selected item
+    pub fn selected_item(&self) -> Option<SidebarSelection> {
+        self.item_at(self.selected_index)
+    }
+
+    /// Get the item at a specific global index
+    /// Delegations come first (indices 0..delegations.len()),
+    /// then reports (indices delegations.len()..total_items())
+    pub fn item_at(&self, global_index: usize) -> Option<SidebarSelection> {
+        let del_count = self.delegations.len();
+        if global_index < del_count {
+            // Delegation
+            self.delegations.get(global_index)
+                .map(|d| SidebarSelection::Delegation(d.thread_id.clone()))
+        } else {
+            // Report
+            let report_idx = global_index - del_count;
+            self.reports.get(report_idx)
+                .map(|r| SidebarSelection::Report(r.a_tag.clone()))
+        }
+    }
+
+    /// Check if a delegation at the given local index is currently selected
+    #[inline]
+    pub fn is_delegation_selected(&self, local_index: usize) -> bool {
+        self.focused && self.selected_index == local_index
+    }
+
+    /// Check if a report at the given local index is currently selected
+    #[inline]
+    pub fn is_report_selected(&self, local_index: usize) -> bool {
+        self.focused && self.selected_index == self.delegations.len() + local_index
+    }
+
+    /// Toggle focus state
+    pub fn toggle_focus(&mut self) {
+        self.focused = !self.focused;
+    }
+
+    /// Set focus state
+    pub fn set_focused(&mut self, focused: bool) {
+        self.focused = focused;
+    }
+}
+
 /// Metadata about the current conversation (from kind:513 events)
 #[derive(Debug, Clone, Default)]
 pub struct ConversationMetadata {
@@ -56,11 +214,12 @@ impl ConversationMetadata {
 }
 
 /// Render the conversation sidebar on the right side of the chat.
-/// Shows summary (first), work indicator (if busy), todos (if any), and metadata below.
+/// Shows summary (first), work indicator (if busy), todos (if any), delegations, reports, and metadata below.
 pub fn render_chat_sidebar(
     f: &mut Frame,
     todo_state: &TodoState,
     metadata: &ConversationMetadata,
+    sidebar_state: &SidebarState,
     spinner_char: char,
     area: Rect,
 ) {
@@ -69,37 +228,59 @@ pub fn render_chat_sidebar(
     let h_padding = 2;
     let content_width = (area.width as usize).saturating_sub(h_padding * 2);
 
+    // Track whether we've rendered any section (for separator logic)
+    let mut has_content = false;
+
     // === SUMMARY SECTION (FIRST) ===
     let has_summary = metadata.summary.is_some();
     if has_summary {
         render_summary_section(&mut lines, metadata, content_width, h_padding);
+        has_content = true;
     }
 
     // === WORK INDICATOR SECTION ===
     if metadata.is_busy() {
-        // Add separator if we had summary
-        if has_summary {
+        if has_content {
             lines.push(Line::from(""));
         }
         render_work_indicator_section(&mut lines, metadata, spinner_char, content_width, h_padding);
+        has_content = true;
     }
 
     // === TODOS SECTION ===
     if todo_state.has_todos() {
-        // Add separator if we had work indicator or summary
-        if metadata.is_busy() || has_summary {
+        if has_content {
             lines.push(Line::from(""));
         }
         render_todos_section(&mut lines, todo_state, content_width, h_padding);
+        has_content = true;
+    }
+
+    // === DELEGATIONS SECTION ===
+    if !sidebar_state.delegations.is_empty() {
+        if has_content {
+            lines.push(Line::from(""));
+        }
+        render_delegations_section(&mut lines, sidebar_state, content_width, h_padding);
+        has_content = true;
+    }
+
+    // === REPORTS SECTION ===
+    if !sidebar_state.reports.is_empty() {
+        if has_content {
+            lines.push(Line::from(""));
+        }
+        render_reports_section(&mut lines, sidebar_state, content_width, h_padding);
+        has_content = true;
     }
 
     // === METADATA SECTION ===
     if metadata.has_content() {
-        // Add separator if we had todos, work indicator, or summary
-        if todo_state.has_todos() || metadata.is_busy() || has_summary {
+        if has_content {
             lines.push(Line::from(""));
         }
         render_metadata_section(&mut lines, metadata, content_width, h_padding);
+        // has_content = true; // Not needed, this is the last section
     }
 
     // === EMPTY STATE ===
@@ -111,10 +292,19 @@ pub fn render_chat_sidebar(
         )));
     }
 
+
     let sidebar = Paragraph::new(lines)
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
+
+    // Draw focus indicator on left edge if focused
+    if sidebar_state.focused && area.width > 0 {
+        let focus_indicator = Paragraph::new("│".repeat(area.height as usize))
+            .style(Style::default().fg(theme::ACCENT_PRIMARY));
+        let indicator_area = Rect::new(area.x, area.y, 1, area.height);
+        f.render_widget(focus_indicator, indicator_area);
+    }
 }
 
 fn render_summary_section<'a>(
@@ -126,10 +316,6 @@ fn render_summary_section<'a>(
     let padding = " ".repeat(h_padding);
 
     if let Some(ref summary) = metadata.summary {
-        lines.push(Line::from(vec![
-            Span::raw(padding.clone()),
-            Span::styled("Summary", theme::text_muted()),
-        ]));
         for line in wrap_text(summary, content_width) {
             lines.push(Line::from(vec![
                 Span::raw(padding.clone()),
@@ -179,17 +365,8 @@ fn render_work_indicator_section(
 fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_width: usize, h_padding: usize) {
     let padding = " ".repeat(h_padding);
 
-    // Header with count
     let completed = todo_state.completed_count();
     let total = todo_state.items.len();
-    lines.push(Line::from(vec![
-        Span::raw(padding.clone()),
-        Span::styled("TODOS ", theme::text_muted()),
-        Span::styled(
-            format!("{}/{}", completed, total),
-            Style::default().fg(theme::TEXT_DIM),
-        ),
-    ]));
 
     // Progress bar
     let filled = if total > 0 {
@@ -257,6 +434,97 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
         lines.push(Line::from(vec![
             Span::raw(padding.clone()),
             Span::styled(format!("{} ", icon), icon_style),
+            Span::styled(title, title_style),
+        ]));
+    }
+}
+
+fn render_delegations_section(
+    lines: &mut Vec<Line>,
+    sidebar_state: &SidebarState,
+    content_width: usize,
+    h_padding: usize,
+) {
+    let padding = " ".repeat(h_padding);
+
+    // Section header
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled("DELEGATIONS", theme::text_muted()),
+        Span::styled(
+            format!(" ({})", sidebar_state.delegations.len()),
+            Style::default().fg(theme::TEXT_DIM),
+        ),
+    ]));
+
+    // Render each delegation (only show the target/recipient)
+    for (i, delegation) in sidebar_state.delegations.iter().enumerate() {
+        let is_selected = sidebar_state.is_delegation_selected(i);
+
+        // Selection indicator
+        let indicator = if is_selected { "▸ " } else { "  " };
+        let indicator_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY)
+        } else {
+            Style::default()
+        };
+
+        // Target/recipient line only
+        let target = truncate_with_ellipsis(&delegation.target, content_width.saturating_sub(4));
+        let target_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            theme::text_primary()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(indicator.to_string(), indicator_style),
+            Span::styled(target, target_style),
+        ]));
+    }
+}
+
+fn render_reports_section(
+    lines: &mut Vec<Line>,
+    sidebar_state: &SidebarState,
+    content_width: usize,
+    h_padding: usize,
+) {
+    let padding = " ".repeat(h_padding);
+
+    // Section header
+    lines.push(Line::from(vec![
+        Span::raw(padding.clone()),
+        Span::styled("REPORTS", theme::text_muted()),
+        Span::styled(
+            format!(" ({})", sidebar_state.reports.len()),
+            Style::default().fg(theme::TEXT_DIM),
+        ),
+    ]));
+
+    // Render each report
+    for (i, report) in sidebar_state.reports.iter().enumerate() {
+        let is_selected = sidebar_state.is_report_selected(i);
+
+        // Selection indicator
+        let indicator = if is_selected { "▸ " } else { "  " };
+        let indicator_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY)
+        } else {
+            Style::default()
+        };
+
+        // Title line with document icon
+        let title = truncate_with_ellipsis(&report.title, content_width.saturating_sub(6));
+        let title_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            theme::text_primary()
+        };
+        lines.push(Line::from(vec![
+            Span::raw(padding.clone()),
+            Span::styled(indicator.to_string(), indicator_style),
+            Span::styled("📄 ", Style::default()),
             Span::styled(title, title_style),
         ]));
     }
