@@ -883,6 +883,58 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
     let has_alt = modifiers.contains(KeyModifiers::ALT);
 
+    // Handle sidebar-focused state first
+    if app.is_sidebar_focused() {
+        match code {
+            // Escape or 'h' unfocuses sidebar
+            KeyCode::Esc | KeyCode::Char('h') => {
+                app.set_sidebar_focused(false);
+                return Ok(true);
+            }
+            // Up/k = move selection up
+            KeyCode::Up | KeyCode::Char('k') => {
+                app.sidebar_move_up();
+                return Ok(true);
+            }
+            // Down/j = move selection down
+            KeyCode::Down | KeyCode::Char('j') => {
+                app.sidebar_move_down();
+                return Ok(true);
+            }
+            // Enter = activate selected item
+            KeyCode::Enter => {
+                if let Some(selection) = app.sidebar_activate() {
+                    use crate::ui::components::SidebarSelection;
+                    match selection {
+                        SidebarSelection::Delegation(thread_id) => {
+                            // Navigate to the delegated conversation
+                            app.push_delegation(&thread_id);
+                        }
+                        SidebarSelection::Report(a_tag) => {
+                            // Open the report viewer using shared coordinate parser
+                            use crate::ui::components::ReportCoordinate;
+                            if let Some(coord) = ReportCoordinate::parse(&a_tag) {
+                                let report = app.data_store.borrow().get_report(&coord.slug).cloned();
+                                if let Some(report) = report {
+                                    use crate::ui::modal::{ModalState, ReportViewerState};
+                                    app.modal_state = ModalState::ReportViewer(ReportViewerState::new(report));
+                                }
+                            }
+                        }
+                    }
+                    app.set_sidebar_focused(false);
+                }
+                return Ok(true);
+            }
+            // Tab = unfocus sidebar (go back to message panel)
+            KeyCode::Tab => {
+                app.set_sidebar_focused(false);
+                return Ok(true);
+            }
+            _ => {}
+        }
+    }
+
     match code {
         // Alt+B = open branch selector
         KeyCode::Char('b') if has_alt => {
@@ -901,13 +953,20 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
             }
             return Ok(true);
         }
-        // Tab key cycles through tabs (Shift+Tab = prev, Tab = next)
+        // Tab key: if sidebar has items, toggle focus; otherwise cycle tabs
         KeyCode::Tab => {
-            if has_shift {
+            if app.sidebar_state.has_items() && app.todo_sidebar_visible {
+                app.toggle_sidebar_focus();
+            } else if has_shift {
                 app.prev_tab();
             } else {
                 app.next_tab();
             }
+            return Ok(true);
+        }
+        // 'l' = focus sidebar (vim-style right motion)
+        KeyCode::Char('l') if app.sidebar_state.has_items() && app.todo_sidebar_visible => {
+            app.set_sidebar_focused(true);
             return Ok(true);
         }
         // x closes current tab

@@ -1,5 +1,5 @@
 use crate::ui::components::{
-    render_chat_sidebar, render_modal_items, render_tab_bar, ConversationMetadata, Modal,
+    render_chat_sidebar, render_modal_items, render_statusbar, render_tab_bar, ConversationMetadata, Modal,
     ModalItem, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
@@ -47,19 +47,22 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     let all_messages = app.messages();
 
+    // NOTE: Sidebar state is updated on data-change events (message arrival, tab switch)
+    // not during render, to keep render pure. See update_sidebar_from_messages().
+
     // Aggregate todo state from all messages
     let todo_state = aggregate_todo_state(&all_messages);
 
-    // Calculate total LLM runtime across all messages in the conversation
-    let total_llm_runtime_ms: u64 = all_messages
-        .iter()
-        .filter_map(|msg| {
-            msg.llm_metadata
-                .iter()
-                .find(|(key, _)| key == "runtime")
-                .and_then(|(_, value)| value.parse::<u64>().ok())
+    // Calculate total LLM runtime hierarchically (own + all children recursively)
+    // This uses the RuntimeHierarchy in the data store for efficient recursive lookups
+    let total_llm_runtime_ms: u64 = app
+        .selected_thread
+        .as_ref()
+        .map(|thread| {
+            let store = app.data_store.borrow();
+            store.get_hierarchical_runtime(&thread.id)
         })
-        .sum();
+        .unwrap_or(0);
 
     // Build conversation metadata from selected thread, including work status
     let metadata = app
@@ -129,9 +132,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     messages::render_messages_panel(f, app, messages_area, &all_messages);
 
-    // Render chat sidebar (work indicator + todos + metadata)
+    // Render chat sidebar (work indicator + todos + delegations + reports + metadata)
     if let Some(sidebar) = sidebar_area {
-        render_chat_sidebar(f, &todo_state, &metadata, app.spinner_char(), sidebar);
+        render_chat_sidebar(f, &todo_state, &metadata, &app.sidebar_state, app.spinner_char(), sidebar);
     }
 
     // Calculate chunk indices based on layout
@@ -157,7 +160,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Tab bar (if tabs are open)
     if has_tabs {
         render_tab_bar(f, app, chunks[idx]);
+        idx += 1;
     }
+
+    // Status bar at the very bottom (always visible)
+    // Uses today-only runtime filtering for the status bar display
+    let cumulative_runtime = app.data_store.borrow_mut().get_today_unique_runtime();
+    render_statusbar(f, chunks[idx], app.current_notification(), cumulative_runtime);
 
     // Render agent selector popup if showing
     if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
@@ -257,6 +266,7 @@ fn build_layout(
     has_status: bool,
     has_tabs: bool,
 ) -> Rc<[Rect]> {
+    // All layouts end with statusbar at the very bottom
     match (has_attachments, has_status, has_tabs) {
         (true, true, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
@@ -264,6 +274,7 @@ fn build_layout(
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, true, false) => Layout::vertical([
@@ -271,6 +282,7 @@ fn build_layout(
             Constraint::Length(1),         // Status line
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, false, true) => Layout::vertical([
@@ -278,12 +290,14 @@ fn build_layout(
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, false, false) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Attachments line
             Constraint::Length(input_height), // Input (includes context)
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, true, true) => Layout::vertical([
@@ -291,23 +305,27 @@ fn build_layout(
             Constraint::Length(1),         // Status line
             Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, true, false) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(1),         // Status line
             Constraint::Length(input_height), // Input (includes context)
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, false, true) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(input_height), // Input (includes context)
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, false, false) => Layout::vertical([
             Constraint::Min(0),            // Messages
             Constraint::Length(input_height), // Input (includes context)
+            Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
     }

@@ -12,6 +12,7 @@ pub mod home;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
+pub mod nudge_crud;
 pub mod nudge_selector;
 pub mod project_settings;
 pub mod report_viewer;
@@ -28,6 +29,10 @@ pub use history_search::render_history_search;
 pub use home::render_home;
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
+pub use nudge_crud::{
+    render_nudge_list, render_nudge_create, render_nudge_edit,
+    render_nudge_detail, render_nudge_delete_confirm,
+};
 pub use nudge_selector::render_nudge_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};
 pub use report_viewer::render_report_viewer;

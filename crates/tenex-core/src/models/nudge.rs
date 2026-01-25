@@ -12,6 +12,12 @@ pub struct Nudge {
     pub content: String,
     pub hashtags: Vec<String>,
     pub created_at: u64,
+    /// Tools to add to agent's available tools (allow-tool tags)
+    pub allowed_tools: Vec<String>,
+    /// Tools to remove from agent's available tools (deny-tool tags)
+    pub denied_tools: Vec<String>,
+    /// ID of the nudge this one supersedes (supersedes tag)
+    pub supersedes: Option<String>,
 }
 
 impl Nudge {
@@ -29,6 +35,9 @@ impl Nudge {
         let mut title: Option<String> = None;
         let mut description: Option<String> = None;
         let mut hashtags: Vec<String> = Vec::new();
+        let mut allowed_tools: Vec<String> = Vec::new();
+        let mut denied_tools: Vec<String> = Vec::new();
+        let mut supersedes: Option<String> = None;
 
         for tag in note.tags() {
             if tag.count() >= 2 {
@@ -38,6 +47,9 @@ impl Nudge {
                             "title" => title = Some(value.to_string()),
                             "description" => description = Some(value.to_string()),
                             "t" => hashtags.push(value.to_string()),
+                            "allow-tool" => allowed_tools.push(value.to_string()),
+                            "deny-tool" => denied_tools.push(value.to_string()),
+                            "supersedes" => supersedes = Some(value.to_string()),
                             _ => {}
                         }
                     }
@@ -53,6 +65,9 @@ impl Nudge {
             content,
             hashtags,
             created_at,
+            allowed_tools,
+            denied_tools,
+            supersedes,
         })
     }
 
