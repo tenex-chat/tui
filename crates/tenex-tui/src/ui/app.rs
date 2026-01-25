@@ -2,6 +2,7 @@ use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachm
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
+use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
 use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::{Notification, NotificationQueue};
 use crate::ui::selector::SelectorState;
@@ -275,6 +276,9 @@ pub struct App {
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
 
+    /// State for the chat sidebar (delegations, reports, focus)
+    pub sidebar_state: SidebarState,
+
     /// Collapsed thread IDs (parent threads whose children are hidden)
     pub collapsed_threads: HashSet<String>,
 
@@ -381,6 +385,7 @@ impl App {
             local_stream_buffers: HashMap::new(),
             show_llm_metadata: false,
             todo_sidebar_visible: true,
+            sidebar_state: SidebarState::new(),
             collapsed_threads: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
@@ -1756,6 +1761,11 @@ impl App {
             self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
         );
 
+        // Update sidebar state with delegations and reports from messages
+        // (done here on tab switch rather than during render for purity)
+        let messages = self.messages();
+        self.update_sidebar_from_messages(&messages);
+
         // Auto-open pending ask modal if there's one for this thread
         self.maybe_open_pending_ask();
     }
@@ -2170,6 +2180,10 @@ impl App {
             self.input_mode = InputMode::Editing;
             self.scroll_offset = usize::MAX;
 
+            // Update sidebar for new thread
+            let messages = self.messages();
+            self.update_sidebar_from_messages(&messages);
+
             // Auto-open pending ask modal if there's one for this thread
             self.maybe_open_pending_ask();
         } else {
@@ -2240,6 +2254,10 @@ impl App {
                 self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
             );
 
+            // Update sidebar for new thread
+            let messages = self.messages();
+            self.update_sidebar_from_messages(&messages);
+
             // Auto-open pending ask modal if there's one for this thread
             self.maybe_open_pending_ask();
         }
@@ -2292,6 +2310,10 @@ impl App {
                 tlog!("AGENT", "pop_navigation_stack done: selected_agent={:?}",
                     self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
                 );
+
+                // Update sidebar for restored thread
+                let messages = self.messages();
+                self.update_sidebar_from_messages(&messages);
 
                 // Auto-open pending ask modal if there's one for this thread
                 self.maybe_open_pending_ask();
@@ -3377,6 +3399,133 @@ impl App {
         let blocked = prefs.blocked_backend_pubkeys().clone();
         drop(prefs);
         self.data_store.borrow_mut().set_trusted_backends(approved, blocked);
+    }
+
+    // ===== Sidebar Methods =====
+
+    /// Update the sidebar state with delegations and reports from the current conversation
+    pub fn update_sidebar_from_messages(&mut self, messages: &[Message]) {
+        use std::collections::HashSet;
+        use crate::ui::views::chat::grouping::should_treat_as_delegation;
+
+        let store = self.data_store.borrow();
+
+        // Extract delegations from q-tags, but only from delegation tools
+        // Non-delegation tools (like report_write) may have q_tags for other purposes
+        let mut delegations = Vec::new();
+        let mut seen_thread_ids: HashSet<String> = HashSet::new();
+
+        for msg in messages {
+            // Skip q_tags from non-delegation tools
+            if !should_treat_as_delegation(msg.tool_name.as_deref()) {
+                continue;
+            }
+            for thread_id in &msg.q_tags {
+                if seen_thread_ids.contains(thread_id) {
+                    continue;
+                }
+                seen_thread_ids.insert(thread_id.clone());
+
+                // Look up the thread to get its title
+                let (title, target) = if let Some(thread) = store.get_thread_by_id(thread_id) {
+                    // Try to find the target agent name
+                    let target_name = thread.p_tags.first()
+                        .and_then(|pk| {
+                            // Find project status and look up agent name
+                            store.find_project_for_thread(thread_id)
+                                .and_then(|a_tag| store.get_project_status(&a_tag))
+                                .and_then(|status| {
+                                    status.agents.iter()
+                                        .find(|a| a.pubkey == *pk)
+                                        .map(|a| a.name.clone())
+                                })
+                        })
+                        .unwrap_or_else(|| {
+                            thread.p_tags.first()
+                                .map(|pk| format!("{}...", &pk[..8.min(pk.len())]))
+                                .unwrap_or_else(|| "Unknown".to_string())
+                        });
+
+                    (thread.title.clone(), target_name)
+                } else {
+                    // Thread not found, use short ID
+                    (format!("Thread {}...", &thread_id[..8.min(thread_id.len())]), "Unknown".to_string())
+                };
+
+                delegations.push(SidebarDelegation {
+                    thread_id: thread_id.clone(),
+                    title,
+                    target,
+                });
+            }
+        }
+
+        // Extract reports from a-tags (dedupe by a_tag)
+        let mut reports = Vec::new();
+        let mut seen_a_tags: HashSet<String> = HashSet::new();
+
+        for msg in messages {
+            for a_tag in &msg.a_tags {
+                if seen_a_tags.contains(a_tag) {
+                    continue;
+                }
+                seen_a_tags.insert(a_tag.clone());
+
+                // Parse a_tag using shared helper
+                if let Some(coord) = ReportCoordinate::parse(a_tag) {
+                    // Look up the report to get its title
+                    let title = store.get_report(&coord.slug)
+                        .map(|r| r.title.clone())
+                        .unwrap_or_else(|| coord.slug.clone());
+
+                    reports.push(SidebarReport {
+                        a_tag: a_tag.clone(),
+                        title,
+                        slug: coord.slug,
+                    });
+                }
+            }
+        }
+
+        drop(store);
+        self.sidebar_state.update(delegations, reports);
+    }
+
+    /// Toggle sidebar focus
+    pub fn toggle_sidebar_focus(&mut self) {
+        if self.sidebar_state.has_items() {
+            self.sidebar_state.toggle_focus();
+        }
+    }
+
+    /// Set sidebar focus
+    pub fn set_sidebar_focused(&mut self, focused: bool) {
+        self.sidebar_state.set_focused(focused);
+    }
+
+    /// Check if sidebar is focused
+    pub fn is_sidebar_focused(&self) -> bool {
+        self.sidebar_state.focused
+    }
+
+    /// Move sidebar selection up
+    pub fn sidebar_move_up(&mut self) {
+        self.sidebar_state.move_up();
+    }
+
+    /// Move sidebar selection down
+    pub fn sidebar_move_down(&mut self) {
+        self.sidebar_state.move_down();
+    }
+
+    /// Activate the currently selected sidebar item
+    /// Returns the selection if one was made
+    pub fn sidebar_activate(&mut self) -> Option<crate::ui::components::SidebarSelection> {
+        if self.sidebar_state.focused {
+            self.sidebar_state.selected_item()
+        } else {
+            None
+        }
     }
 }
 

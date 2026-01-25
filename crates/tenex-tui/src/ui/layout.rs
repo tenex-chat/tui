@@ -46,6 +46,9 @@ pub const FOOTER_HEIGHT_DEFAULT: u16 = 1;
 /// Tab bar height (top padding + title + project + bottom padding)
 pub const TAB_BAR_HEIGHT: u16 = 4;
 
+/// Status bar height (single line at very bottom of app)
+pub const STATUSBAR_HEIGHT: u16 = 1;
+
 // =============================================================================
 // MODAL CONSTANTS - Sizing for popup modals
 // =============================================================================
