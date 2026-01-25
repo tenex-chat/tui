@@ -21,3 +21,4 @@ pulldown-cmark.workspace = true
 arboard.workspace = true
 png.workspace = true
 unicode-width = "0.2"
+unicode-segmentation = "1.10"

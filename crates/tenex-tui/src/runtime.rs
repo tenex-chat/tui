@@ -231,6 +231,11 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                         }
                     }
 
+                    // Update sidebar state with delegations and reports from messages
+                    // (done here on message arrival rather than during render for purity)
+                    let messages = app.messages();
+                    app.update_sidebar_from_messages(&messages);
+
                     // Check if this new message created a pending ask for the current thread
                     // and auto-open the modal (event-driven, not per-frame)
                     app.maybe_open_pending_ask();
