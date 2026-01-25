@@ -10,7 +10,9 @@ pub use tenex_core::store;
 pub use tenex_core::streaming;
 
 use anyhow::Result;
+use clap::Parser;
 use nostr::NostrCommand;
+use nostr_sdk::prelude::*;
 use tenex_core::config::CoreConfig;
 use tenex_core::runtime::CoreRuntime;
 
@@ -18,8 +20,21 @@ use crate::runtime::run_app;
 use ui::views::login::LoginStep;
 use ui::{App, InputMode, View};
 
+/// TENEX TUI Client
+#[derive(Parser, Debug)]
+#[command(name = "tenex-tui")]
+#[command(about = "TENEX Terminal User Interface Client")]
+struct Args {
+    /// Use this nsec directly instead of loading from file
+    #[arg(long)]
+    nsec: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Parse CLI arguments
+    let args = Args::parse();
+
     // Set up panic hook to restore terminal on panic
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
@@ -54,23 +69,12 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
     app.set_core_handle(core_handle.clone(), data_rx);
 
-    // Check credentials state upfront to avoid borrow conflicts
-    let has_creds = nostr::has_stored_credentials(&app.preferences.borrow());
-    let needs_password = has_creds && nostr::credentials_need_password(&app.preferences.borrow());
-
-    let mut login_step = if !has_creds {
-        // No credentials - show nsec prompt with autofocus
-        app.input_mode = InputMode::Editing;
-        LoginStep::Nsec
-    } else if needs_password {
-        // Password required - show unlock prompt with autofocus
-        app.input_mode = InputMode::Editing;
-        LoginStep::Unlock
-    } else {
-        // No password - auto-login with unencrypted credentials
-        let keys_result = nostr::load_unencrypted_keys(&app.preferences.borrow());
-        match keys_result {
-            Ok(keys) => {
+    // Determine login approach: CLI nsec takes precedence over stored credentials
+    let mut login_step = if let Some(ref nsec) = args.nsec {
+        // Use CLI-provided nsec directly
+        match SecretKey::parse(nsec) {
+            Ok(secret_key) => {
+                let keys = Keys::new(secret_key);
                 let user_pubkey = nostr::get_current_pubkey(&keys);
                 app.keys = Some(keys.clone());
                 app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
@@ -79,7 +83,7 @@ async fn main() -> Result<()> {
                     keys: keys.clone(),
                     user_pubkey: user_pubkey.clone(),
                 }) {
-                    app.set_status(&format!("Failed to connect: {}", e));
+                    app.set_status(&format!("Failed to connect with CLI nsec: {}", e));
                     app.input_mode = InputMode::Editing;
                     LoginStep::Nsec
                 } else {
@@ -90,9 +94,52 @@ async fn main() -> Result<()> {
                 }
             }
             Err(e) => {
-                app.set_status(&format!("Failed to load credentials: {}", e));
+                app.set_status(&format!("Invalid nsec provided: {}", e));
                 app.input_mode = InputMode::Editing;
                 LoginStep::Nsec
+            }
+        }
+    } else {
+        // Check credentials state upfront to avoid borrow conflicts
+        let has_creds = nostr::has_stored_credentials(&app.preferences.borrow());
+        let needs_password = has_creds && nostr::credentials_need_password(&app.preferences.borrow());
+
+        if !has_creds {
+            // No credentials - show nsec prompt with autofocus
+            app.input_mode = InputMode::Editing;
+            LoginStep::Nsec
+        } else if needs_password {
+            // Password required - show unlock prompt with autofocus
+            app.input_mode = InputMode::Editing;
+            LoginStep::Unlock
+        } else {
+            // No password - auto-login with unencrypted credentials
+            let keys_result = nostr::load_unencrypted_keys(&app.preferences.borrow());
+            match keys_result {
+                Ok(keys) => {
+                    let user_pubkey = nostr::get_current_pubkey(&keys);
+                    app.keys = Some(keys.clone());
+                    app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
+
+                    if let Err(e) = core_handle.send(NostrCommand::Connect {
+                        keys: keys.clone(),
+                        user_pubkey: user_pubkey.clone(),
+                    }) {
+                        app.set_status(&format!("Failed to connect: {}", e));
+                        app.input_mode = InputMode::Editing;
+                        LoginStep::Nsec
+                    } else {
+                        app.view = View::Home;
+                        app.load_filter_preferences();
+                        app.init_trusted_backends();
+                        LoginStep::Nsec // Won't be shown since view is Home
+                    }
+                }
+                Err(e) => {
+                    app.set_status(&format!("Failed to load credentials: {}", e));
+                    app.input_mode = InputMode::Editing;
+                    LoginStep::Nsec
+                }
             }
         }
     };
