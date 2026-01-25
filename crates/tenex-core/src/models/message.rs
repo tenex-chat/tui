@@ -35,9 +35,16 @@ pub struct Message {
     pub is_reasoning: bool,
     /// Ask event data if this message contains an ask
     pub ask_event: Option<AskEvent>,
-    /// Q-tags pointing to delegated conversation IDs
-    /// When an agent delegates work, the delegation message has q-tags pointing to child conversations
+    /// Q-tags from the event (may reference other conversation IDs).
+    /// While delegation tool calls use q-tags to point to child conversations,
+    /// other tool calls (like report_write) may also have q-tags for different purposes.
+    /// Only messages from specific delegation tools (mcp__tenex__delegate, etc.)
+    /// should have their q_tags treated as delegation references.
+    /// See `should_treat_as_delegation()` in grouping.rs for the filter logic.
     pub q_tags: Vec<String>,
+    /// A-tags (addressable references) - NIP-33 coordinates for kind:30023 reports
+    /// Format: "30023:pubkey:slug" - used to show referenced reports in sidebar
+    pub a_tags: Vec<String>,
     /// P-tags (mentions) - pubkeys this message mentions
     /// Used for message grouping: p-tag breaks consecutive message groups
     pub p_tags: Vec<String>,
@@ -79,6 +86,7 @@ impl Message {
         let mut reply_to: Option<String> = None;
         let mut is_reasoning = false;
         let mut q_tags: Vec<String> = Vec::new();
+        let mut a_tags: Vec<String> = Vec::new();
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
@@ -124,6 +132,16 @@ impl Message {
                         q_tags.push(conv_id.to_string());
                     } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
                         q_tags.push(hex::encode(id_bytes));
+                    }
+                }
+                Some("a") => {
+                    // A-tags are addressable references (NIP-33 coordinates)
+                    // Format: "kind:pubkey:identifier" - we only capture kind:30023 reports
+                    if let Some(coord) = tag.get(1).and_then(|t| t.variant().str()) {
+                        // Only capture report references (kind:30023)
+                        if coord.starts_with("30023:") {
+                            a_tags.push(coord.to_string());
+                        }
                     }
                 }
                 Some("e") => {
@@ -197,6 +215,7 @@ impl Message {
             is_reasoning,
             ask_event,
             q_tags,
+            a_tags,
             p_tags,
             tool_name,
             tool_args,
@@ -222,6 +241,7 @@ impl Message {
         let mut has_a_tag = false;
         let mut has_e_tag = false;
         let mut q_tags: Vec<String> = Vec::new();
+        let mut a_tags: Vec<String> = Vec::new();
         let mut p_tags: Vec<String> = Vec::new();
         let mut tool_name: Option<String> = None;
         let mut tool_args: Option<String> = None;
@@ -243,7 +263,15 @@ impl Message {
             }
 
             match tag_name {
-                Some("a") => has_a_tag = true,
+                Some("a") => {
+                    has_a_tag = true;
+                    // Also capture report references (kind:30023)
+                    if let Some(coord) = tag.get(1).and_then(|t| t.variant().str()) {
+                        if coord.starts_with("30023:") {
+                            a_tags.push(coord.to_string());
+                        }
+                    }
+                }
                 Some("e") => has_e_tag = true,
                 Some("p") => {
                     if let Some(pk) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -289,6 +317,7 @@ impl Message {
             is_reasoning: false,
             ask_event,
             q_tags,
+            a_tags,
             p_tags,
             tool_name,
             tool_args,
@@ -612,6 +641,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
@@ -631,6 +661,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
@@ -653,6 +684,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
@@ -676,6 +708,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
@@ -699,6 +732,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
@@ -722,6 +756,7 @@ mod tests {
             is_reasoning: false,
             ask_event: None,
             q_tags: vec![],
+            a_tags: vec![],
             p_tags: vec![],
             tool_name: None,
             tool_args: None,

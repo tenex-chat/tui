@@ -134,6 +134,33 @@ pub enum NostrCommand {
     SubscribeToProjectMetadata {
         project_a_tag: String,
     },
+    /// Create a new nudge (kind:4201)
+    CreateNudge {
+        title: String,
+        description: String,
+        content: String,
+        hashtags: Vec<String>,
+        /// Tools to allow (allow-tool tags)
+        allow_tools: Vec<String>,
+        /// Tools to deny (deny-tool tags)
+        deny_tools: Vec<String>,
+    },
+    /// Update an existing nudge (republish kind:4201 with same d-tag for replaceable events)
+    /// Note: kind:4201 is NOT a replaceable event in NIP-33, so we create a new event
+    /// and the old one becomes superseded by the newer timestamp
+    UpdateNudge {
+        original_id: String,
+        title: String,
+        description: String,
+        content: String,
+        hashtags: Vec<String>,
+        allow_tools: Vec<String>,
+        deny_tools: Vec<String>,
+    },
+    /// Delete a nudge (kind:5 deletion event referencing the nudge)
+    DeleteNudge {
+        nudge_id: String,
+    },
     Shutdown,
 }
 
@@ -310,6 +337,24 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to subscribe to project metadata: {}", e);
                         }
                     }
+                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools } => {
+                        debug_log(&format!("Worker: Creating nudge '{}'", title));
+                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools)) {
+                            tlog!("ERROR", "Failed to create nudge: {}", e);
+                        }
+                    }
+                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools } => {
+                        debug_log(&format!("Worker: Updating nudge '{}'", title));
+                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools)) {
+                            tlog!("ERROR", "Failed to update nudge: {}", e);
+                        }
+                    }
+                    NostrCommand::DeleteNudge { nudge_id } => {
+                        debug_log(&format!("Worker: Deleting nudge {}", &nudge_id[..8]));
+                        if let Err(e) = rt.block_on(self.handle_delete_nudge(nudge_id)) {
+                            tlog!("ERROR", "Failed to delete nudge: {}", e);
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
                         let _ = rt.block_on(self.handle_disconnect());
@@ -417,14 +462,19 @@ impl NostrWorker {
         );
         tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
 
-        // 4. Nudges (kind:4201)
-        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+        // 4. Nudges (kind:4201) - scoped to current user only (Fix #12)
+        // Parse user pubkey to use as author filter
+        let user_pk = PublicKey::from_hex(user_pubkey)
+            .map_err(|e| anyhow::anyhow!("Invalid user pubkey: {}", e))?;
+        let nudge_filter = Filter::new()
+            .kind(Kind::Custom(4201))
+            .author(user_pk);
         let output = client.subscribe(vec![nudge_filter], None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Nudges".to_string(), vec![4201], None),
+            SubscriptionInfo::new("Nudges (user)".to_string(), vec![4201], None),
         );
-        tlog!("CONN", "Subscribed to nudges (kind:4201)");
+        tlog!("CONN", "Subscribed to nudges (kind:4201) for user {}", &user_pubkey[..8]);
 
         // 5. Agent lessons (kind:4129)
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
@@ -1180,6 +1230,199 @@ impl NostrWorker {
         self.user_pubkey = None;
         Ok(())
     }
+
+    /// Create a new nudge (kind:4201)
+    async fn handle_create_nudge(
+        &self,
+        title: String,
+        description: String,
+        content: String,
+        hashtags: Vec<String>,
+        allow_tools: Vec<String>,
+        deny_tools: Vec<String>,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Build the nudge event (kind:4201)
+        let mut event = EventBuilder::new(Kind::Custom(4201), &content)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![title.clone()],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        // Add description tag if non-empty
+        if !description.is_empty() {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                vec![description],
+            ));
+        }
+
+        // Add hashtag tags
+        for tag in &hashtags {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("t")),
+                vec![tag.clone()],
+            ));
+        }
+
+        // Add allow-tool tags
+        for tool in &allow_tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                vec![tool.clone()],
+            ));
+        }
+
+        // Add deny-tool tags
+        for tool in &deny_tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                vec![tool.clone()],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => debug_log(&format!("Created nudge '{}': {}", title, output.id())),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send nudge to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending nudge to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
+
+    /// Update an existing nudge (create new event with updated content)
+    /// Since kind:4201 is not a replaceable event, we create a new event
+    /// and add a reference to the original
+    async fn handle_update_nudge(
+        &self,
+        original_id: String,
+        title: String,
+        description: String,
+        content: String,
+        hashtags: Vec<String>,
+        allow_tools: Vec<String>,
+        deny_tools: Vec<String>,
+    ) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Build the updated nudge event (kind:4201)
+        let mut event = EventBuilder::new(Kind::Custom(4201), &content)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![title.clone()],
+            ))
+            // Reference to original nudge (supersedes relationship)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("supersedes")),
+                vec![original_id],
+            ))
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        // Add description tag if non-empty
+        if !description.is_empty() {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("description")),
+                vec![description],
+            ));
+        }
+
+        // Add hashtag tags
+        for tag in &hashtags {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("t")),
+                vec![tag.clone()],
+            ));
+        }
+
+        // Add allow-tool tags
+        for tool in &allow_tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                vec![tool.clone()],
+            ));
+        }
+
+        // Add deny-tool tags
+        for tool in &deny_tools {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                vec![tool.clone()],
+            ));
+        }
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => debug_log(&format!("Updated nudge '{}': {}", title, output.id())),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send updated nudge to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending updated nudge to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
+
+    /// Delete a nudge (kind:5 deletion event)
+    async fn handle_delete_nudge(&self, nudge_id: String) -> Result<()> {
+        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Parse the nudge event ID
+        let event_id = EventId::parse(&nudge_id)
+            .map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
+
+        // Build the deletion event (kind:5 per NIP-09)
+        let event = EventBuilder::delete(vec![event_id])
+            // NIP-89 client tag
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec!["tenex-tui".to_string()],
+            ));
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(signed_event)
+        ).await {
+            Ok(Ok(output)) => debug_log(&format!("Deleted nudge {}: deletion event {}", &nudge_id[..8], output.id())),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send deletion event to relay: {}", e),
+            Err(_) => tlog!("ERROR", "Timeout sending deletion event to relay (saved locally)"),
+        }
+
+        Ok(())
+    }
 }
 
 /// Run negentropy sync loop with adaptive timing
@@ -1244,8 +1487,10 @@ async fn sync_all_filters(
     let lesson_filter = Filter::new().kind(Kind::Custom(4129));
     total_new += sync_filter(client, lesson_filter, "4129", stats).await;
 
-    // Nudges (kind 4201)
-    let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+    // Nudges (kind 4201) - scoped to current user only (Fix #12)
+    let nudge_filter = Filter::new()
+        .kind(Kind::Custom(4201))
+        .author(*user_pubkey);
     total_new += sync_filter(client, nudge_filter, "4201", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
