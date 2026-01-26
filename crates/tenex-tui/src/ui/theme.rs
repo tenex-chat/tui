@@ -279,6 +279,11 @@ pub fn tab_unread() -> Style {
     Style::default().fg(ACCENT_WARNING).add_modifier(Modifier::BOLD)
 }
 
+pub fn tab_waiting_for_user() -> Style {
+    // Same style as unread - both use warning color with bold
+    tab_unread()
+}
+
 // -----------------------------------------------------------------------------
 // Tool Call Styles
 // -----------------------------------------------------------------------------
