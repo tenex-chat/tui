@@ -152,26 +152,35 @@ impl RuntimeHierarchy {
     /// Add a parent-child relationship from the parent's perspective.
     /// This is typically discovered from q-tags (parent has q-tag pointing to child).
     /// Delegates to set_parent() to ensure graph consistency.
-    pub fn add_child(&mut self, parent_id: &str, child_id: &str) {
+    /// Returns true if this was a new relationship (not already known).
+    pub fn add_child(&mut self, parent_id: &str, child_id: &str) -> bool {
         // Delegate to set_parent which is the single source of truth
-        self.set_parent(child_id, parent_id);
+        self.set_parent(child_id, parent_id)
     }
 
     /// Set parent for a child conversation.
     /// This is the single source of truth for parent-child relationships.
     /// Handles re-parenting by cleaning up old edges before adding new ones.
+    /// Returns true if this was a new or changed relationship.
     ///
     /// When setting a new parent:
     /// 1. Remove child from old parent's children set (if any)
     /// 2. Clear the child's old parent entry
     /// 3. Add the new relationship
-    pub fn set_parent(&mut self, child_id: &str, parent_id: &str) {
+    pub fn set_parent(&mut self, child_id: &str, parent_id: &str) -> bool {
         // Don't add self-referential relationships
         if parent_id == child_id {
-            return;
+            return false;
         }
 
-        // Clean up old relationship if child already has a parent
+        // Check if relationship already exists with the same parent
+        if let Some(existing_parent) = self.parents.get(child_id) {
+            if existing_parent == parent_id {
+                return false; // No change needed
+            }
+        }
+
+        // Clean up old relationship if child already has a different parent
         if let Some(old_parent_id) = self.parents.get(child_id).cloned() {
             // Only clean up if we're actually changing parents
             if old_parent_id != parent_id {
@@ -193,6 +202,8 @@ impl RuntimeHierarchy {
             .entry(parent_id.to_string())
             .or_default()
             .insert(child_id.to_string());
+
+        true // Relationship was added or changed
     }
 
     /// Get the parent of a conversation (if any)
@@ -1075,10 +1086,14 @@ mod tests {
         hierarchy.set_parent("conv2", "conv1");
         hierarchy.set_parent("conv1", "conv2");
 
-        // Should not infinite loop
+        // Should not infinite loop and should return the max of all values in cycle
+        // conv1's effective = max(100, 200) = 200
         let effective = hierarchy.get_effective_last_activity("conv1");
-        // Should return some reasonable value without crashing
-        assert!(effective > 0);
+        assert_eq!(effective, 200, "cycle detection should still return max value");
+
+        // conv2's effective = max(200, 100) = 200
+        let effective2 = hierarchy.get_effective_last_activity("conv2");
+        assert_eq!(effective2, 200, "cycle detection should still return max value from conv2");
     }
 
     #[test]
