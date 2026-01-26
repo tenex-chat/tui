@@ -3414,30 +3414,68 @@ impl App {
         }
     }
 
-    /// Update sidebar search results based on current query
+    /// Update sidebar search results based on current query and active tab
     pub fn update_sidebar_search_results(&mut self) {
-        use crate::ui::search::search_conversations;
+        use crate::ui::search::{search_conversations, search_reports};
         let store = self.data_store.borrow();
-        self.sidebar_search.results = search_conversations(
-            &self.sidebar_search.query,
-            &store,
-            &self.visible_projects,
-        );
+
+        // Clear both result sets
+        self.sidebar_search.results.clear();
+        self.sidebar_search.report_results.clear();
+
+        // Search based on current tab
+        match self.home_panel_focus {
+            HomeTab::Reports => {
+                self.sidebar_search.report_results = search_reports(
+                    &self.sidebar_search.query,
+                    &store,
+                    &self.visible_projects,
+                );
+            }
+            _ => {
+                self.sidebar_search.results = search_conversations(
+                    &self.sidebar_search.query,
+                    &store,
+                    &self.visible_projects,
+                );
+            }
+        }
+
         // Reset selection when results change
         self.sidebar_search.selected_index = 0;
         self.sidebar_search.scroll_offset = 0;
     }
 
-    /// Open the selected search result
+    /// Open the selected search result (conversation or report based on current tab)
     pub fn open_selected_search_result(&mut self) {
-        if let Some(result) = self.sidebar_search.selected_result().cloned() {
-            // Close search
-            self.sidebar_search.visible = false;
-            self.sidebar_search.query.clear();
-            self.sidebar_search.results.clear();
+        match self.home_panel_focus {
+            HomeTab::Reports => {
+                // Open report
+                if let Some(report) = self.sidebar_search.report_results.get(self.sidebar_search.selected_index).cloned() {
+                    // Close search
+                    self.sidebar_search.visible = false;
+                    self.sidebar_search.query.clear();
+                    self.sidebar_search.results.clear();
+                    self.sidebar_search.report_results.clear();
 
-            // Open the thread
-            self.open_thread_from_home(&result.thread, &result.project_a_tag);
+                    // Open the report in a viewer modal
+                    use crate::ui::modal::{ModalState, ReportViewerState};
+                    self.modal_state = ModalState::ReportViewer(ReportViewerState::new(report));
+                }
+            }
+            _ => {
+                // Open conversation
+                if let Some(result) = self.sidebar_search.selected_result().cloned() {
+                    // Close search
+                    self.sidebar_search.visible = false;
+                    self.sidebar_search.query.clear();
+                    self.sidebar_search.results.clear();
+                    self.sidebar_search.report_results.clear();
+
+                    // Open the thread
+                    self.open_thread_from_home(&result.thread, &result.project_a_tag);
+                }
+            }
         }
     }
 
