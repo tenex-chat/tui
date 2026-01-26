@@ -196,13 +196,15 @@ fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
             // Open command palette - the '/' command will toggle search off
             app.open_command_palette();
         }
-        // Esc does NOT close search (per user request: Ctrl+T + / to toggle)
-        // Instead, Esc clears the query if there is one
+        // Esc clears the query first, then closes the search if already empty
         KeyCode::Esc => {
             if !app.sidebar_search.query.is_empty() {
                 app.sidebar_search.query.clear();
                 app.sidebar_search.cursor = 0;
                 app.update_sidebar_search_results();
+            } else {
+                // Query is already empty, close the search
+                app.sidebar_search.toggle();
             }
         }
         // Enter opens the selected result
@@ -215,6 +217,7 @@ fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Down => {
             // Use appropriate move method based on current tab
+            // Note: scroll offset adjustment happens in the renderer where we have real layout data
             if app.home_panel_focus == crate::ui::HomeTab::Reports {
                 app.sidebar_search.move_selection_down_reports();
             } else {
