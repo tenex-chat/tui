@@ -6,8 +6,6 @@
 
 use crate::models::Thread;
 use crate::store::AppDataStore;
-use ratatui::style::Style;
-use ratatui::text::Span;
 use std::cell::Ref;
 use std::collections::HashSet;
 
@@ -20,8 +18,10 @@ pub struct SidebarSearchState {
     pub query: String,
     /// Cursor position within query
     pub cursor: usize,
-    /// Cached search results
+    /// Cached search results for conversations
     pub results: Vec<SearchResult>,
+    /// Cached search results for reports
+    pub report_results: Vec<tenex_core::models::Report>,
     /// Selected result index
     pub selected_index: usize,
     /// Scroll offset for long results lists
@@ -41,37 +41,52 @@ impl SidebarSearchState {
             self.query.clear();
             self.cursor = 0;
             self.results.clear();
+            self.report_results.clear();
             self.selected_index = 0;
             self.scroll_offset = 0;
         }
     }
 
-    /// Insert a character at the cursor position
+    /// Insert a character at the cursor position (cursor is char index, not byte index)
     pub fn insert_char(&mut self, c: char) {
-        self.query.insert(self.cursor, c);
+        // Convert char index to byte index for insert
+        let byte_idx = self.char_to_byte_index(self.cursor);
+        self.query.insert(byte_idx, c);
         self.cursor += 1;
     }
 
-    /// Delete character before cursor
+    /// Delete character before cursor (cursor is char index, not byte index)
     pub fn delete_char(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
-            self.query.remove(self.cursor);
+            // Convert char index to byte index for remove
+            let byte_idx = self.char_to_byte_index(self.cursor);
+            self.query.remove(byte_idx);
         }
     }
 
-    /// Move cursor left
+    /// Move cursor left (cursor is char index)
     pub fn move_cursor_left(&mut self) {
         if self.cursor > 0 {
             self.cursor -= 1;
         }
     }
 
-    /// Move cursor right
+    /// Move cursor right (cursor is char index)
     pub fn move_cursor_right(&mut self) {
-        if self.cursor < self.query.len() {
+        let char_count = self.query.chars().count();
+        if self.cursor < char_count {
             self.cursor += 1;
         }
+    }
+
+    /// Convert a character index to a byte index
+    fn char_to_byte_index(&self, char_idx: usize) -> usize {
+        self.query
+            .char_indices()
+            .nth(char_idx)
+            .map(|(byte_idx, _)| byte_idx)
+            .unwrap_or(self.query.len())
     }
 
     /// Move selection up in results
@@ -81,10 +96,28 @@ impl SidebarSearchState {
         }
     }
 
-    /// Move selection down in results
+    /// Move selection down in results (for conversations)
     pub fn move_selection_down(&mut self) {
-        if !self.results.is_empty() && self.selected_index < self.results.len() - 1 {
+        let count = self.results.len();
+        if count > 0 && self.selected_index < count - 1 {
             self.selected_index += 1;
+        }
+    }
+
+    /// Move selection down for reports
+    pub fn move_selection_down_reports(&mut self) {
+        let count = self.report_results.len();
+        if count > 0 && self.selected_index < count - 1 {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Get the active result count (conversations or reports)
+    pub fn active_result_count(&self, is_reports_tab: bool) -> usize {
+        if is_reports_tab {
+            self.report_results.len()
+        } else {
+            self.results.len()
         }
     }
 
@@ -129,8 +162,6 @@ pub struct MatchingReply {
     pub content: String,
     /// Author pubkey
     pub author_pubkey: String,
-    /// Character ranges where matches occur
-    pub match_ranges: Vec<(usize, usize)>,
 }
 
 /// Type of search match
@@ -150,11 +181,17 @@ pub enum SearchMatchType {
 ///
 /// Returns results matching the query in thread titles, content, or reply messages.
 /// Respects project filters (visible_projects) but NOT time filters.
+/// Empty visible_projects = show nothing (consistent with other lists)
 pub fn search_conversations(
     query: &str,
     store: &Ref<AppDataStore>,
     visible_projects: &HashSet<String>,
 ) -> Vec<SearchResult> {
+    // Empty visible_projects = show nothing (consistent with other lists)
+    if visible_projects.is_empty() {
+        return vec![];
+    }
+
     if query.trim().is_empty() {
         return vec![];
     }
@@ -167,8 +204,8 @@ pub fn search_conversations(
     for project in store.get_projects() {
         let a_tag = project.a_tag();
 
-        // Skip projects not in visible_projects (if any are selected)
-        if !visible_projects.is_empty() && !visible_projects.contains(&a_tag) {
+        // Skip projects not in visible_projects
+        if !visible_projects.contains(&a_tag) {
             continue;
         }
 
@@ -225,7 +262,6 @@ pub fn search_conversations(
                                     event_id: msg.id.clone(),
                                     content: msg.content.clone(),
                                     author_pubkey: msg.pubkey.clone(),
-                                    match_ranges: find_match_ranges(&msg.content, &filter),
                                 });
                                 existing.match_type = SearchMatchType::Reply;
                             }
@@ -243,7 +279,6 @@ pub fn search_conversations(
                                 event_id: msg.id.clone(),
                                 content: msg.content.clone(),
                                 author_pubkey: msg.pubkey.clone(),
-                                match_ranges: find_match_ranges(&msg.content, &filter),
                             }),
                             match_type: SearchMatchType::Reply,
                             created_at: msg.created_at,
@@ -261,11 +296,17 @@ pub fn search_conversations(
 }
 
 /// Search reports for a query
+/// Empty visible_projects = show nothing (consistent with other lists)
 pub fn search_reports(
     query: &str,
     store: &Ref<AppDataStore>,
     visible_projects: &HashSet<String>,
 ) -> Vec<tenex_core::models::Report> {
+    // Empty visible_projects = show nothing (consistent with other lists)
+    if visible_projects.is_empty() {
+        return vec![];
+    }
+
     if query.trim().is_empty() {
         return vec![];
     }
@@ -274,8 +315,8 @@ pub fn search_reports(
     let mut results = Vec::new();
 
     for report in store.get_reports() {
-        // Skip reports not in visible_projects (if any are selected)
-        if !visible_projects.is_empty() && !visible_projects.contains(&report.project_a_tag) {
+        // Skip reports not in visible_projects
+        if !visible_projects.contains(&report.project_a_tag) {
             continue;
         }
 
@@ -294,99 +335,4 @@ pub fn search_reports(
     results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
     results
-}
-
-/// Find all character ranges where the query matches in the content
-fn find_match_ranges(content: &str, query: &str) -> Vec<(usize, usize)> {
-    let content_lower = content.to_lowercase();
-    let query_lower = query.to_lowercase();
-    let mut ranges = Vec::new();
-    let mut start = 0;
-
-    while let Some(pos) = content_lower[start..].find(&query_lower) {
-        let match_start = start + pos;
-        let match_end = match_start + query.len();
-        ranges.push((match_start, match_end));
-        start = match_end;
-    }
-
-    ranges
-}
-
-/// Create highlighted spans for text with match ranges
-///
-/// Returns a vector of Spans with matches highlighted
-pub fn highlight_matches<'a>(
-    text: &'a str,
-    query: &str,
-    normal_style: Style,
-    highlight_style: Style,
-    max_chars: usize,
-) -> Vec<Span<'a>> {
-    let mut spans = Vec::new();
-
-    if query.is_empty() {
-        let truncated: String = text.chars().take(max_chars).collect();
-        spans.push(Span::styled(truncated, normal_style));
-        return spans;
-    }
-
-    let text_lower = text.to_lowercase();
-    let query_lower = query.to_lowercase();
-
-    // Find first match to center the preview around it
-    if let Some(first_match_pos) = text_lower.find(&query_lower) {
-        // Calculate window to show around the match
-        let context_chars = max_chars.saturating_sub(query.len()) / 2;
-        let window_start = first_match_pos.saturating_sub(context_chars);
-        let window_end = (first_match_pos + query.len() + context_chars).min(text.len());
-
-        // Add ellipsis if we're not starting from the beginning
-        if window_start > 0 {
-            spans.push(Span::styled("...", normal_style));
-        }
-
-        // Extract the window of text
-        let window: String = text.chars().skip(window_start).take(window_end - window_start).collect();
-        let window_lower = window.to_lowercase();
-
-        // Highlight matches within the window
-        let mut last_end = 0;
-        let mut start = 0;
-
-        while let Some(pos) = window_lower[start..].find(&query_lower) {
-            let match_start = start + pos;
-            let match_end = match_start + query.len();
-
-            // Text before match
-            if match_start > last_end {
-                let before: String = window.chars().skip(last_end).take(match_start - last_end).collect();
-                spans.push(Span::styled(before, normal_style));
-            }
-
-            // The match itself (preserve original case)
-            let matched: String = window.chars().skip(match_start).take(query.len()).collect();
-            spans.push(Span::styled(matched, highlight_style));
-
-            last_end = match_end;
-            start = match_end;
-        }
-
-        // Remaining text after last match
-        if last_end < window.len() {
-            let after: String = window.chars().skip(last_end).collect();
-            spans.push(Span::styled(after, normal_style));
-        }
-
-        // Add ellipsis if we're not showing the end
-        if window_end < text.len() {
-            spans.push(Span::styled("...", normal_style));
-        }
-    } else {
-        // No match found, just show truncated text
-        let truncated: String = text.chars().take(max_chars).collect();
-        spans.push(Span::styled(truncated, normal_style));
-    }
-
-    spans
 }

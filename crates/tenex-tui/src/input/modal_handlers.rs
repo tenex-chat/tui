@@ -14,6 +14,13 @@ use tenex_core::stats::query_events_by_e_tag;
 /// Routes input to the appropriate modal handler.
 /// Returns `true` if the input was handled by a modal, `false` otherwise.
 pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    // Handle command palette when open - MUST come before sidebar search
+    // so that Ctrl+T + / can toggle search off when palette is opened from search
+    if matches!(app.modal_state, ModalState::CommandPalette(_)) {
+        handle_command_palette_key(app, key);
+        return Ok(true);
+    }
+
     // Handle sidebar search when visible
     if app.sidebar_search.visible {
         handle_sidebar_search_key(app, key);
@@ -29,12 +36,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle ask modal when open
     if matches!(app.modal_state, ModalState::AskModal(_)) {
         handle_ask_modal_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle command palette when open
-    if matches!(app.modal_state, ModalState::CommandPalette(_)) {
-        handle_command_palette_key(app, key);
         return Ok(true);
     }
 
@@ -219,7 +220,12 @@ fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
             app.sidebar_search.move_selection_up();
         }
         KeyCode::Down => {
-            app.sidebar_search.move_selection_down();
+            // Use appropriate move method based on current tab
+            if app.home_panel_focus == crate::ui::HomeTab::Reports {
+                app.sidebar_search.move_selection_down_reports();
+            } else {
+                app.sidebar_search.move_selection_down();
+            }
         }
         // Left/Right move cursor in query
         KeyCode::Left => {

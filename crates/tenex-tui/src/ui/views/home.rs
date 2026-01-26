@@ -1333,9 +1333,10 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     f.render_widget(block, area);
 
-    // Search query with cursor
+    // Search query with cursor (cursor_pos is a char index, not byte index)
     let query = &app.sidebar_search.query;
     let cursor_pos = app.sidebar_search.cursor;
+    let char_count = query.chars().count();
 
     // Build the search line with cursor indicator
     let mut spans = Vec::new();
@@ -1347,7 +1348,7 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Cursor (block character when focused)
-    let cursor_char = if cursor_pos < query.len() {
+    let cursor_char = if cursor_pos < char_count {
         query.chars().nth(cursor_pos).unwrap_or(' ')
     } else {
         ' '
@@ -1358,7 +1359,7 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     ));
 
     // Text after cursor
-    if cursor_pos < query.len() {
+    if cursor_pos < char_count {
         let after: String = query.chars().skip(cursor_pos + 1).collect();
         spans.push(Span::styled(after, Style::default().fg(theme::TEXT_PRIMARY)));
     }
@@ -1374,6 +1375,16 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
 
 /// Render the sidebar search results in the main content area
 fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
+    // Delegate to appropriate renderer based on current tab
+    if app.home_panel_focus == HomeTab::Reports {
+        render_report_search_results(f, app, area);
+    } else {
+        render_conversation_search_results(f, app, area);
+    }
+}
+
+/// Render conversation search results
+fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
     let results = &app.sidebar_search.results;
     let selected_idx = app.sidebar_search.selected_index;
     let query = &app.sidebar_search.query;
@@ -1430,6 +1441,147 @@ fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().fg(theme::TEXT_MUTED))
         .alignment(ratatui::layout::Alignment::Right);
     f.render_widget(count_line, count_area);
+}
+
+/// Render report search results
+fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
+    let results = &app.sidebar_search.report_results;
+    let selected_idx = app.sidebar_search.selected_index;
+    let query = &app.sidebar_search.query;
+
+    if results.is_empty() {
+        let msg = "No matching reports";
+        let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty, area);
+        return;
+    }
+
+    let mut y_offset = 0u16;
+    let query_lower = query.to_lowercase();
+
+    for (i, report) in results.iter().enumerate() {
+        let is_selected = i == selected_idx;
+
+        // Card height: Title + Summary + Spacing
+        let card_height = 4u16;
+
+        if y_offset + card_height > area.height.saturating_sub(1) {
+            break;
+        }
+
+        let card_area = Rect::new(
+            area.x,
+            area.y + y_offset,
+            area.width,
+            card_height,
+        );
+
+        render_report_search_result_card(f, report, is_selected, card_area, &query_lower);
+        y_offset += card_height;
+    }
+
+    // Show result count at bottom
+    let result_count = results.len();
+    let count_text = format!("{} report{}", result_count, if result_count == 1 { "" } else { "s" });
+    let count_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+    let count_line = Paragraph::new(count_text)
+        .style(Style::default().fg(theme::TEXT_MUTED))
+        .alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(count_line, count_area);
+}
+
+/// Render a single report search result card
+fn render_report_search_result_card(
+    f: &mut Frame,
+    report: &tenex_core::models::Report,
+    is_selected: bool,
+    area: Rect,
+    query: &str,
+) {
+    let bg = if is_selected {
+        theme::BG_SELECTED
+    } else {
+        theme::BG_CARD
+    };
+
+    // Background
+    let block = Block::default()
+        .style(Style::default().bg(bg))
+        .padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.height == 0 {
+        return;
+    }
+
+    // Line 1: Title with highlighting
+    let title_line = highlight_text_spans(&report.title, query, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY);
+    let title_para = Paragraph::new(Line::from(title_line));
+    let title_area = Rect::new(inner.x, inner.y, inner.width, 1);
+    f.render_widget(title_para, title_area);
+
+    // Line 2: Summary (truncated) with highlighting
+    if inner.height > 1 {
+        let summary: String = report.summary.chars().take(100).collect();
+        let summary_line = highlight_text_spans(&summary, query, theme::TEXT_MUTED, theme::ACCENT_PRIMARY);
+        let summary_para = Paragraph::new(Line::from(summary_line));
+        let summary_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
+        f.render_widget(summary_para, summary_area);
+    }
+
+    // Line 3: Hashtags
+    if inner.height > 2 && !report.hashtags.is_empty() {
+        let tags = report.hashtags.iter()
+            .take(5)
+            .map(|t| format!("#{}", t))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let tags_para = Paragraph::new(tags).style(Style::default().fg(theme::ACCENT_SPECIAL));
+        let tags_area = Rect::new(inner.x, inner.y + 2, inner.width, 1);
+        f.render_widget(tags_para, tags_area);
+    }
+}
+
+/// Highlight matching text in a string with spans
+fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::Color, highlight_color: ratatui::style::Color) -> Vec<Span<'static>> {
+    if query.is_empty() {
+        return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
+    }
+
+    let text_lower = text.to_lowercase();
+    let mut spans = Vec::new();
+    let mut last_end = 0;
+
+    for (start, _) in text_lower.match_indices(query) {
+        // Add text before match
+        if start > last_end {
+            spans.push(Span::styled(
+                text[last_end..start].to_string(),
+                Style::default().fg(normal_color),
+            ));
+        }
+        // Add highlighted match
+        spans.push(Span::styled(
+            text[start..start + query.len()].to_string(),
+            Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
+        ));
+        last_end = start + query.len();
+    }
+
+    // Add remaining text
+    if last_end < text.len() {
+        spans.push(Span::styled(
+            text[last_end..].to_string(),
+            Style::default().fg(normal_color),
+        ));
+    }
+
+    if spans.is_empty() {
+        vec![Span::styled(text.to_string(), Style::default().fg(normal_color))]
+    } else {
+        spans
+    }
 }
 
 /// Render a single sidebar search result card
