@@ -420,6 +420,12 @@ impl OpenTab {
         self.draft_id.is_some()
     }
 
+    /// Clear attention flags (unread and waiting_for_user) when user views this tab
+    pub fn clear_attention_flags(&mut self) {
+        self.has_unread = false;
+        self.waiting_for_user = false;
+    }
+
     /// Create a new tab for an existing thread
     pub fn for_thread(thread_id: String, thread_title: String, project_a_tag: String) -> Self {
         Self {
@@ -574,8 +580,7 @@ impl TabManager {
     ) -> usize {
         // Check if already open
         if let Some(idx) = self.find_by_thread_id(&thread_id) {
-            self.tabs[idx].has_unread = false;
-            self.tabs[idx].waiting_for_user = false; // Clear waiting state on view
+            self.tabs[idx].clear_attention_flags();
             self.active_index = idx;
             return idx;
         }
@@ -629,8 +634,7 @@ impl TabManager {
         self.push_history(index);
         self.push_view_history(ViewLocation::Tab(index));
         self.active_index = index;
-        self.tabs[index].has_unread = false;
-        self.tabs[index].waiting_for_user = false; // Clear waiting state on view
+        self.tabs[index].clear_attention_flags();
         true
     }
 

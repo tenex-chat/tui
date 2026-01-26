@@ -834,11 +834,11 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
         Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
     ];
 
-    // Line 2: Type + Project + Author (yellow for waiting items)
+    // Line 2: Type + Project + Author (yellow for waiting items, muted otherwise)
     let type_style = if is_waiting_for_user {
         Style::default().fg(theme::ACCENT_WARNING)
     } else {
-        Style::default().fg(theme::ACCENT_WARNING)
+        Style::default().fg(theme::TEXT_MUTED)
     };
 
     let line2_spans = vec![
