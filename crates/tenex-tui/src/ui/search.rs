@@ -206,8 +206,8 @@ pub fn search_conversations(
             let title_matches = thread.title.to_lowercase().contains(&filter);
             // Check thread content
             let content_matches = thread.content.to_lowercase().contains(&filter);
-            // Check conversation ID
-            let id_matches = thread.id.to_lowercase().contains(&filter);
+            // Check conversation ID (prefix match for shortened IDs like 12-char or full 64-char)
+            let id_matches = thread.id.to_lowercase().starts_with(&filter);
 
             if title_matches || content_matches || id_matches {
                 seen_threads.insert(thread.id.clone());
