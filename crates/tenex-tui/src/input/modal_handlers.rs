@@ -2271,7 +2271,7 @@ fn get_selected_nudge_id(app: &App, state: &ui::modal::NudgeListState) -> Option
 }
 
 // =============================================================================
-// NUDGE FORM (CREATE/EDIT)
+// NUDGE FORM (CREATE)
 // =============================================================================
 
 fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
