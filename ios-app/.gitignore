@@ -1,0 +1,8 @@
+# Tuist generated files - regenerate with `tuist generate`
+*.xcodeproj/
+*.xcworkspace/
+Derived/
+
+# Xcode user-specific files
+xcuserdata/
+*.xcuserstate

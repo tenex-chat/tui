@@ -6,6 +6,7 @@ edition.workspace = true
 [lib]
 name = "tenex_core"
 path = "src/lib.rs"
+crate-type = ["lib", "cdylib", "staticlib"]
 
 [dependencies]
 anyhow.workspace = true
@@ -23,6 +24,11 @@ libc.workspace = true
 uuid.workspace = true
 dirs.workspace = true
 parking_lot.workspace = true
+uniffi = { workspace = true, features = ["cli"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
 
 [dev-dependencies]
 tempfile.workspace = true

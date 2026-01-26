@@ -36,3 +36,4 @@ ratatui-image = "4"
 libc = "0.2"
 uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
+uniffi = "0.29"
