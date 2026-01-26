@@ -1,7 +1,7 @@
 //! Nudge CRUD module - comprehensive interface for kind:4201 events
 //!
 //! This module provides:
-//! - NudgeFormState: State for create/edit nudge forms
+//! - NudgeFormState: State for nudge creation forms
 //! - Tool permission management (allow-tool, deny-tool tags)
 //! - Dynamic tool registry from kind:24010 events
 //! - Validation and conflict detection

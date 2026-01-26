@@ -1,11 +1,11 @@
-//! Nudge form state for create/edit operations
+//! Nudge form state for create operations
 //!
 //! Multi-step wizard state following existing patterns (CreateProject, CreateAgent)
 
 use super::ToolPermissions;
 use tenex_core::models::Nudge;
 
-/// Step in the nudge create/edit wizard
+/// Step in the nudge creation wizard
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NudgeFormStep {
     /// Basic info: title and description
@@ -100,13 +100,9 @@ pub enum PermissionMode {
     AddDeny,
 }
 
-/// State for the nudge create/edit form
+/// State for the nudge creation form
 #[derive(Debug, Clone)]
 pub struct NudgeFormState {
-    /// Whether this is an edit (vs create)
-    pub is_edit: bool,
-    /// Original nudge ID (for edit mode)
-    pub original_id: Option<String>,
     /// Current wizard step
     pub step: NudgeFormStep,
     /// Focus within basics step
@@ -145,8 +141,6 @@ impl NudgeFormState {
     /// Create new state for creating a nudge
     pub fn new() -> Self {
         Self {
-            is_edit: false,
-            original_id: None,
             step: NudgeFormStep::Basics,
             focus: NudgeFormFocus::Title,
             title: String::new(),
@@ -170,7 +164,6 @@ impl NudgeFormState {
     /// Note: Nostr events are immutable, so we can't edit them. Instead, we copy the nudge's
     /// data and allow the user to create a new nudge with modifications.
     pub fn copy_from_nudge(nudge: &Nudge) -> Self {
-        // Hydrate permissions from nudge's allowed/denied tools
         let mut permissions = ToolPermissions::new();
         for tool in &nudge.allowed_tools {
             permissions.add_allow_tool(tool.clone());
@@ -179,12 +172,9 @@ impl NudgeFormState {
             permissions.add_deny_tool(tool.clone());
         }
 
-        // Set cursor column to length of first line
         let first_line_len = nudge.content.lines().next().map(|l| l.len()).unwrap_or(0);
 
         Self {
-            is_edit: false,  // This creates a NEW nudge, not an edit
-            original_id: None, // No original ID since this is a new nudge
             step: NudgeFormStep::Basics,
             focus: NudgeFormFocus::Title,
             title: nudge.title.clone(),
@@ -205,11 +195,7 @@ impl NudgeFormState {
 
     /// Get the mode label for the form title
     pub fn mode_label(&self) -> &'static str {
-        if self.is_edit {
-            "Edit Nudge"
-        } else {
-            "Create Nudge"
-        }
+        "Create Nudge"
     }
 
     /// Check if current step can proceed to next
