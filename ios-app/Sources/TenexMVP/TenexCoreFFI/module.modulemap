@@ -1,0 +1,4 @@
+module tenex_coreFFI {
+    header "tenex_coreFFI.h"
+    export *
+}
