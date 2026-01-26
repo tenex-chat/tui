@@ -311,6 +311,42 @@ impl ChatDraft {
     }
 }
 
+/// A snapshot of a draft at the time it was sent, with unique tracking ID
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PendingPublishSnapshot {
+    /// Unique ID for this specific send attempt (UUID-based)
+    pub publish_id: String,
+    /// The content that was actually sent
+    pub content: String,
+    /// Conversation ID this belongs to
+    pub conversation_id: String,
+    /// Timestamp when the message was sent
+    pub sent_at: u64,
+    /// Timestamp when confirmed published (None = still pending)
+    pub published_at: Option<u64>,
+    /// Event ID from relay (filled in on confirmation)
+    pub published_event_id: Option<String>,
+}
+
+impl PendingPublishSnapshot {
+    /// Create a new pending publish snapshot
+    pub fn new(conversation_id: String, content: String) -> Self {
+        Self {
+            publish_id: format!("pub-{}", Uuid::new_v4()),
+            content,
+            conversation_id,
+            sent_at: now_secs(),
+            published_at: None,
+            published_event_id: None,
+        }
+    }
+
+    /// Check if this snapshot has been confirmed as published
+    pub fn is_confirmed(&self) -> bool {
+        self.published_at.is_some()
+    }
+}
+
 /// Storage for chat drafts (persisted to JSON file)
 ///
 /// BULLETPROOF PERSISTENCE: This storage is designed to NEVER lose user data.
@@ -318,99 +354,187 @@ impl ChatDraft {
 /// - Drafts are ONLY removed after confirmed publish to relay AND after grace period
 /// - Empty drafts are still persisted to track conversation state
 /// - Unpublished drafts can be recovered on startup
+/// - Pending publishes are tracked separately as snapshots, so new typing doesn't interfere
 pub struct DraftStorage {
     path: PathBuf,
     drafts: HashMap<String, ChatDraft>,
+    /// Pending publish snapshots - these track what was actually sent to relays
+    /// Key is the publish_id (unique per send attempt)
+    pending_publishes: HashMap<String, PendingPublishSnapshot>,
+    /// Last error that occurred (for surfacing to UI)
+    last_error: Option<DraftStorageError>,
 }
 
 /// Grace period in seconds before cleaning up published drafts (24 hours)
 /// This ensures we never lose data even if relay confirmation was false positive
 const PUBLISHED_DRAFT_GRACE_PERIOD_SECS: u64 = 24 * 60 * 60;
 
+/// Data structure for persisting drafts (includes both current drafts and pending publishes)
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct DraftStorageData {
+    drafts: HashMap<String, ChatDraft>,
+    #[serde(default)]
+    pending_publishes: HashMap<String, PendingPublishSnapshot>,
+}
+
 impl DraftStorage {
+    /// Create a new storage, loading from disk. Check `last_error()` for load issues.
     pub fn new(data_dir: &str) -> Self {
         let path = PathBuf::from(data_dir).join("drafts.json");
-        let drafts = Self::load_from_file(&path).unwrap_or_default();
-        Self { path, drafts }
-    }
-
-    fn load_from_file(path: &PathBuf) -> Option<HashMap<String, ChatDraft>> {
-        let contents = fs::read_to_string(path).ok()?;
-        serde_json::from_str(&contents).ok()
-    }
-
-    fn save_to_file(&self) {
-        if let Ok(json) = serde_json::to_string_pretty(&self.drafts) {
-            let _ = fs::write(&self.path, json);
+        let (data, last_error) = Self::load_from_file(&path);
+        Self {
+            path,
+            drafts: data.drafts,
+            pending_publishes: data.pending_publishes,
+            last_error,
         }
+    }
+
+    /// Load drafts from file, returning (data, optional_error)
+    fn load_from_file(path: &PathBuf) -> (DraftStorageData, Option<DraftStorageError>) {
+        match fs::read_to_string(path) {
+            Ok(contents) => {
+                // Try to parse as new format first
+                if let Ok(data) = serde_json::from_str::<DraftStorageData>(&contents) {
+                    return (data, None);
+                }
+                // Fall back to old format (just drafts HashMap)
+                match serde_json::from_str::<HashMap<String, ChatDraft>>(&contents) {
+                    Ok(drafts) => (DraftStorageData { drafts, pending_publishes: HashMap::new() }, None),
+                    Err(e) => (DraftStorageData::default(), Some(DraftStorageError::ParseError(e.to_string()))),
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // File doesn't exist yet - that's fine, not an error
+                (DraftStorageData::default(), None)
+            }
+            Err(e) => (DraftStorageData::default(), Some(DraftStorageError::ReadError(e.to_string()))),
+        }
+    }
+
+    /// Save drafts to file, returning error if it fails
+    fn save_to_file(&mut self) -> Result<(), DraftStorageError> {
+        let data = DraftStorageData {
+            drafts: self.drafts.clone(),
+            pending_publishes: self.pending_publishes.clone(),
+        };
+        let json = serde_json::to_string_pretty(&data)
+            .map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
+
+        fs::write(&self.path, json)
+            .map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
+
+        self.last_error = None;
+        Ok(())
+    }
+
+    /// Get the last error that occurred (if any)
+    pub fn last_error(&self) -> Option<&DraftStorageError> {
+        self.last_error.as_ref()
+    }
+
+    /// Clear the last error
+    pub fn clear_error(&mut self) {
+        self.last_error = None;
     }
 
     /// Save a draft for a conversation - ALWAYS persists, never deletes
     ///
     /// BULLETPROOF: Even empty drafts are kept to preserve conversation state.
     /// Only cleanup_published_drafts() removes drafts, and only after confirmation + grace period.
-    pub fn save(&mut self, draft: ChatDraft) {
+    /// Returns error if persistence fails.
+    pub fn save(&mut self, draft: ChatDraft) -> Result<(), DraftStorageError> {
         // CRITICAL: Never auto-delete drafts. User data is precious.
         // Even "empty" drafts may have agent/branch selections we want to preserve.
-        // The only deletion path is through mark_as_published() + cleanup_published_drafts()
+        // The only deletion path is through cleanup_published_drafts()
+
+        // NOTE: We don't preserve published_at/published_event_id here because:
+        // - These fields are for the CURRENT editor draft
+        // - Published content is tracked separately in pending_publishes
+        // - A new draft save means user is typing something NEW, not the published content
         self.drafts.insert(draft.conversation_id.clone(), draft);
-        self.save_to_file();
+        if let Err(e) = self.save_to_file() {
+            self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+            return Err(e);
+        }
+        Ok(())
     }
 
-    /// Load a draft for a conversation (returns unpublished drafts only by default)
+    /// Load a draft for a conversation (always returns the current draft if it exists)
+    /// The draft represents what's currently in the editor, regardless of pending publishes.
     pub fn load(&self, conversation_id: &str) -> Option<ChatDraft> {
-        self.drafts.get(conversation_id).and_then(|d| {
-            // Only return drafts that haven't been published
-            // (published drafts should be treated as "sent" and not restored to editor)
-            if d.is_published() {
-                None
-            } else {
-                Some(d.clone())
-            }
-        })
-    }
-
-    /// Load a draft even if it's been published (for recovery purposes)
-    pub fn load_any(&self, conversation_id: &str) -> Option<ChatDraft> {
         self.drafts.get(conversation_id).cloned()
     }
 
-    /// Mark a draft as published (called AFTER relay confirms the message)
-    ///
-    /// This does NOT delete the draft - it marks it for later cleanup.
-    /// The draft will be automatically cleaned up after PUBLISHED_DRAFT_GRACE_PERIOD_SECS.
-    pub fn mark_as_published(&mut self, conversation_id: &str, event_id: Option<String>) {
-        if let Some(draft) = self.drafts.get_mut(conversation_id) {
-            draft.published_at = Some(now_secs());
-            draft.published_event_id = event_id;
-            self.save_to_file();
+    /// Alias for load() - both do the same thing now since we use snapshots for tracking
+    pub fn load_any(&self, conversation_id: &str) -> Option<ChatDraft> {
+        self.load(conversation_id)
+    }
+
+    /// Create a pending publish snapshot and return its unique ID
+    /// Call this BEFORE sending to relay - this captures exactly what was sent
+    pub fn create_publish_snapshot(&mut self, conversation_id: &str, content: String) -> Result<String, DraftStorageError> {
+        let snapshot = PendingPublishSnapshot::new(conversation_id.to_string(), content);
+        let publish_id = snapshot.publish_id.clone();
+        self.pending_publishes.insert(publish_id.clone(), snapshot);
+        if let Err(e) = self.save_to_file() {
+            // Rollback: remove the snapshot we just added
+            self.pending_publishes.remove(&publish_id);
+            self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+            return Err(e);
         }
+        Ok(publish_id)
+    }
+
+    /// Mark a pending publish as confirmed (called AFTER relay confirms the message)
+    /// Only marks the specific snapshot that matches the publish_id - doesn't affect current draft.
+    /// Returns true if the snapshot was found and marked.
+    pub fn mark_publish_confirmed(&mut self, publish_id: &str, event_id: Option<String>) -> Result<bool, DraftStorageError> {
+        if let Some(snapshot) = self.pending_publishes.get_mut(publish_id) {
+            snapshot.published_at = Some(now_secs());
+            snapshot.published_event_id = event_id;
+            if let Err(e) = self.save_to_file() {
+                self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+                return Err(e);
+            }
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     /// Get all unpublished drafts (for recovery on startup)
-    /// Returns drafts that have content and haven't been confirmed as published
+    /// Returns drafts that have non-trivial content
     pub fn get_unpublished_drafts(&self) -> Vec<&ChatDraft> {
         self.drafts
             .values()
-            .filter(|d| !d.is_published() && !d.text.trim().is_empty())
+            .filter(|d| !d.is_empty())
             .collect()
     }
 
-    /// Get all drafts (published and unpublished) for debugging/recovery
+    /// Get all pending (unconfirmed) publish snapshots
+    /// These are messages that were sent but not yet confirmed by relay
+    pub fn get_pending_publishes(&self) -> Vec<&PendingPublishSnapshot> {
+        self.pending_publishes
+            .values()
+            .filter(|s| !s.is_confirmed())
+            .collect()
+    }
+
+    /// Get all drafts (for debugging/recovery)
     pub fn get_all_drafts(&self) -> Vec<&ChatDraft> {
         self.drafts.values().collect()
     }
 
-    /// Clean up old published drafts (call periodically, e.g., on app startup)
-    /// Only removes drafts that were published more than GRACE_PERIOD ago
+    /// Clean up old confirmed publish snapshots (call periodically, e.g., on app startup)
+    /// Only removes snapshots that were confirmed more than GRACE_PERIOD ago
     ///
-    /// Returns the number of drafts cleaned up
-    pub fn cleanup_published_drafts(&mut self) -> usize {
+    /// Returns the number of snapshots cleaned up
+    pub fn cleanup_confirmed_publishes(&mut self) -> Result<usize, DraftStorageError> {
         let now = now_secs();
-        let to_remove: Vec<String> = self.drafts
+        let to_remove: Vec<String> = self.pending_publishes
             .iter()
-            .filter_map(|(id, draft)| {
-                if let Some(published_at) = draft.published_at {
+            .filter_map(|(id, snapshot)| {
+                if let Some(published_at) = snapshot.published_at {
                     // Only clean up if grace period has passed
                     if now.saturating_sub(published_at) > PUBLISHED_DRAFT_GRACE_PERIOD_SECS {
                         return Some(id.clone());
@@ -422,34 +546,44 @@ impl DraftStorage {
 
         let count = to_remove.len();
         for id in to_remove {
-            self.drafts.remove(&id);
+            self.pending_publishes.remove(&id);
         }
 
         if count > 0 {
-            self.save_to_file();
+            if let Err(e) = self.save_to_file() {
+                self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+                return Err(e);
+            }
         }
 
-        count
+        Ok(count)
     }
 
     /// Delete a draft for a conversation
-    /// DEPRECATED: Use mark_as_published() instead for normal flow.
-    /// This is kept for explicit user-initiated deletion only.
-    pub fn delete(&mut self, conversation_id: &str) {
+    /// This is for explicit user-initiated deletion only.
+    pub fn delete(&mut self, conversation_id: &str) -> Result<(), DraftStorageError> {
         self.drafts.remove(conversation_id);
-        self.save_to_file();
+        if let Err(e) = self.save_to_file() {
+            self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+            return Err(e);
+        }
+        Ok(())
     }
 
-    /// Force immediate cleanup of a specific published draft (for testing/admin)
-    /// Only works on drafts that have been marked as published
-    pub fn force_cleanup_draft(&mut self, conversation_id: &str) -> bool {
-        if let Some(draft) = self.drafts.get(conversation_id) {
-            if draft.is_published() {
-                self.drafts.remove(conversation_id);
-                self.save_to_file();
-                return true;
+    /// Clear the current draft content for a conversation (after successful send)
+    /// This keeps the draft entry but resets its content, preserving agent/branch selection.
+    pub fn clear_draft_content(&mut self, conversation_id: &str) -> Result<(), DraftStorageError> {
+        if let Some(draft) = self.drafts.get_mut(conversation_id) {
+            draft.text.clear();
+            draft.attachments.clear();
+            draft.image_attachments.clear();
+            draft.reference_conversation_id = None;
+            draft.last_modified = now_secs();
+            if let Err(e) = self.save_to_file() {
+                self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+                return Err(e);
             }
         }
-        false
+        Ok(())
     }
 }

@@ -693,7 +693,7 @@ impl App {
                 .and_then(|t| t.reference_conversation_id.clone());
 
             let draft = ChatDraft {
-                conversation_id,
+                conversation_id: conversation_id.clone(),
                 text: editor.text.clone(), // Raw text, not build_full_content()
                 attachments,
                 image_attachments,
@@ -708,7 +708,10 @@ impl App {
                 published_at: None,
                 published_event_id: None,
             };
-            self.draft_storage.borrow_mut().save(draft);
+            if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+                // BULLETPROOF: Log I/O errors but don't interrupt user - draft may still be in memory
+                tlog!("DRAFT", "ERROR saving draft for {}: {}", conversation_id, e);
+            }
         }
     }
 
@@ -762,7 +765,7 @@ impl App {
                 .collect();
 
             let draft = ChatDraft {
-                conversation_id,
+                conversation_id: conversation_id.clone(),
                 text: tab.editor.text.clone(),
                 attachments,
                 image_attachments,
@@ -777,7 +780,10 @@ impl App {
                 published_at: None,
                 published_event_id: None,
             };
-            self.draft_storage.borrow_mut().save(draft);
+            if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+                // BULLETPROOF: Log I/O errors but don't interrupt - critical for tab close flow
+                tlog!("DRAFT", "ERROR saving draft from tab {}: {}", conversation_id, e);
+            }
         }
     }
 
@@ -922,11 +928,18 @@ impl App {
         }
     }
 
-    /// Mark draft as published for the selected thread (call after message publish confirmed)
-    /// This does NOT delete the draft - it marks it for later cleanup.
-    /// BULLETPROOF: Drafts are only cleaned up after grace period.
-    pub fn mark_draft_as_published(&self, draft_key: &str, event_id: Option<String>) {
-        self.draft_storage.borrow_mut().mark_as_published(draft_key, event_id);
+    /// Create a publish snapshot for a message about to be sent.
+    /// Returns the unique publish_id for tracking confirmation.
+    /// BULLETPROOF: This captures exactly what was sent, separate from the current draft.
+    pub fn create_publish_snapshot(&self, conversation_id: &str, content: String) -> Result<String, tenex_core::models::draft::DraftStorageError> {
+        self.draft_storage.borrow_mut().create_publish_snapshot(conversation_id, content)
+    }
+
+    /// Mark a publish snapshot as confirmed (call after relay confirmation)
+    /// Uses the unique publish_id to mark the specific snapshot - doesn't affect current draft.
+    /// BULLETPROOF: New typing after send won't be lost because snapshots are separate.
+    pub fn mark_publish_confirmed(&self, publish_id: &str, event_id: Option<String>) -> Result<bool, tenex_core::models::draft::DraftStorageError> {
+        self.draft_storage.borrow_mut().mark_publish_confirmed(publish_id, event_id)
     }
 
     /// Set the publish confirmation sender (called from runtime)
@@ -939,10 +952,10 @@ impl App {
         self.publish_confirm_tx.clone()
     }
 
-    /// Clean up old published drafts (call on app startup)
-    /// Returns the number of drafts cleaned up
-    pub fn cleanup_published_drafts(&self) -> usize {
-        self.draft_storage.borrow_mut().cleanup_published_drafts()
+    /// Clean up old confirmed publish snapshots (call on app startup)
+    /// Returns the number of snapshots cleaned up
+    pub fn cleanup_confirmed_publishes(&self) -> Result<usize, tenex_core::models::draft::DraftStorageError> {
+        self.draft_storage.borrow_mut().cleanup_confirmed_publishes()
     }
 
     /// Get unpublished drafts for recovery (call on app startup)
@@ -950,13 +963,16 @@ impl App {
         self.draft_storage.borrow().get_unpublished_drafts().into_iter().cloned().collect()
     }
 
-    /// DEPRECATED: Delete draft for the selected thread
-    /// Use mark_draft_as_published() for normal flow after relay confirmation.
-    /// This is kept for explicit user-initiated deletion only.
+    /// Get pending (unconfirmed) publish snapshots
+    pub fn get_pending_publishes(&self) -> Vec<tenex_core::models::draft::PendingPublishSnapshot> {
+        self.draft_storage.borrow().get_pending_publishes().into_iter().cloned().collect()
+    }
+
+    /// Delete draft for the selected thread (explicit user-initiated deletion only)
     #[allow(dead_code)]
     fn delete_chat_draft(&self) {
         if let Some(ref thread) = self.selected_thread {
-            self.draft_storage.borrow_mut().delete(&thread.id);
+            let _ = self.draft_storage.borrow_mut().delete(&thread.id);
         }
     }
 
