@@ -113,7 +113,7 @@ impl NotificationQueue {
     }
 
     /// Add a notification to the queue
-    /// Higher priority notifications can preempt lower priority ones
+    /// Higher priority notifications replace lower priority ones (the old notification is dropped)
     pub fn push(&mut self, notification: Notification) {
         // Check for duplicate (same message shown recently)
         let hash = Self::hash_message(&notification.message);
@@ -133,9 +133,9 @@ impl NotificationQueue {
         // If there's a current notification, check priority
         if let Some(ref current) = self.current {
             if notification.level > current.level {
-                // Higher priority - preempt current, push current back to front
-                let old = self.current.take().unwrap();
-                self.queue.push_front(old);
+                // Higher priority - replace current (old notification is dropped)
+                // Don't re-queue the old notification - it was already shown,
+                // showing it again would create duplicate toasts
                 self.current = Some(notification);
                 if let Some(ref mut n) = self.current {
                     n.mark_shown();
@@ -239,19 +239,20 @@ mod tests {
     }
 
     #[test]
-    fn test_priority_preemption() {
+    fn test_priority_replaces_current() {
         let mut q = NotificationQueue::new();
 
         q.push(Notification::info("low priority"));
         assert_eq!(q.current().unwrap().message, "low priority");
 
-        // Error should preempt info
+        // Error replaces info (info is dropped, not re-queued)
         q.push(Notification::error("high priority"));
         assert_eq!(q.current().unwrap().message, "high priority");
 
-        // Dismiss high priority, should show low priority again
+        // After dismissing high priority, queue is empty because the low priority
+        // notification was dropped when replaced (prevents duplicate toast bug)
         q.dismiss();
-        assert_eq!(q.current().unwrap().message, "low priority");
+        assert!(q.current().is_none());
     }
 
     #[test]
