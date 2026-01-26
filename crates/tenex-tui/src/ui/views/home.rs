@@ -1397,7 +1397,7 @@ fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
 /// Render conversation search results
 fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
     let results = &app.sidebar_search.results;
-    let selected_idx = app.sidebar_search.selected_index;
+    let selected_idx = app.sidebar_search.selected_index.min(results.len().saturating_sub(1));
     let query = &app.sidebar_search.query;
 
     if results.is_empty() {
@@ -1407,29 +1407,65 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let store = app.data_store.borrow();
-    let mut y_offset = 0u16;
-
-    for (i, result) in results.iter().enumerate() {
-        let is_selected = i == selected_idx;
-
-        // Calculate card height based on content
-        // Line 1: Title + project + time
-        // Line 2: Match type indicator or reply content start
-        // Lines 3+: Reply content (if reply match)
-        // Spacing line
+    // Helper to compute card height for a result without allocation
+    fn compute_card_height(result: &crate::ui::search::SearchResult) -> u16 {
         let base_height = 3u16;
         let content_lines = if let Some(ref reply) = result.matching_reply {
-            // Show up to 3 lines of reply content
-            let preview: String = reply.content.chars().take(300).collect();
-            let line_count = preview.lines().count().min(3) as u16;
-            line_count.max(2)
+            // Count newlines directly without allocating a String
+            let char_count = reply.content.chars().take(300).count();
+            let line_count = reply.content.chars().take(char_count).filter(|&c| c == '\n').count() + 1;
+            (line_count.min(3) as u16).max(2)
         } else {
             1
         };
-        let card_height = base_height + content_lines;
+        base_height + content_lines
+    }
 
-        if y_offset + card_height > area.height {
+    // Calculate available height (reserve 1 line for count at bottom)
+    let available_height = area.height.saturating_sub(1);
+
+    // Compute scroll_offset lazily - only compute heights up to selected_idx + visible items
+    // First, calculate cumulative height up to selected item
+    let mut cumulative_before_selected: u16 = 0;
+    let mut heights_cache: Vec<u16> = Vec::with_capacity(selected_idx + 1);
+    for i in 0..=selected_idx {
+        let h = compute_card_height(&results[i]);
+        heights_cache.push(h);
+        if i < selected_idx {
+            cumulative_before_selected += h;
+        }
+    }
+    let selected_height = heights_cache[selected_idx];
+
+    // Calculate scroll offset: scroll just enough to show the selected item
+    let scroll_offset = if cumulative_before_selected + selected_height <= available_height {
+        // Selected item fits from the top, no scroll needed
+        0
+    } else {
+        // Find the minimum scroll offset that makes selected visible
+        let mut offset = 0;
+        let mut height_sum: u16 = heights_cache.iter().sum();
+        while height_sum > available_height && offset < selected_idx {
+            height_sum -= heights_cache[offset];
+            offset += 1;
+        }
+        offset
+    };
+
+    let store = app.data_store.borrow();
+    let mut y_offset = 0u16;
+
+    // Render items starting from scroll_offset
+    for (i, result) in results.iter().enumerate().skip(scroll_offset) {
+        let is_selected = i == selected_idx;
+        // Use cached height if available, otherwise compute
+        let card_height = if i < heights_cache.len() {
+            heights_cache[i]
+        } else {
+            compute_card_height(result)
+        };
+
+        if y_offset + card_height > available_height {
             break;
         }
 
@@ -1457,7 +1493,7 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
 /// Render report search results
 fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
     let results = &app.sidebar_search.report_results;
-    let selected_idx = app.sidebar_search.selected_index;
+    let selected_idx = app.sidebar_search.selected_index.min(results.len().saturating_sub(1));
     let query = &app.sidebar_search.query;
 
     if results.is_empty() {
@@ -1467,16 +1503,31 @@ fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
+    // Card height is fixed at 4 lines for reports (Title + Summary + Spacing)
+    let card_height = 4u16;
+    // Available height (reserve 1 line for count at bottom)
+    let available_height = area.height.saturating_sub(1);
+    // Calculate how many items can be visible at once
+    let visible_count = (available_height / card_height) as usize;
+
+    // Compute scroll_offset to ensure selected item is visible
+    // Guard: if available_height < card_height, visible_count is 0 - don't scroll
+    let scroll_offset = if visible_count == 0 {
+        0
+    } else if selected_idx >= visible_count {
+        selected_idx - visible_count + 1
+    } else {
+        0
+    };
+
     let mut y_offset = 0u16;
     let query_lower = query.to_lowercase();
 
-    for (i, report) in results.iter().enumerate() {
+    // Render items starting from scroll_offset
+    for (i, report) in results.iter().enumerate().skip(scroll_offset) {
         let is_selected = i == selected_idx;
 
-        // Card height: Title + Summary + Spacing
-        let card_height = 4u16;
-
-        if y_offset + card_height > area.height.saturating_sub(1) {
+        if y_offset + card_height > available_height {
             break;
         }
 
