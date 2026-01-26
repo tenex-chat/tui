@@ -39,11 +39,30 @@ pub(crate) async fn run_app(
     // Channel for receiving upload results from background tasks
     let (upload_tx, mut upload_rx) = tokio::sync::mpsc::channel::<UploadResult>(10);
 
+    // BULLETPROOF: Channel for receiving publish confirmations from worker threads
+    // When a message is confirmed published to relay, we mark the draft as published
+    let (publish_confirm_tx, mut publish_confirm_rx) = tokio::sync::mpsc::channel::<(String, String)>(100);
+    app.set_publish_confirm_tx(publish_confirm_tx);
+
+    // Clean up old published drafts on startup (>24h old)
+    let cleaned_up = app.cleanup_published_drafts();
+    if cleaned_up > 0 {
+        log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old published drafts", cleaned_up));
+    }
+
+    // Check for unpublished drafts on startup (recovery)
+    let unpublished = app.get_unpublished_drafts();
+    if !unpublished.is_empty() {
+        log_diagnostic(&format!("BULLETPROOF: Found {} unpublished drafts that can be recovered", unpublished.len()));
+        // TODO: Show notification to user about recoverable drafts
+    }
+
     let mut loop_count: u64 = 0;
     let mut terminal_events: u64 = 0;
     let mut ndb_events: u64 = 0;
     let mut tick_events: u64 = 0;
     let mut upload_events: u64 = 0;
+    let mut publish_confirm_events: u64 = 0;
     let diag_start = Instant::now();
 
     while app.running {
@@ -53,14 +72,15 @@ pub(crate) async fn run_app(
         if loop_count % 1000 == 0 {
             let elapsed = diag_start.elapsed().as_secs();
             log_diagnostic(&format!(
-                "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={}",
+                "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={} publish_confirm={}",
                 loop_count,
                 elapsed,
                 if elapsed > 0 { loop_count / elapsed } else { loop_count },
                 terminal_events,
                 ndb_events,
                 tick_events,
-                upload_events
+                upload_events,
+                publish_confirm_events
             ));
         }
 
@@ -192,6 +212,17 @@ pub(crate) async fn run_app(
                         app.set_status(&msg);
                     }
                 }
+            }
+
+            // BULLETPROOF: Handle publish confirmations from worker threads
+            // When relay confirms message was published, mark the draft as published
+            Some((draft_key, event_id)) = publish_confirm_rx.recv() => {
+                publish_confirm_events += 1;
+                app.mark_draft_as_published(&draft_key, Some(event_id.clone()));
+                log_diagnostic(&format!("BULLETPROOF: Draft '{}' marked as published (event_id={})",
+                    &draft_key[..draft_key.len().min(12)],
+                    &event_id[..event_id.len().min(12)]
+                ));
             }
         }
     }

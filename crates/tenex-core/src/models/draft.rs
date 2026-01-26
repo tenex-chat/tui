@@ -70,6 +70,13 @@ pub struct ChatDraft {
     /// (for "Reference conversation" command, results in a "context" tag when sent)
     #[serde(default)]
     pub reference_conversation_id: Option<String>,
+    /// Timestamp when message was confirmed published to relay (None = unpublished/pending)
+    /// Drafts are ONLY cleaned up after this is set AND after a grace period
+    #[serde(default)]
+    pub published_at: Option<u64>,
+    /// Event ID of the published message (for tracking)
+    #[serde(default)]
+    pub published_event_id: Option<String>,
 }
 
 // =============================================================================
@@ -297,13 +304,28 @@ impl ChatDraft {
             && self.selected_branch.is_none()
             && self.reference_conversation_id.is_none()
     }
+
+    /// Check if this draft has been published (confirmed by relay)
+    pub fn is_published(&self) -> bool {
+        self.published_at.is_some()
+    }
 }
 
 /// Storage for chat drafts (persisted to JSON file)
+///
+/// BULLETPROOF PERSISTENCE: This storage is designed to NEVER lose user data.
+/// - Drafts are saved on every keystroke (debounced)
+/// - Drafts are ONLY removed after confirmed publish to relay AND after grace period
+/// - Empty drafts are still persisted to track conversation state
+/// - Unpublished drafts can be recovered on startup
 pub struct DraftStorage {
     path: PathBuf,
     drafts: HashMap<String, ChatDraft>,
 }
+
+/// Grace period in seconds before cleaning up published drafts (24 hours)
+/// This ensures we never lose data even if relay confirmation was false positive
+const PUBLISHED_DRAFT_GRACE_PERIOD_SECS: u64 = 24 * 60 * 60;
 
 impl DraftStorage {
     pub fn new(data_dir: &str) -> Self {
@@ -323,24 +345,111 @@ impl DraftStorage {
         }
     }
 
-    /// Save a draft for a conversation
+    /// Save a draft for a conversation - ALWAYS persists, never deletes
+    ///
+    /// BULLETPROOF: Even empty drafts are kept to preserve conversation state.
+    /// Only cleanup_published_drafts() removes drafts, and only after confirmation + grace period.
     pub fn save(&mut self, draft: ChatDraft) {
-        if draft.is_empty() {
-            self.drafts.remove(&draft.conversation_id);
-        } else {
-            self.drafts.insert(draft.conversation_id.clone(), draft);
-        }
+        // CRITICAL: Never auto-delete drafts. User data is precious.
+        // Even "empty" drafts may have agent/branch selections we want to preserve.
+        // The only deletion path is through mark_as_published() + cleanup_published_drafts()
+        self.drafts.insert(draft.conversation_id.clone(), draft);
         self.save_to_file();
     }
 
-    /// Load a draft for a conversation
+    /// Load a draft for a conversation (returns unpublished drafts only by default)
     pub fn load(&self, conversation_id: &str) -> Option<ChatDraft> {
+        self.drafts.get(conversation_id).and_then(|d| {
+            // Only return drafts that haven't been published
+            // (published drafts should be treated as "sent" and not restored to editor)
+            if d.is_published() {
+                None
+            } else {
+                Some(d.clone())
+            }
+        })
+    }
+
+    /// Load a draft even if it's been published (for recovery purposes)
+    pub fn load_any(&self, conversation_id: &str) -> Option<ChatDraft> {
         self.drafts.get(conversation_id).cloned()
     }
 
+    /// Mark a draft as published (called AFTER relay confirms the message)
+    ///
+    /// This does NOT delete the draft - it marks it for later cleanup.
+    /// The draft will be automatically cleaned up after PUBLISHED_DRAFT_GRACE_PERIOD_SECS.
+    pub fn mark_as_published(&mut self, conversation_id: &str, event_id: Option<String>) {
+        if let Some(draft) = self.drafts.get_mut(conversation_id) {
+            draft.published_at = Some(now_secs());
+            draft.published_event_id = event_id;
+            self.save_to_file();
+        }
+    }
+
+    /// Get all unpublished drafts (for recovery on startup)
+    /// Returns drafts that have content and haven't been confirmed as published
+    pub fn get_unpublished_drafts(&self) -> Vec<&ChatDraft> {
+        self.drafts
+            .values()
+            .filter(|d| !d.is_published() && !d.text.trim().is_empty())
+            .collect()
+    }
+
+    /// Get all drafts (published and unpublished) for debugging/recovery
+    pub fn get_all_drafts(&self) -> Vec<&ChatDraft> {
+        self.drafts.values().collect()
+    }
+
+    /// Clean up old published drafts (call periodically, e.g., on app startup)
+    /// Only removes drafts that were published more than GRACE_PERIOD ago
+    ///
+    /// Returns the number of drafts cleaned up
+    pub fn cleanup_published_drafts(&mut self) -> usize {
+        let now = now_secs();
+        let to_remove: Vec<String> = self.drafts
+            .iter()
+            .filter_map(|(id, draft)| {
+                if let Some(published_at) = draft.published_at {
+                    // Only clean up if grace period has passed
+                    if now.saturating_sub(published_at) > PUBLISHED_DRAFT_GRACE_PERIOD_SECS {
+                        return Some(id.clone());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        let count = to_remove.len();
+        for id in to_remove {
+            self.drafts.remove(&id);
+        }
+
+        if count > 0 {
+            self.save_to_file();
+        }
+
+        count
+    }
+
     /// Delete a draft for a conversation
+    /// DEPRECATED: Use mark_as_published() instead for normal flow.
+    /// This is kept for explicit user-initiated deletion only.
     pub fn delete(&mut self, conversation_id: &str) {
         self.drafts.remove(conversation_id);
         self.save_to_file();
+    }
+
+    /// Force immediate cleanup of a specific published draft (for testing/admin)
+    /// Only works on drafts that have been marked as published
+    pub fn force_cleanup_draft(&mut self, conversation_id: &str) -> bool {
+        if let Some(draft) = self.drafts.get(conversation_id) {
+            if draft.is_published() {
+                self.drafts.remove(conversation_id);
+                self.save_to_file();
+                return true;
+            }
+        }
+        false
     }
 }

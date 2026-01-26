@@ -485,6 +485,8 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
 }
 
 /// Handle sending a message or creating a new thread
+/// BULLETPROOF: Drafts are NOT deleted here - they are only marked as published
+/// after relay confirms the message was received.
 fn handle_send_message(app: &mut App) {
     let content = app.chat_editor_mut().submit();
     if !content.is_empty() {
@@ -504,11 +506,15 @@ fn handle_send_message(app: &mut App) {
             if let Some(ref thread) = app.selected_thread {
                 // Reply to existing thread
                 let thread_id = thread.id.clone();
+                let draft_key = thread_id.clone();
                 let reply_to = if let Some(ref root_id) = app.subthread_root {
                     Some(root_id.clone())
                 } else {
                     Some(thread_id.clone())
                 };
+
+                // Create response channel for publish confirmation
+                let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
 
                 if let Err(e) = core_handle.send(NostrCommand::PublishMessage {
                     thread_id,
@@ -519,11 +525,27 @@ fn handle_send_message(app: &mut App) {
                     branch,
                     nudge_ids,
                     ask_author_pubkey: None,
-                    response_tx: None,
+                    response_tx: Some(response_tx),
                 }) {
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
-                    app.delete_chat_draft();
+                    // BULLETPROOF: Spawn background task to wait for publish confirmation
+                    // and mark draft as published (not deleted) when confirmed
+                    if let Some(confirm_tx) = app.get_publish_confirm_tx() {
+                        std::thread::spawn(move || {
+                            // Wait for relay confirmation (with timeout)
+                            match response_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                                Ok(event_id) => {
+                                    // Send confirmation to runtime (non-blocking)
+                                    let _ = confirm_tx.blocking_send((draft_key, event_id));
+                                }
+                                Err(_) => {
+                                    // Timeout or error - draft stays unpublished (recoverable)
+                                    // This is intentional: better to keep the draft than lose it
+                                }
+                            }
+                        });
+                    }
                 }
             } else {
                 // Create new thread (kind:1)
@@ -533,9 +555,15 @@ fn handle_send_message(app: &mut App) {
                     .find_draft_tab(&project_a_tag)
                     .map(|(_, id)| id.to_string());
 
+                // Get the draft key for confirmation tracking
+                let draft_key_for_confirm = draft_id.clone();
+
                 // Get reference_conversation_id from current tab (if set by "Reference conversation" command)
                 let reference_conversation_id = app.tabs.active_tab()
                     .and_then(|tab| tab.reference_conversation_id.clone());
+
+                // Create response channel for publish confirmation
+                let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
 
                 if let Err(e) = core_handle.send(NostrCommand::PublishThread {
                     project_a_tag: project_a_tag.clone(),
@@ -545,7 +573,7 @@ fn handle_send_message(app: &mut App) {
                     branch,
                     nudge_ids,
                     reference_conversation_id,
-                    response_tx: None,
+                    response_tx: Some(response_tx),
                 }) {
                     app.set_status(&format!("Failed to create thread: {}", e));
                 } else {
@@ -554,6 +582,20 @@ fn handle_send_message(app: &mut App) {
                     // Clear the reference_conversation_id after sending
                     if let Some(tab) = app.tabs.active_tab_mut() {
                         tab.reference_conversation_id = None;
+                    }
+
+                    // BULLETPROOF: Spawn background task for publish confirmation
+                    if let (Some(confirm_tx), Some(draft_key)) = (app.get_publish_confirm_tx(), draft_key_for_confirm) {
+                        std::thread::spawn(move || {
+                            match response_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                                Ok(event_id) => {
+                                    let _ = confirm_tx.blocking_send((draft_key, event_id));
+                                }
+                                Err(_) => {
+                                    // Timeout - draft stays unpublished (recoverable)
+                                }
+                            }
+                        });
                     }
                 }
             }

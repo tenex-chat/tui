@@ -313,6 +313,9 @@ pub struct App {
     pub input_context_focus: Option<InputContextFocus>,
     /// Sidebar search state (Ctrl+T + /)
     pub sidebar_search: crate::ui::search::SidebarSearchState,
+    /// Channel sender for publish confirmations (draft_key, event_id)
+    /// Used to notify the runtime when a message has been published
+    pub publish_confirm_tx: Option<tokio::sync::mpsc::Sender<(String, String)>>,
 }
 
 impl App {
@@ -402,6 +405,7 @@ impl App {
             last_undo_action: None,
             input_context_focus: None,
             sidebar_search: crate::ui::search::SidebarSearchState::new(),
+            publish_confirm_tx: None,
         }
     }
 
@@ -700,6 +704,9 @@ impl App {
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
                 reference_conversation_id,
+                // BULLETPROOF: New drafts are unpublished - they stay until relay confirms
+                published_at: None,
+                published_event_id: None,
             };
             self.draft_storage.borrow_mut().save(draft);
         }
@@ -766,6 +773,9 @@ impl App {
                     .map(|d| d.as_secs())
                     .unwrap_or(0),
                 reference_conversation_id: tab.reference_conversation_id.clone(),
+                // BULLETPROOF: Drafts from closed tabs are unpublished
+                published_at: None,
+                published_event_id: None,
             };
             self.draft_storage.borrow_mut().save(draft);
         }
@@ -912,8 +922,39 @@ impl App {
         }
     }
 
-    /// Delete draft for the selected thread (call after sending message)
-    pub fn delete_chat_draft(&self) {
+    /// Mark draft as published for the selected thread (call after message publish confirmed)
+    /// This does NOT delete the draft - it marks it for later cleanup.
+    /// BULLETPROOF: Drafts are only cleaned up after grace period.
+    pub fn mark_draft_as_published(&self, draft_key: &str, event_id: Option<String>) {
+        self.draft_storage.borrow_mut().mark_as_published(draft_key, event_id);
+    }
+
+    /// Set the publish confirmation sender (called from runtime)
+    pub fn set_publish_confirm_tx(&mut self, tx: tokio::sync::mpsc::Sender<(String, String)>) {
+        self.publish_confirm_tx = Some(tx);
+    }
+
+    /// Get the publish confirmation sender (clone for async use)
+    pub fn get_publish_confirm_tx(&self) -> Option<tokio::sync::mpsc::Sender<(String, String)>> {
+        self.publish_confirm_tx.clone()
+    }
+
+    /// Clean up old published drafts (call on app startup)
+    /// Returns the number of drafts cleaned up
+    pub fn cleanup_published_drafts(&self) -> usize {
+        self.draft_storage.borrow_mut().cleanup_published_drafts()
+    }
+
+    /// Get unpublished drafts for recovery (call on app startup)
+    pub fn get_unpublished_drafts(&self) -> Vec<tenex_core::models::draft::ChatDraft> {
+        self.draft_storage.borrow().get_unpublished_drafts().into_iter().cloned().collect()
+    }
+
+    /// DEPRECATED: Delete draft for the selected thread
+    /// Use mark_draft_as_published() for normal flow after relay confirmation.
+    /// This is kept for explicit user-initiated deletion only.
+    #[allow(dead_code)]
+    fn delete_chat_draft(&self) {
         if let Some(ref thread) = self.selected_thread {
             self.draft_storage.borrow_mut().delete(&thread.id);
         }
