@@ -112,15 +112,6 @@ impl SidebarSearchState {
         }
     }
 
-    /// Get the active result count (conversations or reports)
-    pub fn active_result_count(&self, is_reports_tab: bool) -> usize {
-        if is_reports_tab {
-            self.report_results.len()
-        } else {
-            self.results.len()
-        }
-    }
-
     /// Get currently selected result
     pub fn selected_result(&self) -> Option<&SearchResult> {
         self.results.get(self.selected_index)
@@ -156,8 +147,6 @@ pub struct SearchResult {
 /// Information about a matching reply
 #[derive(Debug, Clone)]
 pub struct MatchingReply {
-    /// Reply event ID
-    pub event_id: String,
     /// Reply content
     pub content: String,
     /// Author pubkey
@@ -259,7 +248,6 @@ pub fn search_conversations(
                         if let Some(existing) = results.iter_mut().find(|r| r.thread_id == thread.id) {
                             if existing.matching_reply.is_none() {
                                 existing.matching_reply = Some(MatchingReply {
-                                    event_id: msg.id.clone(),
                                     content: msg.content.clone(),
                                     author_pubkey: msg.pubkey.clone(),
                                 });
@@ -276,7 +264,6 @@ pub fn search_conversations(
                             project_a_tag: a_tag.clone(),
                             project_name: project_name.clone(),
                             matching_reply: Some(MatchingReply {
-                                event_id: msg.id.clone(),
                                 content: msg.content.clone(),
                                 author_pubkey: msg.pubkey.clone(),
                             }),

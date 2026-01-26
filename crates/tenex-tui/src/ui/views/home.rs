@@ -1549,32 +1549,46 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
         return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
     }
 
-    let text_lower = text.to_lowercase();
+    let query_lower = query.to_lowercase();
+    let query_char_count = query_lower.chars().count();
     let mut spans = Vec::new();
-    let mut last_end = 0;
+    let mut last_char_end = 0;
 
-    for (start, _) in text_lower.match_indices(query) {
-        // Add text before match
-        if start > last_end {
+    // Build a char-indexed search by iterating through characters
+    let chars: Vec<char> = text.chars().collect();
+    let chars_lower: Vec<char> = text.to_lowercase().chars().collect();
+
+    let mut i = 0;
+    while i <= chars_lower.len().saturating_sub(query_char_count) {
+        // Check if query matches at position i (case-insensitive)
+        let query_chars: Vec<char> = query_lower.chars().collect();
+        let matches = query_chars.iter().enumerate().all(|(j, qc)| {
+            i + j < chars_lower.len() && chars_lower[i + j] == *qc
+        });
+
+        if matches {
+            // Add text before match
+            if i > last_char_end {
+                let before: String = chars[last_char_end..i].iter().collect();
+                spans.push(Span::styled(before, Style::default().fg(normal_color)));
+            }
+            // Add highlighted match (from original text, not lowercased)
+            let match_text: String = chars[i..i + query_char_count].iter().collect();
             spans.push(Span::styled(
-                text[last_end..start].to_string(),
-                Style::default().fg(normal_color),
+                match_text,
+                Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
             ));
+            last_char_end = i + query_char_count;
+            i = last_char_end;
+        } else {
+            i += 1;
         }
-        // Add highlighted match
-        spans.push(Span::styled(
-            text[start..start + query.len()].to_string(),
-            Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
-        ));
-        last_end = start + query.len();
     }
 
     // Add remaining text
-    if last_end < text.len() {
-        spans.push(Span::styled(
-            text[last_end..].to_string(),
-            Style::default().fg(normal_color),
-        ));
+    if last_char_end < chars.len() {
+        let remaining: String = chars[last_char_end..].iter().collect();
+        spans.push(Span::styled(remaining, Style::default().fg(normal_color)));
     }
 
     if spans.is_empty() {
@@ -1582,6 +1596,59 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
     } else {
         spans
     }
+}
+
+/// Find the char index of a case-insensitive query match in text
+/// Returns the char position (not byte offset) or None if not found
+fn find_char_match_index(text: &str, query: &str) -> Option<usize> {
+    if query.is_empty() {
+        return None;
+    }
+    let query_lower: Vec<char> = query.to_lowercase().chars().collect();
+    let text_lower: Vec<char> = text.to_lowercase().chars().collect();
+    let query_len = query_lower.len();
+
+    for i in 0..=text_lower.len().saturating_sub(query_len) {
+        if query_lower.iter().enumerate().all(|(j, qc)| {
+            i + j < text_lower.len() && text_lower[i + j] == *qc
+        }) {
+            return Some(i);
+        }
+    }
+    None
+}
+
+/// Build highlight spans for a line with a query match at char index
+/// Returns spans for: prefix + before + match + after
+fn build_match_highlight_spans(
+    line: &str,
+    query: &str,
+    match_char_idx: usize,
+    content_width: usize,
+    prefix: &str,
+) -> Vec<Span<'static>> {
+    let chars: Vec<char> = line.chars().collect();
+    let query_char_count = query.chars().count();
+    let mut spans = vec![Span::styled(prefix.to_string(), Style::default())];
+
+    // Before match
+    if match_char_idx > 0 {
+        let before: String = chars[..match_char_idx].iter().collect();
+        let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
+        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+    }
+    // Match (use original case from text)
+    let match_end = (match_char_idx + query_char_count).min(chars.len());
+    let match_text: String = chars[match_char_idx..match_end].iter().collect();
+    spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
+    // After match
+    if match_end < chars.len() {
+        let after: String = chars[match_end..].iter().collect();
+        let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
+        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+    }
+
+    spans
 }
 
 /// Render a single sidebar search result card
@@ -1647,35 +1714,18 @@ fn render_sidebar_search_result_card(
         // Reply content with highlighted matches
         let content_width = area.width as usize - 6;
         let preview: String = reply.content.chars().take(200).collect();
-        let query_lower = query.to_lowercase();
 
         for line in preview.lines().take(3) {
-            let mut spans = vec![Span::styled("    ".to_string(), Style::default())];
-
-            // Highlight matches inline
-            let line_lower = line.to_lowercase();
-            if let Some(match_start) = line_lower.find(&query_lower) {
-                let match_end = match_start + query.len();
-                // Before match
-                if match_start > 0 {
-                    let before: String = line.chars().take(match_start).collect();
-                    let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
-                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                }
-                // Match
-                let match_text: String = line.chars().skip(match_start).take(query.len()).collect();
-                spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
-                // After match
-                if match_end < line.len() {
-                    let after: String = line.chars().skip(match_end).collect();
-                    let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
-                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                }
+            // Use char-based matching to handle Unicode correctly
+            let spans = if let Some(match_idx) = find_char_match_index(line, query) {
+                build_match_highlight_spans(line, query, match_idx, content_width, "    ")
             } else {
                 let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
-                spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-            }
-
+                vec![
+                    Span::styled("    ".to_string(), Style::default()),
+                    Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)),
+                ]
+            };
             lines.push(Line::from(spans));
         }
     } else {
@@ -1684,34 +1734,17 @@ fn render_sidebar_search_result_card(
             let content_width = area.width as usize - 6;
             let content_preview: String = result.thread.content.chars().take(100).collect();
             let first_line: String = content_preview.lines().next().unwrap_or("").to_string();
-            let query_lower = query.to_lowercase();
 
-            let mut spans = vec![Span::styled("  ".to_string(), Style::default())];
-
-            // Highlight matches inline
-            let line_lower = first_line.to_lowercase();
-            if let Some(match_start) = line_lower.find(&query_lower) {
-                let match_end = match_start + query.len();
-                // Before match
-                if match_start > 0 {
-                    let before: String = first_line.chars().take(match_start).collect();
-                    let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
-                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                }
-                // Match
-                let match_text: String = first_line.chars().skip(match_start).take(query.len()).collect();
-                spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
-                // After match
-                if match_end < first_line.len() {
-                    let after: String = first_line.chars().skip(match_end).collect();
-                    let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
-                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                }
+            // Use char-based matching to handle Unicode correctly
+            let spans = if let Some(match_idx) = find_char_match_index(&first_line, query) {
+                build_match_highlight_spans(&first_line, query, match_idx, content_width, "  ")
             } else {
                 let truncated = crate::ui::format::truncate_with_ellipsis(&first_line, content_width);
-                spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-            }
-
+                vec![
+                    Span::styled("  ".to_string(), Style::default()),
+                    Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)),
+                ]
+            };
             lines.push(Line::from(spans));
         }
     }
