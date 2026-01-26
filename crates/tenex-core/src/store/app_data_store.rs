@@ -893,29 +893,47 @@ impl AppDataStore {
                     .or_default()
                     .insert(thread_id.clone());
 
+                // Reconcile last_activity with any messages that arrived before this thread
+                // (handles out-of-order message arrival)
+                let mut reconciled_thread = thread;
+                let mut was_reconciled = false;
+                if let Some(messages) = self.messages_by_thread.get(&thread_id) {
+                    if let Some(max_message_time) = messages.iter().map(|m| m.created_at).max() {
+                        if max_message_time > reconciled_thread.last_activity {
+                            reconciled_thread.last_activity = max_message_time;
+                            reconciled_thread.effective_last_activity = max_message_time;
+                            // Update runtime hierarchy with reconciled timestamp
+                            self.runtime_hierarchy.set_individual_last_activity(&thread_id, max_message_time);
+                            was_reconciled = true;
+                        }
+                    }
+                }
+
                 // Add to existing threads list, maintaining sort order by effective_last_activity
                 let threads = self.threads_by_project.entry(a_tag).or_default();
 
                 // Check if thread already exists (avoid duplicates)
                 if !threads.iter().any(|t| t.id == thread_id) {
                     // Insert in sorted position by effective_last_activity (most recent first)
-                    let insert_pos = threads.partition_point(|t| t.effective_last_activity > thread.effective_last_activity);
-                    threads.insert(insert_pos, thread);
+                    let insert_pos = threads.partition_point(|t| t.effective_last_activity > reconciled_thread.effective_last_activity);
+                    threads.insert(insert_pos, reconciled_thread);
                 }
-            }
 
-            // Check if this thread has a parent - either from Thread struct or from runtime hierarchy
-            // (parent links can be discovered via q-tags in older messages)
-            let has_parent = has_parent_from_thread
-                || self.runtime_hierarchy.get_parent(&thread_id).is_some();
+                // Check if this thread has a parent - either from Thread struct or from runtime hierarchy
+                // (parent links can be discovered via q-tags in older messages)
+                let has_parent = has_parent_from_thread
+                    || self.runtime_hierarchy.get_parent(&thread_id).is_some();
 
-            // If this thread has a parent, propagate effective_last_activity up the hierarchy
-            if has_parent {
-                self.propagate_effective_last_activity(&thread_id);
+                // Propagate effective_last_activity up the hierarchy if:
+                // 1. This thread has a parent (new child bumps ancestors), OR
+                // 2. We reconciled with preloaded messages (late-arriving thread root needs to propagate)
+                if has_parent || was_reconciled {
+                    self.propagate_effective_last_activity(&thread_id);
 
-                // Re-sort threads by effective_last_activity
-                for threads in self.threads_by_project.values_mut() {
-                    threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                    // Re-sort threads by effective_last_activity
+                    for threads in self.threads_by_project.values_mut() {
+                        threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                    }
                 }
             }
 
