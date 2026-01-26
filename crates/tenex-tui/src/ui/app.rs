@@ -3522,15 +3522,14 @@ impl App {
 
         // Reset selection when results change
         self.sidebar_search.selected_index = 0;
-        self.sidebar_search.scroll_offset = 0;
     }
 
     /// Open the selected search result (conversation or report based on current tab)
     pub fn open_selected_search_result(&mut self) {
         match self.home_panel_focus {
             HomeTab::Reports => {
-                // Open report
-                if let Some(report) = self.sidebar_search.report_results.get(self.sidebar_search.selected_index).cloned() {
+                // Open report (using clamped accessor)
+                if let Some(report) = self.sidebar_search.selected_report().cloned() {
                     // Close search
                     self.sidebar_search.visible = false;
                     self.sidebar_search.query.clear();
@@ -3543,7 +3542,7 @@ impl App {
                 }
             }
             _ => {
-                // Open conversation
+                // Open conversation (using clamped accessor)
                 if let Some(result) = self.sidebar_search.selected_result().cloned() {
                     // Close search
                     self.sidebar_search.visible = false;

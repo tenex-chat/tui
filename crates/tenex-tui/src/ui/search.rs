@@ -24,8 +24,8 @@ pub struct SidebarSearchState {
     pub report_results: Vec<tenex_core::models::Report>,
     /// Selected result index
     pub selected_index: usize,
-    /// Scroll offset for long results lists
-    pub scroll_offset: usize,
+    // Note: scroll_offset is computed fresh each frame in the renderer
+    // using real layout data, not stored in state
 }
 
 impl SidebarSearchState {
@@ -43,7 +43,6 @@ impl SidebarSearchState {
             self.results.clear();
             self.report_results.clear();
             self.selected_index = 0;
-            self.scroll_offset = 0;
         }
     }
 
@@ -90,6 +89,7 @@ impl SidebarSearchState {
     }
 
     /// Move selection up in results
+    /// Note: scroll offset adjustment happens in the renderer where we have real layout data
     pub fn move_selection_up(&mut self) {
         if self.selected_index > 0 {
             self.selected_index -= 1;
@@ -112,9 +112,40 @@ impl SidebarSearchState {
         }
     }
 
-    /// Get currently selected result
+
+    /// Get currently selected result (clamped to valid range)
     pub fn selected_result(&self) -> Option<&SearchResult> {
-        self.results.get(self.selected_index)
+        if self.results.is_empty() {
+            None
+        } else {
+            let idx = self.selected_index.min(self.results.len() - 1);
+            self.results.get(idx)
+        }
+    }
+
+    /// Get currently selected report (clamped to valid range)
+    pub fn selected_report(&self) -> Option<&tenex_core::models::Report> {
+        if self.report_results.is_empty() {
+            None
+        } else {
+            let idx = self.selected_index.min(self.report_results.len() - 1);
+            self.report_results.get(idx)
+        }
+    }
+
+    /// Clamp selected_index to valid range based on current results
+    /// Call this after updating results to ensure index stays valid
+    pub fn clamp_selection(&mut self, for_reports: bool) {
+        let max_len = if for_reports {
+            self.report_results.len()
+        } else {
+            self.results.len()
+        };
+        if max_len == 0 {
+            self.selected_index = 0;
+        } else if self.selected_index >= max_len {
+            self.selected_index = max_len - 1;
+        }
     }
 
     /// Check if search has a non-empty query
