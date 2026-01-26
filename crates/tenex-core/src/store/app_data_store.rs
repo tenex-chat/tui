@@ -504,7 +504,10 @@ impl AppDataStore {
 
     /// Update runtime hierarchy for a thread after messages change
     /// Called from handle_message_event after the message is added
-    fn update_runtime_hierarchy_for_thread_id(&mut self, thread_id: &str) {
+    /// Returns true if relationships changed (new parent or children discovered)
+    fn update_runtime_hierarchy_for_thread_id(&mut self, thread_id: &str) -> bool {
+        let mut relationships_changed = false;
+
         if let Some(messages) = self.messages_by_thread.get(thread_id) {
             // Update conversation creation time if not already set
             // (Use the earliest message timestamp as the creation time)
@@ -519,13 +522,17 @@ impl AppDataStore {
             for message in messages {
                 // Update q-tag relationships (this message's children)
                 for child_id in &message.q_tags {
-                    self.runtime_hierarchy.add_child(thread_id, child_id);
+                    if self.runtime_hierarchy.add_child(thread_id, child_id) {
+                        relationships_changed = true;
+                    }
                 }
 
                 // Update delegation relationship (this conversation's parent)
                 if let Some(ref parent_id) = message.delegation_tag {
                     if parent_id != thread_id {
-                        self.runtime_hierarchy.set_parent(thread_id, parent_id);
+                        if self.runtime_hierarchy.set_parent(thread_id, parent_id) {
+                            relationships_changed = true;
+                        }
                     }
                 }
             }
@@ -534,6 +541,8 @@ impl AppDataStore {
             let runtime_ms = Self::calculate_runtime_from_messages(messages);
             self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
         }
+
+        relationships_changed
     }
 
     /// Update runtime hierarchy when a new thread is discovered
@@ -677,7 +686,11 @@ impl AppDataStore {
                     thread.status_label = metadata.status_label;
                     thread.status_current_activity = metadata.status_current_activity;
                     thread.summary = metadata.summary;
-                    thread.last_activity = metadata.created_at;
+                    // Only update last_activity if metadata is newer than current
+                    // to avoid regressing timestamps when metadata is older than newest message
+                    if metadata.created_at > thread.last_activity {
+                        thread.last_activity = metadata.created_at;
+                    }
                     break;
                 }
             }
@@ -867,7 +880,8 @@ impl AppDataStore {
         // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
         if let Some(thread) = Thread::from_note(note) {
             let thread_id = thread.id.clone();
-            let has_parent = thread.parent_conversation_id.is_some();
+            // Capture whether thread has parent before moving thread
+            let has_parent_from_thread = thread.parent_conversation_id.is_some();
 
             // Update runtime hierarchy for parent-child relationship
             self.update_runtime_hierarchy_for_thread(&thread);
@@ -889,6 +903,11 @@ impl AppDataStore {
                     threads.insert(insert_pos, thread);
                 }
             }
+
+            // Check if this thread has a parent - either from Thread struct or from runtime hierarchy
+            // (parent links can be discovered via q-tags in older messages)
+            let has_parent = has_parent_from_thread
+                || self.runtime_hierarchy.get_parent(&thread_id).is_some();
 
             // If this thread has a parent, propagate effective_last_activity up the hierarchy
             if has_parent {
@@ -991,7 +1010,8 @@ impl AppDataStore {
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
-                self.update_runtime_hierarchy_for_thread_id(&thread_id);
+                // Returns true if relationships changed (new parent or children discovered)
+                let relationships_changed = self.update_runtime_hierarchy_for_thread_id(&thread_id);
 
                 // Update thread's last_activity so it appears in Conversations tab
                 let mut last_activity_updated = false;
@@ -1006,8 +1026,10 @@ impl AppDataStore {
                     }
                 }
 
-                // Propagate effective_last_activity up the hierarchy if last_activity changed
-                if last_activity_updated {
+                // Propagate effective_last_activity up the hierarchy if:
+                // - last_activity changed (new activity in this conversation)
+                // - relationships changed (new parent/child discovered, ancestors need update)
+                if last_activity_updated || relationships_changed {
                     self.propagate_effective_last_activity(&thread_id);
 
                     // Re-sort threads by effective_last_activity (most recent first)

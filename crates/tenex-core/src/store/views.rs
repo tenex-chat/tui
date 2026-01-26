@@ -136,8 +136,9 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
     }
 
     // Sort by effective_last_activity descending (most recent activity first)
-    // This uses hierarchical sorting where parent conversations reflect
-    // the most recent activity in their entire delegation tree.
+    // Note: For threads loaded directly from nostrdb, effective_last_activity equals
+    // last_activity since hierarchical propagation requires runtime processing.
+    // Full hierarchical sorting is performed in AppDataStore.threads_by_project.
     threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
 
     Ok(threads)
@@ -171,8 +172,9 @@ pub fn get_threads_by_ids(ndb: &Ndb, root_ids: &std::collections::HashSet<String
     }
 
     // Sort by effective_last_activity descending (most recent activity first)
-    // This uses hierarchical sorting where parent conversations reflect
-    // the most recent activity in their entire delegation tree.
+    // Note: For threads loaded directly from nostrdb, effective_last_activity equals
+    // last_activity since hierarchical propagation requires runtime processing.
+    // Full hierarchical sorting is performed in AppDataStore.threads_by_project.
     threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
 
     Ok(threads)
