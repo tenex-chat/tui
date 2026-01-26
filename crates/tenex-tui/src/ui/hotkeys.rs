@@ -605,7 +605,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     HotkeyBinding::shift(
         HotkeyId::NewConversationWithPicker,
         KeyCode::Char('P'),
-        "New Conversation (select project)",
+        "New conversation on project...",
         "Conversation",
         &[HotkeyContext::HomeConversations],
     ),

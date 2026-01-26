@@ -339,7 +339,7 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'P',
-        label: "New conversation (select project)",
+        label: "New conversation on project...",
         section: "Conversation",
         available: |app| {
             // Available in Home view (Conversations tab, not sidebar focused)
