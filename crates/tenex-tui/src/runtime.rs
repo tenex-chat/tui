@@ -44,17 +44,28 @@ pub(crate) async fn run_app(
     let (publish_confirm_tx, mut publish_confirm_rx) = tokio::sync::mpsc::channel::<(String, String)>(100);
     app.set_publish_confirm_tx(publish_confirm_tx);
 
-    // Clean up old published drafts on startup (>24h old)
-    let cleaned_up = app.cleanup_published_drafts();
-    if cleaned_up > 0 {
-        log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old published drafts", cleaned_up));
+    // BULLETPROOF: Clean up old confirmed publish snapshots on startup (>24h old)
+    match app.cleanup_confirmed_publishes() {
+        Ok(cleaned_up) if cleaned_up > 0 => {
+            log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old confirmed publish snapshots", cleaned_up));
+        }
+        Err(e) => {
+            log_diagnostic(&format!("BULLETPROOF: Error cleaning up publish snapshots: {}", e));
+        }
+        _ => {}
+    }
+
+    // Check for pending (unconfirmed) publish snapshots on startup (recovery)
+    let pending_publishes = app.get_pending_publishes();
+    if !pending_publishes.is_empty() {
+        log_diagnostic(&format!("BULLETPROOF: Found {} pending (unconfirmed) publish snapshots that may need recovery", pending_publishes.len()));
+        // These are messages that were sent but never got relay confirmation
     }
 
     // Check for unpublished drafts on startup (recovery)
     let unpublished = app.get_unpublished_drafts();
     if !unpublished.is_empty() {
-        log_diagnostic(&format!("BULLETPROOF: Found {} unpublished drafts that can be recovered", unpublished.len()));
-        // TODO: Show notification to user about recoverable drafts
+        log_diagnostic(&format!("BULLETPROOF: Found {} drafts with content", unpublished.len()));
     }
 
     let mut loop_count: u64 = 0;
@@ -215,14 +226,27 @@ pub(crate) async fn run_app(
             }
 
             // BULLETPROOF: Handle publish confirmations from worker threads
-            // When relay confirms message was published, mark the draft as published
-            Some((draft_key, event_id)) = publish_confirm_rx.recv() => {
+            // When relay confirms message was published, mark the specific snapshot as confirmed
+            Some((publish_id, event_id)) = publish_confirm_rx.recv() => {
                 publish_confirm_events += 1;
-                app.mark_draft_as_published(&draft_key, Some(event_id.clone()));
-                log_diagnostic(&format!("BULLETPROOF: Draft '{}' marked as published (event_id={})",
-                    &draft_key[..draft_key.len().min(12)],
-                    &event_id[..event_id.len().min(12)]
-                ));
+                match app.mark_publish_confirmed(&publish_id, Some(event_id.clone())) {
+                    Ok(true) => {
+                        log_diagnostic(&format!("BULLETPROOF: Publish snapshot '{}' confirmed (event_id={})",
+                            &publish_id[..publish_id.len().min(16)],
+                            &event_id[..event_id.len().min(12)]
+                        ));
+                    }
+                    Ok(false) => {
+                        log_diagnostic(&format!("BULLETPROOF: Warning - publish snapshot '{}' not found for confirmation",
+                            &publish_id[..publish_id.len().min(16)]
+                        ));
+                    }
+                    Err(e) => {
+                        log_diagnostic(&format!("BULLETPROOF: Error confirming publish snapshot '{}': {}",
+                            &publish_id[..publish_id.len().min(16)], e
+                        ));
+                    }
+                }
             }
         }
     }

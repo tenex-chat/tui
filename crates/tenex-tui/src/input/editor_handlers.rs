@@ -485,8 +485,9 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
 }
 
 /// Handle sending a message or creating a new thread
-/// BULLETPROOF: Drafts are NOT deleted here - they are only marked as published
-/// after relay confirms the message was received.
+/// BULLETPROOF: Uses publish snapshots to track exactly what was sent.
+/// The snapshot is confirmed independently of the current draft, so new typing
+/// after sending doesn't affect confirmation tracking.
 fn handle_send_message(app: &mut App) {
     let content = app.chat_editor_mut().submit();
     if !content.is_empty() {
@@ -506,11 +507,20 @@ fn handle_send_message(app: &mut App) {
             if let Some(ref thread) = app.selected_thread {
                 // Reply to existing thread
                 let thread_id = thread.id.clone();
-                let draft_key = thread_id.clone();
                 let reply_to = if let Some(ref root_id) = app.subthread_root {
                     Some(root_id.clone())
                 } else {
                     Some(thread_id.clone())
+                };
+
+                // BULLETPROOF: Create a publish snapshot BEFORE sending
+                // This captures exactly what was sent, with a unique ID for tracking
+                let publish_id = match app.create_publish_snapshot(&thread_id, content.clone()) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        app.set_status(&format!("Failed to save publish snapshot: {}", e));
+                        return;
+                    }
                 };
 
                 // Create response channel for publish confirmation
@@ -530,18 +540,18 @@ fn handle_send_message(app: &mut App) {
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
                     // BULLETPROOF: Spawn background task to wait for publish confirmation
-                    // and mark draft as published (not deleted) when confirmed
+                    // Uses the unique publish_id to mark the specific snapshot as confirmed
                     if let Some(confirm_tx) = app.get_publish_confirm_tx() {
                         std::thread::spawn(move || {
                             // Wait for relay confirmation (with timeout)
                             match response_rx.recv_timeout(std::time::Duration::from_secs(30)) {
                                 Ok(event_id) => {
-                                    // Send confirmation to runtime (non-blocking)
-                                    let _ = confirm_tx.blocking_send((draft_key, event_id));
+                                    // Send confirmation with publish_id (non-blocking)
+                                    let _ = confirm_tx.blocking_send((publish_id, event_id));
                                 }
                                 Err(_) => {
-                                    // Timeout or error - draft stays unpublished (recoverable)
-                                    // This is intentional: better to keep the draft than lose it
+                                    // Timeout or error - snapshot stays unconfirmed (recoverable)
+                                    // This is intentional: better to keep the snapshot than lose it
                                 }
                             }
                         });
@@ -555,8 +565,17 @@ fn handle_send_message(app: &mut App) {
                     .find_draft_tab(&project_a_tag)
                     .map(|(_, id)| id.to_string());
 
-                // Get the draft key for confirmation tracking
-                let draft_key_for_confirm = draft_id.clone();
+                // Use the draft_id as the conversation_id for the snapshot
+                let conversation_id = draft_id.clone().unwrap_or_else(|| format!("new-thread-{}", project_a_tag));
+
+                // BULLETPROOF: Create a publish snapshot BEFORE sending
+                let publish_id = match app.create_publish_snapshot(&conversation_id, content.clone()) {
+                    Ok(id) => id,
+                    Err(e) => {
+                        app.set_status(&format!("Failed to save publish snapshot: {}", e));
+                        return;
+                    }
+                };
 
                 // Get reference_conversation_id from current tab (if set by "Reference conversation" command)
                 let reference_conversation_id = app.tabs.active_tab()
@@ -585,14 +604,14 @@ fn handle_send_message(app: &mut App) {
                     }
 
                     // BULLETPROOF: Spawn background task for publish confirmation
-                    if let (Some(confirm_tx), Some(draft_key)) = (app.get_publish_confirm_tx(), draft_key_for_confirm) {
+                    if let Some(confirm_tx) = app.get_publish_confirm_tx() {
                         std::thread::spawn(move || {
                             match response_rx.recv_timeout(std::time::Duration::from_secs(30)) {
                                 Ok(event_id) => {
-                                    let _ = confirm_tx.blocking_send((draft_key, event_id));
+                                    let _ = confirm_tx.blocking_send((publish_id, event_id));
                                 }
                                 Err(_) => {
-                                    // Timeout - draft stays unpublished (recoverable)
+                                    // Timeout - snapshot stays unconfirmed (recoverable)
                                 }
                             }
                         });
