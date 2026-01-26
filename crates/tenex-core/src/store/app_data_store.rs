@@ -242,6 +242,7 @@ impl AppDataStore {
         }
 
         // Update thread last_activity based on most recent message
+        // (effective_last_activity will be updated after metadata is applied and hierarchy is built)
         for threads in self.threads_by_project.values_mut() {
             for thread in threads.iter_mut() {
                 if let Some(messages) = self.messages_by_thread.get(&thread.id) {
@@ -252,7 +253,7 @@ impl AppDataStore {
                     }
                 }
             }
-            // Re-sort after updating last_activity
+            // Temporary sort by last_activity - will be re-sorted by effective_last_activity after hierarchy is built
             threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
         }
 
@@ -260,7 +261,13 @@ impl AppDataStore {
         self.apply_existing_metadata();
 
         // Build runtime hierarchy from loaded data
+        // This sets up parent-child relationships and calculates effective_last_activity
         self.rebuild_runtime_hierarchy();
+
+        // Final sort by effective_last_activity after hierarchy is fully built
+        for threads in self.threads_by_project.values_mut() {
+            threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+        }
 
         // Load agent definitions (kind:4199)
         self.load_agent_definitions();
@@ -406,12 +413,15 @@ impl AppDataStore {
     fn rebuild_runtime_hierarchy(&mut self) {
         self.runtime_hierarchy.clear();
 
-        // Build parent-child relationships from threads (delegation tags)
+        // Step 1: Build parent-child relationships from threads (delegation tags)
+        // Also track individual last_activity for each thread
         for threads in self.threads_by_project.values() {
             for thread in threads {
                 if let Some(ref parent_id) = thread.parent_conversation_id {
                     self.runtime_hierarchy.set_parent(&thread.id, parent_id);
                 }
+                // Initialize individual last_activity from thread
+                self.runtime_hierarchy.set_individual_last_activity(&thread.id, thread.last_activity);
             }
         }
 
@@ -445,6 +455,31 @@ impl AppDataStore {
                 self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
             }
         }
+
+        // Step 4: Update effective_last_activity on all threads
+        // We need to do this after all relationships are established
+        self.rebuild_all_effective_last_activity();
+    }
+
+    /// Rebuild effective_last_activity for all threads.
+    /// Called after runtime hierarchy relationships are fully established.
+    fn rebuild_all_effective_last_activity(&mut self) {
+        // Collect all thread IDs first to avoid borrow issues
+        let thread_ids: Vec<String> = self.threads_by_project
+            .values()
+            .flat_map(|threads| threads.iter().map(|t| t.id.clone()))
+            .collect();
+
+        // Update each thread's effective_last_activity
+        for thread_id in thread_ids {
+            let effective = self.runtime_hierarchy.get_effective_last_activity(&thread_id);
+            for threads in self.threads_by_project.values_mut() {
+                if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                    thread.effective_last_activity = effective;
+                    break;
+                }
+            }
+        }
     }
 
     /// Calculate total LLM runtime from a set of messages.
@@ -469,7 +504,10 @@ impl AppDataStore {
 
     /// Update runtime hierarchy for a thread after messages change
     /// Called from handle_message_event after the message is added
-    fn update_runtime_hierarchy_for_thread_id(&mut self, thread_id: &str) {
+    /// Returns true if relationships changed (new parent or children discovered)
+    fn update_runtime_hierarchy_for_thread_id(&mut self, thread_id: &str) -> bool {
+        let mut relationships_changed = false;
+
         if let Some(messages) = self.messages_by_thread.get(thread_id) {
             // Update conversation creation time if not already set
             // (Use the earliest message timestamp as the creation time)
@@ -484,13 +522,17 @@ impl AppDataStore {
             for message in messages {
                 // Update q-tag relationships (this message's children)
                 for child_id in &message.q_tags {
-                    self.runtime_hierarchy.add_child(thread_id, child_id);
+                    if self.runtime_hierarchy.add_child(thread_id, child_id) {
+                        relationships_changed = true;
+                    }
                 }
 
                 // Update delegation relationship (this conversation's parent)
                 if let Some(ref parent_id) = message.delegation_tag {
                     if parent_id != thread_id {
-                        self.runtime_hierarchy.set_parent(thread_id, parent_id);
+                        if self.runtime_hierarchy.set_parent(thread_id, parent_id) {
+                            relationships_changed = true;
+                        }
                     }
                 }
             }
@@ -499,6 +541,8 @@ impl AppDataStore {
             let runtime_ms = Self::calculate_runtime_from_messages(messages);
             self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
         }
+
+        relationships_changed
     }
 
     /// Update runtime hierarchy when a new thread is discovered
@@ -510,6 +554,9 @@ impl AppDataStore {
         // Set the thread's creation time from last_activity (which equals created_at for new threads)
         self.runtime_hierarchy
             .set_conversation_created_at(&thread.id, thread.last_activity);
+        // Set the thread's individual last_activity
+        self.runtime_hierarchy
+            .set_individual_last_activity(&thread.id, thread.last_activity);
     }
 
     /// Get the total hierarchical runtime for a conversation (own + all children recursively)
@@ -532,6 +579,53 @@ impl AppDataStore {
     /// Used for the global status bar cumulative runtime display.
     pub fn get_total_unique_runtime(&self) -> u64 {
         self.runtime_hierarchy.get_total_unique_runtime()
+    }
+
+    /// Get the effective last_activity for a conversation (own + all descendants).
+    /// Used for hierarchical sorting in the Conversations tab.
+    pub fn get_effective_last_activity(&self, thread_id: &str) -> u64 {
+        self.runtime_hierarchy.get_effective_last_activity(thread_id)
+    }
+
+    /// Update effective_last_activity on a thread and propagate up the ancestor chain.
+    /// This should be called whenever a thread's last_activity changes.
+    fn propagate_effective_last_activity(&mut self, thread_id: &str) {
+        // First, update the individual last_activity in RuntimeHierarchy
+        // (get it from the actual thread)
+        if let Some(last_activity) = self.get_thread_last_activity(thread_id) {
+            self.runtime_hierarchy.set_individual_last_activity(thread_id, last_activity);
+        }
+
+        // Now update this thread's effective_last_activity
+        self.update_thread_effective_last_activity(thread_id);
+
+        // Walk up the ancestor chain and update each ancestor's effective_last_activity
+        let ancestors = self.runtime_hierarchy.get_ancestors(thread_id);
+        for ancestor_id in ancestors {
+            self.update_thread_effective_last_activity(&ancestor_id);
+        }
+    }
+
+    /// Get the last_activity from a thread (helper for propagation)
+    fn get_thread_last_activity(&self, thread_id: &str) -> Option<u64> {
+        for threads in self.threads_by_project.values() {
+            if let Some(thread) = threads.iter().find(|t| t.id == thread_id) {
+                return Some(thread.last_activity);
+            }
+        }
+        None
+    }
+
+    /// Update effective_last_activity on a specific thread
+    fn update_thread_effective_last_activity(&mut self, thread_id: &str) {
+        let effective = self.runtime_hierarchy.get_effective_last_activity(thread_id);
+
+        for threads in self.threads_by_project.values_mut() {
+            if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                thread.effective_last_activity = effective;
+                break;
+            }
+        }
     }
 
     /// Get the total unique runtime for conversations created TODAY only.
@@ -592,15 +686,30 @@ impl AppDataStore {
                     thread.status_label = metadata.status_label;
                     thread.status_current_activity = metadata.status_current_activity;
                     thread.summary = metadata.summary;
-                    thread.last_activity = metadata.created_at;
+                    // Only update last_activity if metadata is newer than current
+                    // to avoid regressing timestamps when metadata is older than newest message
+                    if metadata.created_at > thread.last_activity {
+                        thread.last_activity = metadata.created_at;
+                    }
                     break;
                 }
             }
         }
 
-        // Re-sort all thread lists after applying metadata
+        // Update individual_last_activity in RuntimeHierarchy for threads that had metadata applied
+        // and rebuild effective_last_activity
+        for threads in self.threads_by_project.values() {
+            for thread in threads {
+                self.runtime_hierarchy.set_individual_last_activity(&thread.id, thread.last_activity);
+            }
+        }
+
+        // Rebuild effective_last_activity for all threads after metadata is applied
+        self.rebuild_all_effective_last_activity();
+
+        // Re-sort all thread lists by effective_last_activity after applying metadata
         for threads in self.threads_by_project.values_mut() {
-            threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+            threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
         }
     }
 
@@ -771,6 +880,8 @@ impl AppDataStore {
         // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
         if let Some(thread) = Thread::from_note(note) {
             let thread_id = thread.id.clone();
+            // Capture whether thread has parent before moving thread
+            let has_parent_from_thread = thread.parent_conversation_id.is_some();
 
             // Update runtime hierarchy for parent-child relationship
             self.update_runtime_hierarchy_for_thread(&thread);
@@ -782,14 +893,62 @@ impl AppDataStore {
                     .or_default()
                     .insert(thread_id.clone());
 
-                // Add to existing threads list, maintaining sort order by last_activity
+                // Reconcile last_activity with any messages that arrived before this thread
+                // (handles out-of-order message arrival)
+                let mut reconciled_thread = thread;
+                let mut was_reconciled = false;
+                if let Some(messages) = self.messages_by_thread.get(&thread_id) {
+                    if let Some(max_message_time) = messages.iter().map(|m| m.created_at).max() {
+                        if max_message_time > reconciled_thread.last_activity {
+                            reconciled_thread.last_activity = max_message_time;
+                            reconciled_thread.effective_last_activity = max_message_time;
+                            // Update runtime hierarchy with reconciled timestamp
+                            self.runtime_hierarchy.set_individual_last_activity(&thread_id, max_message_time);
+                            was_reconciled = true;
+                        }
+                    }
+                }
+
+                // Add to existing threads list, maintaining sort order by effective_last_activity
                 let threads = self.threads_by_project.entry(a_tag).or_default();
 
                 // Check if thread already exists (avoid duplicates)
                 if !threads.iter().any(|t| t.id == thread_id) {
-                    // Insert in sorted position (most recent first)
-                    let insert_pos = threads.partition_point(|t| t.last_activity > thread.last_activity);
-                    threads.insert(insert_pos, thread);
+                    // Insert in sorted position by effective_last_activity (most recent first)
+                    let insert_pos = threads.partition_point(|t| t.effective_last_activity > reconciled_thread.effective_last_activity);
+                    threads.insert(insert_pos, reconciled_thread);
+                }
+
+                // Check if this thread has a parent - either from Thread struct or from runtime hierarchy
+                // (parent links can be discovered via q-tags in older messages)
+                let has_parent = has_parent_from_thread
+                    || self.runtime_hierarchy.get_parent(&thread_id).is_some();
+
+                // Check if this thread has children already in the hierarchy
+                // (children can arrive before parent due to out-of-order message delivery)
+                let has_children = self
+                    .runtime_hierarchy
+                    .get_children(&thread_id)
+                    .map(|c| !c.is_empty())
+                    .unwrap_or(false);
+
+                // Propagate/recompute effective_last_activity if:
+                // 1. This thread has a parent (new child bumps ancestors), OR
+                // 2. We reconciled with preloaded messages (late-arriving thread root needs to propagate), OR
+                // 3. This thread has children already (parent arrived after children - need to pick up child activity)
+                if has_parent || was_reconciled || has_children {
+                    // If this thread has children, first recompute its own effective_last_activity
+                    // from its descendants before propagating up to ancestors
+                    if has_children {
+                        self.update_thread_effective_last_activity(&thread_id);
+                    }
+
+                    self.propagate_effective_last_activity(&thread_id);
+
+                    // Re-sort threads by effective_last_activity
+                    for threads in self.threads_by_project.values_mut() {
+                        threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                    }
                 }
             }
 
@@ -884,18 +1043,31 @@ impl AppDataStore {
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
-                self.update_runtime_hierarchy_for_thread_id(&thread_id);
+                // Returns true if relationships changed (new parent or children discovered)
+                let relationships_changed = self.update_runtime_hierarchy_for_thread_id(&thread_id);
 
                 // Update thread's last_activity so it appears in Conversations tab
+                let mut last_activity_updated = false;
                 for threads in self.threads_by_project.values_mut() {
                     if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
                         // Only update if this message is newer than current last_activity
                         if message_created_at > thread.last_activity {
                             thread.last_activity = message_created_at;
-                            // Re-sort to maintain order by last_activity (most recent first)
-                            threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                            last_activity_updated = true;
                         }
                         break;
+                    }
+                }
+
+                // Propagate effective_last_activity up the hierarchy if:
+                // - last_activity changed (new activity in this conversation)
+                // - relationships changed (new parent/child discovered, ancestors need update)
+                if last_activity_updated || relationships_changed {
+                    self.propagate_effective_last_activity(&thread_id);
+
+                    // Re-sort threads by effective_last_activity (most recent first)
+                    for threads in self.threads_by_project.values_mut() {
+                        threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
                     }
                 }
             }
@@ -969,6 +1141,7 @@ impl AppDataStore {
             let _ = thread_id_short; // For debugging
 
             // Find the thread across all projects and update its fields
+            let mut last_activity_updated = false;
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
                     if let Some(new_title) = title.clone() {
@@ -978,11 +1151,22 @@ impl AppDataStore {
                     thread.status_label = status_label;
                     thread.status_current_activity = status_current_activity;
                     thread.summary = summary;
-                    // Update last_activity and maintain sort order
-                    thread.last_activity = created_at;
-                    // Re-sort to maintain order by last_activity (most recent first)
-                    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+                    // Update last_activity
+                    if created_at > thread.last_activity {
+                        thread.last_activity = created_at;
+                        last_activity_updated = true;
+                    }
                     break;
+                }
+            }
+
+            // Propagate effective_last_activity up the hierarchy if last_activity changed
+            if last_activity_updated {
+                self.propagate_effective_last_activity(&thread_id);
+
+                // Re-sort threads by effective_last_activity (most recent first)
+                for threads in self.threads_by_project.values_mut() {
+                    threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
                 }
             }
         } else {
@@ -1150,7 +1334,7 @@ impl AppDataStore {
         Some((ask_event, pubkey))
     }
 
-    /// Get all threads across all projects, sorted by last_activity descending
+    /// Get all threads across all projects, sorted by effective_last_activity descending
     /// Returns (Thread, project_a_tag) tuples
     #[deprecated(
         since = "0.1.0",
@@ -1164,19 +1348,21 @@ impl AppDataStore {
             })
             .collect();
 
-        all_threads.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
+        all_threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
         all_threads.truncate(limit);
         all_threads
     }
 
-    /// Get recent threads for specific projects, sorted by last_activity descending.
+    /// Get recent threads for specific projects, sorted by effective_last_activity descending.
     /// Filters by project first (before any truncation), then applies optional time filter,
     /// then applies optional limit to final sorted results.
+    /// Uses hierarchical sorting where parent conversations reflect the most recent activity
+    /// in their entire delegation tree.
     /// Returns (Thread, project_a_tag) tuples.
     ///
     /// # Arguments
     /// * `visible_projects` - Set of project a_tags to include threads from
-    /// * `time_cutoff` - Optional Unix timestamp; only threads with last_activity >= cutoff are included
+    /// * `time_cutoff` - Optional Unix timestamp; only threads with effective_last_activity >= cutoff are included
     /// * `limit` - Optional limit on the number of threads returned (applied AFTER sorting)
     pub fn get_recent_threads_for_projects(
         &self,
@@ -1191,17 +1377,19 @@ impl AppDataStore {
             .flat_map(|(a_tag, threads)| {
                 threads.iter().map(|t| (t.clone(), a_tag.clone()))
             })
-            // Apply time filter if specified
+            // Apply time filter using effective_last_activity if specified
             .filter(|(thread, _)| {
                 match time_cutoff {
-                    Some(cutoff) => thread.last_activity >= cutoff,
+                    Some(cutoff) => thread.effective_last_activity >= cutoff,
                     None => true,
                 }
             })
             .collect();
 
-        // Sort by last_activity descending (most recent first)
-        threads.sort_by(|a, b| b.0.last_activity.cmp(&a.0.last_activity));
+        // Sort by effective_last_activity descending (most recent first)
+        // This enables hierarchical sorting where parent conversations reflect
+        // the most recent activity in their entire delegation tree.
+        threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
 
         // Apply optional limit AFTER sorting
         if let Some(max) = limit {
