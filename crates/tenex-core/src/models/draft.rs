@@ -487,10 +487,15 @@ impl DraftStorage {
     }
 
     /// Remove a pending publish snapshot (for rollback when send fails)
-    /// Call this when the send to relay fails AFTER snapshot was created
+    /// Call this when the send to relay fails AFTER snapshot was created.
+    /// If disk write fails, the snapshot is reinserted to maintain consistency.
     pub fn remove_publish_snapshot(&mut self, publish_id: &str) -> Result<bool, DraftStorageError> {
-        if self.pending_publishes.remove(publish_id).is_some() {
+        // Remove from HashMap first, but keep the snapshot for potential rollback
+        if let Some(removed_snapshot) = self.pending_publishes.remove(publish_id) {
             if let Err(e) = self.save_to_file() {
+                // ROLLBACK: Reinsert the snapshot since disk write failed
+                // This maintains consistency between memory and disk state
+                self.pending_publishes.insert(publish_id.to_string(), removed_snapshot);
                 self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
                 return Err(e);
             }

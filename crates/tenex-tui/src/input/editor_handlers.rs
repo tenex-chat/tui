@@ -3,6 +3,7 @@
 //! Handles input for the chat editor including vim mode support.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tenex_core::tlog;
 
 use crate::input::input_prefix;
 use crate::nostr::NostrCommand;
@@ -538,7 +539,9 @@ fn handle_send_message(app: &mut App) {
                     response_tx: Some(response_tx),
                 }) {
                     // BULLETPROOF: Roll back the snapshot on send failure
-                    let _ = app.remove_publish_snapshot(&publish_id);
+                    if let Err(rollback_err) = app.remove_publish_snapshot(&publish_id) {
+                        tlog!("DRAFT", "ERROR: Failed to roll back publish snapshot {}: {} (phantom publish may remain)", publish_id, rollback_err);
+                    }
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
                     // BULLETPROOF: Spawn background task to wait for publish confirmation
@@ -597,7 +600,9 @@ fn handle_send_message(app: &mut App) {
                     response_tx: Some(response_tx),
                 }) {
                     // BULLETPROOF: Roll back the snapshot on send failure
-                    let _ = app.remove_publish_snapshot(&publish_id);
+                    if let Err(rollback_err) = app.remove_publish_snapshot(&publish_id) {
+                        tlog!("DRAFT", "ERROR: Failed to roll back publish snapshot {}: {} (phantom publish may remain)", publish_id, rollback_err);
+                    }
                     app.set_status(&format!("Failed to create thread: {}", e));
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
