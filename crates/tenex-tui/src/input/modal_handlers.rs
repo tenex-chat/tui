@@ -159,14 +159,8 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle nudge create form when open
+    // Handle nudge create form when open (also handles copy/pre-populated form)
     if matches!(app.modal_state, ModalState::NudgeCreate(_)) {
-        handle_nudge_form_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle nudge edit form when open
-    if matches!(app.modal_state, ModalState::NudgeEdit(_)) {
         handle_nudge_form_key(app, key);
         return Ok(true);
     }
@@ -2204,13 +2198,13 @@ fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
             // Create new nudge
             app.modal_state = ModalState::NudgeCreate(NudgeFormState::new());
         }
-        KeyCode::Char('e') => {
-            // Edit selected nudge
+        KeyCode::Char('c') => {
+            // Copy selected nudge (pre-populate wizard with nudge data to create a new one)
             let nudge_id = get_selected_nudge_id(app, &state);
             if let Some(id) = nudge_id {
                 let nudge = app.data_store.borrow().nudges.get(&id).cloned();
                 if let Some(nudge) = nudge {
-                    app.modal_state = ModalState::NudgeEdit(NudgeFormState::from_nudge(&nudge));
+                    app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
                 } else {
                     app.modal_state = ModalState::NudgeList(state);
                 }
@@ -2283,9 +2277,8 @@ fn get_selected_nudge_id(app: &App, state: &ui::modal::NudgeListState) -> Option
 fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
     use ui::nudge::{NudgeFormFocus, NudgeFormStep, PermissionMode};
 
-    let (is_edit, state) = match std::mem::replace(&mut app.modal_state, ModalState::None) {
-        ModalState::NudgeCreate(s) => (false, s),
-        ModalState::NudgeEdit(s) => (true, s),
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::NudgeCreate(s) => s,
         other => {
             app.modal_state = other;
             return;
@@ -2541,9 +2534,9 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                 }
                 KeyCode::Enter => {
                     if state.can_submit() {
-                        // Submit the nudge
+                        // Submit the nudge (always creates a new one - Nostr events are immutable)
                         if let Some(ref core_handle) = app.core_handle {
-                            // Fix #3: Sanitize allow list - remove any tools that also appear in deny list
+                            // Sanitize allow list - remove any tools that also appear in deny list
                             // "Deny wins" conflict resolution: if a tool is in both, only keep it in deny
                             let deny_set: std::collections::HashSet<_> = state.permissions.deny_tools.iter().collect();
                             let sanitized_allow_tools: Vec<String> = state.permissions.allow_tools
@@ -2552,39 +2545,24 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                                 .cloned()
                                 .collect();
 
-                            let result = if is_edit {
-                                core_handle.send(NostrCommand::UpdateNudge {
-                                    original_id: state.original_id.clone().unwrap_or_default(),
-                                    title: state.title.clone(),
-                                    description: state.description.clone(),
-                                    content: state.content.clone(),
-                                    hashtags: state.hashtags.clone(),
-                                    allow_tools: sanitized_allow_tools,
-                                    deny_tools: state.permissions.deny_tools.clone(),
-                                })
-                            } else {
-                                core_handle.send(NostrCommand::CreateNudge {
-                                    title: state.title.clone(),
-                                    description: state.description.clone(),
-                                    content: state.content.clone(),
-                                    hashtags: state.hashtags.clone(),
-                                    allow_tools: sanitized_allow_tools,
-                                    deny_tools: state.permissions.deny_tools.clone(),
-                                })
-                            };
+                            let result = core_handle.send(NostrCommand::CreateNudge {
+                                title: state.title.clone(),
+                                description: state.description.clone(),
+                                content: state.content.clone(),
+                                hashtags: state.hashtags.clone(),
+                                allow_tools: sanitized_allow_tools,
+                                deny_tools: state.permissions.deny_tools.clone(),
+                            });
 
                             match result {
                                 Ok(_) => {
-                                    let action = if is_edit { "updated" } else { "created" };
-                                    app.set_status(&format!("Nudge '{}' {}", state.title, action));
+                                    app.set_status(&format!("Nudge '{}' created", state.title));
                                 }
                                 Err(e) => {
-                                    let action = if is_edit { "update" } else { "create" };
-                                    app.set_status(&format!("Failed to {} nudge: {}", action, e));
+                                    app.set_status(&format!("Failed to create nudge: {}", e));
                                 }
                             }
                         } else {
-                            // Fix #9: Show error status when core_handle is missing
                             app.set_status("Error: Not connected to backend");
                         }
                         app.modal_state = ModalState::None;
@@ -2605,11 +2583,7 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
     }
 
     // Restore state
-    if is_edit {
-        app.modal_state = ModalState::NudgeEdit(state);
-    } else {
-        app.modal_state = ModalState::NudgeCreate(state);
-    }
+    app.modal_state = ModalState::NudgeCreate(state);
 }
 
 // =============================================================================
@@ -2652,10 +2626,11 @@ fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
             app.modal_state = ModalState::NudgeDetail(new_state);
         }
         KeyCode::Char('e') => {
-            // Edit this nudge
+            // Copy this nudge (pre-populate wizard with nudge data to create a new one)
+            // Note: Nostr events are immutable - we can't edit, only copy and create new
             let nudge = app.data_store.borrow().nudges.get(&state.nudge_id).cloned();
             if let Some(nudge) = nudge {
-                app.modal_state = ModalState::NudgeEdit(NudgeFormState::from_nudge(&nudge));
+                app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
             } else {
                 app.modal_state = ModalState::NudgeDetail(state);
             }
@@ -2728,6 +2703,8 @@ fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
                 }) {
                     app.set_status(&format!("Failed to delete nudge: {}", e));
                 } else {
+                    // Remove from selection if this nudge was selected (prevents stale references)
+                    app.remove_selected_nudge(&state.nudge_id);
                     app.set_status("Nudge deleted");
                 }
             }

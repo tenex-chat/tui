@@ -524,7 +524,6 @@ fn handle_send_message(app: &mut App) {
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
                     app.delete_chat_draft();
-                    app.clear_selected_nudges();
                 }
             } else {
                 // Create new thread (kind:1)
@@ -552,7 +551,6 @@ fn handle_send_message(app: &mut App) {
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
-                    app.clear_selected_nudges();
                     // Clear the reference_conversation_id after sending
                     if let Some(tab) = app.tabs.active_tab_mut() {
                         tab.reference_conversation_id = None;

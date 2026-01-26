@@ -3155,13 +3155,6 @@ impl App {
         }
     }
 
-    /// Clear all selected nudges for current tab
-    pub fn clear_selected_nudges(&mut self) {
-        if let Some(tab) = self.tabs.active_tab_mut() {
-            tab.selected_nudge_ids.clear();
-        }
-    }
-
     /// Get selected nudge IDs for current tab (per-tab isolated)
     pub fn selected_nudge_ids(&self) -> Vec<String> {
         self.tabs.active_tab()
