@@ -1543,36 +1543,38 @@ fn render_report_search_result_card(
     }
 }
 
+/// Check if query chars match at position in text chars using ASCII case-insensitive comparison
+/// This avoids Unicode casefold expansion issues (e.g., Turkish İ → i̇)
+fn chars_match_ascii_ignore_case(text_chars: &[char], query_chars: &[char], start_idx: usize) -> bool {
+    query_chars.iter().enumerate().all(|(i, qc)| {
+        text_chars.get(start_idx + i).map_or(false, |tc| tc.eq_ignore_ascii_case(qc))
+    })
+}
+
 /// Highlight matching text in a string with spans
 fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::Color, highlight_color: ratatui::style::Color) -> Vec<Span<'static>> {
     if query.is_empty() {
         return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
     }
 
-    let query_lower = query.to_lowercase();
-    let query_char_count = query_lower.chars().count();
+    let query_chars: Vec<char> = query.chars().collect();
+    let query_char_count = query_chars.len();
     let mut spans = Vec::new();
     let mut last_char_end = 0;
 
     // Build a char-indexed search by iterating through characters
     let chars: Vec<char> = text.chars().collect();
-    let chars_lower: Vec<char> = text.to_lowercase().chars().collect();
 
     let mut i = 0;
-    while i <= chars_lower.len().saturating_sub(query_char_count) {
-        // Check if query matches at position i (case-insensitive)
-        let query_chars: Vec<char> = query_lower.chars().collect();
-        let matches = query_chars.iter().enumerate().all(|(j, qc)| {
-            i + j < chars_lower.len() && chars_lower[i + j] == *qc
-        });
-
-        if matches {
+    while i <= chars.len().saturating_sub(query_char_count) {
+        // Check if query matches at position i (ASCII case-insensitive)
+        if chars_match_ascii_ignore_case(&chars, &query_chars, i) {
             // Add text before match
             if i > last_char_end {
                 let before: String = chars[last_char_end..i].iter().collect();
                 spans.push(Span::styled(before, Style::default().fg(normal_color)));
             }
-            // Add highlighted match (from original text, not lowercased)
+            // Add highlighted match (from original text)
             let match_text: String = chars[i..i + query_char_count].iter().collect();
             spans.push(Span::styled(
                 match_text,
@@ -1600,18 +1602,17 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
 
 /// Find the char index of a case-insensitive query match in text
 /// Returns the char position (not byte offset) or None if not found
+/// Uses ASCII case-insensitive comparison to avoid Unicode casefold expansion issues
 fn find_char_match_index(text: &str, query: &str) -> Option<usize> {
     if query.is_empty() {
         return None;
     }
-    let query_lower: Vec<char> = query.to_lowercase().chars().collect();
-    let text_lower: Vec<char> = text.to_lowercase().chars().collect();
-    let query_len = query_lower.len();
+    let query_chars: Vec<char> = query.chars().collect();
+    let text_chars: Vec<char> = text.chars().collect();
+    let query_len = query_chars.len();
 
-    for i in 0..=text_lower.len().saturating_sub(query_len) {
-        if query_lower.iter().enumerate().all(|(j, qc)| {
-            i + j < text_lower.len() && text_lower[i + j] == *qc
-        }) {
+    for i in 0..=text_chars.len().saturating_sub(query_len) {
+        if chars_match_ascii_ignore_case(&text_chars, &query_chars, i) {
             return Some(i);
         }
     }
