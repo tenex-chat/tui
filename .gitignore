@@ -6,3 +6,8 @@ tenex_data/
 # Git worktrees
 .worktrees/
 addresses.txt
+
+# Editor files
+*.swp
+*.swo
+*~

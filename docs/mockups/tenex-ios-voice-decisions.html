@@ -1,0 +1,1108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tenex iOS Concept - Decisions and Voice</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;9..144,800&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+    :root {
+      --bg: #f6f1e7;
+      --ink: #1c1a16;
+      --muted: #6e6a64;
+      --card: #fff7ee;
+      --card-2: #f2eadb;
+      --line: #e5d9c7;
+      --accent: #0f8b8d;
+      --accent-2: #f08c3b;
+      --accent-3: #2f4858;
+      --urgent: #d64550;
+      --ok: #2f9e44;
+      --shadow: rgba(28, 26, 22, 0.12);
+      --shadow-strong: rgba(28, 26, 22, 0.24);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(1200px 700px at 20% -10%, #fbe7c5 0%, transparent 60%),
+                  radial-gradient(900px 600px at 100% 10%, #d7f0ee 0%, transparent 55%),
+                  linear-gradient(180deg, #f6f1e7 0%, #f0e6d6 100%);
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+
+    .noise {
+      position: fixed;
+      inset: 0;
+      background-image: repeating-linear-gradient(
+        90deg,
+        rgba(0, 0, 0, 0.02) 0px,
+        rgba(0, 0, 0, 0.02) 1px,
+        transparent 1px,
+        transparent 3px
+      );
+      pointer-events: none;
+      mix-blend-mode: multiply;
+      opacity: 0.35;
+    }
+
+    .stage {
+      width: min(1200px, 96vw);
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    .phone {
+      width: min(420px, 94vw);
+      height: min(860px, 94vh);
+      border-radius: 36px;
+      background: #fdf9f2;
+      border: 1px solid var(--line);
+      box-shadow: 0 20px 60px var(--shadow-strong);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .status-bar {
+      height: 36px;
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.02em;
+      background: linear-gradient(180deg, #fff8ef 0%, #f7efe2 100%);
+      border-bottom: 1px solid var(--line);
+    }
+
+    .status-icons {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .pill {
+      padding: 2px 8px;
+      border-radius: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+    }
+
+    .top-bar {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 48px 1fr 48px;
+      align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid var(--line);
+      background: #fffaf3;
+    }
+
+    .screen-title {
+      font-family: "Fraunces", serif;
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: 0.01em;
+      text-align: center;
+    }
+
+    .icon-btn {
+      width: 40px;
+      height: 40px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .screens {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: radial-gradient(300px 300px at 80% 10%, rgba(240, 140, 59, 0.12), transparent 60%);
+    }
+
+    .screen {
+      position: absolute;
+      inset: 0;
+      padding: 16px;
+      overflow-y: auto;
+      display: none;
+    }
+
+    .screen.active {
+      display: block;
+      animation: fadeIn 0.35s ease;
+    }
+
+    .screen h2 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      letter-spacing: 0.02em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .hero {
+      padding: 16px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, #fff1d9 0%, #f7f1ff 100%);
+      border: 1px solid var(--line);
+      box-shadow: 0 10px 20px var(--shadow);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 140px;
+      height: 140px;
+      right: -40px;
+      top: -40px;
+      border-radius: 50%;
+      background: rgba(15, 139, 141, 0.18);
+    }
+
+    .hero-title {
+      font-family: "Fraunces", serif;
+      font-size: 22px;
+      margin: 0 0 6px;
+    }
+
+    .hero-sub {
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 13px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 8px 18px var(--shadow); }
+    .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn.accent { background: var(--accent-2); color: #fff; border-color: var(--accent-2); }
+    .btn.ghost { background: #fff; color: var(--muted); }
+    .btn.voice { background: #fff; border: 1px dashed var(--accent); color: var(--accent); }
+
+    .card {
+      background: var(--card);
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      padding: 14px;
+      box-shadow: 0 8px 18px var(--shadow);
+    }
+
+    .card + .card { margin-top: 12px; }
+
+    .card-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      padding: 2px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 11px;
+    }
+
+    .chip.urgent { border-color: var(--urgent); color: var(--urgent); }
+    .chip.ok { border-color: var(--ok); color: var(--ok); }
+
+    .decision {
+      border-left: 4px solid var(--accent);
+    }
+
+    .decision .question {
+      margin: 8px 0 6px;
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .decision .context {
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .option-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+
+    .option {
+      padding: 6px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .decision.answered {
+      border-left-color: var(--ok);
+      opacity: 0.85;
+    }
+
+    .decision-status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .voice-panel {
+      padding: 18px;
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: radial-gradient(200px 200px at 80% 20%, rgba(15, 139, 141, 0.12), transparent 60%),
+                  #fff8ef;
+      display: grid;
+      gap: 12px;
+    }
+
+    .record-btn {
+      width: 120px;
+      height: 120px;
+      border-radius: 50%;
+      border: 6px solid #fff;
+      background: radial-gradient(circle at 30% 30%, #ffb98a, #f08c3b);
+      box-shadow: 0 20px 30px rgba(240, 140, 59, 0.25);
+      margin: 8px auto 0;
+      display: grid;
+      place-items: center;
+      color: #fff;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .recording .record-btn {
+      animation: pulse 1.2s infinite;
+    }
+
+    .wave {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+    }
+
+    .wave span {
+      width: 4px;
+      height: 18px;
+      background: var(--accent-3);
+      border-radius: 6px;
+      opacity: 0.6;
+      animation: wave 1s infinite ease-in-out;
+    }
+
+    .wave span:nth-child(2) { animation-delay: 0.15s; }
+    .wave span:nth-child(3) { animation-delay: 0.3s; }
+    .wave span:nth-child(4) { animation-delay: 0.45s; }
+
+    .input {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      font-size: 13px;
+      font-family: "Space Grotesk", "Segoe UI", sans-serif;
+      background: #fff;
+    }
+
+    .segmented {
+      display: inline-flex;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .segmented button {
+      border: none;
+      padding: 8px 12px;
+      background: transparent;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .segmented button.active {
+      background: var(--accent-3);
+      color: #fff;
+    }
+
+    .plan-card {
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      padding: 12px;
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .plan-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 8px 18px var(--shadow);
+    }
+
+    .markdown {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .markdown h1, .markdown h2, .markdown h3 {
+      font-family: "Fraunces", serif;
+      margin: 12px 0 6px;
+    }
+
+    .markdown pre {
+      background: #f8f1e6;
+      padding: 10px;
+      border-radius: 10px;
+      overflow-x: auto;
+    }
+
+    .list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .project-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      cursor: pointer;
+    }
+
+    .progress {
+      height: 8px;
+      border-radius: 999px;
+      background: #f0e6d6;
+      overflow: hidden;
+    }
+
+    .progress span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      border-radius: 999px;
+    }
+
+    .nav {
+      height: 70px;
+      border-top: 1px solid var(--line);
+      background: #fffaf3;
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: center;
+      padding: 8px;
+      gap: 8px;
+    }
+
+    .nav button {
+      border: none;
+      background: transparent;
+      font-size: 11px;
+      color: var(--muted);
+      cursor: pointer;
+      display: grid;
+      gap: 4px;
+      justify-items: center;
+    }
+
+    .nav button.active {
+      color: var(--accent-3);
+      font-weight: 600;
+    }
+
+    .toast {
+      position: absolute;
+      left: 16px;
+      right: 16px;
+      bottom: 90px;
+      background: #1c1a16;
+      color: #fff;
+      padding: 10px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      display: none;
+    }
+
+    .modal {
+      position: absolute;
+      inset: 0;
+      background: rgba(28, 26, 22, 0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .modal.active { display: flex; }
+
+    .modal-card {
+      background: #fff;
+      border-radius: 20px;
+      padding: 16px;
+      width: 100%;
+      max-width: 320px;
+      border: 1px solid var(--line);
+      box-shadow: 0 20px 40px var(--shadow-strong);
+    }
+
+    .spacer { height: 12px; }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 20px 30px rgba(240, 140, 59, 0.25); }
+      50% { transform: scale(1.05); box-shadow: 0 26px 40px rgba(240, 140, 59, 0.35); }
+      100% { transform: scale(1); box-shadow: 0 20px 30px rgba(240, 140, 59, 0.25); }
+    }
+
+    @keyframes wave {
+      0%, 100% { height: 10px; }
+      50% { height: 22px; }
+    }
+
+    @media (max-width: 720px) {
+      .phone { height: 92vh; }
+    }
+  </style>
+</head>
+<body>
+  <div class="noise"></div>
+  <div class="stage">
+    <div class="phone">
+      <div class="status-bar">
+        <span>9:04</span>
+        <div class="status-icons">
+          <span class="pill">Voice</span>
+          <span>LTE</span>
+          <span>87%</span>
+        </div>
+      </div>
+
+      <div class="top-bar">
+        <button class="icon-btn" data-back title="Back">Back</button>
+        <div class="screen-title" id="screenTitle">Pulse</div>
+        <button class="icon-btn" data-open="message" title="Message">Msg</button>
+      </div>
+
+      <main class="screens">
+        <section class="screen active" data-screen="pulse">
+          <div class="hero">
+            <div class="hero-title">Decisions and Voice, side by side</div>
+            <div class="hero-sub">
+              The app is tuned for fast answers and daily voice briefs.
+            </div>
+            <div class="row">
+              <button class="btn primary" data-nav="decisions">Open decision queue (5)</button>
+              <button class="btn accent" data-nav="voice">Record morning brief</button>
+            </div>
+            <div class="spacer"></div>
+            <div class="row">
+              <button class="btn ghost" data-tts="You have five open decisions. Two are high urgency. Projects Tenex and Atlas are waiting for your input.">Listen summary</button>
+              <button class="btn ghost" data-nav="plans">Read plans</button>
+              <button class="btn ghost" data-nav="projects">Project pulse</button>
+            </div>
+          </div>
+
+          <div class="spacer"></div>
+          <h2>Decision highlights</h2>
+          <div class="card decision">
+            <div class="card-title">Release timing</div>
+            <div class="meta">
+              <span class="chip urgent">Urgent</span>
+              <span class="chip">TENEX</span>
+              <span class="chip">Due in 2h</span>
+            </div>
+            <div class="question">Do we ship the new sync worker today or hold for an extra test pass?</div>
+            <div class="context">Agent summary: remaining risk is limited to the archive migration path.</div>
+            <div class="row">
+              <button class="btn ghost" data-tts="Decision: release timing. Do we ship the new sync worker today or hold for an extra test pass? Context: remaining risk is limited to the archive migration path.">Read aloud</button>
+              <button class="btn voice" data-voice-answer="ask-17">Answer by voice</button>
+            </div>
+          </div>
+
+          <div class="card decision">
+            <div class="card-title">Data retention policy</div>
+            <div class="meta">
+              <span class="chip">Atlas</span>
+              <span class="chip">Due in 5h</span>
+            </div>
+            <div class="question">Should we retain agent transcripts for 30 days or 90 days for the pilot?</div>
+            <div class="context">Agent note: storage cost difference is minimal, but privacy is a factor.</div>
+            <div class="row">
+              <button class="btn ghost" data-tts="Decision: data retention policy. Should we retain agent transcripts for thirty days or ninety days for the pilot? Context: storage cost difference is minimal, but privacy is a factor.">Read aloud</button>
+              <button class="btn voice" data-voice-answer="ask-22">Answer by voice</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="decisions">
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <h2>Decision queue</h2>
+            <button class="btn ghost" data-tts="Five open decisions. Two urgent. The first is about release timing. The second is about data retention policy. The rest are routine approvals.">Read all</button>
+          </div>
+
+          <div class="card decision" data-ask-id="ask-17">
+            <div class="card-title">Release timing</div>
+            <div class="meta">
+              <span class="chip urgent">Urgent</span>
+              <span class="chip">TENEX</span>
+              <span class="chip">Ask event</span>
+            </div>
+            <div class="question">Ship the new sync worker today, or hold for another test pass?</div>
+            <div class="context">Context: only risk is archive migration on low disk devices.</div>
+            <div class="row">
+              <button class="btn ghost" data-tts="Ship the new sync worker today, or hold for another test pass? Context: only risk is archive migration on low disk devices.">Read aloud</button>
+              <button class="btn voice" data-voice-answer="ask-17">Answer by voice</button>
+            </div>
+            <div class="option-row">
+              <button class="option" data-answer="Ship today">Ship today</button>
+              <button class="option" data-answer="Hold for tests">Hold for tests</button>
+              <button class="option" data-answer="Split release">Split release</button>
+            </div>
+            <div class="decision-status">Pending response (ask event)</div>
+          </div>
+
+          <div class="card decision" data-ask-id="ask-22">
+            <div class="card-title">Data retention policy</div>
+            <div class="meta">
+              <span class="chip">Atlas</span>
+              <span class="chip">Ask event</span>
+            </div>
+            <div class="question">Retain agent transcripts for 30 days or 90 days for the pilot?</div>
+            <div class="context">Context: privacy vs long term troubleshooting.</div>
+            <div class="row">
+              <button class="btn ghost" data-tts="Retain agent transcripts for thirty days or ninety days for the pilot? Context: privacy versus long term troubleshooting.">Read aloud</button>
+              <button class="btn voice" data-voice-answer="ask-22">Answer by voice</button>
+            </div>
+            <div class="option-row">
+              <button class="option" data-answer="30 days">30 days</button>
+              <button class="option" data-answer="90 days">90 days</button>
+            </div>
+            <div class="decision-status">Pending response (ask event)</div>
+          </div>
+
+          <div class="card decision" data-ask-id="ask-31">
+            <div class="card-title">Budget approval</div>
+            <div class="meta">
+              <span class="chip">Kite</span>
+              <span class="chip">Ask event</span>
+            </div>
+            <div class="question">Approve the third party transcription spend for the pilot month?</div>
+            <div class="context">Context: $350 estimate, can cancel any time.</div>
+            <div class="row">
+              <button class="btn ghost" data-tts="Approve the third party transcription spend for the pilot month? Context: three hundred fifty dollars estimate, can cancel any time.">Read aloud</button>
+              <button class="btn voice" data-voice-answer="ask-31">Answer by voice</button>
+            </div>
+            <div class="option-row">
+              <button class="option" data-answer="Approve">Approve</button>
+              <button class="option" data-answer="Hold for now">Hold for now</button>
+            </div>
+            <div class="decision-status">Pending response (ask event)</div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="voice">
+          <h2>Morning brief</h2>
+          <div class="voice-panel" id="voicePanel">
+            <div class="meta">
+              <span class="chip">Voice to text</span>
+              <span class="chip">Broadcast to agents</span>
+            </div>
+            <div class="record-btn" id="recordBrief">Record</div>
+            <div class="wave" id="wave" style="display:none;">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="row">
+              <button class="btn ghost" data-recipient="Coordinator">Coordinator</button>
+              <button class="btn ghost" data-recipient="All projects">All projects</button>
+              <button class="btn ghost" data-recipient="Specific project">Specific project</button>
+            </div>
+            <textarea class="input" id="briefText" rows="6" placeholder="Transcript appears here. You can also type."></textarea>
+            <div class="row">
+              <button class="btn voice" id="voiceDictateBrief">Dictate</button>
+              <button class="btn primary" id="sendBrief">Send brief</button>
+            </div>
+            <div class="meta">Intent: high level vision, priorities, and constraints.</div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="plans">
+          <div class="row" style="justify-content: space-between; align-items: center;">
+            <h2>Plans and specs</h2>
+            <div class="segmented">
+              <button class="active" data-plan-tab="list">List</button>
+              <button data-plan-tab="doc">Doc</button>
+            </div>
+          </div>
+          <div id="planList" class="list">
+            <div class="plan-card active" data-plan="plan-sync">
+              <div class="card-title">Sync worker revamp</div>
+              <div class="meta">TENEX - 4 sections - updated 2h ago</div>
+            </div>
+            <div class="plan-card" data-plan="plan-voice">
+              <div class="card-title">Voice pipeline</div>
+              <div class="meta">Atlas - 5 sections - updated 1d ago</div>
+            </div>
+            <div class="plan-card" data-plan="plan-privacy">
+              <div class="card-title">Privacy policy draft</div>
+              <div class="meta">Kite - 3 sections - updated 3d ago</div>
+            </div>
+          </div>
+          <div id="planDoc" class="markdown" style="display:none;"></div>
+          <div class="spacer"></div>
+          <div class="row">
+            <button class="btn ghost" id="toggleMarkdown">Show raw markdown</button>
+            <button class="btn primary" data-open="message">Send note to agent</button>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="projects">
+          <h2>Project pulse</h2>
+          <div class="list">
+            <div class="project-row" data-open="project-detail" data-project="TENEX">
+              <div>
+                <div class="card-title">TENEX</div>
+                <div class="meta">2 decisions waiting - 3 agents online</div>
+                <div class="progress"><span style="width: 78%;"></span></div>
+              </div>
+              <span class="chip urgent">Needs you</span>
+            </div>
+            <div class="project-row" data-open="project-detail" data-project="Atlas">
+              <div>
+                <div class="card-title">Atlas</div>
+                <div class="meta">1 decision waiting - 4 agents online</div>
+                <div class="progress"><span style="width: 54%;"></span></div>
+              </div>
+              <span class="chip">Active</span>
+            </div>
+            <div class="project-row" data-open="project-detail" data-project="Kite">
+              <div>
+                <div class="card-title">Kite</div>
+                <div class="meta">0 decisions waiting - 2 agents online</div>
+                <div class="progress"><span style="width: 36%;"></span></div>
+              </div>
+              <span class="chip ok">On track</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="project-detail">
+          <h2>Project focus</h2>
+          <div class="card">
+            <div class="card-title" id="projectName">TENEX</div>
+            <div class="meta">
+              <span class="chip">3 agents online</span>
+              <span class="chip">Runtime today: 5h 12m</span>
+            </div>
+            <div class="spacer"></div>
+            <div class="meta">Latest summary: Sync worker nearing final checks. Ask items are waiting for approval.</div>
+          </div>
+          <div class="spacer"></div>
+          <div class="card">
+            <div class="card-title">Open decisions</div>
+            <div class="meta">2 ask events in queue</div>
+            <div class="row" style="margin-top: 8px;">
+              <button class="btn primary" data-nav="decisions">Review decisions</button>
+              <button class="btn ghost" data-nav="plans">Open plans</button>
+            </div>
+          </div>
+          <div class="spacer"></div>
+          <div class="card">
+            <div class="card-title">Message an agent</div>
+            <div class="meta">Send a direct instruction or clarification</div>
+            <div class="row" style="margin-top: 8px;">
+              <button class="btn primary" data-open="message">Send message</button>
+              <button class="btn voice" data-open="voice">Voice note</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="screen" data-screen="message">
+          <h2>Send message</h2>
+          <div class="card">
+            <label class="meta">Project</label>
+            <select class="input" id="projectSelect">
+              <option>TENEX</option>
+              <option>Atlas</option>
+              <option>Kite</option>
+            </select>
+            <div class="spacer"></div>
+            <label class="meta">Agent</label>
+            <select class="input" id="agentSelect">
+              <option>Coordinator</option>
+              <option>Research agent</option>
+              <option>Builder agent</option>
+            </select>
+            <div class="spacer"></div>
+            <label class="meta">Message</label>
+            <textarea class="input" id="messageText" rows="6" placeholder="Type or dictate your message."></textarea>
+            <div class="spacer"></div>
+            <div class="row">
+              <button class="btn voice" id="voiceDictateMessage">Dictate</button>
+              <button class="btn primary" id="sendMessage">Send to agent</button>
+            </div>
+            <div class="decision-status">This posts a message event to the selected project.</div>
+          </div>
+        </section>
+      </main>
+
+      <div class="toast" id="toast">Sent.</div>
+
+      <div class="modal" id="voiceModal">
+        <div class="modal-card">
+          <div class="card-title">Answer by voice</div>
+          <div class="meta">Captured response will be posted as the ask reply.</div>
+          <div class="spacer"></div>
+          <textarea class="input" id="voiceAnswerText" rows="4" placeholder="Your response appears here."></textarea>
+          <div class="spacer"></div>
+          <div class="row">
+            <button class="btn voice" id="startVoiceAnswer">Dictate</button>
+            <button class="btn primary" id="sendVoiceAnswer">Send answer</button>
+          </div>
+          <div class="spacer"></div>
+          <button class="btn ghost" id="closeVoiceModal">Close</button>
+        </div>
+      </div>
+
+      <div class="nav">
+        <button class="active" data-nav="pulse">Pulse</button>
+        <button data-nav="decisions">Decisions</button>
+        <button data-nav="voice">Voice</button>
+        <button data-nav="plans">Plans</button>
+        <button data-nav="projects">Projects</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const screens = document.querySelectorAll(".screen");
+    const navButtons = document.querySelectorAll("[data-nav]");
+    const backButtons = document.querySelectorAll("[data-back]");
+    const openButtons = document.querySelectorAll("[data-open]");
+    const title = document.getElementById("screenTitle");
+    const toast = document.getElementById("toast");
+    const voiceModal = document.getElementById("voiceModal");
+    const voiceAnswerText = document.getElementById("voiceAnswerText");
+    let currentAskId = null;
+    const historyStack = ["pulse"];
+
+    const titles = {
+      pulse: "Pulse",
+      decisions: "Decisions",
+      voice: "Voice Brief",
+      plans: "Plans",
+      projects: "Projects",
+      "project-detail": "Project Focus",
+      message: "Message"
+    };
+
+    function showScreen(name, push = true) {
+      screens.forEach((screen) => screen.classList.toggle("active", screen.dataset.screen === name));
+      navButtons.forEach((btn) => btn.classList.toggle("active", btn.dataset.nav === name));
+      title.textContent = titles[name] || "TENEX";
+      if (push) {
+        const last = historyStack[historyStack.length - 1];
+        if (last !== name) historyStack.push(name);
+      }
+    }
+
+    navButtons.forEach((btn) => {
+      btn.addEventListener("click", () => showScreen(btn.dataset.nav));
+    });
+
+    backButtons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        historyStack.pop();
+        const last = historyStack[historyStack.length - 1] || "pulse";
+        showScreen(last, false);
+      });
+    });
+
+    openButtons.forEach((btn) => {
+      btn.addEventListener("click", () => showScreen(btn.dataset.open));
+    });
+
+    document.querySelectorAll("[data-tts]").forEach((btn) => {
+      btn.addEventListener("click", () => speak(btn.dataset.tts));
+    });
+
+    document.querySelectorAll("[data-voice-answer]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        currentAskId = btn.dataset.voiceAnswer;
+        voiceAnswerText.value = "";
+        voiceModal.classList.add("active");
+      });
+    });
+
+    document.getElementById("closeVoiceModal").addEventListener("click", () => {
+      voiceModal.classList.remove("active");
+      currentAskId = null;
+    });
+
+    document.querySelectorAll(".option").forEach((btn) => {
+      btn.addEventListener("click", () => markAnswered(btn.closest(".decision"), btn.dataset.answer));
+    });
+
+    function markAnswered(card, response) {
+      if (!card) return;
+      card.classList.add("answered");
+      const status = card.querySelector(".decision-status");
+      if (status) status.textContent = "Answer queued: " + response;
+      showToast("Answer queued for ask event.");
+    }
+
+    document.getElementById("sendVoiceAnswer").addEventListener("click", () => {
+      const response = voiceAnswerText.value.trim() || "Voice response captured.";
+      const card = document.querySelector(`[data-ask-id="${currentAskId}"]`);
+      markAnswered(card, response);
+      voiceModal.classList.remove("active");
+    });
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.style.display = "block";
+      setTimeout(() => { toast.style.display = "none"; }, 1800);
+    }
+
+    function speak(text) {
+      if (!("speechSynthesis" in window)) {
+        showToast("Speech not available in this browser.");
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    const planData = {
+      "plan-sync": [
+        "# Sync worker revamp",
+        "## Goal",
+        "Reduce cold start time and improve resilience for offline queues.",
+        "## Steps",
+        "- Parallelize initial sync stages",
+        "- Add fallback when archives are missing",
+        "- Emit status checkpoints every 5 minutes",
+        "## Risks",
+        "- Archive migration on low disk devices",
+        "- Additional relay load during catch up"
+      ].join("\n"),
+      "plan-voice": [
+        "# Voice pipeline",
+        "## Goal",
+        "Enable reliable voice briefs and ask responses with minimal user attention.",
+        "## Steps",
+        "- Capture audio and request transcription",
+        "- Store transcript with ask event metadata",
+        "- Provide quick confirmation before sending",
+        "## Notes",
+        "- Voice replies must map to ask events",
+        "- Keep raw audio optional"
+      ].join("\n"),
+      "plan-privacy": [
+        "# Privacy policy draft",
+        "## Goal",
+        "Define retention and deletion guarantees for pilot users.",
+        "## Key points",
+        "- Default retention: 30 days",
+        "- Manual purge supported",
+        "- Admin access logged"
+      ].join("\n")
+    };
+
+    const planDoc = document.getElementById("planDoc");
+    let rawMode = false;
+    let activePlan = "plan-sync";
+
+    function renderMarkdown(md) {
+      const escapeHtml = (str) => str
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+
+      const inline = (str) => {
+        let safe = escapeHtml(str);
+        safe = safe.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        safe = safe.replace(/`(.+?)`/g, "<code>$1</code>");
+        return safe;
+      };
+
+      const lines = md.split("\n");
+      let html = "";
+      let inList = false;
+
+      lines.forEach((line) => {
+        if (line.startsWith("### ")) {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<h3>" + inline(line.slice(4)) + "</h3>";
+        } else if (line.startsWith("## ")) {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<h2>" + inline(line.slice(3)) + "</h2>";
+        } else if (line.startsWith("# ")) {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<h1>" + inline(line.slice(2)) + "</h1>";
+        } else if (line.startsWith("- ")) {
+          if (!inList) { html += "<ul>"; inList = true; }
+          html += "<li>" + inline(line.slice(2)) + "</li>";
+        } else if (line.trim() === "") {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<div class='spacer'></div>";
+        } else {
+          if (inList) { html += "</ul>"; inList = false; }
+          html += "<p>" + inline(line) + "</p>";
+        }
+      });
+
+      if (inList) html += "</ul>";
+      return html;
+    }
+
+    function updatePlan() {
+      const md = planData[activePlan];
+      planDoc.innerHTML = rawMode ? "<pre>" + md + "</pre>" : renderMarkdown(md);
+    }
+
+    document.querySelectorAll(".plan-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        document.querySelectorAll(".plan-card").forEach((c) => c.classList.remove("active"));
+        card.classList.add("active");
+        activePlan = card.dataset.plan;
+        updatePlan();
+        document.querySelector('[data-plan-tab="doc"]').click();
+      });
+    });
+
+    document.getElementById("toggleMarkdown").addEventListener("click", () => {
+      rawMode = !rawMode;
+      document.getElementById("toggleMarkdown").textContent = rawMode ? "Show rendered markdown" : "Show raw markdown";
+      updatePlan();
+    });
+
+    document.querySelectorAll("[data-plan-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll("[data-plan-tab]").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        const mode = btn.dataset.planTab;
+        document.getElementById("planList").style.display = mode === "list" ? "grid" : "none";
+        planDoc.style.display = mode === "doc" ? "block" : "none";
+        if (mode === "doc") updatePlan();
+      });
+    });
+
+    document.querySelectorAll("[data-open='project-detail']").forEach((row) => {
+      row.addEventListener("click", () => {
+        document.getElementById("projectName").textContent = row.dataset.project;
+        showScreen("project-detail");
+      });
+    });
+
+    const voicePanel = document.getElementById("voicePanel");
+    const recordBrief = document.getElementById("recordBrief");
+    const wave = document.getElementById("wave");
+    let recording = false;
+
+    recordBrief.addEventListener("click", () => {
+      recording = !recording;
+      voicePanel.classList.toggle("recording", recording);
+      wave.style.display = recording ? "flex" : "none";
+      recordBrief.textContent = recording ? "Stop" : "Record";
+    });
+
+    document.getElementById("sendBrief").addEventListener("click", () => {
+      showToast("Brief queued for transcription and delivery.");
+    });
+
+    document.getElementById("sendMessage").addEventListener("click", () => {
+      showToast("Message queued to agent.");
+      document.getElementById("messageText").value = "";
+    });
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    function startDictation(target) {
+      if (!SpeechRecognition) {
+        showToast("Speech recognition not available.");
+        return;
+      }
+      const recognition = new SpeechRecognition();
+      recognition.lang = "en-US";
+      recognition.interimResults = true;
+      recognition.onresult = (event) => {
+        let text = "";
+        for (let i = 0; i < event.results.length; i += 1) {
+          text += event.results[i][0].transcript;
+        }
+        target.value = text;
+      };
+      recognition.onend = () => showToast("Dictation captured.");
+      recognition.start();
+    }
+
+    document.getElementById("voiceDictateBrief").addEventListener("click", () => {
+      startDictation(document.getElementById("briefText"));
+    });
+
+    document.getElementById("voiceDictateMessage").addEventListener("click", () => {
+      startDictation(document.getElementById("messageText"));
+    });
+
+    document.getElementById("startVoiceAnswer").addEventListener("click", () => {
+      startDictation(voiceAnswerText);
+    });
+
+    showScreen("pulse", false);
+  </script>
+</body>
+</html>
