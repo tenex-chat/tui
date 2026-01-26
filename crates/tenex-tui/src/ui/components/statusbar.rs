@@ -28,12 +28,21 @@ fn format_runtime(total_ms: u64) -> String {
     }
 }
 
-/// Minimum width for the runtime column (fits "Runtime: MM:SS " with padding)
-const RUNTIME_COLUMN_MIN_WIDTH: u16 = 18;
+/// Label prefix for the runtime display
+const TODAY_LABEL: &str = "Today: ";
+
+/// Minimum width for the runtime column.
+/// Ensures column doesn't collapse below "Today: MM:SS " (13 chars) + 1 left padding + 2 buffer = 16
+const RUNTIME_COLUMN_MIN_WIDTH: u16 = 16;
+
+/// Format the full runtime label string (e.g., "Today: 05:32 ")
+fn format_today_label(cumulative_runtime_ms: u64) -> String {
+    format!("{}{} ", TODAY_LABEL, format_runtime(cumulative_runtime_ms))
+}
 
 /// Calculate the width needed for the runtime string
 fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
-    let runtime_str = format!("Runtime: {} ", format_runtime(cumulative_runtime_ms));
+    let runtime_str = format_today_label(cumulative_runtime_ms);
     // Add 1 for left padding, ensure minimum width
     (runtime_str.width() + 1).max(RUNTIME_COLUMN_MIN_WIDTH as usize) as u16
 }
@@ -88,7 +97,7 @@ pub fn render_statusbar(
     f.render_widget(notification_paragraph, notification_area);
 
     // Render runtime (right side) - right-aligned within its fixed column
-    let runtime_str = format!("Runtime: {} ", format_runtime(cumulative_runtime_ms));
+    let runtime_str = format_today_label(cumulative_runtime_ms);
     let runtime_width = runtime_str.width();
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
     let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
