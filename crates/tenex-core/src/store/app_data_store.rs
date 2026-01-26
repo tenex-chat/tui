@@ -100,6 +100,35 @@ impl AppDataStore {
         self.populate_inbox_from_existing(&pubkey);
     }
 
+    /// Clear all in-memory data (used on logout to prevent stale data leaks).
+    /// Does NOT clear nostrdb - that persists across sessions.
+    /// After logout and re-login with different account, rebuild_from_ndb()
+    /// will repopulate with the new user's filtered view.
+    pub fn clear(&mut self) {
+        self.projects.clear();
+        self.project_statuses.clear();
+        self.threads_by_project.clear();
+        self.messages_by_thread.clear();
+        self.profiles.clear();
+        self.inbox_items.clear();
+        self.inbox_read_ids.clear();
+        self.user_pubkey = None;
+        self.agent_chatter.clear();
+        self.lessons.clear();
+        self.agent_definitions.clear();
+        self.nudges.clear();
+        self.reports.clear();
+        self.reports_all_versions.clear();
+        self.document_threads.clear();
+        self.operations_by_event.clear();
+        self.pending_project_subscriptions.clear();
+        self.approved_backends.clear();
+        self.blocked_backends.clear();
+        self.pending_backend_approvals.clear();
+        self.thread_root_index.clear();
+        self.runtime_hierarchy = RuntimeHierarchy::new();
+    }
+
     /// Scan existing messages and populate inbox with those that p-tag the user
     fn populate_inbox_from_existing(&mut self, user_pubkey: &str) {
         let Ok(txn) = Transaction::new(&self.ndb) else {

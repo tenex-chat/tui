@@ -1280,6 +1280,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
+                                        response_tx: None,
                                     }) {
                                         app.set_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Nsec;
@@ -1314,6 +1315,7 @@ pub(super) fn handle_editing_mode(
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
                                         keys: keys.clone(),
                                         user_pubkey: user_pubkey.clone(),
+                                        response_tx: None,
                                     }) {
                                         app.set_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Unlock;

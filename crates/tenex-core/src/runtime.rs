@@ -21,6 +21,10 @@ pub struct CoreHandle {
 }
 
 impl CoreHandle {
+    pub(crate) fn new(command_tx: Sender<NostrCommand>) -> Self {
+        Self { command_tx }
+    }
+
     pub fn send(&self, command: NostrCommand) -> Result<(), mpsc::SendError<NostrCommand>> {
         self.command_tx.send(command)
     }
@@ -37,6 +41,51 @@ pub struct CoreRuntime {
     event_stats: SharedEventStats,
     subscription_stats: SharedSubscriptionStats,
     negentropy_stats: SharedNegentropySyncStats,
+}
+
+pub(crate) fn process_note_keys(
+    ndb: &Ndb,
+    data_store: &mut AppDataStore,
+    handle: &CoreHandle,
+    note_keys: &[NoteKey],
+) -> Result<Vec<CoreEvent>> {
+    let txn = Transaction::new(ndb)?;
+    let mut events = Vec::with_capacity(note_keys.len());
+
+    for &note_key in note_keys.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
+            let kind = note.kind();
+
+            // handle_event returns CoreEvent for kinds that need special handling (24010)
+            let status_event = data_store.handle_event(kind, &note);
+
+            match kind {
+                1 => {
+                    if let Some(message) = Message::from_note(&note) {
+                        events.push(CoreEvent::Message(message));
+                    }
+                }
+                24010 => {
+                    // Use the event returned by handle_event (trust-validated)
+                    if let Some(event) = status_event {
+                        events.push(event);
+                    }
+                }
+                24133 => {
+                    // Operations status - already handled by data_store.handle_event
+                    // No CoreEvent needed as UI will query data_store directly
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // Subscribe to messages for any newly discovered projects
+    for project_a_tag in data_store.drain_pending_project_subscriptions() {
+        let _ = handle.send(NostrCommand::SubscribeToProjectMessages { project_a_tag });
+    }
+
+    Ok(events)
 }
 
 impl CoreRuntime {
@@ -131,43 +180,8 @@ impl CoreRuntime {
     }
 
     pub fn process_note_keys(&self, note_keys: &[NoteKey]) -> Result<Vec<CoreEvent>> {
-        let txn = Transaction::new(&self.ndb)?;
-        let mut events = Vec::with_capacity(note_keys.len());
-
-        for &note_key in note_keys.iter() {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, note_key) {
-                let kind = note.kind();
-
-                // handle_event returns CoreEvent for kinds that need special handling (24010)
-                let status_event = self.data_store.borrow_mut().handle_event(kind, &note);
-
-                match kind {
-                    1 => {
-                        if let Some(message) = Message::from_note(&note) {
-                            events.push(CoreEvent::Message(message));
-                        }
-                    }
-                    24010 => {
-                        // Use the event returned by handle_event (trust-validated)
-                        if let Some(event) = status_event {
-                            events.push(event);
-                        }
-                    }
-                    24133 => {
-                        // Operations status - already handled by data_store.handle_event
-                        // No CoreEvent needed as UI will query data_store directly
-                    }
-                    _ => {}
-                }
-            }
-        }
-
-        // Subscribe to messages for any newly discovered projects
-        for project_a_tag in self.data_store.borrow_mut().drain_pending_project_subscriptions() {
-            let _ = self.handle.send(NostrCommand::SubscribeToProjectMessages { project_a_tag });
-        }
-
-        Ok(events)
+        let mut store = self.data_store.borrow_mut();
+        process_note_keys(self.ndb.as_ref(), &mut store, &self.handle, note_keys)
     }
 
     pub fn shutdown(&mut self) {

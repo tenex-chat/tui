@@ -82,6 +82,7 @@ fn connect_and_init(
         .send(NostrCommand::Connect {
             keys: keys.clone(),
             user_pubkey: user_pubkey.clone(),
+            response_tx: None,
         })
         .map_err(|e| format!("Failed to connect: {}", e))?;
 
