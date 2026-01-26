@@ -797,22 +797,30 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
     };
     let time_str = format_relative_time(item.created_at);
 
+    // Check if this is a "Waiting For You" item (Mention type = user was p-tagged)
+    let is_waiting_for_user = matches!(item.event_type, InboxEventType::Mention) && !item.is_read;
+
     let type_str = match item.event_type {
-        InboxEventType::Mention => "Mention",
+        InboxEventType::Mention => "@ mentioned you",
         InboxEventType::Reply => "Reply",
         InboxEventType::ThreadReply => "Thread reply",
     };
 
     let title_style = if is_selected {
         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    } else if is_waiting_for_user {
+        // Waiting for user items get yellow/warning style
+        Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
     } else if !item.is_read {
         Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_PRIMARY)
     };
 
-    // Unread indicator
-    let indicator = if !item.is_read {
+    // Indicator: @ for waiting items, • for unread, space otherwise
+    let indicator = if is_waiting_for_user {
+        Span::styled("@ ", Style::default().fg(theme::ACCENT_WARNING))
+    } else if !item.is_read {
         Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_PRIMARY))
     } else {
         Span::styled(card::SPACER, Style::default())
@@ -826,9 +834,15 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
         Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
     ];
 
-    // Line 2: Type + Project + Author
+    // Line 2: Type + Project + Author (yellow for waiting items, muted otherwise)
+    let type_style = if is_waiting_for_user {
+        Style::default().fg(theme::ACCENT_WARNING)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
     let line2_spans = vec![
-        Span::styled(type_str, Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(type_str, type_style),
         Span::styled(" in ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(project_name, Style::default().fg(theme::project_color(&item.project_a_tag))),
         Span::styled(" by ", Style::default().fg(theme::TEXT_MUTED)),
