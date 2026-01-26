@@ -924,10 +924,25 @@ impl AppDataStore {
                 let has_parent = has_parent_from_thread
                     || self.runtime_hierarchy.get_parent(&thread_id).is_some();
 
-                // Propagate effective_last_activity up the hierarchy if:
+                // Check if this thread has children already in the hierarchy
+                // (children can arrive before parent due to out-of-order message delivery)
+                let has_children = self
+                    .runtime_hierarchy
+                    .get_children(&thread_id)
+                    .map(|c| !c.is_empty())
+                    .unwrap_or(false);
+
+                // Propagate/recompute effective_last_activity if:
                 // 1. This thread has a parent (new child bumps ancestors), OR
-                // 2. We reconciled with preloaded messages (late-arriving thread root needs to propagate)
-                if has_parent || was_reconciled {
+                // 2. We reconciled with preloaded messages (late-arriving thread root needs to propagate), OR
+                // 3. This thread has children already (parent arrived after children - need to pick up child activity)
+                if has_parent || was_reconciled || has_children {
+                    // If this thread has children, first recompute its own effective_last_activity
+                    // from its descendants before propagating up to ancestors
+                    if has_children {
+                        self.update_thread_effective_last_activity(&thread_id);
+                    }
+
                     self.propagate_effective_last_activity(&thread_id);
 
                     // Re-sort threads by effective_last_activity
