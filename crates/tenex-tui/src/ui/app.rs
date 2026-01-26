@@ -952,10 +952,26 @@ impl App {
         self.publish_confirm_tx.clone()
     }
 
-    /// Clean up old confirmed publish snapshots (call on app startup)
+    /// Clean up old confirmed publish snapshots (call on app startup or after confirmations)
     /// Returns the number of snapshots cleaned up
     pub fn cleanup_confirmed_publishes(&self) -> Result<usize, tenex_core::models::draft::DraftStorageError> {
         self.draft_storage.borrow_mut().cleanup_confirmed_publishes()
+    }
+
+    /// Remove a publish snapshot (for rollback when send fails)
+    /// Call this when send to relay fails AFTER snapshot was created
+    pub fn remove_publish_snapshot(&self, publish_id: &str) -> Result<bool, tenex_core::models::draft::DraftStorageError> {
+        self.draft_storage.borrow_mut().remove_publish_snapshot(publish_id)
+    }
+
+    /// Get the last draft storage error (if any)
+    pub fn draft_storage_last_error(&self) -> Option<String> {
+        self.draft_storage.borrow().last_error().map(|e| e.to_string())
+    }
+
+    /// Clear the last draft storage error
+    pub fn draft_storage_clear_error(&self) {
+        self.draft_storage.borrow_mut().clear_error();
     }
 
     /// Get unpublished drafts for recovery (call on app startup)
@@ -972,7 +988,9 @@ impl App {
     #[allow(dead_code)]
     fn delete_chat_draft(&self) {
         if let Some(ref thread) = self.selected_thread {
-            let _ = self.draft_storage.borrow_mut().delete(&thread.id);
+            if let Err(e) = self.draft_storage.borrow_mut().delete(&thread.id) {
+                tlog!("DRAFT", "ERROR deleting draft for {}: {}", thread.id, e);
+            }
         }
     }
 

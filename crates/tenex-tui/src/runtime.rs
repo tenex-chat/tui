@@ -44,6 +44,13 @@ pub(crate) async fn run_app(
     let (publish_confirm_tx, mut publish_confirm_rx) = tokio::sync::mpsc::channel::<(String, String)>(100);
     app.set_publish_confirm_tx(publish_confirm_tx);
 
+    // BULLETPROOF: Surface draft storage load/parse errors at startup
+    if let Some(error) = app.draft_storage_last_error() {
+        log_diagnostic(&format!("BULLETPROOF: Draft storage error at startup: {}", error));
+        app.set_status(&format!("WARNING: Draft load error - {}", error));
+        app.draft_storage_clear_error();
+    }
+
     // BULLETPROOF: Clean up old confirmed publish snapshots on startup (>24h old)
     match app.cleanup_confirmed_publishes() {
         Ok(cleaned_up) if cleaned_up > 0 => {
@@ -235,6 +242,19 @@ pub(crate) async fn run_app(
                             &publish_id[..publish_id.len().min(16)],
                             &event_id[..event_id.len().min(12)]
                         ));
+                        // BULLETPROOF: Periodically cleanup old confirmed snapshots to prevent accumulation
+                        // Run after every 10 confirmations to balance I/O vs. memory
+                        if publish_confirm_events % 10 == 0 {
+                            match app.cleanup_confirmed_publishes() {
+                                Ok(cleaned) if cleaned > 0 => {
+                                    log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old confirmed snapshots", cleaned));
+                                }
+                                Err(e) => {
+                                    log_diagnostic(&format!("BULLETPROOF: Error cleaning up snapshots: {}", e));
+                                }
+                                _ => {}
+                            }
+                        }
                     }
                     Ok(false) => {
                         log_diagnostic(&format!("BULLETPROOF: Warning - publish snapshot '{}' not found for confirmation",
