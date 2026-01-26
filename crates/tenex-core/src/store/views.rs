@@ -135,8 +135,10 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
         }
     }
 
-    // Sort by last_activity descending (most recent activity first)
-    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    // Sort by effective_last_activity descending (most recent activity first)
+    // This uses hierarchical sorting where parent conversations reflect
+    // the most recent activity in their entire delegation tree.
+    threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
 
     Ok(threads)
 }
@@ -168,8 +170,10 @@ pub fn get_threads_by_ids(ndb: &Ndb, root_ids: &std::collections::HashSet<String
         }
     }
 
-    // Sort by last_activity descending (most recent activity first)
-    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
+    // Sort by effective_last_activity descending (most recent activity first)
+    // This uses hierarchical sorting where parent conversations reflect
+    // the most recent activity in their entire delegation tree.
+    threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
 
     Ok(threads)
 }

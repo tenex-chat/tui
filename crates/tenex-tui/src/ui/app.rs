@@ -2050,14 +2050,14 @@ impl App {
             })
             .collect();
 
-        // Sort: threads with current_activity first, then by last_activity descending
+        // Sort: threads with current_activity first, then by effective_last_activity descending
         status_threads.sort_by(|(a, _), (b, _)| {
             let a_has_activity = a.status_current_activity.is_some();
             let b_has_activity = b.status_current_activity.is_some();
             match (a_has_activity, b_has_activity) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => b.last_activity.cmp(&a.last_activity),
+                _ => b.effective_last_activity.cmp(&a.effective_last_activity),
             }
         });
 
