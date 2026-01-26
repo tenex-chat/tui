@@ -1307,10 +1307,8 @@ pub enum ModalState {
     HistorySearch(HistorySearchState),
     /// Nudge list view - browse and manage nudges
     NudgeList(NudgeListState),
-    /// Nudge create form - multi-step wizard for creating nudges
+    /// Nudge create form - multi-step wizard for creating nudges (also used for copy)
     NudgeCreate(NudgeFormState),
-    /// Nudge edit form - edit existing nudge
-    NudgeEdit(NudgeFormState),
     /// Nudge detail view - read-only view of a nudge
     NudgeDetail(NudgeDetailState),
     /// Nudge delete confirmation - confirm deletion of a nudge
