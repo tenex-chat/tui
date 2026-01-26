@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 /// Centralized store for hierarchical conversation runtime tracking.
 /// Tracks individual conversation runtimes and parent-child relationships
 /// to enable efficient recursive runtime aggregation.
+/// Also tracks last_activity timestamps for hierarchical sorting in the Conversations tab.
 #[derive(Debug, Default)]
 pub struct RuntimeHierarchy {
     /// Each conversation's individual (net) runtime in milliseconds
@@ -12,6 +13,11 @@ pub struct RuntimeHierarchy {
     /// Each conversation's creation timestamp (Unix seconds)
     /// Used for today-only filtering in get_today_unique_runtime()
     conversation_created_at: HashMap<String, u64>,
+
+    /// Each conversation's individual last_activity timestamp (Unix seconds)
+    /// This is the conversation's own last_activity, not including descendants.
+    /// Used as input for effective_last_activity calculation.
+    individual_last_activity: HashMap<String, u64>,
 
     /// Parent-child relationships: parent_id -> set of child_ids
     /// Built via set_parent() from both q-tags (parent has q-tag pointing to child)
@@ -89,6 +95,58 @@ impl RuntimeHierarchy {
             .get(conversation_id)
             .copied()
             .unwrap_or(0)
+    }
+
+    // ===== Last Activity Methods (for hierarchical sorting) =====
+
+    /// Set the individual last_activity timestamp for a conversation.
+    /// This is the conversation's own last_activity (not including descendants).
+    pub fn set_individual_last_activity(&mut self, conversation_id: &str, timestamp: u64) {
+        self.individual_last_activity
+            .insert(conversation_id.to_string(), timestamp);
+    }
+
+    /// Get the individual last_activity timestamp for a conversation (if set)
+    pub fn get_individual_last_activity(&self, conversation_id: &str) -> Option<u64> {
+        self.individual_last_activity.get(conversation_id).copied()
+    }
+
+    /// Calculate effective last_activity for a conversation including all descendants.
+    /// This is the maximum of the conversation's own last_activity and all its descendants' last_activity.
+    /// Used for hierarchical sorting in the Conversations tab.
+    pub fn get_effective_last_activity(&self, conversation_id: &str) -> u64 {
+        self.get_effective_last_activity_with_visited(conversation_id, &mut HashSet::new())
+    }
+
+    /// Internal recursive implementation with cycle detection
+    fn get_effective_last_activity_with_visited(
+        &self,
+        conversation_id: &str,
+        visited: &mut HashSet<String>,
+    ) -> u64 {
+        // Cycle detection
+        if visited.contains(conversation_id) {
+            return 0;
+        }
+        visited.insert(conversation_id.to_string());
+
+        // Start with this conversation's individual last_activity
+        let mut max_activity = self.individual_last_activity
+            .get(conversation_id)
+            .copied()
+            .unwrap_or(0);
+
+        // Check all children recursively for their effective last_activity
+        if let Some(children) = self.children.get(conversation_id) {
+            for child_id in children {
+                let child_activity = self.get_effective_last_activity_with_visited(child_id, visited);
+                if child_activity > max_activity {
+                    max_activity = child_activity;
+                }
+            }
+        }
+
+        max_activity
     }
 
     /// Add a parent-child relationship from the parent's perspective.
@@ -241,6 +299,7 @@ impl RuntimeHierarchy {
     pub fn clear(&mut self) {
         self.individual_runtimes.clear();
         self.conversation_created_at.clear();
+        self.individual_last_activity.clear();
         self.children.clear();
         self.parents.clear();
         self.cached_total_unique_runtime = 0;
@@ -923,5 +982,132 @@ mod tests {
         hierarchy.set_conversation_created_at("conv1", now);
 
         assert_eq!(hierarchy.get_today_unique_runtime(), 10_000);
+    }
+
+    // ===== Effective Last Activity Tests =====
+
+    #[test]
+    fn test_effective_last_activity_single_conversation() {
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("conv1", 100);
+
+        assert_eq!(hierarchy.get_effective_last_activity("conv1"), 100);
+        assert_eq!(hierarchy.get_effective_last_activity("unknown"), 0);
+    }
+
+    #[test]
+    fn test_effective_last_activity_parent_child() {
+        // Scenario: parent (last_activity=50) has child (last_activity=100)
+        // Parent's effective_last_activity should be 100
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("parent", 50);
+        hierarchy.set_individual_last_activity("child", 100);
+        hierarchy.set_parent("child", "parent");
+
+        // Parent's effective = max(50, 100) = 100
+        assert_eq!(hierarchy.get_effective_last_activity("parent"), 100);
+        // Child's effective = 100 (no children)
+        assert_eq!(hierarchy.get_effective_last_activity("child"), 100);
+    }
+
+    #[test]
+    fn test_effective_last_activity_deep_hierarchy() {
+        // Scenario: conv1 -> conv2 -> conv3
+        // conv1.last_activity = 50
+        // conv2.last_activity = 75
+        // conv3.last_activity = 100
+        // conv1.effective = 100 (from conv3)
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("conv1", 50);
+        hierarchy.set_individual_last_activity("conv2", 75);
+        hierarchy.set_individual_last_activity("conv3", 100);
+
+        hierarchy.set_parent("conv2", "conv1");
+        hierarchy.set_parent("conv3", "conv2");
+
+        assert_eq!(hierarchy.get_effective_last_activity("conv3"), 100);
+        assert_eq!(hierarchy.get_effective_last_activity("conv2"), 100);
+        assert_eq!(hierarchy.get_effective_last_activity("conv1"), 100);
+    }
+
+    #[test]
+    fn test_effective_last_activity_multiple_children() {
+        // Scenario: parent has child1 (80) and child2 (120)
+        // Parent's effective should be 120 (max of children)
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("parent", 50);
+        hierarchy.set_individual_last_activity("child1", 80);
+        hierarchy.set_individual_last_activity("child2", 120);
+
+        hierarchy.set_parent("child1", "parent");
+        hierarchy.set_parent("child2", "parent");
+
+        // Parent's effective = max(50, 80, 120) = 120
+        assert_eq!(hierarchy.get_effective_last_activity("parent"), 120);
+    }
+
+    #[test]
+    fn test_effective_last_activity_parent_is_newest() {
+        // Scenario: parent (200) has child (100)
+        // Parent's effective should still be 200 (parent is newest)
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("parent", 200);
+        hierarchy.set_individual_last_activity("child", 100);
+        hierarchy.set_parent("child", "parent");
+
+        // Parent's effective = max(200, 100) = 200
+        assert_eq!(hierarchy.get_effective_last_activity("parent"), 200);
+    }
+
+    #[test]
+    fn test_effective_last_activity_cycle_detection() {
+        // Create a cycle: conv1 -> conv2 -> conv1
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("conv1", 100);
+        hierarchy.set_individual_last_activity("conv2", 200);
+
+        hierarchy.set_parent("conv2", "conv1");
+        hierarchy.set_parent("conv1", "conv2");
+
+        // Should not infinite loop
+        let effective = hierarchy.get_effective_last_activity("conv1");
+        // Should return some reasonable value without crashing
+        assert!(effective > 0);
+    }
+
+    #[test]
+    fn test_effective_last_activity_update() {
+        // Test that updating a child's last_activity affects parent's effective
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("parent", 50);
+        hierarchy.set_individual_last_activity("child", 100);
+        hierarchy.set_parent("child", "parent");
+
+        assert_eq!(hierarchy.get_effective_last_activity("parent"), 100);
+
+        // Update child to newer activity
+        hierarchy.set_individual_last_activity("child", 200);
+
+        assert_eq!(hierarchy.get_effective_last_activity("parent"), 200);
+    }
+
+    #[test]
+    fn test_effective_last_activity_clear() {
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        hierarchy.set_individual_last_activity("conv1", 100);
+        hierarchy.set_parent("child", "conv1");
+
+        hierarchy.clear();
+
+        assert_eq!(hierarchy.get_effective_last_activity("conv1"), 0);
+        assert!(hierarchy.get_individual_last_activity("conv1").is_none());
     }
 }
