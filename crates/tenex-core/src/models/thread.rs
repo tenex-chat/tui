@@ -11,6 +11,10 @@ pub struct Thread {
     pub pubkey: String,
     /// Most recent activity (thread creation or latest reply)
     pub last_activity: u64,
+    /// Effective last activity for sorting - max of own last_activity and all descendants
+    /// This enables hierarchical sorting where a parent conversation reflects the most
+    /// recent activity in its entire delegation tree.
+    pub effective_last_activity: u64,
     /// Status label from kind:513 metadata (e.g., "In Progress", "Blocked", "Done")
     pub status_label: Option<String>,
     /// Current activity from kind:513 metadata (e.g., "Writing tests...")
@@ -111,6 +115,7 @@ impl Thread {
             content,
             pubkey,
             last_activity: created_at,
+            effective_last_activity: created_at, // Initialized to same as last_activity
             status_label: None,
             status_current_activity: None,
             summary: None,
