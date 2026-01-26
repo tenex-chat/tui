@@ -10,6 +10,7 @@ use nostr_sdk::prelude::*;
 use nostrdb::Ndb;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
+use tokio::sync::watch;
 
 use crate::constants::RELAY_URL;
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
@@ -62,7 +63,11 @@ fn debug_log(msg: &str) {
 pub type EventIdSender = std::sync::mpsc::SyncSender<String>;
 
 pub enum NostrCommand {
-    Connect { keys: Keys, user_pubkey: String },
+    Connect {
+        keys: Keys,
+        user_pubkey: String,
+        response_tx: Option<Sender<Result<(), String>>>,
+    },
     PublishThread {
         project_a_tag: String,
         title: String,
@@ -161,6 +166,11 @@ pub enum NostrCommand {
     DeleteNudge {
         nudge_id: String,
     },
+    /// Disconnect from relays but keep the worker running
+    Disconnect {
+        /// Optional response channel to signal when disconnect is complete
+        response_tx: Option<Sender<Result<(), String>>>,
+    },
     Shutdown,
 }
 
@@ -194,6 +204,8 @@ pub struct NostrWorker {
     negentropy_stats: SharedNegentropySyncStats,
     /// Pubkeys for which we've already requested kind:0 profiles
     requested_profiles: Arc<RwLock<HashSet<String>>>,
+    /// Cancellation token sender - signals background tasks to stop on disconnect
+    cancel_tx: Option<watch::Sender<bool>>,
 }
 
 impl NostrWorker {
@@ -217,6 +229,7 @@ impl NostrWorker {
             subscription_stats,
             negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
+            cancel_tx: None,
         }
     }
 
@@ -257,9 +270,13 @@ impl NostrWorker {
         loop {
             if let Ok(cmd) = self.command_rx.recv() {
                 match cmd {
-                    NostrCommand::Connect { keys, user_pubkey } => {
+                    NostrCommand::Connect { keys, user_pubkey, response_tx } => {
                         debug_log(&format!("Worker: Connecting with user {}", &user_pubkey[..8]));
-                        if let Err(e) = rt.block_on(self.handle_connect(keys, user_pubkey)) {
+                        let result = rt.block_on(self.handle_connect(keys, user_pubkey));
+                        if let Some(tx) = response_tx {
+                            let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                        }
+                        if let Err(e) = result {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
@@ -355,9 +372,24 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to delete nudge: {}", e);
                         }
                     }
+                    NostrCommand::Disconnect { response_tx } => {
+                        debug_log("Worker: Disconnecting");
+                        let result = rt.block_on(self.handle_disconnect());
+                        if let Err(ref e) = result {
+                            tlog!("ERROR", "Failed to disconnect: {}", e);
+                        }
+                        if let Some(tx) = response_tx {
+                            let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                        }
+                    }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
-                        let _ = rt.block_on(self.handle_disconnect());
+                        if let Err(e) = rt.block_on(self.handle_disconnect()) {
+                            eprintln!("[TENEX] Shutdown: disconnect failed: {}", e);
+                            tlog!("ERROR", "Shutdown disconnect failed: {}", e);
+                        } else {
+                            eprintln!("[TENEX] Shutdown: disconnect completed");
+                        }
                         break;
                     }
                 }
@@ -379,12 +411,42 @@ impl NostrWorker {
 
         match &connect_result {
             Ok(()) => tlog!("CONN", "Connect completed in {:?}", connect_elapsed),
-            Err(_) => tlog!("CONN", "Connect TIMED OUT after {:?}", connect_elapsed),
+            Err(_) => {
+                tlog!("CONN", "Connect TIMED OUT after {:?}", connect_elapsed);
+                return Err(anyhow::anyhow!("Connection timed out after {:?}", connect_elapsed));
+            }
+        }
+
+        // Verify at least one relay is actually connected using polling loop
+        // This handles race conditions where relay status may transition asynchronously
+        let verify_start = std::time::Instant::now();
+        let verify_timeout = std::time::Duration::from_secs(5);
+        let poll_interval = std::time::Duration::from_millis(100);
+
+        loop {
+            let relays = client.relays().await;
+            let connected_count = relays.values().filter(|r| r.status() == nostr_sdk::RelayStatus::Connected).count();
+
+            if connected_count > 0 {
+                tlog!("CONN", "Verified {} relay(s) connected after {:?}", connected_count, verify_start.elapsed());
+                break;
+            }
+
+            if verify_start.elapsed() >= verify_timeout {
+                tlog!("CONN", "No relays connected after {:?} polling", verify_timeout);
+                return Err(anyhow::anyhow!("No relays connected after {:?} verification timeout", verify_timeout));
+            }
+
+            tokio::time::sleep(poll_interval).await;
         }
 
         self.client = Some(client);
         self.keys = Some(keys);
         self.user_pubkey = Some(user_pubkey.clone());
+
+        // Create cancellation token for background tasks
+        let (cancel_tx, _cancel_rx) = watch::channel(false);
+        self.cancel_tx = Some(cancel_tx);
 
         self.start_subscriptions(&user_pubkey).await?;
 
@@ -410,12 +472,15 @@ impl NostrWorker {
             .expect("spawn_negentropy_sync called before runtime initialized")
             .clone();
         let negentropy_stats = self.negentropy_stats.clone();
+        let cancel_rx = self.cancel_tx.as_ref()
+            .expect("spawn_negentropy_sync called before cancel_tx initialized")
+            .subscribe();
 
         // Mark negentropy sync as enabled
         negentropy_stats.set_enabled(true);
 
         rt_handle.spawn(async move {
-            run_negentropy_sync(client, ndb, pubkey, negentropy_stats).await;
+            run_negentropy_sync(client, ndb, pubkey, negentropy_stats, cancel_rx).await;
         });
     }
 
@@ -428,13 +493,17 @@ impl NostrWorker {
         let sub_start = std::time::Instant::now();
 
         // 1. User's projects (kind:31933)
-        let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
-        let output = client.subscribe(vec![project_filter], None).await?;
+        // Two filters: projects owned by user (author) OR where user is a participant (p-tag)
+        let project_filter_owned = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
+        let project_filter_participant = Filter::new()
+            .kind(Kind::Custom(31933))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
+        let output = client.subscribe(vec![project_filter_owned, project_filter_participant], None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects".to_string(), vec![31933], None),
+            SubscriptionInfo::new("User projects (owned + participant)".to_string(), vec![31933], None),
         );
-        tlog!("CONN", "Subscribed to projects (kind:31933)");
+        tlog!("CONN", "Subscribed to projects (kind:31933) - owned and p-tagged");
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
         let since_time = Timestamp::now() - 45;
@@ -462,19 +531,22 @@ impl NostrWorker {
         );
         tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
 
-        // 4. Nudges (kind:4201) - scoped to current user only (Fix #12)
-        // Parse user pubkey to use as author filter
+        // 4. Nudges (kind:4201) - user's own nudges AND inbound nudges p-tagging user
+        // Two filters: nudges authored by user OR nudges targeting user via p-tag
         let user_pk = PublicKey::from_hex(user_pubkey)
             .map_err(|e| anyhow::anyhow!("Invalid user pubkey: {}", e))?;
-        let nudge_filter = Filter::new()
+        let nudge_filter_owned = Filter::new()
             .kind(Kind::Custom(4201))
             .author(user_pk);
-        let output = client.subscribe(vec![nudge_filter], None).await?;
+        let nudge_filter_inbound = Filter::new()
+            .kind(Kind::Custom(4201))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
+        let output = client.subscribe(vec![nudge_filter_owned, nudge_filter_inbound], None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Nudges (user)".to_string(), vec![4201], None),
+            SubscriptionInfo::new("Nudges (owned + inbound)".to_string(), vec![4201], None),
         );
-        tlog!("CONN", "Subscribed to nudges (kind:4201) for user {}", &user_pubkey[..8]);
+        tlog!("CONN", "Subscribed to nudges (kind:4201) - owned and p-tagged for user {}", &user_pubkey[..8]);
 
         // 5. Agent lessons (kind:4129)
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
@@ -565,6 +637,9 @@ impl NostrWorker {
         let subscription_stats = self.subscription_stats.clone();
         let data_tx = self.data_tx.clone();
         let requested_profiles = self.requested_profiles.clone();
+        let mut cancel_rx = self.cancel_tx.as_ref()
+            .expect("spawn_notification_handler called before cancel_tx initialized")
+            .subscribe();
 
         rt_handle.spawn(async move {
             let mut notifications = client.notifications();
@@ -573,64 +648,87 @@ impl NostrWorker {
             tlog!("CONN", "Notification handler started, waiting for events...");
 
             loop {
-                if let Ok(notification) = notifications.recv().await {
-                    if let RelayPoolNotification::Event { relay_url, subscription_id, event } = notification {
-                        if first_event {
-                            tlog!("CONN", "First event received after {:?}", handler_start.elapsed());
-                            first_event = false;
+                tokio::select! {
+                    // Check for cancellation signal
+                    _ = cancel_rx.changed() => {
+                        if *cancel_rx.borrow() {
+                            tlog!("CONN", "Notification handler received cancellation signal, exiting");
+                            break;
                         }
-                        debug_log(&format!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url));
-
-                        // Track stats - extract project a-tag from event tags
-                        let project_a_tag = event.tags.iter()
-                            .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::A)))
-                            .and_then(|t| t.content())
-                            .map(|s| s.to_string());
-                        event_stats.record(event.kind.as_u16(), project_a_tag.as_deref());
-
-                        // Track per-subscription event count
-                        subscription_stats.record_event(&subscription_id.to_string());
-
-                        let kind = event.kind.as_u16();
-
-                        // Ephemeral events (24010, 24133) go through DataChange channel
-                        if kind == 24010 || kind == 24133 {
-                            if let Ok(json) = serde_json::to_string(&*event) {
-                                let _ = data_tx.send(DataChange::ProjectStatus { json });
-                            }
-                        } else {
-                            // All other events go through nostrdb
-                            if let Err(e) = Self::handle_incoming_event(&ndb, *event.clone(), relay_url.as_str()) {
-                                tlog!("ERROR", "Failed to handle event: {}", e);
-                            }
-
-                            // For kind:1 messages, request author's profile if we haven't already
-                            if kind == 1 {
-                                let author_hex = event.pubkey.to_hex();
-                                let should_request = {
-                                    let profiles = requested_profiles.read().unwrap();
-                                    !profiles.contains(&author_hex)
-                                };
-                                if should_request {
-                                    {
-                                        let mut profiles = requested_profiles.write().unwrap();
-                                        profiles.insert(author_hex.clone());
+                    }
+                    // Process notifications
+                    result = notifications.recv() => {
+                        match result {
+                            Ok(notification) => {
+                                if let RelayPoolNotification::Event { relay_url, subscription_id, event } = notification {
+                                    if first_event {
+                                        tlog!("CONN", "First event received after {:?}", handler_start.elapsed());
+                                        first_event = false;
                                     }
-                                    // Subscribe to kind:0 for this author
-                                    let profile_filter = Filter::new()
-                                        .kind(Kind::Metadata)
-                                        .author(event.pubkey);
-                                    if let Err(e) = client.subscribe(vec![profile_filter], None).await {
-                                        tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
+                                    debug_log(&format!("Received event: kind={} id={} from {}", event.kind, event.id, relay_url));
+
+                                    // Track stats - extract project a-tag from event tags
+                                    let project_a_tag = event.tags.iter()
+                                        .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::A)))
+                                        .and_then(|t| t.content())
+                                        .map(|s| s.to_string());
+                                    event_stats.record(event.kind.as_u16(), project_a_tag.as_deref());
+
+                                    // Track per-subscription event count
+                                    subscription_stats.record_event(&subscription_id.to_string());
+
+                                    let kind = event.kind.as_u16();
+
+                                    // Ephemeral events (24010, 24133) go through DataChange channel
+                                    if kind == 24010 || kind == 24133 {
+                                        if let Ok(json) = serde_json::to_string(&*event) {
+                                            let _ = data_tx.send(DataChange::ProjectStatus { json });
+                                        }
                                     } else {
-                                        debug_log(&format!("Subscribed to profile for author {}", &author_hex[..8]));
+                                        // All other events go through nostrdb
+                                        if let Err(e) = Self::handle_incoming_event(&ndb, *event.clone(), relay_url.as_str()) {
+                                            tlog!("ERROR", "Failed to handle event: {}", e);
+                                        }
+
+                                        // For kind:1 messages, request author's profile if we haven't already
+                                        if kind == 1 {
+                                            let author_hex = event.pubkey.to_hex();
+                                            let should_request = {
+                                                let profiles = requested_profiles.read().unwrap();
+                                                !profiles.contains(&author_hex)
+                                            };
+                                            if should_request {
+                                                {
+                                                    let mut profiles = requested_profiles.write().unwrap();
+                                                    profiles.insert(author_hex.clone());
+                                                }
+                                                // Subscribe to kind:0 for this author
+                                                let profile_filter = Filter::new()
+                                                    .kind(Kind::Metadata)
+                                                    .author(event.pubkey);
+                                                if let Err(e) = client.subscribe(vec![profile_filter], None).await {
+                                                    tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
+                                                } else {
+                                                    debug_log(&format!("Subscribed to profile for author {}", &author_hex[..8]));
+                                                }
+                                            }
+                                        }
                                     }
+                                } else if let RelayPoolNotification::Shutdown = notification {
+                                    tlog!("CONN", "Notification handler received relay pool shutdown, exiting");
+                                    break;
                                 }
+                            }
+                            Err(_) => {
+                                // Channel closed, exit gracefully
+                                tlog!("CONN", "Notification channel closed, handler exiting");
+                                break;
                             }
                         }
                     }
                 }
             }
+            tlog!("CONN", "Notification handler stopped");
         });
     }
 
@@ -1222,12 +1320,28 @@ impl NostrWorker {
     }
 
     async fn handle_disconnect(&mut self) -> Result<()> {
+        // Signal cancellation to background tasks FIRST, before disconnecting
+        if let Some(cancel_tx) = &self.cancel_tx {
+            let _ = cancel_tx.send(true);
+            tlog!("CONN", "Sent cancellation signal to background tasks");
+        }
+
         if let Some(client) = &self.client {
             client.disconnect().await?;
         }
+
+        // Clear requested_profiles so new sessions start fresh
+        // This prevents stale/missing profiles when reconnecting with same or different user
+        {
+            let mut profiles = self.requested_profiles.write().unwrap();
+            profiles.clear();
+            tlog!("CONN", "Cleared requested_profiles");
+        }
+
         self.client = None;
         self.keys = None;
         self.user_pubkey = None;
+        self.cancel_tx = None;
         Ok(())
     }
 
@@ -1432,6 +1546,7 @@ async fn run_negentropy_sync(
     ndb: Arc<Ndb>,
     user_pubkey: PublicKey,
     stats: SharedNegentropySyncStats,
+    mut cancel_rx: watch::Receiver<bool>,
 ) {
     use std::time::Duration;
 
@@ -1442,6 +1557,12 @@ async fn run_negentropy_sync(
     stats.set_interval(interval_secs);
 
     loop {
+        // Check for cancellation before each cycle
+        if *cancel_rx.borrow() {
+            tlog!("SYNC", "Negentropy sync received cancellation signal, exiting");
+            break;
+        }
+
         stats.set_in_progress(true);
         let total_new = sync_all_filters(&client, &ndb, &user_pubkey, &stats).await;
         stats.record_cycle_complete();
@@ -1456,8 +1577,21 @@ async fn run_negentropy_sync(
         }
 
         stats.set_interval(interval_secs);
-        tokio::time::sleep(Duration::from_secs(interval_secs)).await;
+
+        // Use select! to wait for either the sleep to complete or cancellation
+        tokio::select! {
+            _ = cancel_rx.changed() => {
+                if *cancel_rx.borrow() {
+                    tlog!("SYNC", "Negentropy sync received cancellation signal during sleep, exiting");
+                    break;
+                }
+            }
+            _ = tokio::time::sleep(Duration::from_secs(interval_secs)) => {
+                // Continue to next iteration
+            }
+        }
     }
+    tlog!("SYNC", "Negentropy sync loop stopped");
 }
 
 /// Sync all non-ephemeral kinds using negentropy reconciliation
@@ -1468,12 +1602,19 @@ async fn sync_all_filters(
     stats: &SharedNegentropySyncStats,
 ) -> u64 {
     let mut total_new: u64 = 0;
+    let user_pubkey_hex = user_pubkey.to_hex();
 
-    // User's projects (kind 31933)
+    // User's projects (kind 31933) - authored by user
     let project_filter = Filter::new()
         .kind(Kind::Custom(31933))
         .author(*user_pubkey);
-    total_new += sync_filter(client, project_filter, "31933", stats).await;
+    total_new += sync_filter(client, project_filter, "31933-authored", stats).await;
+
+    // Projects where user is a participant (kind 31933) - via p-tag
+    let project_p_filter = Filter::new()
+        .kind(Kind::Custom(31933))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey_hex.clone()]);
+    total_new += sync_filter(client, project_p_filter, "31933-p-tagged", stats).await;
 
     // Agent definitions (kind 4199)
     let agent_filter = Filter::new().kind(Kind::Custom(4199));
@@ -1487,11 +1628,17 @@ async fn sync_all_filters(
     let lesson_filter = Filter::new().kind(Kind::Custom(4129));
     total_new += sync_filter(client, lesson_filter, "4129", stats).await;
 
-    // Nudges (kind 4201) - scoped to current user only (Fix #12)
-    let nudge_filter = Filter::new()
+    // Nudges (kind 4201) - authored by user
+    let nudge_authored_filter = Filter::new()
         .kind(Kind::Custom(4201))
         .author(*user_pubkey);
-    total_new += sync_filter(client, nudge_filter, "4201", stats).await;
+    total_new += sync_filter(client, nudge_authored_filter, "4201-authored", stats).await;
+
+    // Nudges (kind 4201) - targeting user via p-tag (inbound nudges)
+    let nudge_p_filter = Filter::new()
+        .kind(Kind::Custom(4201))
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey_hex]);
+    total_new += sync_filter(client, nudge_p_filter, "4201-p-tagged", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
     if let Ok(projects) = get_projects(ndb) {
