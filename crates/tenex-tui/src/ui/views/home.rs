@@ -1797,7 +1797,7 @@ pub fn selectable_project_count(app: &App) -> usize {
     online.len() + offline.len()
 }
 
-fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     let filter = app.projects_modal_filter();
 
     let (popup_area, remaining) = Modal::new("Switch Project")
