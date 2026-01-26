@@ -238,7 +238,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_backend_approval_modal(f, area, state);
     }
 
-    // Render projects modal if showing (Ctrl+T P from Chat view)
+    // Render projects modal if showing (Ctrl+T Shift+P from Chat view)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         super::super::render_projects_modal(f, app, area);
     }
