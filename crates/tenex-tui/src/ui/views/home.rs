@@ -58,13 +58,18 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     // Render content based on active tab (with consistent padding)
     let content_area = main_chunks[0];
     let padded_content = layout::with_content_padding(content_area);
-    match app.home_panel_focus {
-        HomeTab::Conversations => render_conversations_with_feed(f, app, padded_content),
-        HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
-        HomeTab::Reports => render_reports_list(f, app, padded_content),
-        HomeTab::Status => render_status_list(f, app, padded_content),
-        HomeTab::Search => render_search_tab(f, app, padded_content),
-        HomeTab::Feed => render_feed_cards(f, app, padded_content),
+
+    // If sidebar search is visible with a query, show search results instead
+    if app.sidebar_search.visible && app.sidebar_search.has_query() {
+        render_sidebar_search_results(f, app, padded_content);
+    } else {
+        match app.home_panel_focus {
+            HomeTab::Conversations => render_conversations_with_feed(f, app, padded_content),
+            HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
+            HomeTab::Reports => render_reports_list(f, app, padded_content),
+            HomeTab::Status => render_status_list(f, app, padded_content),
+            HomeTab::Feed => render_feed_cards(f, app, padded_content),
+        }
     }
 
     // Render sidebar on the right
@@ -203,8 +208,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     }
 
     spans.push(Span::styled("   ", Style::default()));
-    spans.push(Span::styled("Search", tab_style(HomeTab::Search)));
-    spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
 
     // Show archived mode indicator
@@ -240,9 +243,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(if app.home_panel_focus == HomeTab::Status { "──────" } else { "      " },
             if app.home_panel_focus == HomeTab::Status { accent } else { blank }),
         Span::styled(if status_count > 0 { "    " } else { "" }, blank),
-        Span::styled("   ", blank),
-        Span::styled(if app.home_panel_focus == HomeTab::Search { "──────" } else { "      " },
-            if app.home_panel_focus == HomeTab::Search { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Feed { "────" } else { "    " },
             if app.home_panel_focus == HomeTab::Feed { accent } else { blank }),
@@ -1295,108 +1295,156 @@ fn render_feed_card(
     }
 }
 
-/// Render the Search tab content - full search with message display
-fn render_search_tab(f: &mut Frame, app: &App, area: Rect) {
-    use crate::ui::app::SearchMatchType;
 
-    // Layout: Search bar + Results
-    let chunks = Layout::vertical([
-        Constraint::Length(2), // Search bar
-        Constraint::Min(0),    // Results
-    ])
-    .split(area);
+/// Render the project sidebar with checkboxes for filtering
+fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
+    // If sidebar search is visible, add search input at top
+    if app.sidebar_search.visible {
+        let chunks = Layout::vertical([
+            Constraint::Length(3), // Search input
+            Constraint::Min(5),    // Projects list
+            Constraint::Length(4), // Filter section
+        ])
+        .split(area);
 
-    // Render search bar
-    let search_style = if !app.search_filter.is_empty() {
-        Style::default().fg(theme::TEXT_PRIMARY)
+        render_sidebar_search_input(f, app, chunks[0]);
+        render_projects_list(f, app, chunks[1]);
+        render_filters_section(f, app, chunks[2]);
     } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
+        // Normal layout without search
+        let chunks = Layout::vertical([
+            Constraint::Min(5),    // Projects list
+            Constraint::Length(4), // Filter section
+        ])
+        .split(area);
 
-    let search_text = if app.search_filter.is_empty() {
-        "/ Search threads and messages...".to_string()
+        render_projects_list(f, app, chunks[0]);
+        render_filters_section(f, app, chunks[1]);
+    }
+}
+
+/// Render the sidebar search input
+fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
+    // Border block with title
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+        .title(Span::styled(" Search ", Style::default().fg(theme::ACCENT_PRIMARY)));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Search query with cursor
+    let query = &app.sidebar_search.query;
+    let cursor_pos = app.sidebar_search.cursor;
+
+    // Build the search line with cursor indicator
+    let mut spans = Vec::new();
+
+    // Text before cursor
+    if cursor_pos > 0 {
+        let before: String = query.chars().take(cursor_pos).collect();
+        spans.push(Span::styled(before, Style::default().fg(theme::TEXT_PRIMARY)));
+    }
+
+    // Cursor (block character when focused)
+    let cursor_char = if cursor_pos < query.len() {
+        query.chars().nth(cursor_pos).unwrap_or(' ')
     } else {
-        format!("/ {}", app.search_filter)
+        ' '
     };
+    spans.push(Span::styled(
+        cursor_char.to_string(),
+        Style::default().fg(theme::BG_APP).bg(theme::TEXT_PRIMARY),
+    ));
 
-    let search_line = Paragraph::new(search_text).style(search_style);
-    f.render_widget(search_line, chunks[0]);
+    // Text after cursor
+    if cursor_pos < query.len() {
+        let after: String = query.chars().skip(cursor_pos + 1).collect();
+        spans.push(Span::styled(after, Style::default().fg(theme::TEXT_PRIMARY)));
+    }
 
-    // Get search results
-    let results = app.search_results();
-    let selected_idx = app.current_selection();
+    // Placeholder when empty
+    if query.is_empty() {
+        spans.push(Span::styled("type to search...", Style::default().fg(theme::TEXT_MUTED)));
+    }
+
+    let search_line = Paragraph::new(Line::from(spans));
+    f.render_widget(search_line, inner);
+}
+
+/// Render the sidebar search results in the main content area
+fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
+    let results = &app.sidebar_search.results;
+    let selected_idx = app.sidebar_search.selected_index;
+    let query = &app.sidebar_search.query;
 
     if results.is_empty() {
-        // Show placeholder or "no results" message
-        let msg = if app.search_filter.is_empty() {
-            "Type to search threads and messages"
-        } else {
-            "No results found"
-        };
+        let msg = "No matching conversations";
         let empty = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
-        f.render_widget(empty, chunks[1]);
+        f.render_widget(empty, area);
         return;
     }
 
-    // Render search results with full message content
-    let mut y_offset = 0u16;
     let store = app.data_store.borrow();
+    let mut y_offset = 0u16;
 
     for (i, result) in results.iter().enumerate() {
         let is_selected = i == selected_idx;
-        let is_multi_selected = app.is_thread_multi_selected(&result.thread.id);
 
         // Calculate card height based on content
         // Line 1: Title + project + time
-        // Line 2: Match type indicator
-        // Lines 3+: Message content (if message match)
+        // Line 2: Match type indicator or reply content start
+        // Lines 3+: Reply content (if reply match)
         // Spacing line
         let base_height = 3u16;
-        let content_lines = if let SearchMatchType::Message { ref message_id } = result.match_type {
-            // Get the message and show more content
-            let messages = store.get_messages(&result.thread.id);
-            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
-                // Show up to 5 lines of content
-                let content_preview: String = msg.content.chars().take(400).collect();
-                let line_count = content_preview.lines().count().min(5) as u16;
-                line_count.max(2)
-            } else {
-                2
-            }
+        let content_lines = if let Some(ref reply) = result.matching_reply {
+            // Show up to 3 lines of reply content
+            let preview: String = reply.content.chars().take(300).collect();
+            let line_count = preview.lines().count().min(3) as u16;
+            line_count.max(2)
         } else {
-            2
+            1
         };
         let card_height = base_height + content_lines;
 
-        if y_offset + card_height > chunks[1].height {
+        if y_offset + card_height > area.height {
             break;
         }
 
         let card_area = Rect::new(
-            chunks[1].x,
-            chunks[1].y + y_offset,
-            chunks[1].width,
+            area.x,
+            area.y + y_offset,
+            area.width,
             card_height,
         );
 
-        render_search_result_card(f, app, result, is_selected, is_multi_selected, card_area, &store);
+        render_sidebar_search_result_card(f, app, result, is_selected, card_area, &store, query);
         y_offset += card_height;
     }
+
+    // Show result count at bottom
+    let result_count = results.len();
+    let count_text = format!("{} result{}", result_count, if result_count == 1 { "" } else { "s" });
+    let count_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+    let count_line = Paragraph::new(count_text)
+        .style(Style::default().fg(theme::TEXT_MUTED))
+        .alignment(ratatui::layout::Alignment::Right);
+    f.render_widget(count_line, count_area);
 }
 
-/// Render a single search result card with full message content
-fn render_search_result_card(
+/// Render a single sidebar search result card
+fn render_sidebar_search_result_card(
     f: &mut Frame,
-    app: &App,
-    result: &crate::ui::app::SearchResult,
+    _app: &App,
+    result: &crate::ui::search::SearchResult,
     is_selected: bool,
-    is_multi_selected: bool,
     area: Rect,
     store: &std::cell::Ref<crate::store::AppDataStore>,
+    query: &str,
 ) {
-    use crate::ui::app::SearchMatchType;
+    use crate::ui::search::SearchMatchType;
 
-    let time_str = crate::ui::format::format_relative_time(result.thread.last_activity);
+    let time_str = crate::ui::format::format_relative_time(result.created_at);
 
     let title_style = if is_selected {
         Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
@@ -1407,15 +1455,17 @@ fn render_search_result_card(
     let bullet = if is_selected { card::BULLET } else { card::SPACER };
     let bullet_color = theme::ACCENT_PRIMARY;
 
-    // Line 1: Title + match type indicator + project + timestamp
-    let title_max = area.width as usize - 40;
-    let title = crate::ui::format::truncate_with_ellipsis(&result.thread.title, title_max);
-
+    // Match type indicator
     let (type_indicator, type_color) = match &result.match_type {
-        SearchMatchType::Thread => ("[T]", theme::ACCENT_PRIMARY),
-        SearchMatchType::ConversationId => ("[I]", theme::ACCENT_WARNING),
-        SearchMatchType::Message { .. } => ("[M]", theme::ACCENT_SUCCESS),
+        SearchMatchType::ThreadTitle => ("[T]", theme::ACCENT_PRIMARY),
+        SearchMatchType::ThreadContent => ("[C]", theme::ACCENT_WARNING),
+        SearchMatchType::ConversationId => ("[I]", theme::TEXT_MUTED),
+        SearchMatchType::Reply => ("[R]", theme::ACCENT_SUCCESS),
     };
+
+    // Line 1: Title + match type + project + timestamp
+    let title_max = area.width as usize - 45;
+    let title = crate::ui::format::truncate_with_ellipsis(&result.thread_title, title_max);
 
     let line1 = Line::from(vec![
         Span::styled(bullet, Style::default().fg(bullet_color)),
@@ -1429,106 +1479,88 @@ fn render_search_result_card(
 
     let mut lines = vec![line1];
 
-    // Line 2+: Show full message content if this is a message match
-    match &result.match_type {
-        SearchMatchType::Message { message_id } => {
-            let messages = store.get_messages(&result.thread.id);
-            if let Some(msg) = messages.iter().find(|m| m.id == *message_id) {
-                // Get author name
-                let author_name = store.get_profile_name(&msg.pubkey);
-                let author_color = theme::user_color(&msg.pubkey);
+    // Line 2+: Show reply content if this is a reply match
+    if let Some(ref reply) = result.matching_reply {
+        // Get author name
+        let author_name = store.get_profile_name(&reply.author_pubkey);
+        let author_color = theme::user_color(&reply.author_pubkey);
 
-                // Author line
-                lines.push(Line::from(vec![
-                    Span::styled("  @", Style::default().fg(theme::TEXT_MUTED)),
-                    Span::styled(author_name, Style::default().fg(author_color)),
-                    Span::styled(":", Style::default().fg(theme::TEXT_MUTED)),
-                ]));
+        // Author line
+        lines.push(Line::from(vec![
+            Span::styled("  @", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(author_name, Style::default().fg(author_color)),
+            Span::styled(":", Style::default().fg(theme::TEXT_MUTED)),
+        ]));
 
-                // Message content (limited to a few lines)
-                let content_preview: String = msg.content.chars().take(400).collect();
-                let content_width = area.width as usize - 4;
+        // Reply content with highlighted matches
+        let content_width = area.width as usize - 6;
+        let preview: String = reply.content.chars().take(200).collect();
+        let query_lower = query.to_lowercase();
 
-                // Highlight the search term in the content
-                let filter_lower = app.search_filter.to_lowercase();
+        for line in preview.lines().take(3) {
+            let mut spans = vec![Span::styled("    ".to_string(), Style::default())];
 
-                for line in content_preview.lines().take(4) {
-                    let mut spans = vec![Span::styled("    ", Style::default())];
-
-                    // Check if this line contains the search term
-                    let line_lower = line.to_lowercase();
-                    if let Some(match_start) = line_lower.find(&filter_lower) {
-                        let match_end = match_start + app.search_filter.len();
-
-                        // Before match
-                        if match_start > 0 {
-                            let before = &line[..match_start];
-                            let truncated = crate::ui::format::truncate_with_ellipsis(before, content_width / 2);
-                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                        }
-
-                        // Highlighted match
-                        let match_text = &line[match_start..match_end.min(line.len())];
-                        spans.push(Span::styled(
-                            match_text.to_string(),
-                            Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING),
-                        ));
-
-                        // After match
-                        if match_end < line.len() {
-                            let after = &line[match_end..];
-                            let truncated = crate::ui::format::truncate_with_ellipsis(after, content_width / 2);
-                            spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                        }
-                    } else {
-                        // No match on this line, render normally
-                        let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
-                        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-                    }
-
-                    lines.push(Line::from(spans));
+            // Highlight matches inline
+            let line_lower = line.to_lowercase();
+            if let Some(match_start) = line_lower.find(&query_lower) {
+                let match_end = match_start + query.len();
+                // Before match
+                if match_start > 0 {
+                    let before: String = line.chars().take(match_start).collect();
+                    let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
+                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
                 }
-
-                // Show "..." if content was truncated
-                if content_preview.lines().count() > 4 || msg.content.len() > 400 {
-                    lines.push(Line::from(vec![
-                        Span::styled("    ...", Style::default().fg(theme::TEXT_MUTED)),
-                    ]));
+                // Match
+                let match_text: String = line.chars().skip(match_start).take(query.len()).collect();
+                spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
+                // After match
+                if match_end < line.len() {
+                    let after: String = line.chars().skip(match_end).collect();
+                    let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
+                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
                 }
-            } else if let Some(excerpt) = &result.excerpt {
-                // Fallback to excerpt if message not found
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
-                ]));
+            } else {
+                let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
+                spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
             }
+
+            lines.push(Line::from(spans));
         }
-        SearchMatchType::Thread => {
-            // Show thread summary or content excerpt
-            if let Some(ref summary) = result.thread.summary {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(
-                        crate::ui::format::truncate_with_ellipsis(summary, area.width as usize - 4),
-                        Style::default().fg(theme::TEXT_MUTED),
-                    ),
-                ]));
-            } else if let Some(excerpt) = &result.excerpt {
-                lines.push(Line::from(vec![
-                    Span::styled("  ", Style::default()),
-                    Span::styled(excerpt.clone(), Style::default().fg(theme::TEXT_MUTED)),
-                ]));
+    } else {
+        // For thread matches, show a snippet of the thread content
+        if !result.thread.content.is_empty() {
+            let content_width = area.width as usize - 6;
+            let content_preview: String = result.thread.content.chars().take(100).collect();
+            let first_line: String = content_preview.lines().next().unwrap_or("").to_string();
+            let query_lower = query.to_lowercase();
+
+            let mut spans = vec![Span::styled("  ".to_string(), Style::default())];
+
+            // Highlight matches inline
+            let line_lower = first_line.to_lowercase();
+            if let Some(match_start) = line_lower.find(&query_lower) {
+                let match_end = match_start + query.len();
+                // Before match
+                if match_start > 0 {
+                    let before: String = first_line.chars().take(match_start).collect();
+                    let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
+                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                }
+                // Match
+                let match_text: String = first_line.chars().skip(match_start).take(query.len()).collect();
+                spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
+                // After match
+                if match_end < first_line.len() {
+                    let after: String = first_line.chars().skip(match_end).collect();
+                    let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
+                    spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
+                }
+            } else {
+                let truncated = crate::ui::format::truncate_with_ellipsis(&first_line, content_width);
+                spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
             }
-        }
-        SearchMatchType::ConversationId => {
-            // Show the ID
-            lines.push(Line::from(vec![
-                Span::styled("  ID: ", Style::default().fg(theme::TEXT_MUTED)),
-                Span::styled(
-                    crate::ui::format::truncate_with_ellipsis(&result.thread.id, 40),
-                    Style::default().fg(theme::ACCENT_SPECIAL),
-                ),
-            ]));
+
+            lines.push(Line::from(spans));
         }
     }
 
@@ -1537,24 +1569,11 @@ fn render_search_result_card(
 
     let content = Paragraph::new(lines);
 
-    if is_selected || is_multi_selected {
+    if is_selected {
         f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
     } else {
         f.render_widget(content, area);
     }
-}
-
-/// Render the project sidebar with checkboxes for filtering
-fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
-    // Split sidebar into projects list and filter section
-    let chunks = Layout::vertical([
-        Constraint::Min(5),    // Projects list
-        Constraint::Length(4), // Filter section
-    ])
-    .split(area);
-
-    render_projects_list(f, app, chunks[0]);
-    render_filters_section(f, app, chunks[1]);
 }
 
 /// Render the projects list with checkboxes

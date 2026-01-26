@@ -262,6 +262,19 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
+        key: '/',
+        label: "Search conversations",
+        section: "Filter",
+        available: |app| {
+            app.view == View::Home
+                && !app.sidebar_focused
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Reports)
+        },
+        execute: |app| {
+            app.toggle_sidebar_search();
+        },
+    },
+    Command {
         key: 'B',
         label: "Agent Browser",
         section: "Other",

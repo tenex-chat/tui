@@ -869,7 +869,6 @@ pub enum HomeTab {
     Inbox,
     Reports,
     Status,
-    Search,
     Feed,
 }
 
@@ -915,8 +914,7 @@ impl HomeViewState {
             HomeTab::Conversations => HomeTab::Inbox,
             HomeTab::Inbox => HomeTab::Reports,
             HomeTab::Reports => HomeTab::Status,
-            HomeTab::Status => HomeTab::Search,
-            HomeTab::Search => HomeTab::Feed,
+            HomeTab::Status => HomeTab::Feed,
             HomeTab::Feed => HomeTab::Conversations,
         };
     }
@@ -928,8 +926,7 @@ impl HomeViewState {
             HomeTab::Inbox => HomeTab::Conversations,
             HomeTab::Reports => HomeTab::Inbox,
             HomeTab::Status => HomeTab::Reports,
-            HomeTab::Search => HomeTab::Status,
-            HomeTab::Feed => HomeTab::Search,
+            HomeTab::Feed => HomeTab::Status,
         };
     }
 

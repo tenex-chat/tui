@@ -137,7 +137,6 @@ pub enum HotkeyContext {
     HomeInbox,
     HomeReports,
     HomeStatus,
-    HomeSearch,
     HomeFeed,
     HomeSidebar,
 
@@ -238,7 +237,6 @@ impl HotkeyContext {
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
                         HomeTab::Reports => HotkeyContext::HomeReports,
                         HomeTab::Status => HotkeyContext::HomeStatus,
-                        HomeTab::Search => HotkeyContext::HomeSearch,
                         HomeTab::Feed => HotkeyContext::HomeFeed,
                     }
                 }
@@ -617,14 +615,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('H'),
         "Show/Hide Archived Conversations",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch, HotkeyContext::HomeFeed],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeStatus, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
         KeyCode::Char('A'),
         "Show/Hide Archived Projects",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeSearch, HotkeyContext::HomeFeed],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeStatus, HotkeyContext::HomeFeed],
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchivedProjects,
