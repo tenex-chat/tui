@@ -300,10 +300,8 @@ pub struct App {
     pub vim_enabled: bool,
     /// Current vim mode (Normal or Insert)
     pub vim_mode: VimMode,
-    /// Whether to show archived conversations in Recent/Inbox
+    /// Whether to show archived items (conversations and projects)
     pub show_archived: bool,
-    /// Whether to show archived projects in the sidebar
-    pub show_archived_projects: bool,
     /// Whether to hide scheduled events from conversation list
     pub hide_scheduled: bool,
     /// Whether user explicitly selected an agent in the current conversation
@@ -401,7 +399,6 @@ impl App {
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
-            show_archived_projects: false,
             hide_scheduled: false,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
@@ -1155,7 +1152,7 @@ impl App {
 
     /// Get filtered projects based on current filter (from ModalState)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
-    /// Archived projects are hidden unless show_archived_projects is true
+    /// Archived projects are hidden unless show_archived is true
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
@@ -1166,7 +1163,7 @@ impl App {
             .iter()
             .filter(|p| {
                 // Filter out archived projects unless showing archived
-                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
+                self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
             .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
@@ -3372,13 +3369,13 @@ impl App {
 
     // ===== Archive Methods =====
 
-    /// Toggle visibility of archived conversations
+    /// Toggle visibility of archived items (conversations and projects)
     pub fn toggle_show_archived(&mut self) {
         self.show_archived = !self.show_archived;
         if self.show_archived {
-            self.notify(Notification::info("Showing archived conversations"));
+            self.notify(Notification::info("Showing archived"));
         } else {
-            self.notify(Notification::info("Hiding archived conversations"));
+            self.notify(Notification::info("Hiding archived"));
         }
     }
 
@@ -3390,16 +3387,6 @@ impl App {
     /// Toggle archive status of a thread
     pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
         self.preferences.borrow_mut().toggle_thread_archived(thread_id)
-    }
-
-    /// Toggle visibility of archived projects
-    pub fn toggle_show_archived_projects(&mut self) {
-        self.show_archived_projects = !self.show_archived_projects;
-        if self.show_archived_projects {
-            self.notify(Notification::info("Showing archived projects"));
-        } else {
-            self.notify(Notification::info("Hiding archived projects"));
-        }
     }
 
     /// Check if a project is archived

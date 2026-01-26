@@ -184,13 +184,10 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'H',
-        label: "Show archived conversations",
+        label: "Show archived",
         section: "Filter",
         available: |app| {
-            app.view == View::Home
-                && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && !app.show_archived
+            app.view == View::Home && !app.sidebar_focused && !app.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
@@ -198,38 +195,13 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'H',
-        label: "Hide archived conversations",
+        label: "Hide archived",
         section: "Filter",
         available: |app| {
-            app.view == View::Home
-                && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && app.show_archived
+            app.view == View::Home && !app.sidebar_focused && app.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
-        },
-    },
-    Command {
-        key: 'A',
-        label: "Show archived projects",
-        section: "Filter",
-        available: |app| {
-            app.view == View::Home && !app.sidebar_focused && !app.show_archived_projects
-        },
-        execute: |app| {
-            app.toggle_show_archived_projects();
-        },
-    },
-    Command {
-        key: 'A',
-        label: "Hide archived projects",
-        section: "Filter",
-        available: |app| {
-            app.view == View::Home && !app.sidebar_focused && app.show_archived_projects
-        },
-        execute: |app| {
-            app.toggle_show_archived_projects();
         },
     },
     Command {
@@ -458,20 +430,20 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'H',
-        label: "Show archived projects",
+        label: "Show archived",
         section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && !app.show_archived_projects,
+        available: |app| app.view == View::Home && app.sidebar_focused && !app.show_archived,
         execute: |app| {
-            app.toggle_show_archived_projects();
+            app.toggle_show_archived();
         },
     },
     Command {
         key: 'H',
-        label: "Hide archived projects",
+        label: "Hide archived",
         section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && app.show_archived_projects,
+        available: |app| app.view == View::Home && app.sidebar_focused && app.show_archived,
         execute: |app| {
-            app.toggle_show_archived_projects();
+            app.toggle_show_archived();
         },
     },
     // =========================================================================
