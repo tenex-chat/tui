@@ -208,7 +208,11 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             "   ".to_string()
         };
 
-        let (indicator, indicator_fg) = if tab.is_draft() {
+        // Indicator priority: @ (waiting) > • (unread) > + (draft) > none
+        let (indicator, indicator_fg) = if tab.waiting_for_user && !is_active {
+            // Waiting for user takes highest priority (yellow @)
+            ("@ ".to_string(), Some(theme::ACCENT_WARNING))
+        } else if tab.is_draft() {
             ("+".to_string(), Some(theme::ACCENT_SUCCESS))
         } else if tab.has_unread && !is_active {
             (card::BULLET.to_string(), Some(theme::ACCENT_ERROR))
@@ -262,6 +266,8 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
 
         let title_style = if is_active {
             theme::tab_active()
+        } else if tab.waiting_for_user {
+            theme::tab_waiting_for_user()
         } else if tab.has_unread {
             theme::tab_unread()
         } else {

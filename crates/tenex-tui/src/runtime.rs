@@ -12,6 +12,7 @@ use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, Tui, View};
+use crate::ui::notifications::Notification;
 
 fn log_diagnostic(msg: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -204,9 +205,38 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
             CoreEvent::Message(message) => {
                 let thread_id = message.thread_id.clone();
                 let message_pubkey = message.pubkey.clone();
+                let p_tags = message.p_tags.clone();
 
                 // Mark tab as unread if it's not the active one
                 app.mark_tab_unread(&thread_id);
+
+                // Check if this message p-tags the current user (waiting for response)
+                // Exception: Self p-tagging (user's own messages) should NOT trigger this
+                let user_pubkey = app.data_store.borrow().user_pubkey.clone();
+                if let Some(ref pk) = user_pubkey {
+                    let is_from_user = &message_pubkey == pk;
+                    let ptags_user = p_tags.iter().any(|p| p == pk);
+
+                    if !is_from_user && ptags_user {
+                        // Mark as waiting for user (tab indicator)
+                        app.mark_tab_waiting_for_user(&thread_id);
+
+                        // Push status bar notification if not viewing this thread
+                        let is_viewing_thread = app.selected_thread.as_ref()
+                            .map(|t| t.id.as_str()) == Some(thread_id.as_str());
+
+                        if !is_viewing_thread {
+                            // Get thread title for notification
+                            let thread_title = app.data_store.borrow()
+                                .get_thread_by_id(&thread_id)
+                                .map(|t| t.title.clone())
+                                .unwrap_or_else(|| "conversation".to_string());
+
+                            let notification_msg = format!("@ Message for you in {}", thread_title);
+                            app.notify(Notification::warning(notification_msg));
+                        }
+                    }
+                }
 
                 // Clear local streaming buffer when Nostr message arrives
                 // This ensures streaming content is replaced by the final message

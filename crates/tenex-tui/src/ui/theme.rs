@@ -279,6 +279,10 @@ pub fn tab_unread() -> Style {
     Style::default().fg(ACCENT_WARNING).add_modifier(Modifier::BOLD)
 }
 
+pub fn tab_waiting_for_user() -> Style {
+    Style::default().fg(ACCENT_WARNING).add_modifier(Modifier::BOLD)
+}
+
 // -----------------------------------------------------------------------------
 // Tool Call Styles
 // -----------------------------------------------------------------------------

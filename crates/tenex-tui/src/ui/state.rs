@@ -391,6 +391,9 @@ pub struct OpenTab {
     pub project_a_tag: String,
     /// Whether this tab has unread messages
     pub has_unread: bool,
+    /// Whether the last message in this tab p-tags the current user (waiting for response)
+    /// This takes priority over `has_unread` for visual indicators
+    pub waiting_for_user: bool,
     /// Draft ID for new conversations not yet sent (None for real threads)
     pub draft_id: Option<String>,
     /// Navigation stack for drilling into delegations.
@@ -424,6 +427,7 @@ impl OpenTab {
             thread_title,
             project_a_tag,
             has_unread: false,
+            waiting_for_user: false,
             draft_id: None,
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -448,6 +452,7 @@ impl OpenTab {
             thread_title: format!("New: {}", project_name),
             project_a_tag,
             has_unread: false,
+            waiting_for_user: false,
             draft_id: Some(draft_id),
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -570,6 +575,7 @@ impl TabManager {
         // Check if already open
         if let Some(idx) = self.find_by_thread_id(&thread_id) {
             self.tabs[idx].has_unread = false;
+            self.tabs[idx].waiting_for_user = false; // Clear waiting state on view
             self.active_index = idx;
             return idx;
         }
@@ -624,6 +630,7 @@ impl TabManager {
         self.push_view_history(ViewLocation::Tab(index));
         self.active_index = index;
         self.tabs[index].has_unread = false;
+        self.tabs[index].waiting_for_user = false; // Clear waiting state on view
         true
     }
 
@@ -763,6 +770,26 @@ impl TabManager {
         for (idx, tab) in self.tabs.iter_mut().enumerate() {
             if tab.thread_id == thread_id && idx != self.active_index {
                 tab.has_unread = true;
+            }
+        }
+    }
+
+    /// Mark a thread as waiting for user response (if open but not active)
+    /// This is triggered when the last message p-tags the current user
+    pub fn mark_waiting_for_user(&mut self, thread_id: &str) {
+        for (idx, tab) in self.tabs.iter_mut().enumerate() {
+            if tab.thread_id == thread_id && idx != self.active_index {
+                tab.waiting_for_user = true;
+            }
+        }
+    }
+
+    /// Clear the waiting_for_user state for a thread
+    /// Called when the user views the tab
+    pub fn clear_waiting_for_user(&mut self, thread_id: &str) {
+        for tab in self.tabs.iter_mut() {
+            if tab.thread_id == thread_id {
+                tab.waiting_for_user = false;
             }
         }
     }

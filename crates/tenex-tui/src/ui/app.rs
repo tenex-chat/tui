@@ -1877,6 +1877,17 @@ impl App {
         self.tabs.mark_unread(thread_id);
     }
 
+    /// Mark a thread as waiting for user response (if it's open in a tab but not active)
+    /// This is triggered when the last message p-tags the current user
+    pub fn mark_tab_waiting_for_user(&mut self, thread_id: &str) {
+        self.tabs.mark_waiting_for_user(thread_id);
+    }
+
+    /// Clear the waiting_for_user state for a thread
+    pub fn clear_tab_waiting_for_user(&mut self, thread_id: &str) {
+        self.tabs.clear_waiting_for_user(thread_id);
+    }
+
     // ===== Home View Methods =====
 
     /// Get the selection index for the current home tab
