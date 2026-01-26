@@ -486,6 +486,19 @@ impl DraftStorage {
         Ok(publish_id)
     }
 
+    /// Remove a pending publish snapshot (for rollback when send fails)
+    /// Call this when the send to relay fails AFTER snapshot was created
+    pub fn remove_publish_snapshot(&mut self, publish_id: &str) -> Result<bool, DraftStorageError> {
+        if self.pending_publishes.remove(publish_id).is_some() {
+            if let Err(e) = self.save_to_file() {
+                self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
+                return Err(e);
+            }
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     /// Mark a pending publish as confirmed (called AFTER relay confirms the message)
     /// Only marks the specific snapshot that matches the publish_id - doesn't affect current draft.
     /// Returns true if the snapshot was found and marked.

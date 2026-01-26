@@ -537,6 +537,8 @@ fn handle_send_message(app: &mut App) {
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
                 }) {
+                    // BULLETPROOF: Roll back the snapshot on send failure
+                    let _ = app.remove_publish_snapshot(&publish_id);
                     app.set_status(&format!("Failed to publish message: {}", e));
                 } else {
                     // BULLETPROOF: Spawn background task to wait for publish confirmation
@@ -594,6 +596,8 @@ fn handle_send_message(app: &mut App) {
                     reference_conversation_id,
                     response_tx: Some(response_tx),
                 }) {
+                    // BULLETPROOF: Roll back the snapshot on send failure
+                    let _ = app.remove_publish_snapshot(&publish_id);
                     app.set_status(&format!("Failed to create thread: {}", e));
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
