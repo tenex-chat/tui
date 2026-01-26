@@ -156,7 +156,7 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
         Span::styled(" scroll", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("e", Style::default().fg(theme::ACCENT_PRIMARY)),
-        Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" copy", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("d", Style::default().fg(theme::ACCENT_ERROR)),
         Span::styled(" delete", Style::default().fg(theme::TEXT_MUTED)),

@@ -156,9 +156,6 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::NudgeCreate(ref state) = app.modal_state {
         super::render_nudge_create(f, app, area, state);
     }
-    if let ModalState::NudgeEdit(ref state) = app.modal_state {
-        super::render_nudge_edit(f, app, area, state);
-    }
     if let ModalState::NudgeDetail(ref state) = app.modal_state {
         super::render_nudge_detail(f, app, area, state);
     }

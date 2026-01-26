@@ -5,7 +5,6 @@
 pub use crate::ui::nudge::views::{
     render_nudge_list,
     render_nudge_create,
-    render_nudge_edit,
     render_nudge_detail,
     render_nudge_delete_confirm,
 };
