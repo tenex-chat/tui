@@ -14,6 +14,12 @@ use tenex_core::stats::query_events_by_e_tag;
 /// Routes input to the appropriate modal handler.
 /// Returns `true` if the input was handled by a modal, `false` otherwise.
 pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
+    // Handle sidebar search when visible
+    if app.sidebar_search.visible {
+        handle_sidebar_search_key(app, key);
+        return Ok(true);
+    }
+
     // Handle attachment modal when open
     if app.is_attachment_modal_open() {
         handle_attachment_modal_key(app, key);
@@ -177,6 +183,63 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     }
 
     Ok(false)
+}
+
+// =============================================================================
+// SIDEBAR SEARCH
+// =============================================================================
+
+fn handle_sidebar_search_key(app: &mut App, key: KeyEvent) {
+    let code = key.code;
+    let modifiers = key.modifiers;
+    let has_ctrl = modifiers.contains(KeyModifiers::CONTROL);
+
+    match code {
+        // Ctrl+T opens command palette (where '/' can toggle search off)
+        // This allows Ctrl+T + / to toggle search off
+        KeyCode::Char('t') if has_ctrl => {
+            // Open command palette - the '/' command will toggle search off
+            app.open_command_palette();
+        }
+        // Esc does NOT close search (per user request: Ctrl+T + / to toggle)
+        // Instead, Esc clears the query if there is one
+        KeyCode::Esc => {
+            if !app.sidebar_search.query.is_empty() {
+                app.sidebar_search.query.clear();
+                app.sidebar_search.cursor = 0;
+                app.update_sidebar_search_results();
+            }
+        }
+        // Enter opens the selected result
+        KeyCode::Enter => {
+            app.open_selected_search_result();
+        }
+        // Up/Down navigate results
+        KeyCode::Up => {
+            app.sidebar_search.move_selection_up();
+        }
+        KeyCode::Down => {
+            app.sidebar_search.move_selection_down();
+        }
+        // Left/Right move cursor in query
+        KeyCode::Left => {
+            app.sidebar_search.move_cursor_left();
+        }
+        KeyCode::Right => {
+            app.sidebar_search.move_cursor_right();
+        }
+        // Backspace deletes character
+        KeyCode::Backspace => {
+            app.sidebar_search.delete_char();
+            app.update_sidebar_search_results();
+        }
+        // Character input
+        KeyCode::Char(c) => {
+            app.sidebar_search.insert_char(c);
+            app.update_sidebar_search_results();
+        }
+        _ => {}
+    }
 }
 
 // =============================================================================

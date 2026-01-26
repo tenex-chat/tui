@@ -32,10 +32,6 @@ fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
             let items = app.status_threads();
             items.get(index).map(|(thread, _)| thread.id.clone())
         }
-        HomeTab::Search => {
-            let items = app.search_results();
-            items.get(index).map(|result| result.thread.id.clone())
-        }
         HomeTab::Feed => {
             let items = app.feed_items();
             items.get(index).map(|item| item.thread_id.clone())
@@ -68,46 +64,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Handle Search tab input mode
-    if app.input_mode == InputMode::Editing && app.home_panel_focus == HomeTab::Search {
-        match code {
-            KeyCode::Char(c) => {
-                app.search_filter.push(c);
-                app.tab_selection.insert(HomeTab::Search, 0);
-            }
-            KeyCode::Backspace => {
-                app.search_filter.pop();
-                app.tab_selection.insert(HomeTab::Search, 0);
-            }
-            KeyCode::Esc => {
-                app.input_mode = InputMode::Normal;
-            }
-            KeyCode::Enter => {
-                app.input_mode = InputMode::Normal;
-                let results = app.search_results();
-                let idx = app.current_selection();
-                if let Some(result) = results.get(idx).cloned() {
-                    app.open_thread_from_home(&result.thread, &result.project_a_tag);
-                }
-            }
-            KeyCode::Up => {
-                let current = app.current_selection();
-                if current > 0 {
-                    app.set_current_selection(current - 1);
-                }
-            }
-            KeyCode::Down => {
-                let current = app.current_selection();
-                let max = app.search_results().len().saturating_sub(1);
-                if current < max {
-                    app.set_current_selection(current + 1);
-                }
-            }
-            _ => {}
-        }
-        return Ok(());
-    }
-
     // Handle projects modal when showing (using ModalState)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         handle_projects_modal_key(app, key)?;
@@ -130,7 +86,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     match code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Char('/') => {
-            if app.home_panel_focus == HomeTab::Reports || app.home_panel_focus == HomeTab::Search {
+            if app.home_panel_focus == HomeTab::Reports {
                 app.input_mode = InputMode::Editing;
             }
         }
@@ -182,8 +138,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Conversations => HomeTab::Inbox,
                 HomeTab::Inbox => HomeTab::Reports,
                 HomeTab::Reports => HomeTab::Status,
-                HomeTab::Status => HomeTab::Search,
-                HomeTab::Search => HomeTab::Feed,
+                HomeTab::Status => HomeTab::Feed,
                 HomeTab::Feed => HomeTab::Conversations,
             };
         }
@@ -193,8 +148,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => HomeTab::Conversations,
                 HomeTab::Reports => HomeTab::Inbox,
                 HomeTab::Status => HomeTab::Reports,
-                HomeTab::Search => HomeTab::Status,
-                HomeTab::Feed => HomeTab::Search,
+                HomeTab::Feed => HomeTab::Status,
             };
         }
         KeyCode::Right => {
@@ -244,7 +198,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
-                    HomeTab::Search => app.search_results().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                 };
                 // If Shift is held, add current item to multi-selection before moving
@@ -286,7 +239,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
-                    HomeTab::Search => app.search_results().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                 };
                 if current > max {
@@ -424,12 +376,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.open_thread_from_home(thread, a_tag);
                         }
                     }
-                    HomeTab::Search => {
-                        let results = app.search_results();
-                        if let Some(result) = results.get(idx).cloned() {
-                            app.open_thread_from_home(&result.thread, &result.project_a_tag);
-                        }
-                    }
                     HomeTab::Feed => {
                         let items = app.feed_items();
                         if let Some(item) = items.get(idx) {
@@ -499,7 +445,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
-                HomeTab::Search => app.search_results().len().saturating_sub(1),
                 HomeTab::Feed => app.feed_items().len().saturating_sub(1),
             };
             if has_shift {

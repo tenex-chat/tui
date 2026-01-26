@@ -96,7 +96,6 @@ pub enum HomeTab {
     Inbox,
     Reports,
     Status,
-    Search,
     Feed,
 }
 
@@ -312,6 +311,8 @@ pub struct App {
     pub last_undo_action: Option<UndoAction>,
     /// Focus state for the context line (None = text input focused)
     pub input_context_focus: Option<InputContextFocus>,
+    /// Sidebar search state (Ctrl+T + /)
+    pub sidebar_search: crate::ui::search::SidebarSearchState,
 }
 
 impl App {
@@ -400,6 +401,7 @@ impl App {
             user_explicitly_selected_agent: false,
             last_undo_action: None,
             input_context_focus: None,
+            sidebar_search: crate::ui::search::SidebarSearchState::new(),
         }
     }
 
@@ -3399,6 +3401,44 @@ impl App {
         let blocked = prefs.blocked_backend_pubkeys().clone();
         drop(prefs);
         self.data_store.borrow_mut().set_trusted_backends(approved, blocked);
+    }
+
+    // ===== Sidebar Search Methods =====
+
+    /// Toggle the sidebar search visibility (Ctrl+T + /)
+    pub fn toggle_sidebar_search(&mut self) {
+        self.sidebar_search.toggle();
+        if self.sidebar_search.visible {
+            // Reset results when opening
+            self.update_sidebar_search_results();
+        }
+    }
+
+    /// Update sidebar search results based on current query
+    pub fn update_sidebar_search_results(&mut self) {
+        use crate::ui::search::search_conversations;
+        let store = self.data_store.borrow();
+        self.sidebar_search.results = search_conversations(
+            &self.sidebar_search.query,
+            &store,
+            &self.visible_projects,
+        );
+        // Reset selection when results change
+        self.sidebar_search.selected_index = 0;
+        self.sidebar_search.scroll_offset = 0;
+    }
+
+    /// Open the selected search result
+    pub fn open_selected_search_result(&mut self) {
+        if let Some(result) = self.sidebar_search.selected_result().cloned() {
+            // Close search
+            self.sidebar_search.visible = false;
+            self.sidebar_search.query.clear();
+            self.sidebar_search.results.clear();
+
+            // Open the thread
+            self.open_thread_from_home(&result.thread, &result.project_a_tag);
+        }
     }
 
     // ===== Sidebar Methods =====
