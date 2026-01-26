@@ -152,7 +152,9 @@ impl AppDataStore {
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
                 // Check for inbox: ask events that p-tag the user
                 if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
-                    let project_a_tag = self.find_project_for_thread(&thread_id);
+                    // Extract project a_tag directly from the note first, fall back to thread lookup
+                    let project_a_tag = Self::extract_project_a_tag(&note)
+                        .or_else(|| self.find_project_for_thread(&thread_id));
                     let project_a_tag_str = project_a_tag.unwrap_or_default();
 
                     let inbox_item = InboxItem {
@@ -818,8 +820,11 @@ impl AppDataStore {
                 if pubkey != *user_pk {  // Don't inbox our own messages
                     // Only include ask events that p-tag the user
                     if self.note_ptags_user(note, user_pk) && self.note_is_ask_event(note) {
-                        // Find project a_tag for this thread
-                        let project_a_tag = self.find_project_for_thread(&thread_id);
+                        // Extract project a_tag directly from the note (not from thread lookup)
+                        // This ensures inbox items are added even when the thread hasn't been
+                        // registered yet (e.g., out-of-order event arrival during real-time sync)
+                        let project_a_tag = Self::extract_project_a_tag(note)
+                            .or_else(|| self.find_project_for_thread(&thread_id));
                         let project_a_tag_str = project_a_tag.clone().unwrap_or_default();
 
                         let inbox_item = InboxItem {
@@ -962,7 +967,10 @@ impl AppDataStore {
                 let tag_name = tag.get(0).and_then(|t| t.variant().str());
                 if tag_name == Some("a") {
                     if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
-                        return Some(value.to_string());
+                        // Only return project a-tags (31933:pubkey:id), not report a-tags (30023:...)
+                        if value.starts_with("31933:") {
+                            return Some(value.to_string());
+                        }
                     }
                 }
             }

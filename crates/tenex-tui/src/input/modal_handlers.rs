@@ -2688,6 +2688,8 @@ fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
                     }) {
                         app.set_status(&format!("Failed to delete nudge: {}", e));
                     } else {
+                        // Remove from selection if this nudge was selected (prevents stale references)
+                        app.remove_selected_nudge(&state.nudge_id);
                         app.set_status("Nudge deleted");
                     }
                 }
