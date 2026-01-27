@@ -53,6 +53,38 @@ pub fn format_relative_time(timestamp: u64) -> String {
     }
 }
 
+/// Format duration since a timestamp started (e.g., "2m", "1h 30m", "2d 5h").
+pub fn format_duration_since(started_at: u64) -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let diff = now.saturating_sub(started_at);
+
+    if diff < 60 {
+        format!("{}s", diff)
+    } else if diff < 3600 {
+        format!("{}m", diff / 60)
+    } else if diff < 86400 {
+        let hours = diff / 3600;
+        let mins = (diff % 3600) / 60;
+        if mins > 0 {
+            format!("{}h {}m", hours, mins)
+        } else {
+            format!("{}h", hours)
+        }
+    } else {
+        let days = diff / 86400;
+        let hours = (diff % 86400) / 3600;
+        if hours > 0 {
+            format!("{}d {}h", days, hours)
+        } else {
+            format!("{}d", days)
+        }
+    }
+}
+
 /// Map status label to a Unicode symbol.
 pub fn status_label_to_symbol(label: &str) -> &'static str {
     match label.to_lowercase().as_str() {

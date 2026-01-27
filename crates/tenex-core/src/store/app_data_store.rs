@@ -1788,6 +1788,36 @@ impl AppDataStore {
             .any(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
     }
 
+    /// Get all active operations across all projects, sorted by created_at (oldest first)
+    pub fn get_all_active_operations(&self) -> Vec<&OperationsStatus> {
+        let mut operations: Vec<&OperationsStatus> = self.operations_by_event
+            .values()
+            .filter(|s| !s.agent_pubkeys.is_empty())
+            .collect();
+        operations.sort_by_key(|s| s.created_at);
+        operations
+    }
+
+    /// Get thread info for an event ID (could be thread root or message within thread).
+    /// Returns (thread_id, thread_title) if found.
+    pub fn get_thread_info_for_event(&self, event_id: &str) -> Option<(String, String)> {
+        // First check if event_id matches a thread root
+        if let Some(thread) = self.get_thread_by_id(event_id) {
+            return Some((thread.id.clone(), thread.title.clone()));
+        }
+
+        // Otherwise, search messages to find which thread contains this event
+        for (thread_id, messages) in &self.messages_by_thread {
+            if messages.iter().any(|m| m.id == event_id) {
+                if let Some(thread) = self.get_thread_by_id(thread_id) {
+                    return Some((thread.id.clone(), thread.title.clone()));
+                }
+            }
+        }
+
+        None
+    }
+
     /// Get unanswered ask event for a thread (derived at check time).
     /// Looks at messages in the thread, finds any with q-tags pointing to ask events,
     /// and returns the first one that the current user hasn't replied to.

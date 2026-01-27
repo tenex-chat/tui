@@ -13,7 +13,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, Borders, Cell, List, ListItem, ListState, Padding, Paragraph, Row, Table},
     Frame,
 };
 use unicode_width::UnicodeWidthStr;
@@ -69,6 +69,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Reports => render_reports_list(f, app, padded_content),
             HomeTab::Status => render_status_list(f, app, padded_content),
             HomeTab::Feed => render_feed_cards(f, app, padded_content),
+            HomeTab::ActiveWork => render_active_work(f, app, padded_content),
             HomeTab::Stats => super::render_stats(f, app, padded_content),
         }
     }
@@ -208,6 +209,8 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
     spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Active", tab_style(HomeTab::ActiveWork)));
+    spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
 
     // Show archived mode indicator
@@ -246,6 +249,9 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Feed { "────" } else { "    " },
             if app.home_panel_focus == HomeTab::Feed { accent } else { blank }),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::ActiveWork { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::ActiveWork { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Stats { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Stats { accent } else { blank }),
@@ -1317,6 +1323,93 @@ fn render_feed_card(
     } else {
         f.render_widget(content, area);
     }
+}
+
+/// Render the Active Work tab showing currently active operations
+fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
+    let data_store = app.data_store.borrow();
+    let operations = data_store.get_all_active_operations();
+
+    if operations.is_empty() {
+        let empty_lines = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "No active work",
+                Style::default().fg(theme::TEXT_MUTED),
+            )),
+            Line::from(Span::styled(
+                "Operations will appear here when agents are working",
+                Style::default().fg(theme::TEXT_MUTED),
+            )),
+        ];
+        let empty = Paragraph::new(empty_lines)
+            .alignment(ratatui::layout::Alignment::Center);
+        f.render_widget(empty, area);
+        return;
+    }
+
+    // Build rows for the table
+    let mut rows: Vec<Row> = Vec::new();
+
+    for op in &operations {
+        // Get agent names (comma-separated if multiple)
+        let agent_names: Vec<String> = op.agent_pubkeys
+            .iter()
+            .map(|pk| data_store.get_profile_name(pk))
+            .collect();
+        let agent_str = if agent_names.is_empty() {
+            "Unknown".to_string()
+        } else {
+            agent_names.join(", ")
+        };
+
+        // Get conversation info
+        let (conv_title, _thread_id) = data_store
+            .get_thread_info_for_event(&op.event_id)
+            .unwrap_or_else(|| (truncate_with_ellipsis(&op.event_id, 12), op.event_id.clone()));
+
+        // Get project name
+        let project_name = data_store.get_project_name(&op.project_coordinate);
+
+        // Calculate duration
+        let duration = crate::ui::format::format_duration_since(op.created_at);
+
+        rows.push(Row::new(vec![
+            Cell::from(truncate_with_ellipsis(&agent_str, 20))
+                .style(Style::default().fg(theme::TEXT_PRIMARY)),
+            Cell::from(truncate_with_ellipsis(&conv_title, 30))
+                .style(Style::default().fg(theme::TEXT_PRIMARY)),
+            Cell::from(truncate_with_ellipsis(&project_name, 20))
+                .style(Style::default().fg(theme::ACCENT_SUCCESS)),
+            Cell::from(duration)
+                .style(Style::default().fg(theme::TEXT_MUTED)),
+        ]));
+    }
+
+    drop(data_store);
+
+    // Create header
+    let header = Row::new(vec![
+        Cell::from("Agent").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Conversation").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Project").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Duration").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+    ])
+    .style(Style::default().bg(theme::BG_SECONDARY))
+    .height(1);
+
+    let widths = [
+        Constraint::Length(22),  // Agent
+        Constraint::Min(20),     // Conversation (flexible)
+        Constraint::Length(22),  // Project
+        Constraint::Length(12),  // Duration
+    ];
+
+    let table = Table::new(rows, widths)
+        .header(header)
+        .column_spacing(2);
+
+    f.render_widget(table, area);
 }
 
 
