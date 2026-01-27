@@ -138,6 +138,7 @@ pub enum HotkeyContext {
     HomeReports,
     HomeStatus,
     HomeFeed,
+    HomeActiveWork,
     HomeStats,
     HomeSidebar,
 
@@ -238,6 +239,7 @@ impl HotkeyContext {
                         HomeTab::Reports => HotkeyContext::HomeReports,
                         HomeTab::Status => HotkeyContext::HomeStatus,
                         HomeTab::Feed => HotkeyContext::HomeFeed,
+                        HomeTab::ActiveWork => HotkeyContext::HomeActiveWork,
                         HomeTab::Stats => HotkeyContext::HomeStats,
                     }
                 }

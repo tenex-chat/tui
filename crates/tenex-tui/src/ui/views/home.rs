@@ -69,6 +69,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Reports => render_reports_list(f, app, padded_content),
             HomeTab::Status => render_status_list(f, app, padded_content),
             HomeTab::Feed => render_feed_cards(f, app, padded_content),
+            HomeTab::ActiveWork => render_active_work(f, app, padded_content),
             HomeTab::Stats => super::render_stats(f, app, padded_content),
         }
     }
@@ -207,6 +208,8 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
+    spans.push(Span::styled("   ", Style::default()));
+    spans.push(Span::styled("Active", tab_style(HomeTab::ActiveWork)));
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
 
@@ -1413,7 +1416,6 @@ fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
 
     f.render_widget(table, area);
 }
-
 
 /// Render the project sidebar with checkboxes for filtering
 fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
