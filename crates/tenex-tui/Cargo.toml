@@ -24,3 +24,6 @@ clap.workspace = true
 unicode-width = "0.2"
 unicode-segmentation = "1.10"
 chrono.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

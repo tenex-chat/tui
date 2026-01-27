@@ -284,9 +284,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             event_ids,
                             agent_pubkeys,
                         }) {
-                            app.set_status(&format!("Failed to stop: {}", e));
+                            app.set_warning_status(&format!("Failed to stop: {}", e));
                         } else {
-                            app.set_status("Stop command sent for all project operations");
+                            app.set_warning_status("Stop command sent for all project operations");
                         }
                     }
                 }
@@ -305,14 +305,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             project_a_tag: a_tag,
                             project_pubkey: Some(pubkey),
                         }) {
-                            app.set_status(&format!("Failed to boot: {}", e));
+                            app.set_warning_status(&format!("Failed to boot: {}", e));
                         } else {
-                            app.set_status(&format!("Boot request sent for {}", project.name));
+                            app.set_warning_status(&format!("Boot request sent for {}", project.name));
                         }
                     }
                 }
             } else {
-                app.set_status("Project is already online");
+                app.set_warning_status("Project is already online");
             }
         }
         KeyCode::Enter => {
@@ -422,9 +422,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             // Toggle collapse/expand all threads
             let now_collapsed = app.toggle_collapse_all_threads();
             if now_collapsed {
-                app.set_status("All threads collapsed");
+                app.set_warning_status("All threads collapsed");
             } else {
-                app.set_status("All threads expanded");
+                app.set_warning_status("All threads expanded");
             }
         }
         // Vim-style navigation (j/k) with Shift support for multi-select
@@ -483,9 +483,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 if let Some(thread_id) = get_thread_id_at_index(app, current) {
                     let is_archived = app.toggle_thread_archived(&thread_id);
                     if is_archived {
-                        app.set_status("Archived conversation");
+                        app.set_warning_status("Archived conversation");
                     } else {
-                        app.set_status("Unarchived conversation");
+                        app.set_warning_status("Unarchived conversation");
                     }
                 }
             }
@@ -532,13 +532,20 @@ fn new_conversation_current_project(app: &mut App) {
         app.selected_project = Some(project);
 
         // Auto-select PM agent and default branch from status
-        if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
-            if let Some(pm) = status.pm_agent() {
-                app.selected_agent = Some(pm.clone());
+        // Extract values before making mutable calls to avoid borrow issues
+        let (pm_agent, default_branch) = {
+            let store = app.data_store.borrow();
+            if let Some(status) = store.get_project_status(&a_tag) {
+                (status.pm_agent().cloned(), status.default_branch().map(String::from))
+            } else {
+                (None, None)
             }
-            if app.selected_branch.is_none() {
-                app.selected_branch = status.default_branch().map(String::from);
-            }
+        };
+        if let Some(pm) = pm_agent {
+            app.set_selected_agent(Some(pm));
+        }
+        if app.selected_branch.is_none() {
+            app.selected_branch = default_branch;
         }
 
         let tab_idx = app.open_draft_tab(&a_tag, &name);
@@ -546,7 +553,7 @@ fn new_conversation_current_project(app: &mut App) {
         app.view = View::Chat;
         app.chat_editor_mut().clear();
     } else {
-        app.set_status("No project available for new conversation");
+        app.set_warning_status("No project available for new conversation");
     }
 }
 
@@ -572,18 +579,27 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
         match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
             SelectorAction::Selected(project) => {
                 let a_tag = project.a_tag();
+                let needs_agent = for_new_thread || app.selected_agent().is_none();
+                let needs_branch = app.selected_branch.is_none();
                 app.selected_project = Some(project);
 
                 // Auto-select PM agent and default branch from status
-                if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
-                    if for_new_thread || app.selected_agent.is_none() {
-                        if let Some(pm) = status.pm_agent() {
-                            app.selected_agent = Some(pm.clone());
-                        }
+                // Extract values before making mutable calls to avoid borrow issues
+                let (pm_agent, default_branch) = {
+                    let store = app.data_store.borrow();
+                    if let Some(status) = store.get_project_status(&a_tag) {
+                        let pm = if needs_agent { status.pm_agent().cloned() } else { None };
+                        let branch = if needs_branch { status.default_branch().map(String::from) } else { None };
+                        (pm, branch)
+                    } else {
+                        (None, None)
                     }
-                    if app.selected_branch.is_none() {
-                        app.selected_branch = status.default_branch().map(String::from);
-                    }
+                };
+                if let Some(pm) = pm_agent {
+                    app.set_selected_agent(Some(pm));
+                }
+                if let Some(branch) = default_branch {
+                    app.selected_branch = Some(branch);
                 }
 
                 app.modal_state = ModalState::None;
@@ -708,9 +724,9 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                             project_a_tag,
                             agent_ids,
                         }) {
-                            app.set_status(&format!("Failed to update agents: {}", e));
+                            app.set_warning_status(&format!("Failed to update agents: {}", e));
                         } else {
-                            app.set_status("Project agents updated");
+                            app.set_warning_status("Project agents updated");
                         }
                     }
 
@@ -807,9 +823,9 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                             description: state.description.clone(),
                             agent_ids: state.agent_ids.clone(),
                         }) {
-                            app.set_status(&format!("Failed to create project: {}", e));
+                            app.set_warning_status(&format!("Failed to create project: {}", e));
                         } else {
-                            app.set_status("Project created");
+                            app.set_warning_status("Project created");
                         }
                     }
                     app.modal_state = ModalState::None;
@@ -967,8 +983,8 @@ pub(super) fn handle_normal_mode(
         KeyCode::Up => match app.view {
             View::Chat => {
                 // Simple navigation - expanded groups are flattened so each item is selectable
-                if app.selected_message_index > 0 {
-                    app.selected_message_index -= 1;
+                if app.selected_message_index() > 0 {
+                    app.set_selected_message_index(app.selected_message_index() - 1);
                 }
             }
             View::LessonViewer => {
@@ -1000,8 +1016,8 @@ pub(super) fn handle_normal_mode(
             View::Chat => {
                 // Simple navigation - expanded groups are flattened so each item is selectable
                 let count = app.display_item_count();
-                if app.selected_message_index < count.saturating_sub(1) {
-                    app.selected_message_index += 1;
+                if app.selected_message_index() < count.saturating_sub(1) {
+                    app.set_selected_message_index(app.selected_message_index() + 1);
                 } else {
                     // At last message, focus the input
                     app.input_mode = InputMode::Editing;
@@ -1104,9 +1120,9 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
                         event_ids: vec![stop_thread_id.clone()],
                         agent_pubkeys: working_agents,
                     }) {
-                        app.set_status(&format!("Failed to stop: {}", e));
+                        app.set_warning_status(&format!("Failed to stop: {}", e));
                     } else {
-                        app.set_status("Stop command sent");
+                        app.set_warning_status("Stop command sent");
                     }
                 }
             }
@@ -1173,9 +1189,10 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
 
 fn handle_chat_enter(app: &mut App) -> Result<()> {
     let messages = app.messages();
-    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let subthread_root = app.subthread_root().cloned();
 
-    let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
+    let display_messages: Vec<&Message> = if let Some(ref root_id) = subthread_root {
         messages
             .iter()
             .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
@@ -1193,7 +1210,7 @@ fn handle_chat_enter(app: &mut App) -> Result<()> {
 
     let grouped = group_messages(&display_messages);
 
-    if let Some(item) = grouped.get(app.selected_message_index) {
+    if let Some(item) = grouped.get(app.selected_message_index()) {
         match item {
             DisplayItem::SingleMessage { message: msg, .. } => {
                 let has_replies = messages.iter().any(|m| {
@@ -1260,7 +1277,7 @@ pub(super) fn handle_editing_mode(
                             *pending_nsec = Some(input);
                             *login_step = LoginStep::Password;
                         } else {
-                            app.set_status("Invalid nsec format");
+                            app.set_warning_status("Invalid nsec format");
                         }
                     }
                     LoginStep::Password => {
@@ -1291,7 +1308,7 @@ pub(super) fn handle_editing_mode(
                                         user_pubkey: user_pubkey.clone(),
                                         response_tx: None,
                                     }) {
-                                        app.set_status(&format!("Failed to connect: {}", e));
+                                        app.set_warning_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Nsec;
                                     } else {
                                         app.view = View::Home;
@@ -1302,7 +1319,7 @@ pub(super) fn handle_editing_mode(
                                 }
                             }
                             Err(e) => {
-                                app.set_status(&format!("Login failed: {}", e));
+                                app.set_warning_status(&format!("Login failed: {}", e));
                                 *login_step = LoginStep::Nsec;
                             }
                         }
@@ -1326,7 +1343,7 @@ pub(super) fn handle_editing_mode(
                                         user_pubkey: user_pubkey.clone(),
                                         response_tx: None,
                                     }) {
-                                        app.set_status(&format!("Failed to connect: {}", e));
+                                        app.set_warning_status(&format!("Failed to connect: {}", e));
                                         *login_step = LoginStep::Unlock;
                                     } else {
                                         app.view = View::Home;
@@ -1337,7 +1354,7 @@ pub(super) fn handle_editing_mode(
                                 }
                             }
                             Err(e) => {
-                                app.set_status(&format!(
+                                app.set_warning_status(&format!(
                                     "Unlock failed: {}. Press Esc to clear input and retry.",
                                     e
                                 ));

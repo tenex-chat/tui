@@ -11,6 +11,7 @@ pub mod notifications;
 pub mod nudge;
 pub mod search;
 pub mod selector;
+pub mod services;
 pub mod state;
 pub mod terminal;
 pub mod text_editor;
@@ -20,6 +21,7 @@ pub mod tool_calls;
 pub mod views;
 
 pub use app::{App, HomeTab, InputMode, UndoAction, View};
+// AnimationClock and NotificationManager are now private services accessed via App methods
 // State types are accessed via app.tabs or crate::ui::state::{...}
 // Hotkey registry - used for centralized hotkey resolution and help generation
 #[allow(unused_imports)]
