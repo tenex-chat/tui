@@ -263,7 +263,7 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: '/',
-        label: "Search conversations",
+        label: "Search conversations (use + for AND)",
         section: "Filter",
         available: |app| {
             app.view == View::Home
