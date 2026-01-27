@@ -14,10 +14,55 @@ use futures::{FutureExt, StreamExt};
 use nostr_sdk::prelude::*;
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
 
+use crate::models::AgentDefinition;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::{process_note_keys, CoreHandle};
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::AppDataStore;
+
+/// Convert an AgentDefinition to AgentInfo (shared helper to eliminate DRY violation)
+fn agent_to_info(agent: &AgentDefinition) -> AgentInfo {
+    AgentInfo {
+        id: agent.id.clone(),
+        pubkey: agent.pubkey.clone(),
+        d_tag: agent.d_tag.clone(),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        role: agent.role.clone(),
+        picture: agent.picture.clone(),
+        model: agent.model.clone(),
+    }
+}
+
+/// Helper to get project a-tag by project ID
+fn get_project_a_tag(store: &RwLock<Option<AppDataStore>>, project_id: &str) -> Result<String, TenexError> {
+    let store_guard = store.read().map_err(|e| TenexError::Internal {
+        message: format!("Failed to acquire store lock: {}", e),
+    })?;
+    let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+        message: "Store not initialized".to_string(),
+    })?;
+
+    let project = store.get_projects()
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned()
+        .ok_or_else(|| TenexError::Internal {
+            message: format!("Project not found: {}", project_id),
+        })?;
+
+    Ok(project.a_tag())
+}
+
+/// Helper to get the core handle
+fn get_core_handle(core_handle: &RwLock<Option<CoreHandle>>) -> Result<CoreHandle, TenexError> {
+    let handle_guard = core_handle.read().map_err(|e| TenexError::Internal {
+        message: format!("Failed to acquire core handle lock: {}", e),
+    })?;
+    handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
+        message: "Core runtime not initialized - call init() first".to_string(),
+    }).cloned()
+}
 
 /// Get the data directory for nostrdb
 fn get_data_dir() -> PathBuf {
@@ -133,6 +178,36 @@ pub struct ReportInfo {
     pub updated_at: u64,
     /// Tags/hashtags
     pub tags: Vec<String>,
+}
+
+/// An agent definition for FFI export.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AgentInfo {
+    /// Unique identifier of the agent (event ID)
+    pub id: String,
+    /// Agent's public key (hex)
+    pub pubkey: String,
+    /// Agent's d-tag (slug)
+    pub d_tag: String,
+    /// Display name of the agent
+    pub name: String,
+    /// Description of the agent's purpose
+    pub description: String,
+    /// Role of the agent (e.g., "Developer", "PM")
+    pub role: String,
+    /// Profile picture URL, if any
+    pub picture: Option<String>,
+    /// Model used by the agent (e.g., "claude-3-opus")
+    pub model: Option<String>,
+}
+
+/// Result of sending a message.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SendMessageResult {
+    /// Event ID of the published message
+    pub event_id: String,
+    /// Whether the message was successfully sent
+    pub success: bool,
 }
 
 /// An inbox item (task/notification waiting for attention).
@@ -854,6 +929,144 @@ impl TenexCore {
                 }
             })
             .collect()
+    }
+
+    /// Get agents for a project.
+    ///
+    /// Returns agents configured for the specified project.
+    /// Returns an error if the store cannot be accessed.
+    pub fn get_agents(&self, project_id: String) -> Result<Vec<AgentInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        // Find the project by ID and get its agent IDs (event IDs of kind:4199 definitions)
+        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let agent_ids: Vec<String> = match project {
+            Some(p) => p.agent_ids,
+            None => return Ok(Vec::new()), // Project not found = empty agents (not an error)
+        };
+
+        // Get agent definitions for these IDs
+        Ok(store.get_agent_definitions()
+            .into_iter()
+            .filter(|agent| agent_ids.contains(&agent.id))
+            .map(agent_to_info)
+            .collect())
+    }
+
+    /// Get all available agents (not filtered by project).
+    ///
+    /// Returns all known agent definitions.
+    /// Returns an error if the store cannot be accessed.
+    pub fn get_all_agents(&self) -> Result<Vec<AgentInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.get_agent_definitions()
+            .into_iter()
+            .map(agent_to_info)
+            .collect())
+    }
+
+    /// Send a new conversation (thread) to a project.
+    ///
+    /// Creates a new kind:1 event with title tag and project a-tag.
+    /// Returns the event ID on success.
+    pub fn send_thread(
+        &self,
+        project_id: String,
+        title: String,
+        content: String,
+        agent_pubkey: Option<String>,
+    ) -> Result<SendMessageResult, TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        // Create a channel to receive the event ID
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+        // Send the publish thread command
+        core_handle
+            .send(NostrCommand::PublishThread {
+                project_a_tag,
+                title,
+                content,
+                agent_pubkey,
+                branch: None,
+                nudge_ids: Vec::new(),
+                reference_conversation_id: None,
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send publish thread command: {}", e),
+            })?;
+
+        // Wait for the event ID with timeout
+        match response_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(event_id) => Ok(SendMessageResult {
+                event_id,
+                success: true,
+            }),
+            Err(_) => Err(TenexError::Internal {
+                message: "Timed out waiting for thread publish confirmation".to_string(),
+            }),
+        }
+    }
+
+    /// Send a message to an existing conversation.
+    ///
+    /// Creates a new kind:1 event with e-tag pointing to the thread root.
+    /// Returns the event ID on success.
+    pub fn send_message(
+        &self,
+        conversation_id: String,
+        project_id: String,
+        content: String,
+        agent_pubkey: Option<String>,
+    ) -> Result<SendMessageResult, TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        // Create a channel to receive the event ID
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+        // Send the publish message command
+        core_handle
+            .send(NostrCommand::PublishMessage {
+                thread_id: conversation_id,
+                project_a_tag,
+                content,
+                agent_pubkey,
+                reply_to: None,
+                branch: None,
+                nudge_ids: Vec::new(),
+                ask_author_pubkey: None,
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send publish message command: {}", e),
+            })?;
+
+        // Wait for the event ID with timeout
+        match response_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(event_id) => Ok(SendMessageResult {
+                event_id,
+                success: true,
+            }),
+            Err(_) => Err(TenexError::Internal {
+                message: "Timed out waiting for message publish confirmation".to_string(),
+            }),
+        }
     }
 
     /// Refresh data from relays.
