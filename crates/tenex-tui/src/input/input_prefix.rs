@@ -42,16 +42,6 @@ impl PrefixTrigger {
         }
     }
 
-    /// Returns the character that triggers this prefix action.
-    #[allow(dead_code)]
-    pub fn trigger_char(&self) -> char {
-        match self {
-            PrefixTrigger::AgentSelector => '@',
-            PrefixTrigger::NudgeSelector => '/',
-            // PrefixTrigger::HashtagSearch => '#',
-            // PrefixTrigger::BranchSelector => '%',
-        }
-    }
 }
 
 /// Checks if the input is in a state where prefix triggers should be evaluated.

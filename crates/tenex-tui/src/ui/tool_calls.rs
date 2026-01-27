@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
 };
 use serde::{Deserialize, Serialize};
@@ -318,61 +318,6 @@ pub fn render_tool_line(
     ])
 }
 
-/// Render a single tool call as a compact single line
-#[allow(dead_code)]
-pub fn render_tool_call_compact(tool_call: &ToolCall) -> Line<'static> {
-    let icon = tool_icon(&tool_call.name);
-    let target = extract_target(tool_call);
-
-    let mut spans = vec![
-        Span::styled("  ", Style::default()), // indent
-        Span::styled(format!("{} ", icon), Style::default()),
-        Span::styled(
-            tool_call.name.clone(),
-            theme::tool_name().add_modifier(Modifier::BOLD),
-        ),
-    ];
-
-    if let Some(t) = target {
-        spans.push(Span::styled(" ", Style::default()));
-        spans.push(Span::styled(t, theme::tool_target()));
-    }
-
-    Line::from(spans)
-}
-
-/// Render a single tool call - returns multiple lines for detailed view
-#[allow(dead_code)]
-fn render_tool_call_detailed(tool_call: &ToolCall) -> Vec<Line<'static>> {
-    // Detailed rendering with box drawing (unused for now, keeping for future)
-    let mut lines = Vec::new();
-
-    lines.push(Line::from(Span::styled(
-        format!("┌─ {} ─────────────────────────────────────", tool_call.name),
-        theme::tool_name(),
-    )));
-
-    if let Some(target) = extract_target(tool_call) {
-        lines.push(Line::from(vec![
-            Span::styled("│ ", theme::tool_name()),
-            Span::styled(target, theme::tool_target()),
-        ]));
-    }
-
-    lines.push(Line::from(Span::styled(
-        "└─────────────────────────────────────────────────",
-        theme::tool_name(),
-    )));
-
-    lines
-}
-
-#[allow(dead_code)]
-pub fn render_tool_calls_group(tool_calls: &[ToolCall]) -> Vec<Line<'static>> {
-    // Render each tool call as a compact line
-    tool_calls.iter().map(render_tool_call_compact).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -399,14 +344,14 @@ mod tests {
     }
 
     #[test]
-    fn test_render_tool_call() {
+    fn test_render_tool_line() {
         let tool_call = ToolCall {
             id: "123".to_string(),
             name: "test_tool".to_string(),
             parameters: serde_json::json!({"key": "value"}),
             result: None,
         };
-        let line = render_tool_call_compact(&tool_call);
+        let line = render_tool_line(&tool_call, Color::Gray, None);
         assert!(!line.spans.is_empty());
     }
 }
