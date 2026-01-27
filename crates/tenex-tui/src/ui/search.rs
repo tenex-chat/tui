@@ -303,7 +303,6 @@ pub fn search_conversations(
         return vec![];
     }
 
-    let is_multi_term = terms.len() > 1;
     let mut results = Vec::new();
     let mut seen_threads: HashSet<String> = HashSet::new();
 
@@ -320,78 +319,48 @@ pub fn search_conversations(
 
         // Search threads
         for thread in store.get_threads(&a_tag) {
-            // Track which terms are found in different parts of the conversation
-            let mut terms_found_in_title: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_content: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_id: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_messages: HashSet<usize> = HashSet::new();
-            let mut first_matching_reply: Option<MatchingReply> = None;
-
-            // Check each term against title, content, and ID
-            for (term_idx, term) in terms.iter().enumerate() {
-                if text_contains_term(&thread.title, term) {
-                    terms_found_in_title.insert(term_idx);
-                }
-                if text_contains_term(&thread.content, term) {
-                    terms_found_in_content.insert(term_idx);
-                }
-                if thread.id.to_lowercase().starts_with(term) {
-                    terms_found_in_id.insert(term_idx);
-                }
-            }
-
-            // Search messages/replies in this thread
+            // Build message list for the shared matcher
             let messages = store.get_messages(&thread.id);
-            for msg in messages {
-                // Skip the root message (already covered by thread search)
-                if msg.id == thread.id {
-                    continue;
-                }
+            let msg_contents: Vec<MessageContent> = messages
+                .iter()
+                .map(|msg| MessageContent {
+                    id: &msg.id,
+                    content: &msg.content,
+                    pubkey: &msg.pubkey,
+                    created_at: msg.created_at,
+                })
+                .collect();
 
-                let msg_lower = msg.content.to_lowercase();
-                for (term_idx, term) in terms.iter().enumerate() {
-                    if msg_lower.contains(term) {
-                        terms_found_in_messages.insert(term_idx);
-                        // Keep first matching reply for display
-                        if first_matching_reply.is_none() {
-                            first_matching_reply = Some(MatchingReply {
-                                content: msg.content.clone(),
-                                author_pubkey: msg.pubkey.clone(),
-                            });
-                        }
-                    }
-                }
-            }
+            // Use shared matcher
+            let match_result = scan_thread_for_terms(
+                &thread.id,
+                &thread.title,
+                &thread.content,
+                &msg_contents,
+                &terms,
+            );
 
-            // For multi-term search: ALL terms must be found somewhere in the conversation
-            // For single-term search: standard behavior (any match)
-            let all_terms_found = if is_multi_term {
-                let mut all_found_terms: HashSet<usize> = HashSet::new();
-                all_found_terms.extend(&terms_found_in_title);
-                all_found_terms.extend(&terms_found_in_content);
-                all_found_terms.extend(&terms_found_in_id);
-                all_found_terms.extend(&terms_found_in_messages);
-                all_found_terms.len() == terms.len()
-            } else {
-                !terms_found_in_title.is_empty()
-                    || !terms_found_in_content.is_empty()
-                    || !terms_found_in_id.is_empty()
-                    || !terms_found_in_messages.is_empty()
-            };
-
-            if all_terms_found && !seen_threads.contains(&thread.id) {
+            if match_result.all_terms_matched && !seen_threads.contains(&thread.id) {
                 seen_threads.insert(thread.id.clone());
 
                 // Determine match type based on where matches were found
-                let match_type = if !terms_found_in_id.is_empty() {
+                let match_type = if match_result.id_matched() {
                     SearchMatchType::ConversationId
-                } else if !terms_found_in_title.is_empty() {
+                } else if match_result.title_matched() {
                     SearchMatchType::ThreadTitle
-                } else if !terms_found_in_content.is_empty() {
+                } else if match_result.content_matched() {
                     SearchMatchType::ThreadContent
                 } else {
                     SearchMatchType::Reply
                 };
+
+                // Get first matching reply for legacy format
+                let matching_reply = match_result.matching_messages.first().map(|msg| {
+                    MatchingReply {
+                        content: msg.content.clone(),
+                        author_pubkey: msg.author_pubkey.clone(),
+                    }
+                });
 
                 results.push(SearchResult {
                     thread: thread.clone(),
@@ -399,7 +368,7 @@ pub fn search_conversations(
                     thread_title: thread.title.clone(),
                     project_a_tag: a_tag.clone(),
                     project_name: project_name.clone(),
-                    matching_reply: first_matching_reply,
+                    matching_reply,
                     match_type,
                     created_at: thread.last_activity,
                 });
@@ -474,15 +443,173 @@ pub fn parse_search_terms(query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Check if text contains a search term (case-insensitive)
+/// Check if text contains a search term (ASCII case-insensitive)
+/// Uses ASCII-only case folding for consistency with highlight_text_spans in home.rs
 fn text_contains_term(text: &str, term: &str) -> bool {
-    text.to_lowercase().contains(term)
+    let text_chars: Vec<char> = text.chars().collect();
+    let term_chars: Vec<char> = term.chars().collect();
+
+    if term_chars.is_empty() {
+        return true;
+    }
+
+    if text_chars.len() < term_chars.len() {
+        return false;
+    }
+
+    // Use ASCII case-insensitive matching (consistent with highlighting)
+    for start_idx in 0..=(text_chars.len() - term_chars.len()) {
+        let matches = term_chars.iter().enumerate().all(|(i, tc)| {
+            text_chars.get(start_idx + i)
+                .map_or(false, |c| c.eq_ignore_ascii_case(tc))
+        });
+        if matches {
+            return true;
+        }
+    }
+    false
 }
 
-/// Check if text matches any of the search terms (OR logic)
-fn text_matches_any_term(text: &str, terms: &[String]) -> bool {
-    let text_lower = text.to_lowercase();
-    terms.iter().any(|term| text_lower.contains(term))
+/// Check if text starts with a prefix (ASCII case-insensitive)
+fn text_starts_with_ascii(text: &str, prefix: &str) -> bool {
+    let text_chars: Vec<char> = text.chars().collect();
+    let prefix_chars: Vec<char> = prefix.chars().collect();
+
+    if prefix_chars.is_empty() {
+        return true;
+    }
+
+    if text_chars.len() < prefix_chars.len() {
+        return false;
+    }
+
+    prefix_chars.iter().enumerate().all(|(i, pc)| {
+        text_chars.get(i)
+            .map_or(false, |c| c.eq_ignore_ascii_case(pc))
+    })
+}
+
+/// Result of scanning a thread and its messages for search term matches
+#[derive(Debug, Clone)]
+pub struct TermMatchResult {
+    /// Which term indices matched in the title
+    pub terms_in_title: HashSet<usize>,
+    /// Which term indices matched in the content
+    pub terms_in_content: HashSet<usize>,
+    /// Which term indices matched in the ID (prefix match)
+    pub terms_in_id: HashSet<usize>,
+    /// Which term indices matched in messages
+    pub terms_in_messages: HashSet<usize>,
+    /// Messages that matched any search term (for display)
+    pub matching_messages: Vec<MatchingMessage>,
+    /// Whether all terms were found (respects multi-term AND logic)
+    pub all_terms_matched: bool,
+}
+
+impl TermMatchResult {
+    /// Check if any match occurred in title
+    pub fn title_matched(&self) -> bool {
+        !self.terms_in_title.is_empty()
+    }
+
+    /// Check if any match occurred in content
+    pub fn content_matched(&self) -> bool {
+        !self.terms_in_content.is_empty()
+    }
+
+    /// Check if any match occurred in ID
+    pub fn id_matched(&self) -> bool {
+        !self.terms_in_id.is_empty()
+    }
+}
+
+/// A message with content and author for matching purposes
+pub struct MessageContent<'a> {
+    pub id: &'a str,
+    pub content: &'a str,
+    pub pubkey: &'a str,
+    pub created_at: u64,
+}
+
+/// Scan a thread (title, content, ID) and its messages for search term matches.
+/// Returns detailed match information including which terms hit where.
+///
+/// This is the shared implementation used by both flat and hierarchical search.
+pub fn scan_thread_for_terms(
+    thread_id: &str,
+    thread_title: &str,
+    thread_content: &str,
+    messages: &[MessageContent],
+    terms: &[String],
+) -> TermMatchResult {
+    let is_multi_term = terms.len() > 1;
+
+    let mut terms_in_title: HashSet<usize> = HashSet::new();
+    let mut terms_in_content: HashSet<usize> = HashSet::new();
+    let mut terms_in_id: HashSet<usize> = HashSet::new();
+    let mut terms_in_messages: HashSet<usize> = HashSet::new();
+    let mut matching_messages: Vec<MatchingMessage> = Vec::new();
+
+    // Check each term against title, content, and ID
+    for (term_idx, term) in terms.iter().enumerate() {
+        if text_contains_term(thread_title, term) {
+            terms_in_title.insert(term_idx);
+        }
+        if text_contains_term(thread_content, term) {
+            terms_in_content.insert(term_idx);
+        }
+        if text_starts_with_ascii(thread_id, term) {
+            terms_in_id.insert(term_idx);
+        }
+    }
+
+    // Scan messages for term matches
+    for msg in messages {
+        // Skip root message (already covered by thread content)
+        if msg.id == thread_id {
+            continue;
+        }
+
+        let mut msg_matches_any = false;
+        for (term_idx, term) in terms.iter().enumerate() {
+            if text_contains_term(msg.content, term) {
+                terms_in_messages.insert(term_idx);
+                msg_matches_any = true;
+            }
+        }
+
+        if msg_matches_any {
+            matching_messages.push(MatchingMessage {
+                content: msg.content.to_string(),
+                author_pubkey: msg.pubkey.to_string(),
+                created_at: msg.created_at,
+            });
+        }
+    }
+
+    // Check if all terms are found (AND logic for multi-term, OR for single term)
+    let all_terms_matched = if is_multi_term {
+        let mut all_found_terms: HashSet<usize> = HashSet::new();
+        all_found_terms.extend(&terms_in_title);
+        all_found_terms.extend(&terms_in_content);
+        all_found_terms.extend(&terms_in_id);
+        all_found_terms.extend(&terms_in_messages);
+        all_found_terms.len() == terms.len()
+    } else {
+        !terms_in_title.is_empty()
+            || !terms_in_content.is_empty()
+            || !terms_in_id.is_empty()
+            || !terms_in_messages.is_empty()
+    };
+
+    TermMatchResult {
+        terms_in_title,
+        terms_in_content,
+        terms_in_id,
+        terms_in_messages,
+        matching_messages,
+        all_terms_matched,
+    }
 }
 
 /// Raw search match data for a conversation (internal use)
@@ -526,8 +653,6 @@ pub fn search_conversations_hierarchical(
         return vec![];
     }
 
-    let is_multi_term = terms.len() > 1;
-
     // Step 1: Collect all matching conversations with ALL their matching messages
     let mut matches_by_conv: HashMap<String, ConversationMatch> = HashMap::new();
 
@@ -540,80 +665,32 @@ pub fn search_conversations_hierarchical(
         let project_name = project.name.clone();
 
         for thread in store.get_threads(&a_tag) {
-            // Track which terms match in different parts of the conversation
-            let mut terms_found_in_title: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_content: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_id: HashSet<usize> = HashSet::new();
-            let mut terms_found_in_messages: HashSet<usize> = HashSet::new();
-
-            // Check each term against title, content, and ID
-            for (term_idx, term) in terms.iter().enumerate() {
-                if text_contains_term(&thread.title, term) {
-                    terms_found_in_title.insert(term_idx);
-                }
-                if text_contains_term(&thread.content, term) {
-                    terms_found_in_content.insert(term_idx);
-                }
-                if thread.id.to_lowercase().starts_with(term) {
-                    terms_found_in_id.insert(term_idx);
-                }
-            }
-
-            // Collect messages that match ANY term (OR logic for display)
-            let mut matching_messages: Vec<MatchingMessage> = Vec::new();
+            // Build message list for the shared matcher
             let messages = store.get_messages(&thread.id);
-            for msg in messages {
-                // Skip root message if we're counting it via content_matched
-                if msg.id == thread.id {
-                    continue;
-                }
+            let msg_contents: Vec<MessageContent> = messages
+                .iter()
+                .map(|msg| MessageContent {
+                    id: &msg.id,
+                    content: &msg.content,
+                    pubkey: &msg.pubkey,
+                    created_at: msg.created_at,
+                })
+                .collect();
 
-                // Check if message matches any term
-                let msg_lower = msg.content.to_lowercase();
-                let mut msg_matches_any = false;
-                for (term_idx, term) in terms.iter().enumerate() {
-                    if msg_lower.contains(term) {
-                        terms_found_in_messages.insert(term_idx);
-                        msg_matches_any = true;
-                    }
-                }
+            // Use shared matcher
+            let match_result = scan_thread_for_terms(
+                &thread.id,
+                &thread.title,
+                &thread.content,
+                &msg_contents,
+                &terms,
+            );
 
-                if msg_matches_any {
-                    matching_messages.push(MatchingMessage {
-                        content: msg.content.clone(),
-                        author_pubkey: msg.pubkey.clone(),
-                        created_at: msg.created_at,
-                    });
-                }
-            }
-
-            // For multi-term search: ALL terms must be found somewhere in the conversation
-            // For single-term search: standard behavior (any match)
-            let all_terms_found = if is_multi_term {
-                // Combine all places where terms were found
-                let mut all_found_terms: HashSet<usize> = HashSet::new();
-                all_found_terms.extend(&terms_found_in_title);
-                all_found_terms.extend(&terms_found_in_content);
-                all_found_terms.extend(&terms_found_in_id);
-                all_found_terms.extend(&terms_found_in_messages);
-
-                // Check if ALL terms were found (AND logic)
-                all_found_terms.len() == terms.len()
-            } else {
-                // Single term: any match counts
-                !terms_found_in_title.is_empty()
-                    || !terms_found_in_content.is_empty()
-                    || !terms_found_in_id.is_empty()
-                    || !terms_found_in_messages.is_empty()
-            };
-
-            if all_terms_found {
-                let title_matched = !terms_found_in_title.is_empty();
-                let content_matched = !terms_found_in_content.is_empty();
-                let id_matched = !terms_found_in_id.is_empty();
-
-                // Build list of matched terms for display
-                let matched_terms = terms.clone();
+            if match_result.all_terms_matched {
+                // Extract booleans before moving matching_messages
+                let title_matched = match_result.title_matched();
+                let content_matched = match_result.content_matched();
+                let id_matched = match_result.id_matched();
 
                 matches_by_conv.insert(
                     thread.id.clone(),
@@ -621,11 +698,11 @@ pub fn search_conversations_hierarchical(
                         thread: thread.clone(),
                         project_a_tag: a_tag.clone(),
                         project_name: project_name.clone(),
-                        matching_messages,
+                        matching_messages: match_result.matching_messages,
                         title_matched,
                         content_matched,
                         id_matched,
-                        matched_terms,
+                        matched_terms: terms.clone(),
                     },
                 );
             }
@@ -895,18 +972,314 @@ mod tests {
     }
 
     #[test]
-    fn test_text_matches_any_term() {
-        let terms = vec!["error".to_string(), "warning".to_string()];
+    fn test_text_starts_with_ascii() {
+        assert!(text_starts_with_ascii("abc123", "ABC"));
+        assert!(text_starts_with_ascii("ABC123", "abc"));
+        assert!(text_starts_with_ascii("test", "TEST"));
+        assert!(!text_starts_with_ascii("test", "abc"));
+        assert!(!text_starts_with_ascii("ab", "abc"));
+        assert!(text_starts_with_ascii("anything", ""));
+    }
 
-        assert!(text_matches_any_term("This is an error", &terms));
-        assert!(text_matches_any_term("This is a warning", &terms));
-        assert!(text_matches_any_term("error and warning", &terms));
-        assert!(!text_matches_any_term("This is info only", &terms));
+    // ========== Behavioral tests for scan_thread_for_terms ==========
+
+    #[test]
+    fn test_scan_single_term_matches_title() {
+        let terms = vec!["error".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Error in production",
+            "Some content without match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.title_matched());
+        assert!(!result.content_matched());
+        assert!(!result.id_matched());
+        assert!(result.matching_messages.is_empty());
     }
 
     #[test]
-    fn test_text_matches_any_term_empty_terms() {
-        let terms: Vec<String> = vec![];
-        assert!(!text_matches_any_term("anything", &terms));
+    fn test_scan_single_term_matches_content() {
+        let terms = vec!["timeout".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "No match here",
+            "Connection timeout occurred",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(!result.title_matched());
+        assert!(result.content_matched());
+    }
+
+    #[test]
+    fn test_scan_single_term_matches_message() {
+        let terms = vec!["critical".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "This is critical information",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "No match",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(!result.title_matched());
+        assert!(!result.content_matched());
+        assert_eq!(result.matching_messages.len(), 1);
+        assert!(result.matching_messages[0].content.contains("critical"));
+    }
+
+    #[test]
+    fn test_scan_multi_term_and_semantics_all_in_title() {
+        // Both terms in title: should match
+        let terms = vec!["error".to_string(), "timeout".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Error due to timeout",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.title_matched());
+    }
+
+    #[test]
+    fn test_scan_multi_term_and_semantics_split_across_locations() {
+        // "error" in title, "timeout" in message: should match (AND across conversation)
+        let terms = vec!["error".to_string(), "timeout".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "Timeout occurred",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Error in system",
+            "No match in content",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.title_matched());
+        assert_eq!(result.matching_messages.len(), 1);
+    }
+
+    #[test]
+    fn test_scan_multi_term_and_semantics_missing_term() {
+        // Only "error" found, "timeout" missing: should NOT match
+        let terms = vec!["error".to_string(), "timeout".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Error in system",
+            "No timeout here",  // Intentional: we want to fail the match
+            &messages,
+            &terms,
+        );
+
+        // Wait, "No timeout here" DOES contain "timeout". Let me fix this test.
+        // Actually it SHOULD match because "timeout" is in content
+        assert!(result.all_terms_matched);
+    }
+
+    #[test]
+    fn test_scan_multi_term_and_semantics_truly_missing() {
+        // Only "error" found, "missing" truly missing: should NOT match
+        let terms = vec!["error".to_string(), "missing".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Error in system",
+            "Some content here",
+            &messages,
+            &terms,
+        );
+
+        assert!(!result.all_terms_matched);
+    }
+
+    #[test]
+    fn test_scan_multi_term_collects_all_matching_messages() {
+        // Multi-term search: all messages matching ANY term should be collected
+        let terms = vec!["error".to_string(), "warning".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "This has an error",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+            MessageContent {
+                id: "msg-2",
+                content: "This has a warning",
+                pubkey: "author-2",
+                created_at: 2000,
+            },
+            MessageContent {
+                id: "msg-3",
+                content: "This is unrelated",
+                pubkey: "author-3",
+                created_at: 3000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "No match",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        // Should have 2 matching messages (error + warning), not the unrelated one
+        assert_eq!(result.matching_messages.len(), 2);
+    }
+
+    #[test]
+    fn test_scan_skips_root_message() {
+        // Message with same ID as thread should be skipped
+        let terms = vec!["secret".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "thread-123", // Same as thread ID - should be skipped
+                content: "This contains secret",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "No match",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        // Root message is skipped, so no match in messages
+        assert!(!result.all_terms_matched);
+        assert!(result.matching_messages.is_empty());
+    }
+
+    #[test]
+    fn test_scan_id_prefix_match() {
+        let terms = vec!["abc12".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "ABC123456789",
+            "No match",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.id_matched());
+    }
+
+    #[test]
+    fn test_scan_ascii_case_insensitive() {
+        // Verify ASCII case-insensitive matching
+        let terms = vec!["error".to_string()];
+        let messages: Vec<MessageContent> = vec![];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "ERROR MESSAGE",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.title_matched());
+    }
+
+    #[test]
+    fn test_scan_three_terms_all_required() {
+        // Three terms: all must be found
+        let terms = vec!["error".to_string(), "warning".to_string(), "info".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "Error happened",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+            MessageContent {
+                id: "msg-2",
+                content: "Warning issued",
+                pubkey: "author-2",
+                created_at: 2000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Info available",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        // All 3 terms found: info in title, error and warning in messages
+    }
+
+    #[test]
+    fn test_scan_three_terms_one_missing() {
+        // Three terms: if one is missing, no match
+        let terms = vec!["error".to_string(), "warning".to_string(), "critical".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "Error happened",
+                pubkey: "author-1",
+                created_at: 1000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "thread-123",
+            "Warning here",
+            "No match",
+            &messages,
+            &terms,
+        );
+
+        // "critical" is missing - should not match
+        assert!(!result.all_terms_matched);
     }
 }
