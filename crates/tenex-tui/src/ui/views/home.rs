@@ -1388,9 +1388,14 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled(after, Style::default().fg(theme::TEXT_PRIMARY)));
     }
 
-    // Placeholder when empty
+    // Placeholder when empty (different hints for different tabs)
     if query.is_empty() {
-        spans.push(Span::styled("type to search...", Style::default().fg(theme::TEXT_MUTED)));
+        let placeholder = if app.home_panel_focus == HomeTab::Reports {
+            "type to search..."
+        } else {
+            "type to search (use + for AND)..."
+        };
+        spans.push(Span::styled(placeholder, Style::default().fg(theme::TEXT_MUTED)));
     }
 
     let search_line = Paragraph::new(Line::from(spans));
