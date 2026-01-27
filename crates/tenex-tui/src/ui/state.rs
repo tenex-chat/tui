@@ -445,14 +445,14 @@ impl OpenTab {
     }
 
     /// Create a draft tab for a new conversation
+    ///
+    /// The draft_id is derived from the project_a_tag using a stable format (`project_a_tag:new`),
+    /// allowing drafts to persist across TUI restarts. When the TUI restarts and user opens
+    /// a new conversation for the same project, the draft can be restored.
     pub fn draft(project_a_tag: String, project_name: String) -> Self {
-        let draft_id = format!(
-            "draft-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis()
-        );
+        // Use a stable, project-based draft key so drafts survive TUI restarts
+        // Format: "project_a_tag:new" (e.g., "30023:pubkey:d:project-slug:new")
+        let draft_id = format!("{}:new", project_a_tag);
         Self {
             thread_id: String::new(),
             thread_title: format!("New: {}", project_name),
@@ -598,9 +598,18 @@ impl TabManager {
 
     /// Open a draft tab for a new conversation.
     /// Returns the tab index.
-    /// Always creates a new draft tab - multiple drafts per project are allowed.
+    ///
+    /// Since draft IDs are now project-based (`project_a_tag:new`) for persistence across restarts,
+    /// we reuse an existing draft tab for the same project if one exists. This prevents the confusing
+    /// scenario where two tabs share the same draft storage.
     pub fn open_draft(&mut self, project_a_tag: String, project_name: String) -> usize {
-        // Create new draft tab (always - allow multiple drafts per project)
+        // Check if there's already a draft tab for this project - reuse it
+        if let Some((idx, _)) = self.find_draft_for_project(&project_a_tag) {
+            self.active_index = idx;
+            return idx;
+        }
+
+        // Create new draft tab
         let tab = OpenTab::draft(project_a_tag, project_name);
 
         // Evict if at capacity (prefer non-drafts)
@@ -1196,21 +1205,31 @@ mod tests {
         assert_eq!(idx, 0);
         assert!(tabs.active_tab().unwrap().is_draft());
 
-        // Opening same project draft creates a new draft (multiple drafts allowed)
+        // Opening same project draft should reuse existing draft tab (project-based draft IDs)
         let idx = tabs.open_draft("project1".to_string(), "Project 1".to_string());
+        assert_eq!(idx, 0); // Same tab reused
+        assert_eq!(tabs.len(), 1); // No new tab created
+
+        // Different project should create new draft
+        let idx = tabs.open_draft("project2".to_string(), "Project 2".to_string());
         assert_eq!(idx, 1);
         assert_eq!(tabs.len(), 2);
 
-        // Different project should also create new draft
-        let idx = tabs.open_draft("project2".to_string(), "Project 2".to_string());
-        assert_eq!(idx, 2);
-        assert_eq!(tabs.len(), 3);
+        // Verify draft IDs are project-based
+        assert_eq!(tabs.tabs()[0].draft_id, Some("project1:new".to_string()));
+        assert_eq!(tabs.tabs()[1].draft_id, Some("project2:new".to_string()));
 
         // Convert first draft to real tab
         let draft_id = tabs.tabs()[0].draft_id.clone().unwrap();
         tabs.convert_draft(&draft_id, "thread1".to_string(), "Real Thread".to_string());
         assert!(!tabs.tabs()[0].is_draft());
         assert_eq!(tabs.tabs()[0].thread_id, "thread1");
+
+        // Now opening a draft for project1 should create a new tab (since the old one was converted)
+        let idx = tabs.open_draft("project1".to_string(), "Project 1".to_string());
+        assert_eq!(idx, 2);
+        assert_eq!(tabs.len(), 3);
+        assert!(tabs.tabs()[2].is_draft());
     }
 
     #[test]
