@@ -1400,9 +1400,11 @@ fn render_sidebar_search_results(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-/// Render conversation search results
+/// Render conversation search results with hierarchical display
 fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
-    let results = &app.sidebar_search.results;
+    use crate::ui::search::HierarchicalSearchItem;
+
+    let results = &app.sidebar_search.hierarchical_results;
     let selected_idx = app.sidebar_search.selected_index.min(results.len().saturating_sub(1));
     let query = &app.sidebar_search.query;
 
@@ -1413,42 +1415,44 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Helper to compute card height for a result without allocation
-    fn compute_card_height(result: &crate::ui::search::SearchResult) -> u16 {
-        let base_height = 3u16;
-        let content_lines = if let Some(ref reply) = result.matching_reply {
-            // Count newlines directly without allocating a String
-            let char_count = reply.content.chars().take(300).count();
-            let line_count = reply.content.chars().take(char_count).filter(|&c| c == '\n').count() + 1;
-            (line_count.min(3) as u16).max(2)
-        } else {
-            1
-        };
-        base_height + content_lines
+    // Helper to compute card height for a hierarchical item
+    fn compute_item_height(item: &HierarchicalSearchItem) -> u16 {
+        match item {
+            HierarchicalSearchItem::ContextAncestor { .. } => {
+                // Context ancestors are compact: just title line
+                1
+            }
+            HierarchicalSearchItem::MatchedConversation { matching_messages, .. } => {
+                // Title line + up to 3 matching message previews (each 2 lines: arrow prefix + content)
+                let msg_lines = matching_messages.len().min(3) as u16 * 2;
+                1 + msg_lines + 1 // title + messages + spacing
+            }
+        }
     }
 
     // Calculate available height (reserve 1 line for count at bottom)
     let available_height = area.height.saturating_sub(1);
 
-    // Compute scroll_offset lazily - only compute heights up to selected_idx + visible items
-    // First, calculate cumulative height up to selected item
+    // Compute heights and scroll offset
     let mut cumulative_before_selected: u16 = 0;
     let mut heights_cache: Vec<u16> = Vec::with_capacity(selected_idx + 1);
-    for i in 0..=selected_idx {
-        let h = compute_card_height(&results[i]);
+    for i in 0..=selected_idx.min(results.len().saturating_sub(1)) {
+        let h = compute_item_height(&results[i]);
         heights_cache.push(h);
         if i < selected_idx {
             cumulative_before_selected += h;
         }
     }
-    let selected_height = heights_cache[selected_idx];
+    let selected_height = if selected_idx < heights_cache.len() {
+        heights_cache[selected_idx]
+    } else {
+        1
+    };
 
-    // Calculate scroll offset: scroll just enough to show the selected item
+    // Calculate scroll offset
     let scroll_offset = if cumulative_before_selected + selected_height <= available_height {
-        // Selected item fits from the top, no scroll needed
         0
     } else {
-        // Find the minimum scroll offset that makes selected visible
         let mut offset = 0;
         let mut height_sum: u16 = heights_cache.iter().sum();
         while height_sum > available_height && offset < selected_idx {
@@ -1461,14 +1465,16 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
     let store = app.data_store.borrow();
     let mut y_offset = 0u16;
 
+    // Count actual matches (not context ancestors)
+    let match_count = results.iter().filter(|r| !r.is_context_ancestor()).count();
+
     // Render items starting from scroll_offset
-    for (i, result) in results.iter().enumerate().skip(scroll_offset) {
+    for (i, item) in results.iter().enumerate().skip(scroll_offset) {
         let is_selected = i == selected_idx;
-        // Use cached height if available, otherwise compute
         let card_height = if i < heights_cache.len() {
             heights_cache[i]
         } else {
-            compute_card_height(result)
+            compute_item_height(item)
         };
 
         if y_offset + card_height > available_height {
@@ -1482,18 +1488,209 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
             card_height,
         );
 
-        render_sidebar_search_result_card(f, app, result, is_selected, card_area, &store, query);
+        render_hierarchical_search_item(f, item, is_selected, card_area, &store, query);
         y_offset += card_height;
     }
 
     // Show result count at bottom
-    let result_count = results.len();
-    let count_text = format!("{} result{}", result_count, if result_count == 1 { "" } else { "s" });
+    let count_text = format!("{} match{}", match_count, if match_count == 1 { "" } else { "es" });
     let count_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
     let count_line = Paragraph::new(count_text)
         .style(Style::default().fg(theme::TEXT_MUTED))
         .alignment(ratatui::layout::Alignment::Right);
     f.render_widget(count_line, count_area);
+}
+
+/// Render a single hierarchical search item
+fn render_hierarchical_search_item(
+    f: &mut Frame,
+    item: &crate::ui::search::HierarchicalSearchItem,
+    is_selected: bool,
+    area: Rect,
+    store: &std::cell::Ref<crate::store::AppDataStore>,
+    query: &str,
+) {
+    use crate::ui::search::HierarchicalSearchItem;
+
+    let depth = item.depth();
+    // Indentation: 2 spaces per depth level
+    let indent = "  ".repeat(depth);
+    let indent_width = depth * 2;
+
+    match item {
+        HierarchicalSearchItem::ContextAncestor { thread_title, project_a_tag, .. } => {
+            // Context ancestors are dimmed and compact
+            let title_max = (area.width as usize).saturating_sub(indent_width).saturating_sub(5).max(10);
+            let title = crate::ui::format::truncate_with_ellipsis(thread_title, title_max);
+
+            let style = if is_selected {
+                Style::default().fg(theme::TEXT_MUTED).bg(theme::BG_SELECTED)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)
+            };
+
+            let line = Line::from(vec![
+                Span::styled(&indent, Style::default()),
+                Span::styled(title, style),
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    store.get_project_name(project_a_tag),
+                    Style::default().fg(theme::project_color(project_a_tag)).add_modifier(Modifier::DIM)
+                ),
+            ]);
+
+            let para = Paragraph::new(vec![line]);
+            if is_selected {
+                f.render_widget(para.style(Style::default().bg(theme::BG_SELECTED)), area);
+            } else {
+                f.render_widget(para, area);
+            }
+        }
+        HierarchicalSearchItem::MatchedConversation {
+            thread_title,
+            project_a_tag,
+            project_name,
+            matching_messages,
+            title_matched,
+            content_matched,
+            id_matched,
+            ..
+        } => {
+            let mut lines: Vec<Line> = Vec::new();
+
+            // Title line with match type indicator and highlighting
+            let type_indicator = if *id_matched {
+                "[I]"
+            } else if *title_matched {
+                "[T]"
+            } else if *content_matched {
+                "[C]"
+            } else {
+                "[R]"
+            };
+            let type_color = if *id_matched {
+                theme::TEXT_MUTED
+            } else if *title_matched {
+                theme::ACCENT_PRIMARY
+            } else if *content_matched {
+                theme::ACCENT_WARNING
+            } else {
+                theme::ACCENT_SUCCESS
+            };
+
+            let title_max = (area.width as usize).saturating_sub(indent_width).saturating_sub(30).max(10);
+
+            // Highlight matching text in title if title matched
+            let title_spans = if *title_matched {
+                highlight_text_spans(thread_title, query, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY)
+            } else {
+                vec![Span::styled(
+                    crate::ui::format::truncate_with_ellipsis(thread_title, title_max),
+                    if is_selected {
+                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme::TEXT_PRIMARY)
+                    },
+                )]
+            };
+
+            let mut title_line_spans = vec![
+                Span::styled(&indent, Style::default()),
+                Span::styled(type_indicator, Style::default().fg(type_color)),
+                Span::styled(" ", Style::default()),
+            ];
+            title_line_spans.extend(title_spans);
+            title_line_spans.push(Span::styled("  ", Style::default()));
+            title_line_spans.push(Span::styled(
+                project_name.as_str(),
+                Style::default().fg(theme::project_color(project_a_tag)),
+            ));
+
+            lines.push(Line::from(title_line_spans));
+
+            // Matching message previews (up to 3)
+            let message_indent = format!("{}  -> ", indent);
+            let content_width = (area.width as usize).saturating_sub(message_indent.len()).saturating_sub(2).max(10);
+
+            for msg in matching_messages.iter().take(3) {
+                // Author line
+                let author_name = store.get_profile_name(&msg.author_pubkey);
+                let author_color = theme::user_color(&msg.author_pubkey);
+                lines.push(Line::from(vec![
+                    Span::styled(format!("{}  ", indent), Style::default()),
+                    Span::styled("@", Style::default().fg(theme::TEXT_MUTED)),
+                    Span::styled(author_name, Style::default().fg(author_color)),
+                ]));
+
+                // Message content with bracket highlighting
+                let preview: String = msg.content.lines().next().unwrap_or("").chars().take(content_width).collect();
+                let highlighted_spans = build_bracket_highlight_spans(&preview, query, content_width);
+                let mut content_line_spans = vec![
+                    Span::styled(&message_indent, Style::default().fg(theme::TEXT_MUTED)),
+                ];
+                content_line_spans.extend(highlighted_spans);
+                lines.push(Line::from(content_line_spans));
+            }
+
+            // Spacing line
+            lines.push(Line::from(""));
+
+            let para = Paragraph::new(lines);
+            if is_selected {
+                f.render_widget(para.style(Style::default().bg(theme::BG_SELECTED)), area);
+            } else {
+                f.render_widget(para, area);
+            }
+        }
+    }
+}
+
+/// Build highlighted spans with [brackets] around matching text
+/// Uses char indices to avoid Unicode byte offset panics
+fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> Vec<Span<'static>> {
+    if query.is_empty() {
+        return vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))];
+    }
+
+    let query_chars: Vec<char> = query.chars().collect();
+    let query_char_count = query_chars.len();
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut spans = Vec::new();
+    let mut last_char_end = 0;
+
+    // Find all matches using char indices (ASCII case-insensitive)
+    let mut i = 0;
+    while i <= text_chars.len().saturating_sub(query_char_count) {
+        if chars_match_ascii_ignore_case(&text_chars, &query_chars, i) {
+            // Add text before match
+            if i > last_char_end {
+                let before: String = text_chars[last_char_end..i].iter().collect();
+                spans.push(Span::styled(before, Style::default().fg(theme::TEXT_MUTED)));
+            }
+            // Add [matched] text with brackets and highlighting
+            let match_text: String = text_chars[i..i + query_char_count].iter().collect();
+            spans.push(Span::styled(
+                format!("[{}]", match_text),
+                Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD),
+            ));
+            last_char_end = i + query_char_count;
+            i = last_char_end;
+        } else {
+            i += 1;
+        }
+    }
+
+    // Add remaining text
+    if last_char_end < text_chars.len() {
+        let remaining: String = text_chars[last_char_end..].iter().collect();
+        spans.push(Span::styled(remaining, Style::default().fg(theme::TEXT_MUTED)));
+    }
+
+    if spans.is_empty() {
+        vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))]
+    } else {
+        spans
+    }
 }
 
 /// Render report search results
@@ -1665,168 +1862,6 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
         vec![Span::styled(text.to_string(), Style::default().fg(normal_color))]
     } else {
         spans
-    }
-}
-
-/// Find the char index of a case-insensitive query match in text
-/// Returns the char position (not byte offset) or None if not found
-/// Uses ASCII case-insensitive comparison to avoid Unicode casefold expansion issues
-fn find_char_match_index(text: &str, query: &str) -> Option<usize> {
-    if query.is_empty() {
-        return None;
-    }
-    let query_chars: Vec<char> = query.chars().collect();
-    let text_chars: Vec<char> = text.chars().collect();
-    let query_len = query_chars.len();
-
-    for i in 0..=text_chars.len().saturating_sub(query_len) {
-        if chars_match_ascii_ignore_case(&text_chars, &query_chars, i) {
-            return Some(i);
-        }
-    }
-    None
-}
-
-/// Build highlight spans for a line with a query match at char index
-/// Returns spans for: prefix + before + match + after
-fn build_match_highlight_spans(
-    line: &str,
-    query: &str,
-    match_char_idx: usize,
-    content_width: usize,
-    prefix: &str,
-) -> Vec<Span<'static>> {
-    let chars: Vec<char> = line.chars().collect();
-    let query_char_count = query.chars().count();
-    let mut spans = vec![Span::styled(prefix.to_string(), Style::default())];
-
-    // Before match
-    if match_char_idx > 0 {
-        let before: String = chars[..match_char_idx].iter().collect();
-        let truncated = crate::ui::format::truncate_with_ellipsis(&before, content_width / 2);
-        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-    }
-    // Match (use original case from text)
-    let match_end = (match_char_idx + query_char_count).min(chars.len());
-    let match_text: String = chars[match_char_idx..match_end].iter().collect();
-    spans.push(Span::styled(match_text, Style::default().fg(theme::BG_APP).bg(theme::ACCENT_WARNING)));
-    // After match
-    if match_end < chars.len() {
-        let after: String = chars[match_end..].iter().collect();
-        let truncated = crate::ui::format::truncate_with_ellipsis(&after, content_width / 2);
-        spans.push(Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)));
-    }
-
-    spans
-}
-
-/// Render a single sidebar search result card
-fn render_sidebar_search_result_card(
-    f: &mut Frame,
-    _app: &App,
-    result: &crate::ui::search::SearchResult,
-    is_selected: bool,
-    area: Rect,
-    store: &std::cell::Ref<crate::store::AppDataStore>,
-    query: &str,
-) {
-    use crate::ui::search::SearchMatchType;
-
-    let time_str = crate::ui::format::format_relative_time(result.created_at);
-
-    let title_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_PRIMARY)
-    };
-
-    let bullet = if is_selected { card::BULLET } else { card::SPACER };
-    let bullet_color = theme::ACCENT_PRIMARY;
-
-    // Match type indicator
-    let (type_indicator, type_color) = match &result.match_type {
-        SearchMatchType::ThreadTitle => ("[T]", theme::ACCENT_PRIMARY),
-        SearchMatchType::ThreadContent => ("[C]", theme::ACCENT_WARNING),
-        SearchMatchType::ConversationId => ("[I]", theme::TEXT_MUTED),
-        SearchMatchType::Reply => ("[R]", theme::ACCENT_SUCCESS),
-    };
-
-    // Line 1: Title + match type + project + timestamp
-    let title_max = area.width as usize - 45;
-    let title = crate::ui::format::truncate_with_ellipsis(&result.thread_title, title_max);
-
-    let line1 = Line::from(vec![
-        Span::styled(bullet, Style::default().fg(bullet_color)),
-        Span::styled(type_indicator, Style::default().fg(type_color)),
-        Span::styled(" ", Style::default()),
-        Span::styled(title, title_style),
-        Span::styled("  ", Style::default()),
-        Span::styled(&result.project_name, Style::default().fg(theme::project_color(&result.project_a_tag))),
-        Span::styled(format!("  {}", time_str), Style::default().fg(theme::TEXT_MUTED)),
-    ]);
-
-    let mut lines = vec![line1];
-
-    // Line 2+: Show reply content if this is a reply match
-    if let Some(ref reply) = result.matching_reply {
-        // Get author name
-        let author_name = store.get_profile_name(&reply.author_pubkey);
-        let author_color = theme::user_color(&reply.author_pubkey);
-
-        // Author line
-        lines.push(Line::from(vec![
-            Span::styled("  @", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(author_name, Style::default().fg(author_color)),
-            Span::styled(":", Style::default().fg(theme::TEXT_MUTED)),
-        ]));
-
-        // Reply content with highlighted matches
-        let content_width = area.width as usize - 6;
-        let preview: String = reply.content.chars().take(200).collect();
-
-        for line in preview.lines().take(3) {
-            // Use char-based matching to handle Unicode correctly
-            let spans = if let Some(match_idx) = find_char_match_index(line, query) {
-                build_match_highlight_spans(line, query, match_idx, content_width, "    ")
-            } else {
-                let truncated = crate::ui::format::truncate_with_ellipsis(line, content_width);
-                vec![
-                    Span::styled("    ".to_string(), Style::default()),
-                    Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)),
-                ]
-            };
-            lines.push(Line::from(spans));
-        }
-    } else {
-        // For thread matches, show a snippet of the thread content
-        if !result.thread.content.is_empty() {
-            let content_width = area.width as usize - 6;
-            let content_preview: String = result.thread.content.chars().take(100).collect();
-            let first_line: String = content_preview.lines().next().unwrap_or("").to_string();
-
-            // Use char-based matching to handle Unicode correctly
-            let spans = if let Some(match_idx) = find_char_match_index(&first_line, query) {
-                build_match_highlight_spans(&first_line, query, match_idx, content_width, "  ")
-            } else {
-                let truncated = crate::ui::format::truncate_with_ellipsis(&first_line, content_width);
-                vec![
-                    Span::styled("  ".to_string(), Style::default()),
-                    Span::styled(truncated, Style::default().fg(theme::TEXT_MUTED)),
-                ]
-            };
-            lines.push(Line::from(spans));
-        }
-    }
-
-    // Spacing line
-    lines.push(Line::from(""));
-
-    let content = Paragraph::new(lines);
-
-    if is_selected {
-        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
-    } else {
-        f.render_widget(content, area);
     }
 }
 

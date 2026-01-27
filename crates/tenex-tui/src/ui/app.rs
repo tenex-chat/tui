@@ -3496,11 +3496,12 @@ impl App {
 
     /// Update sidebar search results based on current query and active tab
     pub fn update_sidebar_search_results(&mut self) {
-        use crate::ui::search::{search_conversations, search_reports};
+        use crate::ui::search::{search_conversations_hierarchical, search_reports};
         let store = self.data_store.borrow();
 
-        // Clear both result sets
+        // Clear all result sets
         self.sidebar_search.results.clear();
+        self.sidebar_search.hierarchical_results.clear();
         self.sidebar_search.report_results.clear();
 
         // Search based on current tab
@@ -3513,7 +3514,8 @@ impl App {
                 );
             }
             _ => {
-                self.sidebar_search.results = search_conversations(
+                // Use hierarchical search for conversations
+                self.sidebar_search.hierarchical_results = search_conversations_hierarchical(
                     &self.sidebar_search.query,
                     &store,
                     &self.visible_projects,
@@ -3527,6 +3529,8 @@ impl App {
 
     /// Open the selected search result (conversation or report based on current tab)
     pub fn open_selected_search_result(&mut self) {
+        use crate::ui::search::HierarchicalSearchItem;
+
         match self.home_panel_focus {
             HomeTab::Reports => {
                 // Open report (using clamped accessor)
@@ -3535,6 +3539,7 @@ impl App {
                     self.sidebar_search.visible = false;
                     self.sidebar_search.query.clear();
                     self.sidebar_search.results.clear();
+                    self.sidebar_search.hierarchical_results.clear();
                     self.sidebar_search.report_results.clear();
 
                     // Open the report in a viewer modal
@@ -3543,16 +3548,27 @@ impl App {
                 }
             }
             _ => {
-                // Open conversation (using clamped accessor)
-                if let Some(result) = self.sidebar_search.selected_result().cloned() {
+                // Open conversation from hierarchical results
+                if let Some(item) = self.sidebar_search.selected_hierarchical_result().cloned() {
+                    // Extract thread and project_a_tag from the item
+                    let (thread, project_a_tag) = match item {
+                        HierarchicalSearchItem::ContextAncestor { thread, project_a_tag, .. } => {
+                            (thread, project_a_tag)
+                        }
+                        HierarchicalSearchItem::MatchedConversation { thread, project_a_tag, .. } => {
+                            (thread, project_a_tag)
+                        }
+                    };
+
                     // Close search
                     self.sidebar_search.visible = false;
                     self.sidebar_search.query.clear();
                     self.sidebar_search.results.clear();
+                    self.sidebar_search.hierarchical_results.clear();
                     self.sidebar_search.report_results.clear();
 
                     // Open the thread
-                    self.open_thread_from_home(&result.thread, &result.project_a_tag);
+                    self.open_thread_from_home(&thread, &project_a_tag);
                 }
             }
         }
