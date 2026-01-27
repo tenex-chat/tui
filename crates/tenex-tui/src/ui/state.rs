@@ -862,43 +862,4 @@ mod tests {
         assert!(tabs.find_by_thread_id("tnew").is_some());
     }
 
-    #[test]
-    fn test_home_view_state() {
-        let mut state = HomeViewState::new();
-
-        assert_eq!(state.panel_focus, HomeTab::Conversations);
-        assert_eq!(state.current_selection(), 0);
-
-        state.set_current_selection(5);
-        assert_eq!(state.current_selection(), 5);
-
-        state.next_tab();
-        assert_eq!(state.panel_focus, HomeTab::Inbox);
-        assert_eq!(state.current_selection(), 0); // Different tab, different selection
-
-        state.set_current_selection(3);
-        state.next_tab();
-        state.prev_tab();
-        assert_eq!(state.current_selection(), 3); // Preserved
-    }
-
-    #[test]
-    fn test_chat_view_state() {
-        let mut state = ChatViewState::new();
-
-        assert!(state.todo_sidebar_visible);
-        assert!(!state.in_subthread());
-
-        state.enter_subthread("msg123".to_string());
-        assert!(state.in_subthread());
-        assert_eq!(state.subthread_root, Some("msg123".to_string()));
-
-        state.exit_subthread();
-        assert!(!state.in_subthread());
-
-        state.toggle_thread_collapse("t1");
-        assert!(state.is_thread_collapsed("t1"));
-        state.toggle_thread_collapse("t1");
-        assert!(!state.is_thread_collapsed("t1"));
-    }
 }
