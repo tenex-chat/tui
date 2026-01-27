@@ -438,7 +438,14 @@ fn render_card_content(
     };
 
     // Format relative time for last activity
-    let time_str = format_relative_time(thread.last_activity);
+    // When collapsed with children, show effective_last_activity (most recent in entire tree)
+    // Otherwise show the conversation's own last_activity
+    let display_timestamp = if is_collapsed && has_children {
+        thread.effective_last_activity
+    } else {
+        thread.last_activity
+    };
+    let time_str = format_relative_time(display_timestamp);
 
     // Format runtime (similar to ConversationMetadata::formatted_runtime)
     let runtime_str = if hierarchical_runtime > 0 {
