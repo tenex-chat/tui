@@ -1,5 +1,21 @@
 use std::collections::{HashMap, HashSet};
 
+/// Unix timestamp for January 24, 2025 00:00:00 UTC.
+/// Runtime data from before this date should be excluded from stats calculations.
+///
+/// **Why this cutoff exists:**
+/// The way LLM runtime was tracked changed on January 24, 2025.
+/// Data from before this date uses a different tracking methodology and is not
+/// comparable to current data. Including it would skew statistics with
+/// inconsistent/unreliable values. This affects:
+/// - Per-day LLM runtime bar chart
+/// - Total runtime calculations
+/// - Average runtime calculations
+/// - Top 10 Longest Conversations ranking
+///
+/// Cost data is NOT affected by this cutoff - only runtime data.
+pub const RUNTIME_CUTOFF_TIMESTAMP: u64 = 1737676800;
+
 /// Centralized store for hierarchical conversation runtime tracking.
 /// Tracks individual conversation runtimes and parent-child relationships
 /// to enable efficient recursive runtime aggregation.
@@ -332,9 +348,22 @@ impl RuntimeHierarchy {
     /// under their parents, this simply sums each conversation's runtime exactly once.
     /// Used for the global status bar runtime display.
     ///
-    /// This is O(1) as the total is cached and updated incrementally.
+    /// **Note:** Excludes runtime data from before RUNTIME_CUTOFF_TIMESTAMP
+    /// (January 24, 2025) due to tracking methodology changes.
+    ///
+    /// This is O(n) as it filters by creation date. For unfiltered totals,
+    /// the cached_total_unique_runtime is still maintained for internal use.
     pub fn get_total_unique_runtime(&self) -> u64 {
-        self.cached_total_unique_runtime
+        self.individual_runtimes
+            .iter()
+            .filter(|(conv_id, _)| {
+                self.conversation_created_at
+                    .get(*conv_id)
+                    .map(|created_at| *created_at >= RUNTIME_CUTOFF_TIMESTAMP)
+                    .unwrap_or(false)
+            })
+            .map(|(_, runtime)| runtime)
+            .sum()
     }
 
     /// Get the sum of individual runtimes for conversations created TODAY only (UTC).
@@ -343,6 +372,9 @@ impl RuntimeHierarchy {
     ///
     /// Uses caching: O(n) on first call or after cache invalidation, O(1) on subsequent calls
     /// within the same day.
+    ///
+    /// **Note:** Excludes runtime data from before RUNTIME_CUTOFF_TIMESTAMP
+    /// (January 24, 2025) due to tracking methodology changes.
     pub fn get_today_unique_runtime(&mut self) -> u64 {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -366,10 +398,14 @@ impl RuntimeHierarchy {
             .individual_runtimes
             .iter()
             .filter(|(conv_id, _)| {
-                // Check if conversation was created today
+                // Check if conversation was created today AND after the runtime cutoff
                 self.conversation_created_at
                     .get(*conv_id)
                     .map(|created_at| {
+                        // Filter out data from before the runtime tracking cutoff date
+                        if *created_at < RUNTIME_CUTOFF_TIMESTAMP {
+                            return false;
+                        }
                         let conv_day_start = (*created_at / seconds_per_day) * seconds_per_day;
                         conv_day_start == current_day_start
                     })
@@ -389,6 +425,9 @@ impl RuntimeHierarchy {
     /// sorted by day in ascending order (oldest first).
     /// Only includes days with non-zero runtime.
     /// Used for displaying runtime bar charts in the Stats tab.
+    ///
+    /// **Note:** Excludes runtime data from before RUNTIME_CUTOFF_TIMESTAMP
+    /// (January 24, 2025) due to tracking methodology changes.
     pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
         // Guard against zero days
         if num_days == 0 {
@@ -403,7 +442,7 @@ impl RuntimeHierarchy {
         let seconds_per_day: u64 = 86400;
         let today_start = (now / seconds_per_day) * seconds_per_day;
         // Use saturating_sub to prevent underflow
-        let cutoff = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
+        let time_window_cutoff = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
 
         // Group runtimes by day
         let mut by_day: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
@@ -413,8 +452,12 @@ impl RuntimeHierarchy {
                 continue;
             }
             if let Some(created_at) = self.conversation_created_at.get(conv_id) {
+                // Filter out data from before the runtime tracking cutoff date
+                if *created_at < RUNTIME_CUTOFF_TIMESTAMP {
+                    continue;
+                }
                 let day_start = (*created_at / seconds_per_day) * seconds_per_day;
-                if day_start >= cutoff {
+                if day_start >= time_window_cutoff {
                     *by_day.entry(day_start).or_insert(0) += runtime;
                 }
             }
@@ -430,6 +473,9 @@ impl RuntimeHierarchy {
     /// Returns (conversation_id, total_runtime_ms) tuples sorted by runtime descending.
     /// Only includes ROOT conversations (those without parents).
     /// Used for the Stats tab's "Top 10 Longest Conversations" display.
+    ///
+    /// **Note:** Excludes runtime data from before RUNTIME_CUTOFF_TIMESTAMP
+    /// (January 24, 2025) due to tracking methodology changes.
     pub fn get_top_conversations_by_runtime(&self, limit: usize) -> Vec<(String, u64)> {
         // Build unified set of all conversation IDs from:
         // - individual_runtimes keys
@@ -454,9 +500,10 @@ impl RuntimeHierarchy {
             .collect();
 
         // Calculate total runtime for each root (including all descendants)
+        // using the filtered version that excludes pre-cutoff data
         let mut runtimes: Vec<(String, u64)> = root_conversations
             .into_iter()
-            .map(|id| (id.clone(), self.get_total_runtime(id)))
+            .map(|id| (id.clone(), self.get_total_runtime_filtered(id)))
             .filter(|(_, runtime)| *runtime > 0)
             .collect();
 
@@ -464,6 +511,49 @@ impl RuntimeHierarchy {
         runtimes.sort_by(|a, b| b.1.cmp(&a.1));
         runtimes.truncate(limit);
         runtimes
+    }
+
+    /// Calculate total runtime for a conversation including all descendants,
+    /// but ONLY counting runtime from conversations created after RUNTIME_CUTOFF_TIMESTAMP.
+    /// This is used for stats display to exclude pre-cutoff data.
+    fn get_total_runtime_filtered(&self, conversation_id: &str) -> u64 {
+        self.get_total_runtime_filtered_with_visited(conversation_id, &mut HashSet::new())
+    }
+
+    /// Internal recursive implementation with cycle detection and timestamp filtering
+    fn get_total_runtime_filtered_with_visited(
+        &self,
+        conversation_id: &str,
+        visited: &mut HashSet<String>,
+    ) -> u64 {
+        // Cycle detection
+        if visited.contains(conversation_id) {
+            return 0;
+        }
+        visited.insert(conversation_id.to_string());
+
+        // Check if this conversation was created after the cutoff
+        let is_after_cutoff = self
+            .conversation_created_at
+            .get(conversation_id)
+            .map(|created_at| *created_at >= RUNTIME_CUTOFF_TIMESTAMP)
+            .unwrap_or(false);
+
+        // Start with this conversation's individual runtime (only if after cutoff)
+        let mut total = if is_after_cutoff {
+            self.get_individual_runtime(conversation_id)
+        } else {
+            0
+        };
+
+        // Add runtime from all children recursively (each child also filtered)
+        if let Some(children) = self.children.get(conversation_id) {
+            for child_id in children {
+                total += self.get_total_runtime_filtered_with_visited(child_id, visited);
+            }
+        }
+
+        total
     }
 }
 
@@ -811,11 +901,18 @@ mod tests {
         // regardless of hierarchy relationships
         let mut hierarchy = RuntimeHierarchy::new();
 
+        // Use a timestamp after the RUNTIME_CUTOFF_TIMESTAMP
+        let valid_timestamp = RUNTIME_CUTOFF_TIMESTAMP + 86400; // One day after cutoff
+
         // Setup: parent -> [child1, child2], child1 -> grandchild
         hierarchy.set_individual_runtime("parent", 10_000);
+        hierarchy.set_conversation_created_at("parent", valid_timestamp);
         hierarchy.set_individual_runtime("child1", 20_000);
+        hierarchy.set_conversation_created_at("child1", valid_timestamp);
         hierarchy.set_individual_runtime("child2", 30_000);
+        hierarchy.set_conversation_created_at("child2", valid_timestamp);
         hierarchy.set_individual_runtime("grandchild", 40_000);
+        hierarchy.set_conversation_created_at("grandchild", valid_timestamp);
 
         hierarchy.set_parent("child1", "parent");
         hierarchy.set_parent("child2", "parent");
@@ -830,6 +927,7 @@ mod tests {
 
         // Now add an unrelated conversation
         hierarchy.set_individual_runtime("unrelated", 50_000);
+        hierarchy.set_conversation_created_at("unrelated", valid_timestamp);
 
         // Parent's hierarchical runtime unchanged
         assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
@@ -845,9 +943,14 @@ mod tests {
         // Test that updating an existing conversation's runtime correctly updates the cache
         let mut hierarchy = RuntimeHierarchy::new();
 
+        // Use a timestamp after the RUNTIME_CUTOFF_TIMESTAMP
+        let valid_timestamp = RUNTIME_CUTOFF_TIMESTAMP + 86400; // One day after cutoff
+
         // Initial setup
         hierarchy.set_individual_runtime("conv1", 10_000);
+        hierarchy.set_conversation_created_at("conv1", valid_timestamp);
         hierarchy.set_individual_runtime("conv2", 20_000);
+        hierarchy.set_conversation_created_at("conv2", valid_timestamp);
 
         // Verify initial total
         assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
@@ -872,8 +975,13 @@ mod tests {
         // Test that setting runtime to 0 correctly updates the cache
         let mut hierarchy = RuntimeHierarchy::new();
 
+        // Use a timestamp after the RUNTIME_CUTOFF_TIMESTAMP
+        let valid_timestamp = RUNTIME_CUTOFF_TIMESTAMP + 86400; // One day after cutoff
+
         hierarchy.set_individual_runtime("conv1", 10_000);
+        hierarchy.set_conversation_created_at("conv1", valid_timestamp);
         hierarchy.set_individual_runtime("conv2", 20_000);
+        hierarchy.set_conversation_created_at("conv2", valid_timestamp);
         assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
 
         // Set conv1 to 0
@@ -890,11 +998,14 @@ mod tests {
         // Test that clear() properly resets all data including caches
         let mut hierarchy = RuntimeHierarchy::new();
 
+        // Use a timestamp after the RUNTIME_CUTOFF_TIMESTAMP
+        let valid_timestamp = RUNTIME_CUTOFF_TIMESTAMP + 86400; // One day after cutoff
+
         // Setup some data
         hierarchy.set_individual_runtime("conv1", 10_000);
         hierarchy.set_individual_runtime("conv2", 20_000);
-        hierarchy.set_conversation_created_at("conv1", 1000000);
-        hierarchy.set_conversation_created_at("conv2", 1000000);
+        hierarchy.set_conversation_created_at("conv1", valid_timestamp);
+        hierarchy.set_conversation_created_at("conv2", valid_timestamp);
         hierarchy.set_parent("conv2", "conv1");
 
         // Verify data exists
@@ -920,9 +1031,13 @@ mod tests {
         // Stress test: many updates should keep cache consistent
         let mut hierarchy = RuntimeHierarchy::new();
 
+        // Use a timestamp after the RUNTIME_CUTOFF_TIMESTAMP
+        let valid_timestamp = RUNTIME_CUTOFF_TIMESTAMP + 86400; // One day after cutoff
+
         // Add many conversations
         for i in 0..100 {
             hierarchy.set_individual_runtime(&format!("conv{}", i), 1000);
+            hierarchy.set_conversation_created_at(&format!("conv{}", i), valid_timestamp);
         }
         assert_eq!(hierarchy.get_total_unique_runtime(), 100_000);
 
@@ -986,7 +1101,7 @@ mod tests {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Conversation with creation date
+        // Conversation with creation date (today, after cutoff)
         hierarchy.set_individual_runtime("with_date", 10_000);
         hierarchy.set_conversation_created_at("with_date", now);
 
@@ -994,8 +1109,9 @@ mod tests {
         hierarchy.set_individual_runtime("without_date", 20_000);
         // No set_conversation_created_at call
 
-        // Total includes both
-        assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
+        // Total only includes conversations with valid creation dates (after cutoff)
+        // Conversations without creation dates are excluded (no way to verify they're after cutoff)
+        assert_eq!(hierarchy.get_total_unique_runtime(), 10_000);
 
         // Today only includes the one with a date
         assert_eq!(hierarchy.get_today_unique_runtime(), 10_000);
