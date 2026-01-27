@@ -97,6 +97,7 @@ pub enum HomeTab {
     Reports,
     Status,
     Feed,
+    Stats,
 }
 
 // ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState

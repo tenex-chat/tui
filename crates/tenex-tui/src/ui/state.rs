@@ -901,6 +901,7 @@ pub enum HomeTab {
     Reports,
     Status,
     Feed,
+    Stats,
 }
 
 /// State for home view navigation and filtering.
@@ -946,18 +947,20 @@ impl HomeViewState {
             HomeTab::Inbox => HomeTab::Reports,
             HomeTab::Reports => HomeTab::Status,
             HomeTab::Status => HomeTab::Feed,
-            HomeTab::Feed => HomeTab::Conversations,
+            HomeTab::Feed => HomeTab::Stats,
+            HomeTab::Stats => HomeTab::Conversations,
         };
     }
 
     /// Cycle to previous tab
     pub fn prev_tab(&mut self) {
         self.panel_focus = match self.panel_focus {
-            HomeTab::Conversations => HomeTab::Feed,
+            HomeTab::Conversations => HomeTab::Stats,
             HomeTab::Inbox => HomeTab::Conversations,
             HomeTab::Reports => HomeTab::Inbox,
             HomeTab::Status => HomeTab::Reports,
             HomeTab::Feed => HomeTab::Status,
+            HomeTab::Stats => HomeTab::Feed,
         };
     }
 

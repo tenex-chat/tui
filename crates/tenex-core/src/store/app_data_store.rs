@@ -635,6 +635,76 @@ impl AppDataStore {
         self.runtime_hierarchy.get_today_unique_runtime()
     }
 
+    /// Get runtime aggregated by day for the Stats tab bar chart.
+    /// Returns (day_start_timestamp, total_runtime_ms) tuples.
+    pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
+        self.runtime_hierarchy.get_runtime_by_day(num_days)
+    }
+
+    /// Get top N conversations by total runtime (including descendants).
+    /// Returns (conversation_id, total_runtime_ms) tuples.
+    pub fn get_top_conversations_by_runtime(&self, limit: usize) -> Vec<(String, u64)> {
+        self.runtime_hierarchy.get_top_conversations_by_runtime(limit)
+    }
+
+    /// Helper: iterate over all (message, cost_usd) pairs across all threads.
+    /// Extracts cost-usd from llm_metadata, returning only messages with valid costs.
+    fn iter_message_costs(&self) -> impl Iterator<Item = (&Message, f64)> {
+        self.messages_by_thread
+            .values()
+            .flat_map(|messages| messages.iter())
+            .filter_map(|msg| {
+                msg.llm_metadata
+                    .iter()
+                    .find(|(key, _)| key == "cost-usd")
+                    .and_then(|(_, value)| value.parse::<f64>().ok())
+                    .map(|cost| (msg, cost))
+            })
+    }
+
+    /// Get total cost across all messages (sum of llm-cost-usd tags).
+    /// Returns the total cost in USD as a float.
+    pub fn get_total_cost(&self) -> f64 {
+        self.iter_message_costs().map(|(_, cost)| cost).sum()
+    }
+
+    /// Get cost aggregated by project.
+    /// Returns (project_a_tag, project_name, total_cost) tuples sorted by cost descending.
+    pub fn get_cost_by_project(&self) -> Vec<(String, String, f64)> {
+        let mut costs: HashMap<String, f64> = HashMap::new();
+
+        for (a_tag, threads) in &self.threads_by_project {
+            let thread_ids: std::collections::HashSet<&str> =
+                threads.iter().map(|t| t.id.as_str()).collect();
+
+            let project_cost: f64 = self
+                .iter_message_costs()
+                .filter(|(msg, _)| thread_ids.contains(msg.thread_id.as_str()))
+                .map(|(_, cost)| cost)
+                .sum();
+
+            if project_cost > 0.0 {
+                costs.insert(a_tag.clone(), project_cost);
+            }
+        }
+
+        // Convert to vec with project names and sort by cost descending
+        let mut result: Vec<(String, String, f64)> = costs
+            .into_iter()
+            .map(|(a_tag, cost)| {
+                let name = self
+                    .projects
+                    .iter()
+                    .find(|p| p.a_tag() == a_tag)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string());
+                (a_tag, name, cost)
+            })
+            .collect();
+        result.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        result
+    }
+
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
     /// Only applies the MOST RECENT metadata event for each thread
     fn apply_existing_metadata(&mut self) {
