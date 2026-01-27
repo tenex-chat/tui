@@ -863,3 +863,259 @@ mod tests {
     }
 
 }
+
+// =============================================================================
+// CONVERSATION STATE
+// =============================================================================
+
+use crate::models::{Message, ProjectAgent, Thread};
+use std::collections::HashMap;
+
+/// Buffer for local streaming content (per conversation)
+#[derive(Default, Clone)]
+pub struct LocalStreamBuffer {
+    pub agent_pubkey: String,
+    pub text_content: String,
+    pub reasoning_content: String,
+    pub is_complete: bool,
+}
+
+/// State for conversation view - thread/agent selection, subthread navigation, and message display.
+///
+/// This consolidates conversation-related state that was previously scattered across App.
+/// It manages:
+/// - Currently selected thread and agent
+/// - Subthread navigation (viewing replies to a specific message)
+/// - Message selection within the conversation
+/// - Local streaming buffers for real-time message updates
+/// - LLM metadata display toggle
+#[derive(Default)]
+pub struct ConversationState {
+    /// Currently selected thread
+    pub selected_thread: Option<Thread>,
+    /// Currently selected agent for sending messages
+    pub selected_agent: Option<ProjectAgent>,
+    /// Subthread root message ID (when viewing replies to a specific message)
+    pub subthread_root: Option<String>,
+    /// The root message when viewing a subthread (for display and reply tagging)
+    pub subthread_root_message: Option<Message>,
+    /// Index of selected message in chat view (for navigation)
+    pub selected_message_index: usize,
+    /// Local streaming buffers by conversation_id
+    pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
+    /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
+    pub show_llm_metadata: bool,
+}
+
+impl ConversationState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enter a subthread view rooted at the given message
+    pub fn enter_subthread(&mut self, message: Message) {
+        self.subthread_root = Some(message.id.clone());
+        self.subthread_root_message = Some(message);
+        self.selected_message_index = 0;
+    }
+
+    /// Exit the current subthread view and return to parent
+    pub fn exit_subthread(&mut self) {
+        self.subthread_root = None;
+        self.subthread_root_message = None;
+        self.selected_message_index = 0;
+    }
+
+    /// Check if we're currently viewing a subthread
+    pub fn in_subthread(&self) -> bool {
+        self.subthread_root.is_some()
+    }
+
+    /// Get current conversation ID (thread ID)
+    pub fn current_conversation_id(&self) -> Option<String> {
+        self.selected_thread.as_ref().map(|t| t.id.clone())
+    }
+
+    /// Get streaming content for current conversation
+    pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
+        let conv_id = self.current_conversation_id()?;
+        self.local_stream_buffers.get(&conv_id)
+    }
+
+    /// Update streaming buffer from local chunk
+    pub fn handle_local_stream_chunk(
+        &mut self,
+        agent_pubkey: String,
+        conversation_id: String,
+        text_delta: Option<String>,
+        reasoning_delta: Option<String>,
+        is_finish: bool,
+    ) {
+        let buffer = self.local_stream_buffers
+            .entry(conversation_id)
+            .or_default();
+
+        buffer.agent_pubkey = agent_pubkey;
+        if let Some(delta) = text_delta {
+            buffer.text_content.push_str(&delta);
+        }
+        if let Some(delta) = reasoning_delta {
+            buffer.reasoning_content.push_str(&delta);
+        }
+        if is_finish {
+            buffer.is_complete = true;
+        }
+    }
+
+    /// Clear the local stream buffer for a conversation
+    pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
+        self.local_stream_buffers.remove(conversation_id);
+    }
+
+    /// Toggle LLM metadata display
+    pub fn toggle_llm_metadata(&mut self) {
+        self.show_llm_metadata = !self.show_llm_metadata;
+    }
+
+    /// Reset message selection to the beginning
+    pub fn reset_message_selection(&mut self) {
+        self.selected_message_index = 0;
+    }
+
+    /// Clear thread and agent selection (e.g., when navigating away)
+    pub fn clear_selection(&mut self) {
+        self.selected_thread = None;
+        self.selected_agent = None;
+        self.subthread_root = None;
+        self.subthread_root_message = None;
+        self.selected_message_index = 0;
+    }
+}
+
+#[cfg(test)]
+mod conversation_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_conversation_state_new() {
+        let state = ConversationState::new();
+        assert!(state.selected_thread.is_none());
+        assert!(state.selected_agent.is_none());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+        assert_eq!(state.selected_message_index, 0);
+        assert!(state.local_stream_buffers.is_empty());
+        assert!(!state.show_llm_metadata);
+    }
+
+    #[test]
+    fn test_subthread_navigation() {
+        let mut state = ConversationState::new();
+
+        // Initially not in subthread
+        assert!(!state.in_subthread());
+
+        // Create a mock message for testing
+        let message = Message {
+            id: "msg-123".to_string(),
+            pubkey: "test-pubkey".to_string(),
+            content: "Test message".to_string(),
+            created_at: 1234567890,
+            thread_id: "thread-456".to_string(),
+            reply_to: None,
+            is_reasoning: false,
+            ask_event: None,
+            q_tags: vec![],
+            a_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            tool_args: None,
+            llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
+        };
+
+        // Enter subthread
+        state.enter_subthread(message.clone());
+        assert!(state.in_subthread());
+        assert_eq!(state.subthread_root, Some("msg-123".to_string()));
+        assert_eq!(state.selected_message_index, 0);
+
+        // Exit subthread
+        state.exit_subthread();
+        assert!(!state.in_subthread());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+    }
+
+    #[test]
+    fn test_streaming_buffer() {
+        let mut state = ConversationState::new();
+
+        // Handle stream chunk
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("Hello ".to_string()),
+            None,
+            false,
+        );
+
+        // Check buffer state
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.agent_pubkey, "agent-pubkey");
+        assert_eq!(buffer.text_content, "Hello ");
+        assert!(!buffer.is_complete);
+
+        // Add more content
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("World!".to_string()),
+            Some("Reasoning text".to_string()),
+            true,
+        );
+
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.text_content, "Hello World!");
+        assert_eq!(buffer.reasoning_content, "Reasoning text");
+        assert!(buffer.is_complete);
+
+        // Clear buffer
+        state.clear_local_stream_buffer("conv-123");
+        assert!(state.local_stream_buffers.get("conv-123").is_none());
+    }
+
+    #[test]
+    fn test_toggle_llm_metadata() {
+        let mut state = ConversationState::new();
+        assert!(!state.show_llm_metadata);
+
+        state.toggle_llm_metadata();
+        assert!(state.show_llm_metadata);
+
+        state.toggle_llm_metadata();
+        assert!(!state.show_llm_metadata);
+    }
+
+    #[test]
+    fn test_clear_selection() {
+        let mut state = ConversationState::new();
+
+        // Set some state
+        state.selected_message_index = 5;
+        state.subthread_root = Some("root-msg".to_string());
+        state.show_llm_metadata = true;
+
+        // Clear selection
+        state.clear_selection();
+
+        assert!(state.selected_thread.is_none());
+        assert!(state.selected_agent.is_none());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+        assert_eq!(state.selected_message_index, 0);
+        // Note: show_llm_metadata is NOT cleared - it's a display preference
+        assert!(state.show_llm_metadata);
+    }
+}

@@ -199,7 +199,7 @@ async fn main() -> Result<()> {
         AuthResult::Success => LoginStep::Nsec, // Won't be shown since view is Home
         AuthResult::ShowLogin(step, error_msg) => {
             if let Some(msg) = error_msg {
-                app.set_status(&msg);
+                app.set_warning_status(&msg);
             }
             app.input_mode = InputMode::Editing;
             step

@@ -1,12 +1,13 @@
-use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, DraftStorage, Message, NamedDraft, NamedDraftStorage, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
+use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, Message, NamedDraft, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
 use crate::ui::modal::{CommandPaletteState, ModalState};
-use crate::ui::notifications::{Notification, NotificationQueue};
+use crate::ui::notifications::Notification;
+use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{ChatSearchMatch, ChatSearchState, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, LocalStreamBuffer, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -100,17 +101,8 @@ pub enum HomeTab {
     Stats,
 }
 
-// ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState
-// are now in ui::state module
-
-/// Buffer for local streaming content (per conversation)
-#[derive(Default, Clone)]
-pub struct LocalStreamBuffer {
-    pub agent_pubkey: String,
-    pub text_content: String,
-    pub reasoning_content: String,
-    pub is_complete: bool,
-}
+// ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState,
+// LocalStreamBuffer, ConversationState are now in ui::state module
 
 /// Vim mode states
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -169,14 +161,16 @@ pub struct App {
     pub keys: Option<Keys>,
 
     pub selected_project: Option<Project>,
-    pub selected_thread: Option<Thread>,
-    pub selected_agent: Option<ProjectAgent>,
+    /// Conversation state (thread/agent selection, subthreads, message display) - private, use accessor methods
+    conversation: ConversationState,
 
     pub scroll_offset: usize,
     /// Maximum scroll offset (set after rendering to enable proper scroll clamping)
     pub max_scroll_offset: usize,
-    /// Notification queue for toast/status messages
-    pub notifications: NotificationQueue,
+    /// Notification manager for toast/status messages (private - use accessor methods)
+    notification_manager: NotificationManager,
+    /// Animation clock for UI spinners and pulsing indicators (private - use accessor methods)
+    animation_clock: AnimationClock,
 
     pub creating_thread: bool,
     pub selected_branch: Option<String>,
@@ -187,11 +181,8 @@ pub struct App {
     /// Whether user pressed Ctrl+C once (pending quit confirmation)
     pub pending_quit: bool,
 
-    /// Draft storage for persisting message drafts
-    draft_storage: RefCell<DraftStorage>,
-
-    /// Named draft storage for user-saved drafts associated with projects
-    named_draft_storage: RefCell<NamedDraftStorage>,
+    /// Unified draft service for persisting message drafts and named drafts
+    draft_service: DraftService,
 
     /// Fallback text editor for chat input when no tab is active.
     /// This should rarely be used - only as a fallback when tabs are empty.
@@ -219,12 +210,8 @@ pub struct App {
     /// Negentropy sync stats for debugging
     pub negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
 
-    /// When viewing a subthread, this is the root message ID
-    pub subthread_root: Option<String>,
-    /// The root message when viewing a subthread (for display and reply tagging)
-    pub subthread_root_message: Option<Message>,
-    /// Index of selected message in chat view (for navigation)
-    pub selected_message_index: usize,
+    // NOTE: subthread_root, subthread_root_message, selected_message_index
+    // are now in ConversationState (accessed via conversation field)
 
     /// Tab management (open tabs, history, modal state)
     pub tabs: TabManager,
@@ -266,12 +253,7 @@ pub struct App {
     pub search_index: usize,
 
     // NOTE: chat_search is now per-tab in OpenTab.chat_search
-
-    /// Local streaming buffers by conversation_id
-    pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
-
-    /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
-    pub show_llm_metadata: bool,
+    // NOTE: local_stream_buffers, show_llm_metadata are now in ConversationState
 
     /// Toggle for showing/hiding the todo sidebar
     pub todo_sidebar_visible: bool,
@@ -288,10 +270,7 @@ pub struct App {
     pub pending_new_thread_draft_id: Option<String>,
 
     // NOTE: selected_nudge_ids is now per-tab in OpenTab.selected_nudge_ids
-
-    /// Frame counter for animations (incremented on each tick)
-    pub frame_counter: u64,
-
+    // NOTE: frame_counter is now managed by notification_manager
     // NOTE: message_history is now per-tab in OpenTab.message_history
     // NOTE: chat_search is now per-tab in OpenTab.chat_search
 
@@ -339,12 +318,12 @@ impl App {
             keys: None,
 
             selected_project: None,
-            selected_thread: None,
-            selected_agent: None,
+            conversation: ConversationState::new(),
 
             scroll_offset: 0,
             max_scroll_offset: 0,
-            notifications: NotificationQueue::new(),
+            notification_manager: NotificationManager::new(),
+            animation_clock: AnimationClock::new(),
 
             creating_thread: false,
             selected_branch: None,
@@ -353,8 +332,7 @@ impl App {
             data_rx: None,
 
             pending_quit: false,
-            draft_storage: RefCell::new(DraftStorage::new("tenex_data")),
-            named_draft_storage: RefCell::new(NamedDraftStorage::new("tenex_data")),
+            draft_service: DraftService::new(data_dir),
             fallback_editor: TextEditor::new(),
             showing_attachment_modal: false,
             attachment_modal_editor: TextEditor::new(),
@@ -363,9 +341,6 @@ impl App {
             event_stats,
             subscription_stats,
             negentropy_stats,
-            subthread_root: None,
-            subthread_root_message: None,
-            selected_message_index: 0,
             tabs: TabManager::new(),
             home_panel_focus: HomeTab::Conversations,
             tab_selection: HashMap::new(),
@@ -387,15 +362,14 @@ impl App {
             search_filter: String::new(),
             search_index: 0,
             // NOTE: chat_search is now per-tab in OpenTab
-            local_stream_buffers: HashMap::new(),
-            show_llm_metadata: false,
+            // NOTE: local_stream_buffers, show_llm_metadata are in ConversationState
             todo_sidebar_visible: true,
             sidebar_state: SidebarState::new(),
             collapsed_threads: HashSet::new(),
             pending_new_thread_project: None,
             pending_new_thread_draft_id: None,
             // NOTE: selected_nudge_ids is now per-tab in OpenTab
-            frame_counter: 0,
+            // NOTE: frame_counter is now managed by notification_manager
             // NOTE: message_history is now per-tab in OpenTab
             vim_enabled: false,
             vim_mode: VimMode::Normal,
@@ -500,18 +474,141 @@ impl App {
         }
     }
 
+    // =============================================================================
+    // TICK AND ANIMATION METHODS
+    // =============================================================================
+
     /// Increment frame counter and update notifications (call on each tick)
     pub fn tick(&mut self) {
-        self.frame_counter = self.frame_counter.wrapping_add(1);
-        self.notifications.tick();
+        self.animation_clock.tick();
+        self.notification_manager.tick();
     }
 
     /// Get spinner character based on frame counter
     pub fn spinner_char(&self) -> char {
-        const SPINNERS: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-        // Divide by 2 to slow down the animation (every 2 frames = ~200ms at 10fps)
-        SPINNERS[(self.frame_counter / 2) as usize % SPINNERS.len()]
+        self.animation_clock.spinner_char()
     }
+
+    /// Get activity indicator for pulsing displays (◉/○)
+    pub fn activity_indicator(&self) -> &'static str {
+        self.animation_clock.activity_indicator()
+    }
+
+    /// Get activity pulse state (true = on, false = off)
+    pub fn activity_pulse(&self) -> bool {
+        self.animation_clock.activity_pulse()
+    }
+
+    // =============================================================================
+    // NOTIFICATION METHODS
+    // =============================================================================
+
+    /// Add a notification to the queue
+    pub fn notify(&mut self, notification: Notification) {
+        self.notification_manager.notify(notification);
+    }
+
+    /// Set a warning status message (legacy compatibility)
+    pub fn set_warning_status(&mut self, message: &str) {
+        self.notification_manager.set_warning_status(message);
+    }
+
+    /// Dismiss the current notification
+    pub fn dismiss_notification(&mut self) {
+        self.notification_manager.dismiss();
+    }
+
+    /// Get the current notification being displayed
+    pub fn current_notification(&self) -> Option<&Notification> {
+        self.notification_manager.current()
+    }
+
+    /// Check if there are any active notifications
+    pub fn has_notifications(&self) -> bool {
+        self.notification_manager.has_notifications()
+    }
+
+    // =============================================================================
+    // CONVERSATION STATE ACCESSOR METHODS (backward compatibility)
+    // =============================================================================
+    // These methods delegate to ConversationState for backward compatibility with code
+    // that accesses app.selected_thread, app.selected_agent, etc. directly.
+
+    /// Get reference to the selected thread
+    #[inline]
+    pub fn selected_thread(&self) -> Option<&Thread> {
+        self.conversation.selected_thread.as_ref()
+    }
+
+    /// Set the selected thread
+    #[inline]
+    pub fn set_selected_thread(&mut self, thread: Option<Thread>) {
+        self.conversation.selected_thread = thread;
+    }
+
+    /// Get reference to the selected agent
+    #[inline]
+    pub fn selected_agent(&self) -> Option<&ProjectAgent> {
+        self.conversation.selected_agent.as_ref()
+    }
+
+    /// Set the selected agent
+    #[inline]
+    pub fn set_selected_agent(&mut self, agent: Option<ProjectAgent>) {
+        self.conversation.selected_agent = agent;
+    }
+
+    /// Get the subthread root message ID (if viewing a subthread)
+    #[inline]
+    pub fn subthread_root(&self) -> Option<&String> {
+        self.conversation.subthread_root.as_ref()
+    }
+
+    /// Get the subthread root message (if viewing a subthread)
+    #[inline]
+    pub fn subthread_root_message(&self) -> Option<&Message> {
+        self.conversation.subthread_root_message.as_ref()
+    }
+
+    /// Get the selected message index
+    #[inline]
+    pub fn selected_message_index(&self) -> usize {
+        self.conversation.selected_message_index
+    }
+
+    /// Set the selected message index
+    #[inline]
+    pub fn set_selected_message_index(&mut self, index: usize) {
+        self.conversation.selected_message_index = index;
+    }
+
+    /// Get the LLM metadata display toggle
+    #[inline]
+    pub fn show_llm_metadata(&self) -> bool {
+        self.conversation.show_llm_metadata
+    }
+
+    /// Set the LLM metadata display toggle
+    #[inline]
+    pub fn set_show_llm_metadata(&mut self, show: bool) {
+        self.conversation.show_llm_metadata = show;
+    }
+
+    /// Get reference to local stream buffers
+    #[inline]
+    pub fn local_stream_buffers(&self) -> &HashMap<String, LocalStreamBuffer> {
+        &self.conversation.local_stream_buffers
+    }
+
+    /// Get mutable reference to local stream buffers
+    #[inline]
+    pub fn local_stream_buffers_mut(&mut self) -> &mut HashMap<String, LocalStreamBuffer> {
+        &mut self.conversation.local_stream_buffers
+    }
+
+    // =============================================================================
+    // THREAD COLLAPSE METHODS
+    // =============================================================================
 
     /// Toggle collapse state for a thread (for hierarchical folding)
     pub fn toggle_thread_collapse(&mut self, thread_id: &str) {
@@ -556,7 +653,7 @@ impl App {
 
     /// Get messages for the currently selected thread
     pub fn messages(&self) -> Vec<Message> {
-        self.selected_thread.as_ref()
+        self.conversation.selected_thread.as_ref()
             .map(|t| self.data_store.borrow().get_messages(&t.id).to_vec())
             .unwrap_or_default()
     }
@@ -584,13 +681,13 @@ impl App {
         use crate::ui::views::chat::{group_messages, DisplayItem};
 
         let messages = self.messages();
-        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
-        let subthread_root = self.subthread_root.as_deref();
+        let thread_id = self.conversation.selected_thread.as_ref().map(|t| t.id.as_str());
+        let subthread_root = self.conversation.subthread_root.as_deref();
 
         let display_messages = Self::filter_messages_for_view(&messages, thread_id, subthread_root);
         let grouped = group_messages(&display_messages);
 
-        grouped.get(self.selected_message_index).and_then(|item| {
+        grouped.get(self.conversation.selected_message_index).and_then(|item| {
             match item {
                 DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
                 DisplayItem::DelegationPreview { .. } => None,
@@ -611,8 +708,8 @@ impl App {
         use crate::ui::views::chat::group_messages;
 
         let messages = self.messages();
-        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
-        let subthread_root = self.subthread_root.as_deref();
+        let thread_id = self.conversation.selected_thread.as_ref().map(|t| t.id.as_str());
+        let subthread_root = self.conversation.subthread_root.as_deref();
 
         let display_messages = Self::filter_messages_for_view(&messages, thread_id, subthread_root);
         group_messages(&display_messages).len()
@@ -620,22 +717,18 @@ impl App {
 
     /// Enter a subthread view rooted at the given message
     pub fn enter_subthread(&mut self, message: Message) {
-        self.subthread_root = Some(message.id.clone());
-        self.subthread_root_message = Some(message);
-        self.selected_message_index = 0;
+        self.conversation.enter_subthread(message);
         self.scroll_offset = 0;
     }
 
     /// Exit the current subthread view and return to parent
     pub fn exit_subthread(&mut self) {
-        self.subthread_root = None;
-        self.subthread_root_message = None;
-        self.selected_message_index = 0;
+        self.conversation.exit_subthread();
     }
 
     /// Check if we're currently viewing a subthread
     pub fn in_subthread(&self) -> bool {
-        self.subthread_root.is_some()
+        self.conversation.in_subthread()
     }
 
     /// Convert TextEditor attachments to draft format.
@@ -665,7 +758,7 @@ impl App {
     /// Save current chat editor content as draft for the selected thread or draft tab
     pub fn save_chat_draft(&self) {
         // Determine the draft key - use thread id or draft_id from active tab
-        let draft_key = if let Some(ref thread) = self.selected_thread {
+        let draft_key = if let Some(ref thread) = self.conversation.selected_thread {
             Some(thread.id.clone())
         } else {
             // Check if current tab is a draft tab
@@ -676,7 +769,7 @@ impl App {
             // Only save agent to draft if user explicitly selected it
             // Otherwise let sync_agent_with_conversation() determine it each time
             let agent_pubkey = if self.user_explicitly_selected_agent {
-                self.selected_agent.as_ref().map(|a| a.pubkey.clone())
+                self.conversation.selected_agent.as_ref().map(|a| a.pubkey.clone())
             } else {
                 None
             };
@@ -710,7 +803,7 @@ impl App {
                 published_at: None,
                 published_event_id: None,
             };
-            if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+            if let Err(e) = self.draft_service.save_chat_draft(draft) {
                 // BULLETPROOF: Log I/O errors but don't interrupt user - draft may still be in memory
                 tlog!("DRAFT", "ERROR saving draft for {}: {}", conversation_id, e);
             }
@@ -732,7 +825,7 @@ impl App {
             // IMPORTANT: Load existing draft to preserve its agent/branch metadata.
             // We cannot use self.selected_agent/selected_branch because those belong
             // to the ACTIVE tab, not necessarily the tab being closed.
-            let existing_draft = self.draft_storage.borrow().load(&conversation_id);
+            let existing_draft = self.draft_service.load_chat_draft(&conversation_id);
             let (agent_pubkey, branch) = if let Some(ref draft) = existing_draft {
                 (draft.selected_agent_pubkey.clone(), draft.selected_branch.clone())
             } else {
@@ -766,7 +859,7 @@ impl App {
                 published_at: None,
                 published_event_id: None,
             };
-            if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+            if let Err(e) = self.draft_service.save_chat_draft(draft) {
                 // BULLETPROOF: Log I/O errors but don't interrupt - critical for tab close flow
                 tlog!("DRAFT", "ERROR saving draft from tab {}: {}", conversation_id, e);
             }
@@ -776,7 +869,7 @@ impl App {
     /// Restore draft for the selected thread or draft tab into chat_editor
     /// Priority: draft values > conversation sync > defaults
     pub fn restore_chat_draft(&mut self) {
-        let thread_id = self.selected_thread.as_ref().map(|t| t.id.clone());
+        let thread_id = self.conversation.selected_thread.as_ref().map(|t| t.id.clone());
         tlog!("AGENT", "restore_chat_draft called, thread_id={:?}", thread_id);
 
         // Reset explicit selection flag when switching conversations
@@ -793,7 +886,7 @@ impl App {
         }
 
         // Determine the draft key - use thread id or draft_id from active tab
-        let draft_key = if let Some(ref thread) = self.selected_thread {
+        let draft_key = if let Some(ref thread) = self.conversation.selected_thread {
             Some(thread.id.clone())
         } else {
             // Check if current tab is a draft tab
@@ -807,8 +900,8 @@ impl App {
         let mut draft_had_branch = false;
 
         if let Some(key) = draft_key {
-            // Load draft into per-tab editor (clone to release borrow before calling chat_editor_mut)
-            let draft_opt = self.draft_storage.borrow().load(&key);
+            // Load draft into per-tab editor
+            let draft_opt = self.draft_service.load_chat_draft(&key);
             if let Some(draft) = draft_opt {
                 {
                     let editor = self.chat_editor_mut();
@@ -846,7 +939,7 @@ impl App {
                     if let Some(agent) = agent {
                         tlog!("AGENT", "restore_chat_draft: restoring agent from draft='{}' (pubkey={})",
                             agent.name, &agent.pubkey[..8]);
-                        self.selected_agent = Some(agent);
+                        self.conversation.selected_agent = Some(agent);
                         draft_had_agent = true;
                     } else {
                         tlog!("AGENT", "restore_chat_draft: draft agent_pubkey={} NOT FOUND in available_agents",
@@ -870,7 +963,7 @@ impl App {
 
         // For real threads, sync agent and branch with conversation ONLY if draft didn't have values
         // This ensures draft selections are preserved while still providing sensible defaults
-        if self.selected_thread.is_some() {
+        if self.conversation.selected_thread.is_some() {
             if !draft_had_agent {
                 tlog!("AGENT", "restore_chat_draft: draft had no agent, calling sync_agent_with_conversation");
                 self.sync_agent_with_conversation();
@@ -883,7 +976,7 @@ impl App {
         }
 
         tlog!("AGENT", "restore_chat_draft done, selected_agent={:?}",
-            self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+            self.conversation.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
         );
     }
 
@@ -896,7 +989,7 @@ impl App {
         if let Some(recent_agent) = self.get_most_recent_agent_from_conversation() {
             tlog!("AGENT", "sync_agent: setting to recent_agent='{}' (pubkey={})",
                 recent_agent.name, &recent_agent.pubkey[..8]);
-            self.selected_agent = Some(recent_agent);
+            self.conversation.selected_agent = Some(recent_agent);
             return;
         }
 
@@ -905,7 +998,7 @@ impl App {
             if let Some(pm) = status.pm_agent() {
                 tlog!("AGENT", "sync_agent: no recent agent, falling back to PM='{}' (pubkey={})",
                     pm.name, &pm.pubkey[..8]);
-                self.selected_agent = Some(pm.clone());
+                self.conversation.selected_agent = Some(pm.clone());
             } else {
                 tlog!("AGENT", "sync_agent: no recent agent and no PM available");
             }
@@ -918,14 +1011,14 @@ impl App {
     /// Returns the unique publish_id for tracking confirmation.
     /// BULLETPROOF: This captures exactly what was sent, separate from the current draft.
     pub fn create_publish_snapshot(&self, conversation_id: &str, content: String) -> Result<String, tenex_core::models::draft::DraftStorageError> {
-        self.draft_storage.borrow_mut().create_publish_snapshot(conversation_id, content)
+        self.draft_service.create_publish_snapshot(conversation_id, content)
     }
 
     /// Mark a publish snapshot as confirmed (call after relay confirmation)
     /// Uses the unique publish_id to mark the specific snapshot - doesn't affect current draft.
     /// BULLETPROOF: New typing after send won't be lost because snapshots are separate.
     pub fn mark_publish_confirmed(&self, publish_id: &str, event_id: Option<String>) -> Result<bool, tenex_core::models::draft::DraftStorageError> {
-        self.draft_storage.borrow_mut().mark_publish_confirmed(publish_id, event_id)
+        self.draft_service.mark_publish_confirmed(publish_id, event_id)
     }
 
     /// Set the publish confirmation sender (called from runtime)
@@ -941,40 +1034,40 @@ impl App {
     /// Clean up old confirmed publish snapshots (call on app startup or after confirmations)
     /// Returns the number of snapshots cleaned up
     pub fn cleanup_confirmed_publishes(&self) -> Result<usize, tenex_core::models::draft::DraftStorageError> {
-        self.draft_storage.borrow_mut().cleanup_confirmed_publishes()
+        self.draft_service.cleanup_confirmed_publishes()
     }
 
     /// Remove a publish snapshot (for rollback when send fails)
     /// Call this when send to relay fails AFTER snapshot was created
     pub fn remove_publish_snapshot(&self, publish_id: &str) -> Result<bool, tenex_core::models::draft::DraftStorageError> {
-        self.draft_storage.borrow_mut().remove_publish_snapshot(publish_id)
+        self.draft_service.remove_publish_snapshot(publish_id)
     }
 
     /// Get the last draft storage error (if any)
     pub fn draft_storage_last_error(&self) -> Option<String> {
-        self.draft_storage.borrow().last_error().map(|e| e.to_string())
+        self.draft_service.chat_draft_last_error()
     }
 
     /// Clear the last draft storage error
     pub fn draft_storage_clear_error(&self) {
-        self.draft_storage.borrow_mut().clear_error();
+        self.draft_service.chat_draft_clear_error();
     }
 
     /// Get unpublished drafts for recovery (call on app startup)
     pub fn get_unpublished_drafts(&self) -> Vec<tenex_core::models::draft::ChatDraft> {
-        self.draft_storage.borrow().get_unpublished_drafts().into_iter().cloned().collect()
+        self.draft_service.get_unpublished_drafts()
     }
 
     /// Get pending (unconfirmed) publish snapshots
     pub fn get_pending_publishes(&self) -> Vec<tenex_core::models::draft::PendingPublishSnapshot> {
-        self.draft_storage.borrow().get_pending_publishes().into_iter().cloned().collect()
+        self.draft_service.get_pending_publishes()
     }
 
     /// Save current chat editor content as a named draft for the current project
     pub fn save_named_draft(&mut self) {
         let text = self.chat_editor().build_full_content();
         if text.trim().is_empty() {
-            self.set_status("Cannot save empty draft");
+            self.set_warning_status("Cannot save empty draft");
             return;
         }
 
@@ -982,7 +1075,7 @@ impl App {
         let project_a_tag = match &self.selected_project {
             Some(p) => p.a_tag(),
             None => {
-                self.set_status("Cannot save draft: no project selected");
+                self.set_warning_status("Cannot save draft: no project selected");
                 return;
             }
         };
@@ -991,11 +1084,11 @@ impl App {
         let draft_name = draft.name.clone();
 
         // Perform the save and capture result before calling set_status
-        let result = self.named_draft_storage.borrow_mut().save(draft);
+        let result = self.draft_service.save_named_draft(draft);
 
         match result {
-            Ok(()) => self.set_status(&format!("Draft saved: {}", draft_name)),
-            Err(e) => self.set_status(&format!("Failed to save draft: {}", e)),
+            Ok(()) => self.set_warning_status(&format!("Draft saved: {}", draft_name)),
+            Err(e) => self.set_warning_status(&format!("Failed to save draft: {}", e)),
         }
     }
 
@@ -1006,32 +1099,22 @@ impl App {
             .map(|p| p.a_tag())
             .unwrap_or_default();
 
-        self.named_draft_storage
-            .borrow()
-            .get_for_project(&project_a_tag)
-            .into_iter()
-            .cloned()
-            .collect()
+        self.draft_service.get_named_drafts_for_project(&project_a_tag)
     }
 
     /// Get all named drafts
     pub fn get_all_named_drafts(&self) -> Vec<NamedDraft> {
-        self.named_draft_storage
-            .borrow()
-            .get_all()
-            .into_iter()
-            .cloned()
-            .collect()
+        self.draft_service.get_all_named_drafts()
     }
 
     /// Delete a named draft by ID
     pub fn delete_named_draft(&mut self, id: &str) {
         // Perform the delete and capture result before calling set_status
-        let result = self.named_draft_storage.borrow_mut().delete(id);
+        let result = self.draft_service.delete_named_draft(id);
 
         match result {
-            Ok(()) => self.set_status("Draft deleted"),
-            Err(e) => self.set_status(&format!("Failed to delete draft: {}", e)),
+            Ok(()) => self.set_warning_status("Draft deleted"),
+            Err(e) => self.set_warning_status(&format!("Failed to delete draft: {}", e)),
         }
     }
 
@@ -1041,7 +1124,7 @@ impl App {
         editor.text = draft.text.clone();
         editor.cursor = draft.text.len();
         self.input_mode = InputMode::Editing;
-        self.set_status(&format!("Draft restored: {}", draft.name));
+        self.set_warning_status(&format!("Draft restored: {}", draft.name));
     }
 
     /// Open the draft navigator modal (scoped to current project)
@@ -1049,11 +1132,11 @@ impl App {
         use crate::ui::modal::DraftNavigatorState;
 
         // Check for storage errors on init and surface them (extract error message first)
-        let storage_error = self.named_draft_storage.borrow().last_error().map(|e| e.to_string());
+        let storage_error = self.draft_service.named_draft_last_error();
         if let Some(error) = storage_error {
-            self.set_status(&format!("Warning: {}", error));
+            self.set_warning_status(&format!("Warning: {}", error));
             // Clear the error after surfacing it to avoid repeated warnings
-            self.named_draft_storage.borrow_mut().clear_error();
+            self.draft_service.named_draft_clear_error();
         }
 
         // Scope to current project - only show drafts for the selected project
@@ -1061,10 +1144,10 @@ impl App {
         let has_project = self.selected_project.is_some();
 
         if drafts.is_empty() && has_project {
-            self.set_status("No drafts for this project. Use Ctrl+T 's' in edit mode to save one.");
+            self.set_warning_status("No drafts for this project. Use Ctrl+T 's' in edit mode to save one.");
             return;
         } else if drafts.is_empty() {
-            self.set_status("No project selected and no drafts available.");
+            self.set_warning_status("No project selected and no drafts available.");
             return;
         }
 
@@ -1248,27 +1331,6 @@ impl App {
         Ok(())
     }
 
-    /// Add a notification to the queue
-    pub fn notify(&mut self, notification: Notification) {
-        self.notifications.push(notification);
-    }
-
-    /// Convenience: set a warning status message (legacy compatibility)
-    /// Prefer using notify() with specific notification types for new code
-    pub fn set_status(&mut self, msg: &str) {
-        self.notifications.push(Notification::warning(msg));
-    }
-
-    /// Dismiss the current notification
-    pub fn dismiss_notification(&mut self) {
-        self.notifications.dismiss();
-    }
-
-    /// Get the current notification message (for display)
-    pub fn current_notification(&self) -> Option<&Notification> {
-        self.notifications.current()
-    }
-
     /// Scroll up by the given amount, clamping to valid range
     pub fn scroll_up(&mut self, amount: usize) {
         // First clamp scroll_offset to max if it's above (handles usize::MAX sentinel)
@@ -1351,7 +1413,7 @@ impl App {
     /// Returns the agent from available_agents whose pubkey matches the most recent
     /// non-user message in the conversation.
     pub fn get_most_recent_agent_from_conversation(&self) -> Option<crate::models::ProjectAgent> {
-        let thread = self.selected_thread.as_ref()?;
+        let thread = self.conversation.selected_thread.as_ref()?;
         let messages = self.messages();
         let available_agents = self.available_agents();
         let user_pubkey = self.data_store.borrow().user_pubkey.clone();
@@ -1578,7 +1640,7 @@ impl App {
     pub fn select_filtered_agent_by_index(&mut self, index: usize) {
         let filtered = self.filtered_agents();
         if let Some(project_agent) = filtered.get(index) {
-            self.selected_agent = Some(project_agent.clone());
+            self.conversation.selected_agent = Some(project_agent.clone());
         }
     }
 
@@ -1659,7 +1721,7 @@ impl App {
             Some(ViewLocation::Home) | None => {
                 // Go back to home view
                 self.fallback_editor.clear();
-                self.selected_thread = None;
+                self.conversation.selected_thread = None;
                 self.view = View::Home;
             }
             Some(ViewLocation::Tab(index)) => {
@@ -1692,13 +1754,13 @@ impl App {
 
         if is_draft {
             // Draft tab - set up for new conversation
-            self.selected_thread = None;
+            self.conversation.selected_thread = None;
             self.creating_thread = true;
 
             // CRITICAL: Clear all context upfront to prevent stale state leaking
             // if project lookup fails below
             self.selected_project = None;
-            self.selected_agent = None;
+            self.conversation.selected_agent = None;
             self.selected_branch = None;
             tlog!("AGENT", "switch_to_tab(draft): cleared agent/branch");
 
@@ -1719,7 +1781,7 @@ impl App {
                     if let Some(pm) = status.pm_agent() {
                         tlog!("AGENT", "switch_to_tab(draft): setting PM='{}' (pubkey={})",
                             pm.name, &pm.pubkey[..8]);
-                        self.selected_agent = Some(pm.clone());
+                        self.conversation.selected_agent = Some(pm.clone());
                     }
                     // Always set default branch (removed .is_none() guard to prevent stale values)
                     self.selected_branch = status.default_branch().map(String::from);
@@ -1728,9 +1790,9 @@ impl App {
 
             self.restore_chat_draft();
             self.scroll_offset = 0;
-            self.selected_message_index = 0;
-            self.subthread_root = None;
-            self.subthread_root_message = None;
+            self.conversation.selected_message_index = 0;
+            self.conversation.subthread_root = None;
+            self.conversation.subthread_root_message = None;
             self.input_mode = InputMode::Editing;
             self.view = View::Chat;
         } else {
@@ -1742,7 +1804,7 @@ impl App {
 
             if let Some(thread) = thread {
                 tlog!("AGENT", "switch_to_tab(real): found thread '{}'", thread.title);
-                self.selected_thread = Some(thread);
+                self.conversation.selected_thread = Some(thread);
                 self.creating_thread = false;
 
                 // CRITICAL: Set project context from the tab's project_a_tag
@@ -1758,7 +1820,7 @@ impl App {
                     self.selected_project = Some(project);
 
                     // Load draft once upfront to check what values it contains
-                    let draft = self.draft_storage.borrow().load(&thread_id);
+                    let draft = self.draft_service.load_chat_draft(&thread_id);
                     let draft_has_agent = draft.as_ref().map(|d| d.selected_agent_pubkey.is_some()).unwrap_or(false);
                     let draft_has_branch = draft.as_ref().map(|d| d.selected_branch.is_some()).unwrap_or(false);
 
@@ -1772,11 +1834,11 @@ impl App {
                             if let Some(pm) = status.pm_agent() {
                                 tlog!("AGENT", "switch_to_tab(real): no draft agent, setting PM='{}' (pubkey={}) BEFORE restore_chat_draft",
                                     pm.name, &pm.pubkey[..8]);
-                                self.selected_agent = Some(pm.clone());
+                                self.conversation.selected_agent = Some(pm.clone());
                             } else {
                                 // No PM available, clear to prevent stale state
                                 tlog!("AGENT", "switch_to_tab(real): no draft agent and no PM, clearing");
-                                self.selected_agent = None;
+                                self.conversation.selected_agent = None;
                             }
                         } else {
                             tlog!("AGENT", "switch_to_tab(real): draft has agent, skipping PM default");
@@ -1788,7 +1850,7 @@ impl App {
                     } else {
                         // No project status, clear agent/branch to prevent stale state
                         tlog!("AGENT", "switch_to_tab(real): no project status, clearing agent/branch");
-                        self.selected_agent = None;
+                        self.conversation.selected_agent = None;
                         self.selected_branch = None;
                     }
 
@@ -1798,20 +1860,20 @@ impl App {
                     // Project lookup failed - clear all context to prevent stale state leaking
                     tlog!("AGENT", "switch_to_tab(real): project lookup failed, clearing all");
                     self.selected_project = None;
-                    self.selected_agent = None;
+                    self.conversation.selected_agent = None;
                     self.selected_branch = None;
                 }
                 self.scroll_offset = usize::MAX; // Scroll to bottom
-                self.selected_message_index = 0;
-                self.subthread_root = None;
-                self.subthread_root_message = None;
+                self.conversation.selected_message_index = 0;
+                self.conversation.subthread_root = None;
+                self.conversation.subthread_root_message = None;
                 self.input_mode = InputMode::Editing; // Auto-focus input
                 self.view = View::Chat; // Switch to Chat view
             }
         }
 
         tlog!("AGENT", "switch_to_tab DONE: selected_agent={:?}",
-            self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+            self.conversation.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
         );
 
         // Update sidebar state with delegations and reports from messages
@@ -1859,7 +1921,7 @@ impl App {
         if new_active.is_none() {
             // No more tabs - go back to home view
             self.fallback_editor.clear();
-            self.selected_thread = None;
+            self.conversation.selected_thread = None;
             self.tabs.record_home_visit();
             self.view = View::Home;
         } else if was_active {
@@ -2226,19 +2288,19 @@ impl App {
             // Set default agent/branch from project status
             if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
                 if let Some(pm) = status.pm_agent() {
-                    self.selected_agent = Some(pm.clone());
+                    self.conversation.selected_agent = Some(pm.clone());
                 } else {
-                    self.selected_agent = None;
+                    self.conversation.selected_agent = None;
                 }
                 self.selected_branch = status.default_branch().map(String::from);
             } else {
-                self.selected_agent = None;
+                self.conversation.selected_agent = None;
                 self.selected_branch = None;
             }
 
             // Open tab and switch to chat
             self.open_tab(thread, project_a_tag);
-            self.selected_thread = Some(thread.clone());
+            self.conversation.selected_thread = Some(thread.clone());
             self.restore_chat_draft();
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
@@ -2253,7 +2315,7 @@ impl App {
         } else {
             // Project not found - clear state to prevent leaks
             self.selected_project = None;
-            self.selected_agent = None;
+            self.conversation.selected_agent = None;
             self.selected_branch = None;
         }
     }
@@ -2272,7 +2334,7 @@ impl App {
             thread_title: tab.thread_title.clone(),
             project_a_tag: tab.project_a_tag.clone(),
             scroll_offset: self.scroll_offset,
-            selected_message_index: self.selected_message_index,
+            selected_message_index: self.conversation.selected_message_index,
         });
 
         // Find the delegation thread
@@ -2297,9 +2359,9 @@ impl App {
             }
 
             // Update app state
-            self.selected_thread = Some(thread);
+            self.conversation.selected_thread = Some(thread);
             self.scroll_offset = usize::MAX; // Start at bottom
-            self.selected_message_index = 0;
+            self.conversation.selected_message_index = 0;
             self.input_mode = InputMode::Editing;
 
             // Update project context if needed
@@ -2315,7 +2377,7 @@ impl App {
             self.restore_chat_draft();
 
             tlog!("AGENT", "push_delegation done: selected_agent={:?}",
-                self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+                self.conversation.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
             );
 
             // Update sidebar for new thread
@@ -2355,9 +2417,9 @@ impl App {
                 }
 
                 // Restore app state
-                self.selected_thread = Some(thread);
+                self.conversation.selected_thread = Some(thread);
                 self.scroll_offset = entry.scroll_offset;
-                self.selected_message_index = entry.selected_message_index;
+                self.conversation.selected_message_index = entry.selected_message_index;
 
                 // Update project context if needed
                 let project = self.data_store.borrow().get_projects()
@@ -2372,7 +2434,7 @@ impl App {
                 self.restore_chat_draft();
 
                 tlog!("AGENT", "pop_navigation_stack done: selected_agent={:?}",
-                    self.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
+                    self.conversation.selected_agent.as_ref().map(|a| format!("{}({})", a.name, &a.pubkey[..8]))
                 );
 
                 // Update sidebar for restored thread
@@ -2410,17 +2472,17 @@ impl App {
             // Set default agent/branch from project status
             if let Some(status) = self.data_store.borrow().get_project_status(&a_tag) {
                 if let Some(pm) = status.pm_agent() {
-                    self.selected_agent = Some(pm.clone());
+                    self.conversation.selected_agent = Some(pm.clone());
                 } else {
-                    self.selected_agent = None;
+                    self.conversation.selected_agent = None;
                 }
                 self.selected_branch = status.default_branch().map(String::from);
             } else {
-                self.selected_agent = None;
+                self.conversation.selected_agent = None;
                 self.selected_branch = None;
             }
 
-            self.selected_thread = None;
+            self.conversation.selected_thread = None;
             self.creating_thread = true;
             self.view = View::Chat;
             self.input_mode = InputMode::Editing;
@@ -2428,7 +2490,7 @@ impl App {
         } else {
             // Project not found - clear state to prevent leaks
             self.selected_project = None;
-            self.selected_agent = None;
+            self.conversation.selected_agent = None;
             self.selected_branch = None;
         }
     }
@@ -2499,7 +2561,7 @@ impl App {
         // Set selection to last message so the view stays at the bottom
         // (consistent with Escape behavior in editor_handlers.rs)
         let count = self.display_item_count();
-        self.selected_message_index = count.saturating_sub(1);
+        self.conversation.selected_message_index = count.saturating_sub(1);
     }
 
     /// Close ask UI and return to normal input
@@ -2516,7 +2578,7 @@ impl App {
         if !matches!(self.modal_state, ModalState::None) {
             return;
         }
-        let thread_id = match self.selected_thread.as_ref() {
+        let thread_id = match self.conversation.selected_thread.as_ref() {
             Some(t) => t.id.clone(),
             None => return,
         };
@@ -2574,8 +2636,7 @@ impl App {
 
     /// Get streaming content for current conversation
     pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
-        let conv_id = self.current_conversation_id()?;
-        self.local_stream_buffers.get(&conv_id)
+        self.conversation.local_streaming_content()
     }
 
     /// Update streaming buffer from local chunk
@@ -2587,30 +2648,23 @@ impl App {
         reasoning_delta: Option<String>,
         is_finish: bool,
     ) {
-        let buffer = self.local_stream_buffers
-            .entry(conversation_id)
-            .or_default();
-
-        buffer.agent_pubkey = agent_pubkey;
-        if let Some(delta) = text_delta {
-            buffer.text_content.push_str(&delta);
-        }
-        if let Some(delta) = reasoning_delta {
-            buffer.reasoning_content.push_str(&delta);
-        }
-        if is_finish {
-            buffer.is_complete = true;
-        }
+        self.conversation.handle_local_stream_chunk(
+            agent_pubkey,
+            conversation_id,
+            text_delta,
+            reasoning_delta,
+            is_finish,
+        );
     }
 
     /// Clear the local stream buffer for a conversation
     pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
-        self.local_stream_buffers.remove(conversation_id);
+        self.conversation.clear_local_stream_buffer(conversation_id);
     }
 
     /// Get current conversation ID (thread ID)
     pub fn current_conversation_id(&self) -> Option<String> {
-        self.selected_thread.as_ref().map(|t| t.id.clone())
+        self.conversation.current_conversation_id()
     }
 
     // ===== Filter Management Methods =====
@@ -2620,7 +2674,7 @@ impl App {
         let prefs = self.preferences.borrow();
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
         self.time_filter = prefs.time_filter();
-        self.show_llm_metadata = prefs.show_llm_metadata();
+        self.conversation.show_llm_metadata = prefs.show_llm_metadata();
         self.hide_scheduled = prefs.hide_scheduled();
     }
 
@@ -2638,8 +2692,8 @@ impl App {
 
     /// Toggle LLM metadata display and persist
     pub fn toggle_llm_metadata(&mut self) {
-        self.show_llm_metadata = !self.show_llm_metadata;
-        self.preferences.borrow_mut().set_show_llm_metadata(self.show_llm_metadata);
+        self.conversation.toggle_llm_metadata();
+        self.preferences.borrow_mut().set_show_llm_metadata(self.conversation.show_llm_metadata);
     }
 
     // ===== Agent Browser Methods =====
@@ -2976,7 +3030,7 @@ impl App {
             if let Some((msg_idx, _)) = messages.iter().enumerate()
                 .find(|(_, m)| m.id == msg_id)
             {
-                self.selected_message_index = msg_idx;
+                self.conversation.selected_message_index = msg_idx;
                 // Scroll will happen naturally in render
             }
         }
@@ -3158,14 +3212,14 @@ impl App {
         use crate::ui::views::chat::{group_messages, DisplayItem};
 
         // Get current thread
-        let thread = self.selected_thread.as_ref()?;
+        let thread = self.conversation.selected_thread.as_ref()?;
         let thread_id = thread.id.as_str();
 
         // Get messages and group them (same logic as rendering)
         let messages = self.messages();
 
         // Get display messages based on current view
-        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.conversation.subthread_root {
             messages.iter()
                 .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
                 .collect()
@@ -3183,7 +3237,7 @@ impl App {
         let grouped = group_messages(&display_messages);
 
         // Check if the selected item is a DelegationPreview
-        if let Some(item) = grouped.get(self.selected_message_index) {
+        if let Some(item) = grouped.get(self.conversation.selected_message_index) {
             match item {
                 DisplayItem::DelegationPreview { thread_id: delegation_thread_id, .. } => {
                     return Some(delegation_thread_id.clone());
@@ -3225,7 +3279,7 @@ impl App {
 
     /// Check if a thread has an unsent draft
     pub fn has_draft_for_thread(&self, thread_id: &str) -> bool {
-        self.draft_storage.borrow().load(thread_id)
+        self.draft_service.load_chat_draft(thread_id)
             .map(|d| !d.text.trim().is_empty())
             .unwrap_or(false)
     }

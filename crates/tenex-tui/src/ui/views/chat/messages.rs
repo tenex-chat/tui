@@ -52,7 +52,7 @@ pub(crate) fn render_messages_panel(
     all_messages: &[Message],
 ) {
     // Get thread_id first - needed for reply index filtering
-    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
 
     // Build reply index: parent_id -> Vec<&Message>
     // Skip messages that e-tag the thread root - those are siblings, not nested replies
@@ -65,7 +65,8 @@ pub(crate) fn render_messages_panel(
             }
         }
     }
-    let display_messages: Vec<&Message> = if let Some(ref root_id) = app.subthread_root {
+    let subthread_root = app.subthread_root().cloned();
+    let display_messages: Vec<&Message> = if let Some(ref root_id) = subthread_root {
         // Subthread view: show messages that reply directly to the root
         all_messages
             .iter()
@@ -93,7 +94,7 @@ pub(crate) fn render_messages_panel(
     let content_width = messages_area.width as usize;
 
     // If in subthread, render the root message first as a header
-    if let Some(ref root_msg) = app.subthread_root_message {
+    if let Some(ref root_msg) = app.subthread_root_message() {
         let author = app.data_store.borrow().get_profile_name(&root_msg.pubkey);
         messages_text.push(Line::from(Span::styled(
             format!("{}{} :", padding, author),
@@ -166,7 +167,7 @@ pub(crate) fn render_messages_panel(
                 } => {
                     // Check if this message is selected (for navigation)
                     let is_selected =
-                        group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
+                        group_idx == app.selected_message_index() && app.input_mode == InputMode::Normal;
 
                     let author = profile_cache
                         .get(&msg.pubkey)
@@ -353,7 +354,7 @@ pub(crate) fn render_messages_panel(
                     }
 
                     // Debug info: shown when selected/setting enabled with llm_metadata
-                    let show_debug_for_llm = (is_selected || app.show_llm_metadata) && !msg.llm_metadata.is_empty();
+                    let show_debug_for_llm = (is_selected || app.show_llm_metadata()) && !msg.llm_metadata.is_empty();
 
                     if show_debug_for_llm {
                         // LLM metadata line (id + token info)
@@ -410,7 +411,7 @@ pub(crate) fn render_messages_panel(
                 } => {
                     // Check if this delegation preview is selected
                     let is_selected =
-                        group_idx == app.selected_message_index && app.input_mode == InputMode::Normal;
+                        group_idx == app.selected_message_index() && app.input_mode == InputMode::Normal;
 
                     let indicator_color = theme::user_color(parent_pubkey);
                     let card_bg = theme::BG_CARD;
@@ -868,7 +869,7 @@ pub(crate) fn render_messages_panel(
 
         // Auto-scroll to keep selected message visible (when in Normal mode navigating)
         if app.input_mode == InputMode::Normal && !item_line_starts.is_empty() {
-            let selected_idx = app.selected_message_index;
+            let selected_idx = app.selected_message_index();
             if selected_idx < item_line_starts.len() {
                 let selected_start = item_line_starts[selected_idx];
                 // Calculate end line (start of next item, or end of all lines)
