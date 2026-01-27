@@ -986,14 +986,6 @@ impl TextEditor {
         }
     }
 
-    /// Check if focused attachment is an image (vs paste)
-    #[allow(dead_code)]
-    pub fn is_focused_image(&self) -> bool {
-        self.focused_attachment
-            .map(|idx| idx < self.image_attachments.len())
-            .unwrap_or(false)
-    }
-
     /// Get focused paste attachment for editing (only paste attachments are editable)
     pub fn get_focused_attachment(&self) -> Option<&PasteAttachment> {
         self.focused_attachment.and_then(|idx| {
@@ -1002,18 +994,6 @@ impl TextEditor {
                 self.attachments.get(idx - img_count)
             } else {
                 None // Image attachment, not editable
-            }
-        })
-    }
-
-    /// Get focused image attachment
-    #[allow(dead_code)]
-    pub fn get_focused_image(&self) -> Option<&ImageAttachment> {
-        self.focused_attachment.and_then(|idx| {
-            if idx < self.image_attachments.len() {
-                self.image_attachments.get(idx)
-            } else {
-                None
             }
         })
     }
