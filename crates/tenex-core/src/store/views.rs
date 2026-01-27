@@ -107,6 +107,11 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
     // Get conversation metadata - scoped to this project's threads
     // This avoids the global limit issue where older conversations would miss metadata
     let thread_ids: HashSet<String> = threads.iter().map(|t| t.id.clone()).collect();
+    // Note: On metadata load failure, we continue with partial/no metadata rather than
+    // failing the entire thread load. Threads will still be usable, just potentially
+    // missing titles/summaries. The underlying get_metadata_for_threads returns
+    // partial results on individual thread failures, so this unwrap_or_default only
+    // triggers on complete failure (e.g., transaction creation failed).
     let metadata_map = get_metadata_for_threads(ndb, &thread_ids).unwrap_or_default();
 
     // Enrich threads with metadata (apply ALL fields consistently: title, status, summary, last_activity)
@@ -121,8 +126,10 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
             // Only update last_activity if metadata is newer to avoid regressing timestamps
             if metadata.created_at > thread.last_activity {
                 thread.last_activity = metadata.created_at;
-                // Note: effective_last_activity will be recomputed when threads are processed
-                // by AppDataStore.rebuild_all_effective_last_activity()
+                // Update effective_last_activity to match - this ensures correct sorting.
+                // Full hierarchical propagation (parent threads bubbling up child activity)
+                // is handled by AppDataStore when threads are processed there.
+                thread.effective_last_activity = metadata.created_at;
             }
         }
     }
