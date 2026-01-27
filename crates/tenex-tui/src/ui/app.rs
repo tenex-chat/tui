@@ -97,6 +97,7 @@ pub enum HomeTab {
     Reports,
     Status,
     Feed,
+    ActiveWork,
     Stats,
 }
 
