@@ -506,18 +506,30 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
-     * Get agents for a project.
-     *
-     * Returns agents configured for the specified project.
+     * Archive a conversation (hide from default view).
      */
-    func getAgents(projectId: String)  -> [AgentInfo]
+    func archiveConversation(conversationId: String) 
     
     /**
-     * Get all available agents (not filtered by project).
+     * Get all conversations across all projects with full info for the Conversations tab.
+     * Returns conversations with activity tracking, archive status, and hierarchy data.
+     * Sorted by: active conversations first (by effective_last_activity desc),
+     * then inactive conversations by effective_last_activity desc.
      *
-     * Returns all known agent definitions.
+     * Returns Result to distinguish "no data" from "core error".
      */
-    func getAllAgents()  -> [AgentInfo]
+    func getAllConversations(filter: ConversationFilter) throws  -> [ConversationFullInfo]
+    
+    /**
+     * Get all archived conversation IDs.
+     * Returns Result to distinguish "no data" from "lock error".
+     */
+    func getArchivedConversationIds() throws  -> [String]
+    
+    /**
+     * Get all collapsed thread IDs.
+     */
+    func getCollapsedThreadIds() throws  -> [String]
     
     /**
      * Get conversations for a project.
@@ -545,6 +557,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getMessages(conversationId: String)  -> [MessageInfo]
     
     /**
+     * Get all projects with filter info (visibility, counts).
+     * Returns Result to distinguish "no data" from "core error".
+     */
+    func getProjectFilters() throws  -> [ProjectFilterInfo]
+    
+    /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as ProjectInfo.
@@ -566,6 +584,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func `init`()  -> Bool
     
     /**
+     * Check if a conversation is archived.
+     */
+    func isConversationArchived(conversationId: String)  -> Bool
+    
+    /**
      * Check if the core is initialized.
      */
     func isInitialized()  -> Bool
@@ -575,6 +598,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns true only if we have stored keys.
      */
     func isLoggedIn()  -> Bool
+    
+    /**
+     * Check if a thread is collapsed.
+     */
+    func isThreadCollapsed(threadId: String)  -> Bool
     
     /**
      * Login with an nsec (Nostr secret key in bech32 format).
@@ -605,20 +633,32 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func refresh()  -> Bool
     
     /**
-     * Send a message to an existing conversation.
-     *
-     * Creates a new kind:1 event with e-tag pointing to the thread root.
-     * Returns the event ID on success.
+     * Set collapsed thread IDs (replace all).
      */
-    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    func setCollapsedThreadIds(threadIds: [String]) 
     
     /**
-     * Send a new conversation (thread) to a project.
-     *
-     * Creates a new kind:1 event with title tag and project a-tag.
-     * Returns the event ID on success.
+     * Set which projects are visible in the Conversations tab.
+     * Pass empty array to show all projects.
      */
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    func setVisibleProjects(projectATags: [String]) 
+    
+    /**
+     * Toggle archive status for a conversation.
+     * Returns true if the conversation is now archived.
+     */
+    func toggleConversationArchived(conversationId: String)  -> Bool
+    
+    /**
+     * Toggle collapsed state for a thread.
+     * Returns true if the thread is now collapsed.
+     */
+    func toggleThreadCollapsed(threadId: String)  -> Bool
+    
+    /**
+     * Unarchive a conversation (show in default view).
+     */
+    func unarchiveConversation(conversationId: String) 
     
     /**
      * Get the version of tenex-core.
@@ -696,26 +736,48 @@ public convenience init() {
 
     
     /**
-     * Get agents for a project.
-     *
-     * Returns agents configured for the specified project.
+     * Archive a conversation (hide from default view).
      */
-open func getAgents(projectId: String) -> [AgentInfo]  {
-    return try!  FfiConverterSequenceTypeAgentInfo.lift(try! rustCall() {
-    uniffi_tenex_core_fn_method_tenexcore_get_agents(self.uniffiClonePointer(),
-        FfiConverterString.lower(projectId),$0
+open func archiveConversation(conversationId: String)  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_archive_conversation(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
+    )
+}
+}
+    
+    /**
+     * Get all conversations across all projects with full info for the Conversations tab.
+     * Returns conversations with activity tracking, archive status, and hierarchy data.
+     * Sorted by: active conversations first (by effective_last_activity desc),
+     * then inactive conversations by effective_last_activity desc.
+     *
+     * Returns Result to distinguish "no data" from "core error".
+     */
+open func getAllConversations(filter: ConversationFilter)throws  -> [ConversationFullInfo]  {
+    return try  FfiConverterSequenceTypeConversationFullInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_all_conversations(self.uniffiClonePointer(),
+        FfiConverterTypeConversationFilter_lower(filter),$0
     )
 })
 }
     
     /**
-     * Get all available agents (not filtered by project).
-     *
-     * Returns all known agent definitions.
+     * Get all archived conversation IDs.
+     * Returns Result to distinguish "no data" from "lock error".
      */
-open func getAllAgents() -> [AgentInfo]  {
-    return try!  FfiConverterSequenceTypeAgentInfo.lift(try! rustCall() {
-    uniffi_tenex_core_fn_method_tenexcore_get_all_agents(self.uniffiClonePointer(),$0
+open func getArchivedConversationIds()throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_archived_conversation_ids(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get all collapsed thread IDs.
+     */
+open func getCollapsedThreadIds()throws  -> [String]  {
+    return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_collapsed_thread_ids(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -768,6 +830,17 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
 }
     
     /**
+     * Get all projects with filter info (visibility, counts).
+     * Returns Result to distinguish "no data" from "core error".
+     */
+open func getProjectFilters()throws  -> [ProjectFilterInfo]  {
+    return try  FfiConverterSequenceTypeProjectFilterInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_filters(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * Get a list of projects.
      *
      * Queries nostrdb for kind 31933 events and returns them as ProjectInfo.
@@ -805,6 +878,17 @@ open func `init`() -> Bool  {
 }
     
     /**
+     * Check if a conversation is archived.
+     */
+open func isConversationArchived(conversationId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_is_conversation_archived(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
+    )
+})
+}
+    
+    /**
      * Check if the core is initialized.
      */
 open func isInitialized() -> Bool  {
@@ -821,6 +905,17 @@ open func isInitialized() -> Bool  {
 open func isLoggedIn() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_is_logged_in(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Check if a thread is collapsed.
+     */
+open func isThreadCollapsed(threadId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_is_thread_collapsed(self.uniffiClonePointer(),
+        FfiConverterString.lower(threadId),$0
     )
 })
 }
@@ -869,37 +964,58 @@ open func refresh() -> Bool  {
 }
     
     /**
-     * Send a message to an existing conversation.
-     *
-     * Creates a new kind:1 event with e-tag pointing to the thread root.
-     * Returns the event ID on success.
+     * Set collapsed thread IDs (replace all).
      */
-open func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
-    return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_send_message(self.uniffiClonePointer(),
-        FfiConverterString.lower(conversationId),
-        FfiConverterString.lower(projectId),
-        FfiConverterString.lower(content),
-        FfiConverterOptionString.lower(agentPubkey),$0
+open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(threadIds),$0
+    )
+}
+}
+    
+    /**
+     * Set which projects are visible in the Conversations tab.
+     * Pass empty array to show all projects.
+     */
+open func setVisibleProjects(projectATags: [String])  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_set_visible_projects(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(projectATags),$0
+    )
+}
+}
+    
+    /**
+     * Toggle archive status for a conversation.
+     * Returns true if the conversation is now archived.
+     */
+open func toggleConversationArchived(conversationId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_toggle_conversation_archived(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
     )
 })
 }
     
     /**
-     * Send a new conversation (thread) to a project.
-     *
-     * Creates a new kind:1 event with title tag and project a-tag.
-     * Returns the event ID on success.
+     * Toggle collapsed state for a thread.
+     * Returns true if the thread is now collapsed.
      */
-open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
-    return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
-        FfiConverterString.lower(projectId),
-        FfiConverterString.lower(title),
-        FfiConverterString.lower(content),
-        FfiConverterOptionString.lower(agentPubkey),$0
+open func toggleThreadCollapsed(threadId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_toggle_thread_collapsed(self.uniffiClonePointer(),
+        FfiConverterString.lower(threadId),$0
     )
 })
+}
+    
+    /**
+     * Unarchive a conversation (show in default view).
+     */
+open func unarchiveConversation(conversationId: String)  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_unarchive_conversation(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
+    )
+}
 }
     
     /**
@@ -966,175 +1082,6 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 }
 
 
-
-
-/**
- * An agent definition for FFI export.
- */
-public struct AgentInfo {
-    /**
-     * Unique identifier of the agent (event ID)
-     */
-    public var id: String
-    /**
-     * Agent's public key (hex)
-     */
-    public var pubkey: String
-    /**
-     * Agent's d-tag (slug)
-     */
-    public var dTag: String
-    /**
-     * Display name of the agent
-     */
-    public var name: String
-    /**
-     * Description of the agent's purpose
-     */
-    public var description: String
-    /**
-     * Role of the agent (e.g., "Developer", "PM")
-     */
-    public var role: String
-    /**
-     * Profile picture URL, if any
-     */
-    public var picture: String?
-    /**
-     * Model used by the agent (e.g., "claude-3-opus")
-     */
-    public var model: String?
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Unique identifier of the agent (event ID)
-         */id: String, 
-        /**
-         * Agent's public key (hex)
-         */pubkey: String, 
-        /**
-         * Agent's d-tag (slug)
-         */dTag: String, 
-        /**
-         * Display name of the agent
-         */name: String, 
-        /**
-         * Description of the agent's purpose
-         */description: String, 
-        /**
-         * Role of the agent (e.g., "Developer", "PM")
-         */role: String, 
-        /**
-         * Profile picture URL, if any
-         */picture: String?, 
-        /**
-         * Model used by the agent (e.g., "claude-3-opus")
-         */model: String?) {
-        self.id = id
-        self.pubkey = pubkey
-        self.dTag = dTag
-        self.name = name
-        self.description = description
-        self.role = role
-        self.picture = picture
-        self.model = model
-    }
-}
-
-#if compiler(>=6)
-extension AgentInfo: Sendable {}
-#endif
-
-
-extension AgentInfo: Equatable, Hashable {
-    public static func ==(lhs: AgentInfo, rhs: AgentInfo) -> Bool {
-        if lhs.id != rhs.id {
-            return false
-        }
-        if lhs.pubkey != rhs.pubkey {
-            return false
-        }
-        if lhs.dTag != rhs.dTag {
-            return false
-        }
-        if lhs.name != rhs.name {
-            return false
-        }
-        if lhs.description != rhs.description {
-            return false
-        }
-        if lhs.role != rhs.role {
-            return false
-        }
-        if lhs.picture != rhs.picture {
-            return false
-        }
-        if lhs.model != rhs.model {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(pubkey)
-        hasher.combine(dTag)
-        hasher.combine(name)
-        hasher.combine(description)
-        hasher.combine(role)
-        hasher.combine(picture)
-        hasher.combine(model)
-    }
-}
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeAgentInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentInfo {
-        return
-            try AgentInfo(
-                id: FfiConverterString.read(from: &buf), 
-                pubkey: FfiConverterString.read(from: &buf), 
-                dTag: FfiConverterString.read(from: &buf), 
-                name: FfiConverterString.read(from: &buf), 
-                description: FfiConverterString.read(from: &buf), 
-                role: FfiConverterString.read(from: &buf), 
-                picture: FfiConverterOptionString.read(from: &buf), 
-                model: FfiConverterOptionString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: AgentInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.pubkey, into: &buf)
-        FfiConverterString.write(value.dTag, into: &buf)
-        FfiConverterString.write(value.name, into: &buf)
-        FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.role, into: &buf)
-        FfiConverterOptionString.write(value.picture, into: &buf)
-        FfiConverterOptionString.write(value.model, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAgentInfo_lift(_ buf: RustBuffer) throws -> AgentInfo {
-    return try FfiConverterTypeAgentInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeAgentInfo_lower(_ value: AgentInfo) -> RustBuffer {
-    return FfiConverterTypeAgentInfo.lower(value)
-}
 
 
 /**
@@ -1233,6 +1180,387 @@ public func FfiConverterTypeAskEventInfo_lift(_ buf: RustBuffer) throws -> AskEv
 #endif
 public func FfiConverterTypeAskEventInfo_lower(_ value: AskEventInfo) -> RustBuffer {
     return FfiConverterTypeAskEventInfo.lower(value)
+}
+
+
+/**
+ * Filter configuration for getAllConversations
+ */
+public struct ConversationFilter {
+    /**
+     * Project IDs to include (empty = all projects)
+     */
+    public var projectIds: [String]
+    /**
+     * Whether to include archived conversations
+     */
+    public var showArchived: Bool
+    /**
+     * Whether to hide scheduled events
+     */
+    public var hideScheduled: Bool
+    /**
+     * Time filter
+     */
+    public var timeFilter: TimeFilterOption
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Project IDs to include (empty = all projects)
+         */projectIds: [String], 
+        /**
+         * Whether to include archived conversations
+         */showArchived: Bool, 
+        /**
+         * Whether to hide scheduled events
+         */hideScheduled: Bool, 
+        /**
+         * Time filter
+         */timeFilter: TimeFilterOption) {
+        self.projectIds = projectIds
+        self.showArchived = showArchived
+        self.hideScheduled = hideScheduled
+        self.timeFilter = timeFilter
+    }
+}
+
+#if compiler(>=6)
+extension ConversationFilter: Sendable {}
+#endif
+
+
+extension ConversationFilter: Equatable, Hashable {
+    public static func ==(lhs: ConversationFilter, rhs: ConversationFilter) -> Bool {
+        if lhs.projectIds != rhs.projectIds {
+            return false
+        }
+        if lhs.showArchived != rhs.showArchived {
+            return false
+        }
+        if lhs.hideScheduled != rhs.hideScheduled {
+            return false
+        }
+        if lhs.timeFilter != rhs.timeFilter {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(projectIds)
+        hasher.combine(showArchived)
+        hasher.combine(hideScheduled)
+        hasher.combine(timeFilter)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationFilter: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationFilter {
+        return
+            try ConversationFilter(
+                projectIds: FfiConverterSequenceString.read(from: &buf), 
+                showArchived: FfiConverterBool.read(from: &buf), 
+                hideScheduled: FfiConverterBool.read(from: &buf), 
+                timeFilter: FfiConverterTypeTimeFilterOption.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ConversationFilter, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.projectIds, into: &buf)
+        FfiConverterBool.write(value.showArchived, into: &buf)
+        FfiConverterBool.write(value.hideScheduled, into: &buf)
+        FfiConverterTypeTimeFilterOption.write(value.timeFilter, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationFilter_lift(_ buf: RustBuffer) throws -> ConversationFilter {
+    return try FfiConverterTypeConversationFilter.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationFilter_lower(_ value: ConversationFilter) -> RustBuffer {
+    return FfiConverterTypeConversationFilter.lower(value)
+}
+
+
+/**
+ * Extended conversation info with all data needed for the Conversations tab.
+ * Includes activity tracking, archive status, and hierarchy data.
+ */
+public struct ConversationFullInfo {
+    /**
+     * Unique identifier of the conversation (event ID)
+     */
+    public var id: String
+    /**
+     * Title/subject of the conversation
+     */
+    public var title: String
+    /**
+     * Agent or user who started the conversation
+     */
+    public var author: String
+    /**
+     * Brief summary or first line of content
+     */
+    public var summary: String?
+    /**
+     * Number of messages in the thread
+     */
+    public var messageCount: UInt32
+    /**
+     * Unix timestamp of last activity (thread's own last activity)
+     */
+    public var lastActivity: UInt64
+    /**
+     * Effective last activity (max of own and all descendants)
+     */
+    public var effectiveLastActivity: UInt64
+    /**
+     * Parent conversation ID (for nesting)
+     */
+    public var parentId: String?
+    /**
+     * Status label from metadata: "In Progress", "Blocked", "Done", etc.
+     */
+    public var status: String?
+    /**
+     * Current activity description (e.g., "Writing tests...")
+     */
+    public var currentActivity: String?
+    /**
+     * Whether this conversation has an agent actively working on it
+     */
+    public var isActive: Bool
+    /**
+     * Whether this conversation is archived
+     */
+    public var isArchived: Bool
+    /**
+     * Whether this thread has children (for collapse/expand UI)
+     */
+    public var hasChildren: Bool
+    /**
+     * Project a_tag this conversation belongs to
+     */
+    public var projectATag: String
+    /**
+     * Whether this is a scheduled event
+     */
+    public var isScheduled: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unique identifier of the conversation (event ID)
+         */id: String, 
+        /**
+         * Title/subject of the conversation
+         */title: String, 
+        /**
+         * Agent or user who started the conversation
+         */author: String, 
+        /**
+         * Brief summary or first line of content
+         */summary: String?, 
+        /**
+         * Number of messages in the thread
+         */messageCount: UInt32, 
+        /**
+         * Unix timestamp of last activity (thread's own last activity)
+         */lastActivity: UInt64, 
+        /**
+         * Effective last activity (max of own and all descendants)
+         */effectiveLastActivity: UInt64, 
+        /**
+         * Parent conversation ID (for nesting)
+         */parentId: String?, 
+        /**
+         * Status label from metadata: "In Progress", "Blocked", "Done", etc.
+         */status: String?, 
+        /**
+         * Current activity description (e.g., "Writing tests...")
+         */currentActivity: String?, 
+        /**
+         * Whether this conversation has an agent actively working on it
+         */isActive: Bool, 
+        /**
+         * Whether this conversation is archived
+         */isArchived: Bool, 
+        /**
+         * Whether this thread has children (for collapse/expand UI)
+         */hasChildren: Bool, 
+        /**
+         * Project a_tag this conversation belongs to
+         */projectATag: String, 
+        /**
+         * Whether this is a scheduled event
+         */isScheduled: Bool) {
+        self.id = id
+        self.title = title
+        self.author = author
+        self.summary = summary
+        self.messageCount = messageCount
+        self.lastActivity = lastActivity
+        self.effectiveLastActivity = effectiveLastActivity
+        self.parentId = parentId
+        self.status = status
+        self.currentActivity = currentActivity
+        self.isActive = isActive
+        self.isArchived = isArchived
+        self.hasChildren = hasChildren
+        self.projectATag = projectATag
+        self.isScheduled = isScheduled
+    }
+}
+
+#if compiler(>=6)
+extension ConversationFullInfo: Sendable {}
+#endif
+
+
+extension ConversationFullInfo: Equatable, Hashable {
+    public static func ==(lhs: ConversationFullInfo, rhs: ConversationFullInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.author != rhs.author {
+            return false
+        }
+        if lhs.summary != rhs.summary {
+            return false
+        }
+        if lhs.messageCount != rhs.messageCount {
+            return false
+        }
+        if lhs.lastActivity != rhs.lastActivity {
+            return false
+        }
+        if lhs.effectiveLastActivity != rhs.effectiveLastActivity {
+            return false
+        }
+        if lhs.parentId != rhs.parentId {
+            return false
+        }
+        if lhs.status != rhs.status {
+            return false
+        }
+        if lhs.currentActivity != rhs.currentActivity {
+            return false
+        }
+        if lhs.isActive != rhs.isActive {
+            return false
+        }
+        if lhs.isArchived != rhs.isArchived {
+            return false
+        }
+        if lhs.hasChildren != rhs.hasChildren {
+            return false
+        }
+        if lhs.projectATag != rhs.projectATag {
+            return false
+        }
+        if lhs.isScheduled != rhs.isScheduled {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(author)
+        hasher.combine(summary)
+        hasher.combine(messageCount)
+        hasher.combine(lastActivity)
+        hasher.combine(effectiveLastActivity)
+        hasher.combine(parentId)
+        hasher.combine(status)
+        hasher.combine(currentActivity)
+        hasher.combine(isActive)
+        hasher.combine(isArchived)
+        hasher.combine(hasChildren)
+        hasher.combine(projectATag)
+        hasher.combine(isScheduled)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ConversationFullInfo {
+        return
+            try ConversationFullInfo(
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                summary: FfiConverterOptionString.read(from: &buf), 
+                messageCount: FfiConverterUInt32.read(from: &buf), 
+                lastActivity: FfiConverterUInt64.read(from: &buf), 
+                effectiveLastActivity: FfiConverterUInt64.read(from: &buf), 
+                parentId: FfiConverterOptionString.read(from: &buf), 
+                status: FfiConverterOptionString.read(from: &buf), 
+                currentActivity: FfiConverterOptionString.read(from: &buf), 
+                isActive: FfiConverterBool.read(from: &buf), 
+                isArchived: FfiConverterBool.read(from: &buf), 
+                hasChildren: FfiConverterBool.read(from: &buf), 
+                projectATag: FfiConverterString.read(from: &buf), 
+                isScheduled: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ConversationFullInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterString.write(value.author, into: &buf)
+        FfiConverterOptionString.write(value.summary, into: &buf)
+        FfiConverterUInt32.write(value.messageCount, into: &buf)
+        FfiConverterUInt64.write(value.lastActivity, into: &buf)
+        FfiConverterUInt64.write(value.effectiveLastActivity, into: &buf)
+        FfiConverterOptionString.write(value.parentId, into: &buf)
+        FfiConverterOptionString.write(value.status, into: &buf)
+        FfiConverterOptionString.write(value.currentActivity, into: &buf)
+        FfiConverterBool.write(value.isActive, into: &buf)
+        FfiConverterBool.write(value.isArchived, into: &buf)
+        FfiConverterBool.write(value.hasChildren, into: &buf)
+        FfiConverterString.write(value.projectATag, into: &buf)
+        FfiConverterBool.write(value.isScheduled, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationFullInfo_lift(_ buf: RustBuffer) throws -> ConversationFullInfo {
+    return try FfiConverterTypeConversationFullInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeConversationFullInfo_lower(_ value: ConversationFullInfo) -> RustBuffer {
+    return FfiConverterTypeConversationFullInfo.lower(value)
 }
 
 
@@ -1885,6 +2213,147 @@ public func FfiConverterTypeMessageInfo_lower(_ value: MessageInfo) -> RustBuffe
 
 
 /**
+ * Project info with selection state for filtering
+ */
+public struct ProjectFilterInfo {
+    /**
+     * Project ID (d-tag)
+     */
+    public var id: String
+    /**
+     * Project a_tag (full coordinate)
+     */
+    public var aTag: String
+    /**
+     * Display title
+     */
+    public var title: String
+    /**
+     * Whether this project is currently visible/selected
+     */
+    public var isVisible: Bool
+    /**
+     * Number of active conversations in this project
+     */
+    public var activeCount: UInt32
+    /**
+     * Total conversations in this project
+     */
+    public var totalCount: UInt32
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Project ID (d-tag)
+         */id: String, 
+        /**
+         * Project a_tag (full coordinate)
+         */aTag: String, 
+        /**
+         * Display title
+         */title: String, 
+        /**
+         * Whether this project is currently visible/selected
+         */isVisible: Bool, 
+        /**
+         * Number of active conversations in this project
+         */activeCount: UInt32, 
+        /**
+         * Total conversations in this project
+         */totalCount: UInt32) {
+        self.id = id
+        self.aTag = aTag
+        self.title = title
+        self.isVisible = isVisible
+        self.activeCount = activeCount
+        self.totalCount = totalCount
+    }
+}
+
+#if compiler(>=6)
+extension ProjectFilterInfo: Sendable {}
+#endif
+
+
+extension ProjectFilterInfo: Equatable, Hashable {
+    public static func ==(lhs: ProjectFilterInfo, rhs: ProjectFilterInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.aTag != rhs.aTag {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.isVisible != rhs.isVisible {
+            return false
+        }
+        if lhs.activeCount != rhs.activeCount {
+            return false
+        }
+        if lhs.totalCount != rhs.totalCount {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(aTag)
+        hasher.combine(title)
+        hasher.combine(isVisible)
+        hasher.combine(activeCount)
+        hasher.combine(totalCount)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeProjectFilterInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectFilterInfo {
+        return
+            try ProjectFilterInfo(
+                id: FfiConverterString.read(from: &buf), 
+                aTag: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                isVisible: FfiConverterBool.read(from: &buf), 
+                activeCount: FfiConverterUInt32.read(from: &buf), 
+                totalCount: FfiConverterUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ProjectFilterInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.aTag, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterBool.write(value.isVisible, into: &buf)
+        FfiConverterUInt32.write(value.activeCount, into: &buf)
+        FfiConverterUInt32.write(value.totalCount, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectFilterInfo_lift(_ buf: RustBuffer) throws -> ProjectFilterInfo {
+    return try FfiConverterTypeProjectFilterInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectFilterInfo_lower(_ value: ProjectFilterInfo) -> RustBuffer {
+    return FfiConverterTypeProjectFilterInfo.lower(value)
+}
+
+
+/**
  * A simplified project info struct for FFI export.
  * This is a subset of the full Project model, safe for cross-language use.
  */
@@ -2168,91 +2637,6 @@ public func FfiConverterTypeReportInfo_lower(_ value: ReportInfo) -> RustBuffer 
 
 
 /**
- * Result of sending a message.
- */
-public struct SendMessageResult {
-    /**
-     * Event ID of the published message
-     */
-    public var eventId: String
-    /**
-     * Whether the message was successfully sent
-     */
-    public var success: Bool
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Event ID of the published message
-         */eventId: String, 
-        /**
-         * Whether the message was successfully sent
-         */success: Bool) {
-        self.eventId = eventId
-        self.success = success
-    }
-}
-
-#if compiler(>=6)
-extension SendMessageResult: Sendable {}
-#endif
-
-
-extension SendMessageResult: Equatable, Hashable {
-    public static func ==(lhs: SendMessageResult, rhs: SendMessageResult) -> Bool {
-        if lhs.eventId != rhs.eventId {
-            return false
-        }
-        if lhs.success != rhs.success {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(eventId)
-        hasher.combine(success)
-    }
-}
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSendMessageResult: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendMessageResult {
-        return
-            try SendMessageResult(
-                eventId: FfiConverterString.read(from: &buf), 
-                success: FfiConverterBool.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SendMessageResult, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.eventId, into: &buf)
-        FfiConverterBool.write(value.success, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSendMessageResult_lift(_ buf: RustBuffer) throws -> SendMessageResult {
-    return try FfiConverterTypeSendMessageResult.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) -> RustBuffer {
-    return FfiConverterTypeSendMessageResult.lower(value)
-}
-
-
-/**
  * Information about the current logged-in user.
  */
 public struct UserInfo {
@@ -2454,6 +2838,9 @@ public enum TenexError: Swift.Error {
     )
     case LogoutFailed(message: String
     )
+    case LockError(resource: String
+    )
+    case CoreNotInitialized
 }
 
 
@@ -2480,6 +2867,10 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
         case 4: return .LogoutFailed(
             message: try FfiConverterString.read(from: &buf)
             )
+        case 5: return .LockError(
+            resource: try FfiConverterString.read(from: &buf)
+            )
+        case 6: return .CoreNotInitialized
 
          default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -2510,6 +2901,15 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
             writeInt(&buf, Int32(4))
             FfiConverterString.write(message, into: &buf)
             
+        
+        case let .LockError(resource):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(resource, into: &buf)
+            
+        
+        case .CoreNotInitialized:
+            writeInt(&buf, Int32(6))
+        
         }
     }
 }
@@ -2540,6 +2940,105 @@ extension TenexError: Foundation.LocalizedError {
         String(reflecting: self)
     }
 }
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Time filter options for conversations
+ */
+
+public enum TimeFilterOption {
+    
+    /**
+     * All time (no filter)
+     */
+    case all
+    /**
+     * Last 24 hours
+     */
+    case today
+    /**
+     * Last 7 days
+     */
+    case thisWeek
+    /**
+     * Last 30 days
+     */
+    case thisMonth
+}
+
+
+#if compiler(>=6)
+extension TimeFilterOption: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTimeFilterOption: FfiConverterRustBuffer {
+    typealias SwiftType = TimeFilterOption
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TimeFilterOption {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .all
+        
+        case 2: return .today
+        
+        case 3: return .thisWeek
+        
+        case 4: return .thisMonth
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: TimeFilterOption, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case .all:
+            writeInt(&buf, Int32(1))
+        
+        
+        case .today:
+            writeInt(&buf, Int32(2))
+        
+        
+        case .thisWeek:
+            writeInt(&buf, Int32(3))
+        
+        
+        case .thisMonth:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTimeFilterOption_lift(_ buf: RustBuffer) throws -> TimeFilterOption {
+    return try FfiConverterTypeTimeFilterOption.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTimeFilterOption_lower(_ value: TimeFilterOption) -> RustBuffer {
+    return FfiConverterTypeTimeFilterOption.lower(value)
+}
+
+
+extension TimeFilterOption: Equatable, Hashable {}
+
+
 
 
 
@@ -2644,23 +3143,23 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeAgentInfo: FfiConverterRustBuffer {
-    typealias SwiftType = [AgentInfo]
+fileprivate struct FfiConverterSequenceTypeConversationFullInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [ConversationFullInfo]
 
-    public static func write(_ value: [AgentInfo], into buf: inout [UInt8]) {
+    public static func write(_ value: [ConversationFullInfo], into buf: inout [UInt8]) {
         let len = Int32(value.count)
         writeInt(&buf, len)
         for item in value {
-            FfiConverterTypeAgentInfo.write(item, into: &buf)
+            FfiConverterTypeConversationFullInfo.write(item, into: &buf)
         }
     }
 
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AgentInfo] {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ConversationFullInfo] {
         let len: Int32 = try readInt(&buf)
-        var seq = [AgentInfo]()
+        var seq = [ConversationFullInfo]()
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeAgentInfo.read(from: &buf))
+            seq.append(try FfiConverterTypeConversationFullInfo.read(from: &buf))
         }
         return seq
     }
@@ -2736,6 +3235,31 @@ fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeMessageInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeProjectFilterInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [ProjectFilterInfo]
+
+    public static func write(_ value: [ProjectFilterInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeProjectFilterInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ProjectFilterInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ProjectFilterInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeProjectFilterInfo.read(from: &buf))
         }
         return seq
     }
@@ -2831,10 +3355,16 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 59043) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_archive_conversation() != 34495) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_all_agents() != 32281) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_all_conversations() != 64629) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_archived_conversation_ids() != 44789) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_collapsed_thread_ids() != 51682) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_conversations() != 60701) {
@@ -2849,6 +3379,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 49414) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -2858,10 +3391,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_conversation_archived() != 25908) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_initialized() != 41100) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 37564) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_login() != 22769) {
@@ -2873,10 +3412,19 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 31823) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 26591) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_visible_projects() != 3693) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_conversation_archived() != 43672) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_toggle_thread_collapsed() != 55408) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_version() != 63230) {
