@@ -7,7 +7,7 @@ use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, LocalStreamBuffer, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
@@ -229,8 +229,9 @@ pub struct App {
     pub sidebar_project_index: usize,
     /// Projects to show in Recent/Inbox (empty = none)
     pub visible_projects: HashSet<String>,
-    /// Filter by time since last activity
-    pub time_filter: Option<TimeFilter>,
+
+    /// Home view state (time filter, archive toggle, agent browser)
+    pub home: HomeViewState,
 
     pub preferences: RefCell<PreferencesStorage>,
 
@@ -240,12 +241,6 @@ pub struct App {
     // Lesson viewer state
     pub viewing_lesson_id: Option<String>,
     pub lesson_viewer_section: usize,
-
-    // Agent browser state
-    pub agent_browser_index: usize,
-    pub agent_browser_filter: String,
-    pub agent_browser_in_detail: bool,
-    pub viewing_agent_id: Option<String>,
 
     // Search modal state (deprecated - replaced by Search tab)
     pub showing_search_modal: bool,
@@ -278,8 +273,7 @@ pub struct App {
     pub vim_enabled: bool,
     /// Current vim mode (Normal or Insert)
     pub vim_mode: VimMode,
-    /// Whether to show archived conversations in Recent/Inbox
-    pub show_archived: bool,
+    // NOTE: show_archived is now in home: HomeViewState
     /// Whether to show archived projects in the sidebar
     pub show_archived_projects: bool,
     /// Whether to hide scheduled events from conversation list
@@ -349,15 +343,11 @@ impl App {
             sidebar_focused: false,
             sidebar_project_index: 0,
             visible_projects: HashSet::new(),
-            time_filter: None,
+            home: HomeViewState::new(),
             preferences: RefCell::new(PreferencesStorage::new(data_dir)),
             modal_state: ModalState::None,
             viewing_lesson_id: None,
             lesson_viewer_section: 0,
-            agent_browser_index: 0,
-            agent_browser_filter: String::new(),
-            agent_browser_in_detail: false,
-            viewing_agent_id: None,
             showing_search_modal: false,
             search_filter: String::new(),
             search_index: 0,
@@ -371,9 +361,9 @@ impl App {
             // NOTE: selected_nudge_ids is now per-tab in OpenTab
             // NOTE: frame_counter is now managed by notification_manager
             // NOTE: message_history is now per-tab in OpenTab
+            // NOTE: show_archived, time_filter, agent_browser_* are now in home: HomeViewState
             vim_enabled: false,
             vim_mode: VimMode::Normal,
-            show_archived: false,
             show_archived_projects: false,
             hide_scheduled: false,
             user_explicitly_selected_agent: false,
@@ -2065,7 +2055,7 @@ impl App {
             .unwrap_or(0);
 
         // Calculate time cutoff if time filter is active
-        let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
+        let time_cutoff = self.home.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
 
         // Get threads from visible projects with time filter applied at the data layer
         // No artificial limit - time filter is the primary constraint
@@ -2084,7 +2074,7 @@ impl App {
             })
             // Archive filter
             .filter(|(thread, _)| {
-                self.show_archived || !prefs.is_thread_archived(&thread.id)
+                self.home.show_archived || !prefs.is_thread_archived(&thread.id)
             })
             .collect();
 
@@ -2116,7 +2106,7 @@ impl App {
             .unwrap_or(0);
 
         // Calculate time cutoff if time filter is active
-        let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
+        let time_cutoff = self.home.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
 
         // Get threads from visible projects with time filter applied at the data layer
         // No artificial limit - time filter is the primary constraint
@@ -2132,7 +2122,7 @@ impl App {
         threads.into_iter()
             .filter(|(thread, _)| {
                 // Archive filter
-                let archive_ok = self.show_archived || !prefs.is_thread_archived(&thread.id);
+                let archive_ok = self.home.show_archived || !prefs.is_thread_archived(&thread.id);
                 // Scheduled filter - hide scheduled if hide_scheduled is true
                 let scheduled_ok = !self.hide_scheduled || !thread.is_scheduled;
                 archive_ok && scheduled_ok
@@ -2160,14 +2150,14 @@ impl App {
             // Archive filter - hide items from archived threads unless show_archived is true
             .filter(|item| {
                 if let Some(ref thread_id) = item.thread_id {
-                    self.show_archived || !prefs.is_thread_archived(thread_id)
+                    self.home.show_archived || !prefs.is_thread_archived(thread_id)
                 } else {
                     true  // Keep items without thread_id
                 }
             })
             // Time filter
             .filter(|item| {
-                if let Some(ref tf) = self.time_filter {
+                if let Some(ref tf) = self.home.time_filter {
                     let cutoff = now.saturating_sub(tf.seconds());
                     item.created_at >= cutoff
                 } else {
@@ -2217,7 +2207,7 @@ impl App {
             .unwrap_or(0);
 
         // Calculate time cutoff if time filter is active
-        let time_cutoff = self.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
+        let time_cutoff = self.home.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
 
         let store = self.data_store.borrow();
         let prefs = self.preferences.borrow();
@@ -2229,7 +2219,7 @@ impl App {
 
             for thread in threads {
                 // Apply archive filter
-                if !self.show_archived && prefs.is_thread_archived(&thread.id) {
+                if !self.home.show_archived && prefs.is_thread_archived(&thread.id) {
                     continue;
                 }
 
@@ -2673,7 +2663,7 @@ impl App {
     pub fn load_filter_preferences(&mut self) {
         let prefs = self.preferences.borrow();
         self.visible_projects = prefs.selected_projects().iter().cloned().collect();
-        self.time_filter = prefs.time_filter();
+        self.home.time_filter = prefs.time_filter();
         self.conversation.show_llm_metadata = prefs.show_llm_metadata();
         self.hide_scheduled = prefs.hide_scheduled();
     }
@@ -2686,8 +2676,8 @@ impl App {
 
     /// Cycle through time filter options and persist
     pub fn cycle_time_filter(&mut self) {
-        self.time_filter = TimeFilter::cycle_next(self.time_filter);
-        self.preferences.borrow_mut().set_time_filter(self.time_filter);
+        self.home.time_filter = TimeFilter::cycle_next(self.home.time_filter);
+        self.preferences.borrow_mut().set_time_filter(self.home.time_filter);
     }
 
     /// Toggle LLM metadata display and persist
@@ -2700,10 +2690,10 @@ impl App {
 
     /// Open the agent browser view
     pub fn open_agent_browser(&mut self) {
-        self.agent_browser_index = 0;
-        self.agent_browser_filter.clear();
-        self.agent_browser_in_detail = false;
-        self.viewing_agent_id = None;
+        self.home.agent_browser_index = 0;
+        self.home.agent_browser_filter.clear();
+        self.home.agent_browser_in_detail = false;
+        self.home.viewing_agent_id = None;
         self.scroll_offset = 0;
         self.view = View::AgentBrowser;
         self.input_mode = InputMode::Normal;
@@ -2711,7 +2701,7 @@ impl App {
 
     /// Get filtered agent definitions for the browser
     pub fn filtered_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
-        let filter = &self.agent_browser_filter;
+        let filter = &self.home.agent_browser_filter;
         self.data_store.borrow()
             .get_agent_definitions()
             .into_iter()
@@ -3427,8 +3417,8 @@ impl App {
 
     /// Toggle visibility of archived conversations
     pub fn toggle_show_archived(&mut self) {
-        self.show_archived = !self.show_archived;
-        if self.show_archived {
+        self.home.show_archived = !self.home.show_archived;
+        if self.home.show_archived {
             self.notify(Notification::info("Showing archived conversations"));
         } else {
             self.notify(Notification::info("Hiding archived conversations"));
