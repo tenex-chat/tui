@@ -47,6 +47,12 @@ let project = Project(
                     "SWIFT_INCLUDE_PATHS": [
                         "$(inherited)",
                         "$(SRCROOT)/Sources/TenexMVP/TenexCoreFFI"
+                    ],
+                    // Disable auto-linking of UIUtilities and SwiftUICore frameworks
+                    "OTHER_SWIFT_FLAGS": [
+                        "$(inherited)",
+                        "-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "UIUtilities",
+                        "-Xfrontend", "-disable-autolink-framework", "-Xfrontend", "SwiftUICore"
                     ]
                 ]
             )
