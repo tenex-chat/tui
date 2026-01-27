@@ -203,11 +203,14 @@ struct LoginView: View {
                     DispatchQueue.main.async {
                         self.isLoading = false
                         self.userNpub = result.npub
-                        self.showSuccess = true
 
-                        // Warn if credential save failed
                         if let error = saveError {
+                            // Show warning if credential save failed
                             self.credentialSaveWarning = "Could not save credentials: \(error). You'll need to log in again next time."
+                            self.showSuccess = true
+                        } else {
+                            // Auto-navigate to app on successful login
+                            self.isLoggedIn = true
                         }
                     }
                 } else {
