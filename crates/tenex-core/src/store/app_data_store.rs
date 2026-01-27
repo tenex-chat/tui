@@ -706,62 +706,41 @@ impl AppDataStore {
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
-    /// Only applies the MOST RECENT metadata event for each thread
+    /// Only applies the MOST RECENT metadata event for each thread.
+    /// Uses project-scoped metadata loading to avoid global query limits.
     fn apply_existing_metadata(&mut self) {
-        use nostrdb::{Filter, Transaction};
-        use std::collections::HashMap;
+        // Step 1: Collect all thread IDs across all projects and fetch their metadata
+        // This avoids the global 1000-event limit that caused metadata to be missing
+        // for older conversations when there are many projects/threads
+        let all_thread_ids: HashSet<String> = self.threads_by_project
+            .values()
+            .flat_map(|threads| threads.iter().map(|t| t.id.clone()))
+            .collect();
 
-        let Ok(txn) = Transaction::new(&self.ndb) else {
+        if all_thread_ids.is_empty() {
             return;
-        };
-
-        let filter = Filter::new().kinds([513]).build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
-            return;
-        };
-
-        // Processing existing kind:513 metadata events
-
-        // Group metadata events by thread_id, keeping only the most recent
-        let mut latest_metadata: HashMap<String, ConversationMetadata> = HashMap::new();
-
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(metadata) = ConversationMetadata::from_note(&note) {
-                    let thread_id = metadata.thread_id.clone();
-
-                    // Keep only the most recent metadata for each thread
-                    match latest_metadata.get(&thread_id) {
-                        Some(existing) if existing.created_at > metadata.created_at => {
-                            // Existing is newer, skip this one
-                        }
-                        _ => {
-                            // This one is newer (or first for this thread)
-                            latest_metadata.insert(thread_id, metadata);
-                        }
-                    }
-                }
-            }
         }
 
-        // Applying latest metadata for unique threads
+        // Fetch metadata for all threads at once (still project-scoped by thread IDs)
+        let Ok(metadata_map) = crate::store::get_metadata_for_threads(&self.ndb, &all_thread_ids) else {
+            return;
+        };
 
-        // Apply the latest metadata to each thread
-        for (thread_id, metadata) in latest_metadata {
-            for threads in self.threads_by_project.values_mut() {
-                if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
-                    if let Some(title) = metadata.title {
-                        thread.title = title;
+        // Step 2: Apply metadata to all threads
+        for threads in self.threads_by_project.values_mut() {
+            for thread in threads.iter_mut() {
+                if let Some(metadata) = metadata_map.get(&thread.id) {
+                    if let Some(ref title) = metadata.title {
+                        thread.title = title.clone();
                     }
-                    thread.status_label = metadata.status_label;
-                    thread.status_current_activity = metadata.status_current_activity;
-                    thread.summary = metadata.summary;
+                    thread.status_label = metadata.status_label.clone();
+                    thread.status_current_activity = metadata.status_current_activity.clone();
+                    thread.summary = metadata.summary.clone();
                     // Only update last_activity if metadata is newer than current
                     // to avoid regressing timestamps when metadata is older than newest message
                     if metadata.created_at > thread.last_activity {
                         thread.last_activity = metadata.created_at;
                     }
-                    break;
                 }
             }
         }
@@ -1387,6 +1366,65 @@ impl AppDataStore {
             }
         }
         None
+    }
+
+    /// Lazy-load metadata for a specific thread if it wasn't loaded initially.
+    /// This is useful when a conversation's metadata wasn't in the initial load window.
+    /// Returns true if metadata was found and applied, false otherwise.
+    pub fn load_metadata_for_thread(&mut self, thread_id: &str) -> bool {
+        // First check if thread exists
+        let thread_exists = self.threads_by_project.values().any(|threads| {
+            threads.iter().any(|t| t.id == thread_id)
+        });
+
+        if !thread_exists {
+            return false;
+        }
+
+        // Try to fetch metadata for this thread
+        let Ok(Some(metadata)) = crate::store::get_metadata_for_thread(&self.ndb, thread_id) else {
+            return false;
+        };
+
+        // Apply metadata to the thread
+        let mut metadata_applied = false;
+        let mut needs_hierarchy_propagation = false;
+        for threads in self.threads_by_project.values_mut() {
+            if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
+                // Apply all metadata fields consistently (title, status, summary, last_activity)
+                if let Some(ref title) = metadata.title {
+                    thread.title = title.clone();
+                }
+                thread.status_label = metadata.status_label.clone();
+                thread.status_current_activity = metadata.status_current_activity.clone();
+                thread.summary = metadata.summary.clone();
+                // Only update last_activity if metadata is newer
+                if metadata.created_at > thread.last_activity {
+                    thread.last_activity = metadata.created_at;
+                    // Update runtime hierarchy - propagation will happen after the loop
+                    self.runtime_hierarchy.set_individual_last_activity(thread_id, metadata.created_at);
+                    needs_hierarchy_propagation = true;
+                }
+                metadata_applied = true;
+                break;
+            }
+        }
+
+        // CRITICAL: Propagate effective_last_activity to ancestors after updating last_activity.
+        // This ensures hierarchical recency sorting remains correct when metadata updates
+        // a thread's timestamp. Without this, parent threads wouldn't bubble up correctly.
+        if needs_hierarchy_propagation {
+            self.propagate_effective_last_activity(thread_id);
+        }
+
+        // Re-sort if metadata was applied (thread position may have changed due to hierarchy propagation)
+        if metadata_applied {
+            for threads in self.threads_by_project.values_mut() {
+                threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+            }
+        }
+
+        metadata_applied
     }
 
     /// Get an ask event by its ID (for q-tags that point to ask events).

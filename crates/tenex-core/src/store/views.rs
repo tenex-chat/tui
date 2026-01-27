@@ -104,33 +104,32 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
             .collect()
     };
 
-    // Get conversation metadata
-    let metadata_map: HashMap<String, ConversationMetadata> = {
-        let metadata_filter = Filter::new().kinds([513]).build();
-        let metadata_results = ndb.query(&txn, &[metadata_filter], 1000)?;
+    // Get conversation metadata - scoped to this project's threads
+    // This avoids the global limit issue where older conversations would miss metadata
+    let thread_ids: HashSet<String> = threads.iter().map(|t| t.id.clone()).collect();
+    // Note: On metadata load failure, we continue with partial/no metadata rather than
+    // failing the entire thread load. Threads will still be usable, just potentially
+    // missing titles/summaries. The underlying get_metadata_for_threads returns
+    // partial results on individual thread failures, so this unwrap_or_default only
+    // triggers on complete failure (e.g., transaction creation failed).
+    let metadata_map = get_metadata_for_threads(ndb, &thread_ids).unwrap_or_default();
 
-        let mut map: HashMap<String, ConversationMetadata> = HashMap::new();
-        for r in metadata_results.iter() {
-            if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
-                if let Some(metadata) = ConversationMetadata::from_note(&note) {
-                    if let Some(existing) = map.get(&metadata.thread_id) {
-                        if metadata.created_at > existing.created_at {
-                            map.insert(metadata.thread_id.clone(), metadata);
-                        }
-                    } else {
-                        map.insert(metadata.thread_id.clone(), metadata);
-                    }
-                }
-            }
-        }
-        map
-    };
-
-    // Enrich threads with metadata
+    // Enrich threads with metadata (apply ALL fields consistently: title, status, summary, last_activity)
     for thread in &mut threads {
         if let Some(metadata) = metadata_map.get(&thread.id) {
             if let Some(title) = &metadata.title {
                 thread.title = title.clone();
+            }
+            thread.status_label = metadata.status_label.clone();
+            thread.status_current_activity = metadata.status_current_activity.clone();
+            thread.summary = metadata.summary.clone();
+            // Only update last_activity if metadata is newer to avoid regressing timestamps
+            if metadata.created_at > thread.last_activity {
+                thread.last_activity = metadata.created_at;
+                // Update effective_last_activity to match - this ensures correct sorting.
+                // Full hierarchical propagation (parent threads bubbling up child activity)
+                // is handled by AppDataStore when threads are processed there.
+                thread.effective_last_activity = metadata.created_at;
             }
         }
     }
@@ -241,6 +240,140 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
     messages.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
     Ok(messages)
+}
+
+/// Get metadata for a specific set of thread IDs.
+/// This provides project-scoped metadata loading by querying only for the threads we care about.
+/// Returns a map of thread_id -> ConversationMetadata, keeping only the newest metadata per thread.
+///
+/// NOTE: Currently performs O(N) queries (one per thread ID) because nostrdb doesn't support
+/// multi-value e-tag filters in a single query. For large thread sets, this could be optimized
+/// by chunking or using a different query strategy if nostrdb adds support.
+pub fn get_metadata_for_threads(ndb: &Ndb, thread_ids: &HashSet<String>) -> Result<HashMap<String, ConversationMetadata>> {
+    if thread_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let txn = Transaction::new(ndb)?;
+    let mut metadata_map: HashMap<String, ConversationMetadata> = HashMap::new();
+    let mut query_errors: usize = 0;
+
+    // Query metadata for each thread ID using e-tag filter
+    // NOTE: This is O(N) queries because nostrdb doesn't support multi-value e-tag filters.
+    // Each thread requires its own query. For typical project sizes (<1000 threads), this
+    // performs acceptably. The alternative would be a global kind:513 query with post-filtering,
+    // but that re-introduces the original limit problem we're solving.
+    for thread_id in thread_ids {
+        let id_bytes = match hex::decode(thread_id) {
+            Ok(bytes) if bytes.len() == 32 => bytes,
+            _ => continue, // Skip invalid thread IDs
+        };
+
+        let mut id_arr = [0u8; 32];
+        id_arr.copy_from_slice(&id_bytes);
+
+        // Build filter for kind:513 with this specific e-tag
+        // Use fallible handling instead of unwrap() to avoid panics
+        let filter = {
+            let mut f = Filter::new();
+            if f.start_tag_field('e').is_err() {
+                query_errors += 1;
+                continue;
+            }
+            if f.add_id_element(&id_arr).is_err() {
+                query_errors += 1;
+                continue;
+            }
+            f.end_field();
+            f.kinds([513]).build()
+        };
+
+        // Query for metadata events for this thread
+        // Use higher limit (100) to ensure we capture all metadata updates, since nostrdb
+        // doesn't guarantee ordering. We then select the newest by created_at.
+        match ndb.query(&txn, &[filter], 100) {
+            Ok(results) => {
+                for r in results.iter() {
+                    if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
+                        if let Some(metadata) = ConversationMetadata::from_note(&note) {
+                            // Keep only the most recent metadata for each thread (explicit newest-wins)
+                            let dominated = metadata_map.get(&metadata.thread_id)
+                                .map(|existing| existing.created_at >= metadata.created_at)
+                                .unwrap_or(false);
+                            if !dominated {
+                                metadata_map.insert(metadata.thread_id.clone(), metadata);
+                            }
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                query_errors += 1;
+                // Log would go here if we had a logging framework
+                // For now, we continue and try other threads rather than failing completely
+            }
+        }
+    }
+
+    // Log if there were any query errors (partial results are still useful)
+    if query_errors > 0 {
+        // In a production system, we'd log this. For now, we return partial results
+        // since having some metadata is better than failing entirely.
+        // tracing::warn!("Failed to query metadata for {} threads", query_errors);
+    }
+
+    Ok(metadata_map)
+}
+
+/// Get metadata for a single thread (lazy loading).
+/// Returns the most recent ConversationMetadata for the thread, if any exists.
+/// Used for on-demand metadata retrieval when a conversation is accessed but
+/// its metadata wasn't in the initial load.
+pub fn get_metadata_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Option<ConversationMetadata>> {
+    let txn = Transaction::new(ndb)?;
+
+    let id_bytes = hex::decode(thread_id)?;
+    if id_bytes.len() != 32 {
+        return Ok(None);
+    }
+
+    let mut id_arr = [0u8; 32];
+    id_arr.copy_from_slice(&id_bytes);
+
+    // Build filter for kind:513 with this specific e-tag
+    // Use fallible handling instead of unwrap() to avoid panics
+    let filter = {
+        let mut f = Filter::new();
+        f.start_tag_field('e').map_err(|e| anyhow::anyhow!("Failed to start tag field: {:?}", e))?;
+        f.add_id_element(&id_arr).map_err(|e| anyhow::anyhow!("Failed to add id element: {:?}", e))?;
+        f.end_field();
+        f.kinds([513]).build()
+    };
+
+    // Query for metadata events for this thread
+    // Use higher limit (100) to ensure we capture all metadata updates, since nostrdb
+    // doesn't guarantee ordering. We then select the newest by created_at.
+    let results = ndb.query(&txn, &[filter], 100)?;
+
+    let mut best_metadata: Option<ConversationMetadata> = None;
+
+    for r in results.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
+            if let Some(metadata) = ConversationMetadata::from_note(&note) {
+                // Explicit newest-wins selection since nostrdb doesn't guarantee order
+                match &best_metadata {
+                    Some(existing) if existing.created_at >= metadata.created_at => {
+                        // Keep existing (newer or equal)
+                    }
+                    _ => {
+                        best_metadata = Some(metadata);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(best_metadata)
 }
 
 pub fn get_profile_name(ndb: &Ndb, pubkey: &str) -> String {
