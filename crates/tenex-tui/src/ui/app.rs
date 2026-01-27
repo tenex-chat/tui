@@ -1631,8 +1631,30 @@ impl App {
         self.tabs.open_draft(project_a_tag.to_string(), project_name.to_string())
     }
 
-    /// Convert a draft tab to a real tab when thread is created
+    /// Convert a draft tab to a real tab when thread is created.
+    /// Also migrates the draft storage entry from the project-based key (e.g., "project_a_tag:new")
+    /// to the new thread-based key (thread.id).
     pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
+        // Migrate the draft storage: load from old key, delete old entry, save with new key
+        let draft_opt = self.draft_storage.borrow().load(draft_id);
+        if let Some(mut draft) = draft_opt {
+            // Update the conversation_id to the new thread ID
+            draft.conversation_id = thread.id.clone();
+
+            // Delete the old draft keyed by project:new
+            if let Err(e) = self.draft_storage.borrow_mut().delete(draft_id) {
+                tlog!("DRAFT", "WARNING: failed to delete old draft key '{}': {}", draft_id, e);
+            }
+
+            // Save with the new thread ID as key (only if there's content to preserve)
+            if !draft.is_empty() {
+                if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+                    tlog!("DRAFT", "ERROR migrating draft to new key '{}': {}", thread.id, e);
+                }
+            }
+        }
+
+        // Convert the tab in the tab manager
         self.tabs.convert_draft(draft_id, thread.id.clone(), thread.title.clone());
     }
 
