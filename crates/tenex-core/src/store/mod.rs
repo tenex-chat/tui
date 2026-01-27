@@ -9,6 +9,7 @@ pub use db::Database;
 pub use events::{get_raw_event_json, get_trace_context, ingest_events, TraceInfo};
 pub use runtime_hierarchy::RuntimeHierarchy;
 pub use views::{
-    build_thread_root_index, get_messages_for_thread, get_profile_name, get_profile_picture,
-    get_projects, get_threads_by_ids, get_threads_for_project,
+    build_thread_root_index, get_messages_for_thread, get_metadata_for_thread,
+    get_metadata_for_threads, get_profile_name, get_profile_picture, get_projects,
+    get_threads_by_ids, get_threads_for_project,
 };
