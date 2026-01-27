@@ -10,12 +10,13 @@ struct ContentView: View {
     @State private var selectedProject: ProjectInfo?
     @State private var showLogoutError = false
     @State private var logoutErrorMessage = ""
+    @State private var isLoggingOut = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
                 // User header
-                UserHeaderView(npub: userNpub, onLogout: logout)
+                UserHeaderView(npub: userNpub, onLogout: logout, isLoggingOut: isLoggingOut)
 
                 Divider()
 
@@ -79,19 +80,43 @@ struct ContentView: View {
     }
 
     private func logout() {
-        do {
-            try coreManager.core.logout()
-            isLoggedIn = false
-        } catch TenexError.LogoutFailed(let message) {
-            // Keep isLoggedIn = true to stay synced with core state (still connected)
-            print("[TENEX] Logout failed: \(message)")
-            logoutErrorMessage = "Logout failed: \(message). Please try again."
-            showLogoutError = true
-        } catch {
-            // For other unexpected errors, also keep state synced
-            print("[TENEX] Unexpected logout error: \(error)")
-            logoutErrorMessage = "Logout error: \(error.localizedDescription)"
-            showLogoutError = true
+        isLoggingOut = true
+
+        DispatchQueue.global(qos: .userInitiated).async {
+            // First perform core logout - only clear credentials if logout succeeds
+            do {
+                try coreManager.core.logout()
+
+                // Logout succeeded - now clear credentials from keychain
+                let clearError = coreManager.clearCredentials()
+                if let error = clearError {
+                    // Log warning but don't fail - logout already succeeded
+                    print("[TENEX] Warning: Failed to clear credentials after logout: \(error)")
+                }
+
+                DispatchQueue.main.async {
+                    self.isLoggingOut = false
+                    self.isLoggedIn = false
+                }
+            } catch TenexError.LogoutFailed(let message) {
+                DispatchQueue.main.async {
+                    self.isLoggingOut = false
+                    // Keep isLoggedIn = true to stay synced with core state (still connected)
+                    // DO NOT clear credentials - user is still logged in
+                    print("[TENEX] Logout failed: \(message)")
+                    self.logoutErrorMessage = "Logout failed: \(message). Please try again."
+                    self.showLogoutError = true
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isLoggingOut = false
+                    // For other unexpected errors, also keep state synced
+                    // DO NOT clear credentials - user may still be logged in
+                    print("[TENEX] Unexpected logout error: \(error)")
+                    self.logoutErrorMessage = "Logout error: \(error.localizedDescription)"
+                    self.showLogoutError = true
+                }
+            }
         }
     }
 }
@@ -101,6 +126,7 @@ struct ContentView: View {
 struct UserHeaderView: View {
     let npub: String
     let onLogout: () -> Void
+    var isLoggingOut: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -126,10 +152,15 @@ struct UserHeaderView: View {
 
             Spacer()
 
-            Button(action: onLogout) {
-                Text("Logout")
-                    .font(.subheadline)
-                    .foregroundStyle(.red)
+            if isLoggingOut {
+                ProgressView()
+                    .scaleEffect(0.8)
+            } else {
+                Button(action: onLogout) {
+                    Text("Logout")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
             }
         }
         .padding()

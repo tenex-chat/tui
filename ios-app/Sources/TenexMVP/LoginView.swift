@@ -5,10 +5,14 @@ struct LoginView: View {
     @Binding var userNpub: String
     @EnvironmentObject var coreManager: TenexCoreManager
 
+    /// Error message from auto-login attempt (if any)
+    var autoLoginError: String?
+
     @State private var nsecInput = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
     @State private var showSuccess = false
+    @State private var credentialSaveWarning: String?
 
     var body: some View {
         NavigationStack {
@@ -28,6 +32,22 @@ struct LoginView: View {
                         .foregroundStyle(.secondary)
                 }
                 .padding(.top, 40)
+
+                // Auto-login error (from previous session)
+                if let autoError = autoLoginError {
+                    HStack {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(.orange)
+                        Text(autoError)
+                            .foregroundStyle(.orange)
+                            .font(.footnote)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .padding(.horizontal)
+                }
 
                 // Input Section
                 VStack(alignment: .leading, spacing: 8) {
@@ -79,6 +99,21 @@ struct LoginView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .padding(.horizontal)
+
+                        // Credential save warning (if save failed)
+                        if let warning = credentialSaveWarning {
+                            HStack {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .foregroundStyle(.orange)
+                                Text(warning)
+                                    .foregroundStyle(.orange)
+                                    .font(.caption2)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.orange.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
                     }
                     .padding()
                     .background(Color.green.opacity(0.1))
@@ -115,11 +150,11 @@ struct LoginView: View {
 
                 // Footer Info
                 VStack(spacing: 4) {
-                    Text("Your key is stored in memory only")
+                    Text("Your key is stored securely in Keychain")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    Text("It will be cleared when you close the app")
+                    Text("You'll be auto-logged in on next launch")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -133,10 +168,15 @@ struct LoginView: View {
         // Reset state
         errorMessage = nil
         showSuccess = false
+        credentialSaveWarning = nil
         isLoading = true
 
-        // Validate input format
+        // Validate input format - capture and clear input immediately
         let trimmedInput = nsecInput.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Clear sensitive input from UI state IMMEDIATELY after capturing
+        // This minimizes the time sensitive data exists in memory
+        nsecInput = ""
 
         guard !trimmedInput.isEmpty else {
             errorMessage = "Please enter your nsec key"
@@ -151,16 +191,28 @@ struct LoginView: View {
         }
 
         // Perform login on background thread
+        // Note: trimmedInput is captured by the closure but will be released when closure completes
         DispatchQueue.global(qos: .userInitiated).async {
             do {
                 let result = try coreManager.core.login(nsec: trimmedInput)
 
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    if result.success {
+                if result.success {
+                    // Save credential to keychain (on background thread)
+                    let saveError = coreManager.saveCredential(nsec: trimmedInput)
+
+                    DispatchQueue.main.async {
+                        self.isLoading = false
                         self.userNpub = result.npub
                         self.showSuccess = true
-                    } else {
+
+                        // Warn if credential save failed
+                        if let error = saveError {
+                            self.credentialSaveWarning = "Could not save credentials: \(error). You'll need to log in again next time."
+                        }
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        self.isLoading = false
                         self.errorMessage = "Login failed"
                     }
                 }
@@ -193,6 +245,6 @@ struct LoginView: View {
 }
 
 #Preview {
-    LoginView(isLoggedIn: .constant(false), userNpub: .constant(""))
+    LoginView(isLoggedIn: .constant(false), userNpub: .constant(""), autoLoginError: nil)
         .environmentObject(TenexCoreManager())
 }
