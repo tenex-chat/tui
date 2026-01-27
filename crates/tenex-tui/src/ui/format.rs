@@ -1,3 +1,11 @@
+/// Get current Unix timestamp in seconds.
+fn now_seconds() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Truncate string to a max length without adding an ellipsis.
 pub fn truncate_plain(s: &str, max_len: usize) -> String {
     if max_len == 0 {
@@ -33,12 +41,7 @@ pub fn truncate_with_ellipsis(s: &str, max_len: usize) -> String {
 
 /// Format a timestamp as relative time (e.g., "2m ago", "1h ago").
 pub fn format_relative_time(timestamp: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(timestamp);
+    let diff = now_seconds().saturating_sub(timestamp);
 
     if diff < 60 {
         "just now".to_string()
@@ -55,12 +58,7 @@ pub fn format_relative_time(timestamp: u64) -> String {
 
 /// Format duration since a timestamp started (e.g., "2m", "1h 30m", "2d 5h").
 pub fn format_duration_since(started_at: u64) -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-
-    let diff = now.saturating_sub(started_at);
+    let diff = now_seconds().saturating_sub(started_at);
 
     if diff < 60 {
         format!("{}s", diff)

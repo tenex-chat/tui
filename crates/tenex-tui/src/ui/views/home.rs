@@ -1363,10 +1363,18 @@ fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
             agent_names.join(", ")
         };
 
-        // Get conversation info
-        let (conv_title, _thread_id) = data_store
-            .get_thread_info_for_event(&op.event_id)
-            .unwrap_or_else(|| (truncate_with_ellipsis(&op.event_id, 12), op.event_id.clone()));
+        // Get conversation title from pre-computed thread_id, or look up from event_id
+        let conv_title = if let Some(ref thread_id) = op.thread_id {
+            data_store
+                .get_thread_by_id(thread_id)
+                .map(|t| t.title.clone())
+                .unwrap_or_else(|| truncate_with_ellipsis(&op.event_id, 12))
+        } else {
+            data_store
+                .get_thread_info_for_event(&op.event_id)
+                .map(|(_thread_id, title)| title)
+                .unwrap_or_else(|| truncate_with_ellipsis(&op.event_id, 12))
+        };
 
         // Get project name
         let project_name = data_store.get_project_name(&op.project_coordinate);
