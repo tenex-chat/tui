@@ -300,10 +300,8 @@ pub struct App {
     pub vim_enabled: bool,
     /// Current vim mode (Normal or Insert)
     pub vim_mode: VimMode,
-    /// Whether to show archived conversations in Recent/Inbox
+    /// Whether to show archived items (conversations and projects)
     pub show_archived: bool,
-    /// Whether to show archived projects in the sidebar
-    pub show_archived_projects: bool,
     /// Whether to hide scheduled events from conversation list
     pub hide_scheduled: bool,
     /// Whether user explicitly selected an agent in the current conversation
@@ -401,7 +399,6 @@ impl App {
             vim_enabled: false,
             vim_mode: VimMode::Normal,
             show_archived: false,
-            show_archived_projects: false,
             hide_scheduled: false,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
@@ -1155,7 +1152,7 @@ impl App {
 
     /// Get filtered projects based on current filter (from ModalState)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
-    /// Archived projects are hidden unless show_archived_projects is true
+    /// Archived projects are hidden unless show_archived is true
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
@@ -1166,7 +1163,7 @@ impl App {
             .iter()
             .filter(|p| {
                 // Filter out archived projects unless showing archived
-                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
+                self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
             .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
@@ -1631,8 +1628,30 @@ impl App {
         self.tabs.open_draft(project_a_tag.to_string(), project_name.to_string())
     }
 
-    /// Convert a draft tab to a real tab when thread is created
+    /// Convert a draft tab to a real tab when thread is created.
+    /// Also migrates the draft storage entry from the project-based key (e.g., "project_a_tag:new")
+    /// to the new thread-based key (thread.id).
     pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
+        // Migrate the draft storage: load from old key, delete old entry, save with new key
+        let draft_opt = self.draft_storage.borrow().load(draft_id);
+        if let Some(mut draft) = draft_opt {
+            // Update the conversation_id to the new thread ID
+            draft.conversation_id = thread.id.clone();
+
+            // Delete the old draft keyed by project:new
+            if let Err(e) = self.draft_storage.borrow_mut().delete(draft_id) {
+                tlog!("DRAFT", "WARNING: failed to delete old draft key '{}': {}", draft_id, e);
+            }
+
+            // Save with the new thread ID as key (only if there's content to preserve)
+            if !draft.is_empty() {
+                if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+                    tlog!("DRAFT", "ERROR migrating draft to new key '{}': {}", thread.id, e);
+                }
+            }
+        }
+
+        // Convert the tab in the tab manager
         self.tabs.convert_draft(draft_id, thread.id.clone(), thread.title.clone());
     }
 
@@ -3372,13 +3391,13 @@ impl App {
 
     // ===== Archive Methods =====
 
-    /// Toggle visibility of archived conversations
+    /// Toggle visibility of archived items (conversations and projects)
     pub fn toggle_show_archived(&mut self) {
         self.show_archived = !self.show_archived;
         if self.show_archived {
-            self.notify(Notification::info("Showing archived conversations"));
+            self.notify(Notification::info("Showing archived"));
         } else {
-            self.notify(Notification::info("Hiding archived conversations"));
+            self.notify(Notification::info("Hiding archived"));
         }
     }
 
@@ -3390,16 +3409,6 @@ impl App {
     /// Toggle archive status of a thread
     pub fn toggle_thread_archived(&mut self, thread_id: &str) -> bool {
         self.preferences.borrow_mut().toggle_thread_archived(thread_id)
-    }
-
-    /// Toggle visibility of archived projects
-    pub fn toggle_show_archived_projects(&mut self) {
-        self.show_archived_projects = !self.show_archived_projects;
-        if self.show_archived_projects {
-            self.notify(Notification::info("Showing archived projects"));
-        } else {
-            self.notify(Notification::info("Hiding archived projects"));
-        }
     }
 
     /// Check if a project is archived
