@@ -561,17 +561,15 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Get the ID of the currently selected message (if any)
-    pub fn selected_message_id(&self) -> Option<String> {
-        use crate::ui::views::chat::{group_messages, DisplayItem};
-
-        let messages = self.messages();
-        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
-
-        // Filter messages based on current view (subthread or main thread)
-        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
+    /// Filter messages for current view (subthread or main thread).
+    /// This helper is used by methods that need to iterate over display messages.
+    /// NOTE: Due to lifetime constraints with group_messages, this filtering logic
+    /// is duplicated in selected_message_id and display_item_count. The filtering
+    /// itself is identical but the grouped result has a lifetime tied to the messages.
+    fn filter_messages_for_view<'a>(messages: &'a [Message], thread_id: Option<&str>, subthread_root: Option<&str>) -> Vec<&'a Message> {
+        if let Some(root_id) = subthread_root {
             messages.iter()
-                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
+                .filter(|m| m.reply_to.as_deref() == Some(root_id))
                 .collect()
         } else {
             messages.iter()
@@ -581,9 +579,20 @@ impl App {
                         || m.reply_to.as_deref() == thread_id
                 })
                 .collect()
-        };
+        }
+    }
 
+    /// Get the ID of the currently selected message (if any)
+    pub fn selected_message_id(&self) -> Option<String> {
+        use crate::ui::views::chat::{group_messages, DisplayItem};
+
+        let messages = self.messages();
+        let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+        let subthread_root = self.subthread_root.as_deref();
+
+        let display_messages = Self::filter_messages_for_view(&messages, thread_id, subthread_root);
         let grouped = group_messages(&display_messages);
+
         grouped.get(self.selected_message_index).and_then(|item| {
             match item {
                 DisplayItem::SingleMessage { message, .. } => Some(message.id.clone()),
@@ -606,22 +615,9 @@ impl App {
 
         let messages = self.messages();
         let thread_id = self.selected_thread.as_ref().map(|t| t.id.as_str());
+        let subthread_root = self.subthread_root.as_deref();
 
-        // Filter messages based on current view (subthread or main thread)
-        let display_messages: Vec<&Message> = if let Some(ref root_id) = self.subthread_root {
-            messages.iter()
-                .filter(|m| m.reply_to.as_deref() == Some(root_id.as_str()))
-                .collect()
-        } else {
-            messages.iter()
-                .filter(|m| {
-                    Some(m.id.as_str()) == thread_id
-                        || m.reply_to.is_none()
-                        || m.reply_to.as_deref() == thread_id
-                })
-                .collect()
-        };
-
+        let display_messages = Self::filter_messages_for_view(&messages, thread_id, subthread_root);
         group_messages(&display_messages).len()
     }
 
@@ -643,6 +639,30 @@ impl App {
     /// Check if we're currently viewing a subthread
     pub fn in_subthread(&self) -> bool {
         self.subthread_root.is_some()
+    }
+
+    /// Convert TextEditor attachments to draft format.
+    /// This is the single source of truth for attachment conversion.
+    fn convert_attachments_to_draft(editor: &crate::ui::text_editor::TextEditor) -> (Vec<DraftPasteAttachment>, Vec<DraftImageAttachment>) {
+        let paste_attachments: Vec<DraftPasteAttachment> = editor
+            .attachments
+            .iter()
+            .map(|a| DraftPasteAttachment {
+                id: a.id,
+                content: a.content.clone(),
+            })
+            .collect();
+
+        let image_attachments: Vec<DraftImageAttachment> = editor
+            .image_attachments
+            .iter()
+            .map(|a| DraftImageAttachment {
+                id: a.id,
+                url: a.url.clone(),
+            })
+            .collect();
+
+        (paste_attachments, image_attachments)
     }
 
     /// Save current chat editor content as draft for the selected thread or draft tab
@@ -669,25 +689,9 @@ impl App {
                 agent_pubkey.as_ref().map(|p| &p[..8])
             );
 
-            // Convert attachments to draft format (using per-tab editor)
+            // Convert attachments using helper
             let editor = self.chat_editor();
-            let attachments: Vec<DraftPasteAttachment> = editor
-                .attachments
-                .iter()
-                .map(|a| DraftPasteAttachment {
-                    id: a.id,
-                    content: a.content.clone(),
-                })
-                .collect();
-
-            let image_attachments: Vec<DraftImageAttachment> = editor
-                .image_attachments
-                .iter()
-                .map(|a| DraftImageAttachment {
-                    id: a.id,
-                    url: a.url.clone(),
-                })
-                .collect();
+            let (attachments, image_attachments) = Self::convert_attachments_to_draft(editor);
 
             // Get reference_conversation_id from active tab if it exists
             let reference_conversation_id = self.tabs.active_tab()
@@ -746,24 +750,8 @@ impl App {
                 branch
             );
 
-            // Convert attachments from the removed tab's editor
-            let attachments: Vec<DraftPasteAttachment> = tab.editor
-                .attachments
-                .iter()
-                .map(|a| DraftPasteAttachment {
-                    id: a.id,
-                    content: a.content.clone(),
-                })
-                .collect();
-
-            let image_attachments: Vec<DraftImageAttachment> = tab.editor
-                .image_attachments
-                .iter()
-                .map(|a| DraftImageAttachment {
-                    id: a.id,
-                    url: a.url.clone(),
-                })
-                .collect();
+            // Convert attachments using helper
+            let (attachments, image_attachments) = Self::convert_attachments_to_draft(&tab.editor);
 
             let draft = ChatDraft {
                 conversation_id: conversation_id.clone(),
@@ -983,16 +971,6 @@ impl App {
     /// Get pending (unconfirmed) publish snapshots
     pub fn get_pending_publishes(&self) -> Vec<tenex_core::models::draft::PendingPublishSnapshot> {
         self.draft_storage.borrow().get_pending_publishes().into_iter().cloned().collect()
-    }
-
-    /// Delete draft for the selected thread (explicit user-initiated deletion only)
-    #[allow(dead_code)]
-    fn delete_chat_draft(&self) {
-        if let Some(ref thread) = self.selected_thread {
-            if let Err(e) = self.draft_storage.borrow_mut().delete(&thread.id) {
-                tlog!("DRAFT", "ERROR deleting draft for {}: {}", thread.id, e);
-            }
-        }
     }
 
     /// Save current chat editor content as a named draft for the current project
@@ -2598,7 +2576,6 @@ impl App {
     // ===== Local Streaming Methods =====
 
     /// Get streaming content for current conversation
-    #[allow(dead_code)]
     pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
         let conv_id = self.current_conversation_id()?;
         self.local_stream_buffers.get(&conv_id)
