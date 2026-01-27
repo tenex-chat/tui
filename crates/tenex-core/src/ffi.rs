@@ -59,6 +59,85 @@ pub struct ConversationInfo {
     pub status: String,
 }
 
+/// Extended conversation info with all data needed for the Conversations tab.
+/// Includes activity tracking, archive status, and hierarchy data.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConversationFullInfo {
+    /// Unique identifier of the conversation (event ID)
+    pub id: String,
+    /// Title/subject of the conversation
+    pub title: String,
+    /// Agent or user who started the conversation
+    pub author: String,
+    /// Brief summary or first line of content
+    pub summary: Option<String>,
+    /// Number of messages in the thread
+    pub message_count: u32,
+    /// Unix timestamp of last activity (thread's own last activity)
+    pub last_activity: u64,
+    /// Effective last activity (max of own and all descendants)
+    pub effective_last_activity: u64,
+    /// Parent conversation ID (for nesting)
+    pub parent_id: Option<String>,
+    /// Status label from metadata: "In Progress", "Blocked", "Done", etc.
+    pub status: Option<String>,
+    /// Current activity description (e.g., "Writing tests...")
+    pub current_activity: Option<String>,
+    /// Whether this conversation has an agent actively working on it
+    pub is_active: bool,
+    /// Whether this conversation is archived
+    pub is_archived: bool,
+    /// Whether this thread has children (for collapse/expand UI)
+    pub has_children: bool,
+    /// Project a_tag this conversation belongs to
+    pub project_a_tag: String,
+    /// Whether this is a scheduled event
+    pub is_scheduled: bool,
+}
+
+/// Time filter options for conversations
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TimeFilterOption {
+    /// All time (no filter)
+    All,
+    /// Last 24 hours
+    Today,
+    /// Last 7 days
+    ThisWeek,
+    /// Last 30 days
+    ThisMonth,
+}
+
+/// Filter configuration for getAllConversations
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ConversationFilter {
+    /// Project IDs to include (empty = all projects)
+    pub project_ids: Vec<String>,
+    /// Whether to include archived conversations
+    pub show_archived: bool,
+    /// Whether to hide scheduled events
+    pub hide_scheduled: bool,
+    /// Time filter
+    pub time_filter: TimeFilterOption,
+}
+
+/// Project info with selection state for filtering
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ProjectFilterInfo {
+    /// Project ID (d-tag)
+    pub id: String,
+    /// Project a_tag (full coordinate)
+    pub a_tag: String,
+    /// Display title
+    pub title: String,
+    /// Whether this project is currently visible/selected
+    pub is_visible: bool,
+    /// Number of active conversations in this project
+    pub active_count: u32,
+    /// Total conversations in this project
+    pub total_count: u32,
+}
+
 /// A single question in an ask event.
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum AskQuestionInfo {
@@ -191,6 +270,55 @@ pub enum TenexError {
     Internal { message: String },
     #[error("Logout failed: {message}")]
     LogoutFailed { message: String },
+    #[error("Lock error: failed to acquire lock on {resource}")]
+    LockError { resource: String },
+    #[error("Core not initialized")]
+    CoreNotInitialized,
+}
+
+/// FFI-specific preferences storage (mirrors PreferencesStorage but simplified for FFI)
+#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct FfiPreferences {
+    /// IDs of archived conversations
+    #[serde(default)]
+    pub archived_thread_ids: std::collections::HashSet<String>,
+    /// Visible project a_tags (empty = all visible)
+    #[serde(default)]
+    pub visible_projects: std::collections::HashSet<String>,
+    /// IDs of collapsed threads (for UI state)
+    #[serde(default)]
+    pub collapsed_thread_ids: std::collections::HashSet<String>,
+}
+
+impl FfiPreferences {
+    fn load_from_file(path: &std::path::Path) -> Option<Self> {
+        let contents = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&contents).ok()
+    }
+
+    fn save_to_file(&self, path: &std::path::Path) {
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+/// Wrapper that handles persistence
+struct FfiPreferencesStorage {
+    prefs: FfiPreferences,
+    path: std::path::PathBuf,
+}
+
+impl FfiPreferencesStorage {
+    fn new(data_dir: &std::path::Path) -> Self {
+        let path = data_dir.join("ios_preferences.json");
+        let prefs = FfiPreferences::load_from_file(&path).unwrap_or_default();
+        Self { prefs, path }
+    }
+
+    fn save(&self) {
+        self.prefs.save_to_file(&self.path);
+    }
 }
 
 /// Core TENEX functionality exposed to foreign languages.
@@ -215,6 +343,8 @@ pub struct TenexCore {
     worker_handle: RwLock<Option<JoinHandle<()>>>,
     /// NostrDB subscription stream for live updates
     ndb_stream: RwLock<Option<SubscriptionStream>>,
+    /// iOS preferences storage (archive state, collapsed threads, visible projects)
+    preferences: RwLock<Option<FfiPreferencesStorage>>,
 }
 
 #[uniffi::export]
@@ -232,6 +362,7 @@ impl TenexCore {
             data_rx: Mutex::new(None),
             worker_handle: RwLock::new(None),
             ndb_stream: RwLock::new(None),
+            preferences: RwLock::new(None),
         }
     }
 
@@ -341,6 +472,16 @@ impl TenexCore {
                 Err(_) => return false,
             };
             *stream_guard = Some(ndb_stream);
+        }
+
+        // Initialize preferences storage
+        {
+            let prefs = FfiPreferencesStorage::new(&data_dir);
+            let mut prefs_guard = match self.preferences.write() {
+                Ok(g) => g,
+                Err(_) => return false,
+            };
+            *prefs_guard = Some(prefs);
         }
 
         self.initialized.store(true, Ordering::SeqCst);
@@ -667,6 +808,13 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
+        // Build a set of agent pubkeys for role detection (Fix #4: proper role detection)
+        // This avoids content-based heuristics that can misclassify user messages
+        let agent_pubkeys: std::collections::HashSet<&String> = store.agent_definitions
+            .values()
+            .map(|def| &def.pubkey)
+            .collect();
+
         // Get messages for the thread
         let messages = store.get_messages(&conversation_id);
 
@@ -691,9 +839,10 @@ impl TenexCore {
                     .and_then(|pk| pk.to_bech32().ok())
                     .unwrap_or_else(|| format!("{}...", &m.pubkey[..16.min(m.pubkey.len())]));
 
-                // Determine role based on content patterns, tool usage, or author
-                // Messages with tool_name are always from assistants (tool calls or ask events)
-                let role = if m.tool_name.is_some() || m.content.contains("```") || m.content.contains("Tool:") {
+                // Determine role based on author pubkey (Fix #4: remove content-based heuristics)
+                // If the message author is a known agent, role is "assistant", otherwise "user"
+                // Messages with tool_name are always from assistants (tool calls require assistant context)
+                let role = if m.tool_name.is_some() || agent_pubkeys.contains(&m.pubkey) {
                     "assistant".to_string()
                 } else {
                     "user".to_string()
@@ -733,7 +882,8 @@ impl TenexCore {
                     author: author_name,
                     author_npub,
                     created_at: m.created_at,
-                    is_tool_call: m.content.starts_with("Tool:") || m.content.contains("<tool_call>") || m.tool_name.is_some(),
+                    // Tool calls are indicated by the tool_name tag (Fix #4: remove content heuristics)
+                    is_tool_call: m.tool_name.is_some(),
                     role,
                     q_tags: m.q_tags.clone(),
                     ask_event,
@@ -854,6 +1004,320 @@ impl TenexCore {
                 }
             })
             .collect()
+    }
+
+    // ===== Conversations Tab Methods (Full-featured) =====
+
+    /// Get all conversations across all projects with full info for the Conversations tab.
+    /// Returns conversations with activity tracking, archive status, and hierarchy data.
+    /// Sorted by: active conversations first (by effective_last_activity desc),
+    /// then inactive conversations by effective_last_activity desc.
+    ///
+    /// Returns Result to distinguish "no data" from "core error".
+    pub fn get_all_conversations(&self, filter: ConversationFilter) -> Result<Vec<ConversationFullInfo>, TenexError> {
+        let store_guard = self.store.read()
+            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+
+        let store = store_guard.as_ref()
+            .ok_or(TenexError::CoreNotInitialized)?;
+
+        // Get archived thread IDs from preferences
+        let prefs_guard = self.preferences.read()
+            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+        let archived_ids = prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.clone())
+            .unwrap_or_default();
+
+        // Build list of project a_tags to include
+        let projects = store.get_projects();
+        let project_a_tags: Vec<String> = if filter.project_ids.is_empty() {
+            // All projects
+            projects.iter().map(|p| p.a_tag()).collect()
+        } else {
+            // Filter to specified project IDs
+            projects.iter()
+                .filter(|p| filter.project_ids.contains(&p.id))
+                .map(|p| p.a_tag())
+                .collect()
+        };
+
+        // Calculate time filter cutoff
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let time_cutoff = match filter.time_filter {
+            TimeFilterOption::All => 0,
+            TimeFilterOption::Today => now.saturating_sub(86400),
+            TimeFilterOption::ThisWeek => now.saturating_sub(86400 * 7),
+            TimeFilterOption::ThisMonth => now.saturating_sub(86400 * 30),
+        };
+
+        // Pre-compute message counts for all threads to avoid N×M reads
+        // Build a map of thread_id -> message_count
+        let mut message_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        for project_a_tag in &project_a_tags {
+            let threads = store.get_threads(project_a_tag);
+            for thread in threads {
+                let count = store.get_messages(&thread.id).len() as u32;
+                message_counts.insert(thread.id.clone(), count);
+            }
+        }
+
+        // Collect all threads from selected projects
+        let mut conversations: Vec<ConversationFullInfo> = Vec::new();
+
+        for project_a_tag in &project_a_tags {
+            let threads = store.get_threads(project_a_tag);
+
+            for thread in threads {
+                // Filter: scheduled events
+                if filter.hide_scheduled && thread.is_scheduled {
+                    continue;
+                }
+
+                // Filter: archived
+                let is_archived = archived_ids.contains(&thread.id);
+                if !filter.show_archived && is_archived {
+                    continue;
+                }
+
+                // Filter: time
+                if time_cutoff > 0 && thread.effective_last_activity < time_cutoff {
+                    continue;
+                }
+
+                // Get message count from pre-computed map (O(1) lookup instead of O(n) each time)
+                let message_count = message_counts.get(&thread.id).copied().unwrap_or(0);
+
+                // Get author display name
+                let author_name = store.get_profile_name(&thread.pubkey);
+
+                // Check if thread has children
+                let has_children = store.runtime_hierarchy.has_children(&thread.id);
+
+                // Check if thread has active agents
+                let is_active = store.is_event_busy(&thread.id);
+
+                conversations.push(ConversationFullInfo {
+                    id: thread.id.clone(),
+                    title: thread.title.clone(),
+                    author: author_name,
+                    summary: thread.summary.clone(),
+                    message_count,
+                    last_activity: thread.last_activity,
+                    effective_last_activity: thread.effective_last_activity,
+                    parent_id: thread.parent_conversation_id.clone(),
+                    status: thread.status_label.clone(),
+                    current_activity: thread.status_current_activity.clone(),
+                    is_active,
+                    is_archived,
+                    has_children,
+                    project_a_tag: project_a_tag.clone(),
+                    is_scheduled: thread.is_scheduled,
+                });
+            }
+        }
+
+        // Sort: active first (by effective_last_activity desc), then inactive by effective_last_activity desc
+        conversations.sort_by(|a, b| {
+            match (a.is_active, b.is_active) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => b.effective_last_activity.cmp(&a.effective_last_activity),
+            }
+        });
+
+        Ok(conversations)
+    }
+
+    /// Get all projects with filter info (visibility, counts).
+    /// Returns Result to distinguish "no data" from "core error".
+    pub fn get_project_filters(&self) -> Result<Vec<ProjectFilterInfo>, TenexError> {
+        let store_guard = self.store.read()
+            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+
+        let store = store_guard.as_ref()
+            .ok_or(TenexError::CoreNotInitialized)?;
+
+        // Get visible project IDs from preferences
+        let prefs_guard = self.preferences.read()
+            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+        let visible_projects = prefs_guard.as_ref()
+            .map(|p| p.prefs.visible_projects.clone())
+            .unwrap_or_default();
+
+        let projects = store.get_projects();
+
+        Ok(projects.iter().map(|p| {
+            let a_tag = p.a_tag();
+            let threads = store.get_threads(&a_tag);
+            let total_count = threads.len() as u32;
+
+            // Count active conversations
+            let active_count = threads.iter()
+                .filter(|t| store.is_event_busy(&t.id))
+                .count() as u32;
+
+            // Check visibility (empty means all visible)
+            let is_visible = visible_projects.is_empty() || visible_projects.contains(&a_tag);
+
+            ProjectFilterInfo {
+                id: p.id.clone(),
+                a_tag,
+                title: p.name.clone(),
+                is_visible,
+                active_count,
+                total_count,
+            }
+        }).collect())
+    }
+
+    /// Set which projects are visible in the Conversations tab.
+    /// Pass empty array to show all projects.
+    pub fn set_visible_projects(&self, project_a_tags: Vec<String>) {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            prefs.prefs.visible_projects = project_a_tags.into_iter().collect();
+            prefs.save();
+        }
+    }
+
+    /// Archive a conversation (hide from default view).
+    pub fn archive_conversation(&self, conversation_id: String) {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            prefs.prefs.archived_thread_ids.insert(conversation_id);
+            prefs.save();
+        }
+    }
+
+    /// Unarchive a conversation (show in default view).
+    pub fn unarchive_conversation(&self, conversation_id: String) {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            prefs.prefs.archived_thread_ids.remove(&conversation_id);
+            prefs.save();
+        }
+    }
+
+    /// Toggle archive status for a conversation.
+    /// Returns true if the conversation is now archived.
+    pub fn toggle_conversation_archived(&self, conversation_id: String) -> bool {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            let is_now_archived = if prefs.prefs.archived_thread_ids.contains(&conversation_id) {
+                prefs.prefs.archived_thread_ids.remove(&conversation_id);
+                false
+            } else {
+                prefs.prefs.archived_thread_ids.insert(conversation_id);
+                true
+            };
+            prefs.save();
+            is_now_archived
+        } else {
+            false
+        }
+    }
+
+    /// Check if a conversation is archived.
+    pub fn is_conversation_archived(&self, conversation_id: String) -> bool {
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.contains(&conversation_id))
+            .unwrap_or(false)
+    }
+
+    /// Get all archived conversation IDs.
+    /// Returns Result to distinguish "no data" from "lock error".
+    pub fn get_archived_conversation_ids(&self) -> Result<Vec<String>, TenexError> {
+        let prefs_guard = self.preferences.read()
+            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+
+        Ok(prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.iter().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    // ===== Collapsed Thread State Methods (Fix #5: Expose via FFI) =====
+
+    /// Get all collapsed thread IDs.
+    pub fn get_collapsed_thread_ids(&self) -> Result<Vec<String>, TenexError> {
+        let prefs_guard = self.preferences.read()
+            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+
+        Ok(prefs_guard.as_ref()
+            .map(|p| p.prefs.collapsed_thread_ids.iter().cloned().collect())
+            .unwrap_or_default())
+    }
+
+    /// Set collapsed thread IDs (replace all).
+    pub fn set_collapsed_thread_ids(&self, thread_ids: Vec<String>) {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            prefs.prefs.collapsed_thread_ids = thread_ids.into_iter().collect();
+            prefs.save();
+        }
+    }
+
+    /// Toggle collapsed state for a thread.
+    /// Returns true if the thread is now collapsed.
+    pub fn toggle_thread_collapsed(&self, thread_id: String) -> bool {
+        let mut prefs_guard = match self.preferences.write() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        if let Some(prefs) = prefs_guard.as_mut() {
+            let is_now_collapsed = if prefs.prefs.collapsed_thread_ids.contains(&thread_id) {
+                prefs.prefs.collapsed_thread_ids.remove(&thread_id);
+                false
+            } else {
+                prefs.prefs.collapsed_thread_ids.insert(thread_id);
+                true
+            };
+            prefs.save();
+            is_now_collapsed
+        } else {
+            false
+        }
+    }
+
+    /// Check if a thread is collapsed.
+    pub fn is_thread_collapsed(&self, thread_id: String) -> bool {
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+
+        prefs_guard.as_ref()
+            .map(|p| p.prefs.collapsed_thread_ids.contains(&thread_id))
+            .unwrap_or(false)
     }
 
     /// Refresh data from relays.

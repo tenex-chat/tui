@@ -80,6 +80,12 @@ struct MainTabView: View {
                 }
                 .environmentObject(coreManager)
 
+            ConversationsTabView()
+                .tabItem {
+                    Label("Conversations", systemImage: "bubble.left.and.bubble.right.fill")
+                }
+                .environmentObject(coreManager)
+
             InboxView()
                 .tabItem {
                     Label("Inbox", systemImage: "tray.fill")
