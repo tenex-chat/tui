@@ -292,6 +292,11 @@ struct MessageBubble: View {
                     .padding(12)
                     .background(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
                     .clipShape(RoundedRectangle(cornerRadius: 16))
+
+                // Ask event component (inline ask)
+                if let askEvent = message.askEvent {
+                    AskEventView(askEvent: askEvent)
+                }
             }
 
             if !isUser { Spacer(minLength: 50) }
@@ -303,6 +308,132 @@ struct MessageBubble: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - Ask Event View
+
+struct AskEventView: View {
+    let askEvent: AskEventInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Title and context
+            if let title = askEvent.title {
+                HStack(spacing: 8) {
+                    Image(systemName: "questionmark.circle.fill")
+                        .foregroundStyle(.orange)
+                    Text(title)
+                        .font(.headline)
+                }
+            }
+
+            if !askEvent.context.isEmpty {
+                Text(askEvent.context)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Questions
+            ForEach(Array(askEvent.questions.enumerated()), id: \.offset) { _, question in
+                AskQuestionView(question: question)
+            }
+        }
+        .padding(16)
+        .background(Color.orange.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Ask Question View
+
+struct AskQuestionView: View {
+    let question: AskQuestionInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            // Title
+            Text(questionTitle)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.orange)
+
+            // Question text
+            Text(questionText)
+                .font(.body)
+
+            // Choices (unified term for suggestions/options)
+            if !choices.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(choices.enumerated()), id: \.offset) { _, choice in
+                        ChoiceRow(choice: choice, isMultiSelect: isMultiSelect)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Computed Properties
+
+    private var questionTitle: String {
+        switch question {
+        case .singleSelect(let title, _, _): return title
+        case .multiSelect(let title, _, _): return title
+        }
+    }
+
+    private var questionText: String {
+        switch question {
+        case .singleSelect(_, let text, _): return text
+        case .multiSelect(_, let text, _): return text
+        }
+    }
+
+    private var choices: [String] {
+        switch question {
+        case .singleSelect(_, _, let suggestions): return suggestions
+        case .multiSelect(_, _, let options): return options
+        }
+    }
+
+    private var isMultiSelect: Bool {
+        switch question {
+        case .singleSelect: return false
+        case .multiSelect: return true
+        }
+    }
+}
+
+// MARK: - Choice Row View
+
+struct ChoiceRow: View {
+    let choice: String
+    let isMultiSelect: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            indicator
+            Text(choice)
+                .font(.subheadline)
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var indicator: some View {
+        if isMultiSelect {
+            RoundedRectangle(cornerRadius: 3)
+                .stroke(Color.orange, lineWidth: 2)
+                .frame(width: 16, height: 16)
+        } else {
+            Circle()
+                .stroke(Color.orange, lineWidth: 2)
+                .frame(width: 16, height: 16)
+        }
     }
 }
 
