@@ -7,6 +7,7 @@ struct ConversationsView: View {
     @State private var isLoading = false
     @State private var selectedConversation: ConversationInfo?
     @State private var showReports = false
+    @State private var showNewConversation = false
 
     var body: some View {
         Group {
@@ -48,18 +49,34 @@ struct ConversationsView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: loadConversations) {
-                    Image(systemName: "arrow.clockwise")
+                HStack(spacing: 16) {
+                    Button(action: loadConversations) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+
+                    Button(action: { showNewConversation = true }) {
+                        Image(systemName: "plus")
+                    }
                 }
-                .disabled(isLoading)
             }
         }
         .onAppear {
             loadConversations()
         }
         .sheet(item: $selectedConversation) { conversation in
-            MessagesView(conversation: conversation)
+            MessagesView(conversation: conversation, project: project)
                 .environmentObject(coreManager)
+        }
+        .sheet(isPresented: $showNewConversation) {
+            MessageComposerView(
+                project: project,
+                onSend: { _ in
+                    // Refresh conversations after sending
+                    loadConversations()
+                }
+            )
+            .environmentObject(coreManager)
         }
         .sheet(isPresented: $showReports) {
             NavigationStack {
@@ -198,24 +215,40 @@ struct ConversationTreeNode: View {
 
 struct MessagesView: View {
     let conversation: ConversationInfo
+    let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var messages: [MessageInfo] = []
     @State private var isLoading = false
+    @State private var showReplyComposer = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(messages, id: \.id) { message in
-                        MessageBubble(message: message)
+            VStack(spacing: 0) {
+                // Messages list
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(messages, id: \.id) { message in
+                            MessageBubble(message: message)
+                        }
                     }
+                    .padding()
                 }
-                .padding()
+
+                Divider()
+
+                // Reply button
+                replyButton
             }
             .navigationTitle(conversation.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(action: loadMessages) {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .disabled(isLoading)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
@@ -223,7 +256,36 @@ struct MessagesView: View {
             .onAppear {
                 loadMessages()
             }
+            .sheet(isPresented: $showReplyComposer) {
+                MessageComposerView(
+                    project: project,
+                    conversationId: conversation.id,
+                    conversationTitle: conversation.title,
+                    onSend: { _ in
+                        // Refresh messages after sending
+                        loadMessages()
+                    }
+                )
+                .environmentObject(coreManager)
+            }
         }
+    }
+
+    private var replyButton: some View {
+        Button(action: { showReplyComposer = true }) {
+            HStack {
+                Image(systemName: "text.bubble")
+                Text("Reply to this conversation")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
+            .background(Color(.systemGray6))
+        }
+        .buttonStyle(.plain)
     }
 
     private func loadMessages() {
