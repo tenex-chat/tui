@@ -16,6 +16,7 @@ pub mod nudge_crud;
 pub mod nudge_selector;
 pub mod project_settings;
 pub mod report_viewer;
+pub mod stats;
 
 pub use agent_browser::render_agent_browser;
 pub use ask_modal::render_ask_modal;
@@ -36,6 +37,7 @@ pub use nudge_crud::{
 pub use nudge_selector::render_nudge_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};
 pub use report_viewer::render_report_viewer;
+pub use stats::render_stats;
 
 use crate::ui::components::{render_modal_items, Modal, ModalItem, ModalSize};
 use crate::ui::modal::{BackendApprovalAction, BackendApprovalState};

@@ -383,6 +383,88 @@ impl RuntimeHierarchy {
 
         today_runtime
     }
+
+    /// Get runtime aggregated by calendar day (UTC).
+    /// Returns a vector of (day_start_timestamp, total_runtime_ms) tuples,
+    /// sorted by day in ascending order (oldest first).
+    /// Only includes days with non-zero runtime.
+    /// Used for displaying runtime bar charts in the Stats tab.
+    pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
+        // Guard against zero days
+        if num_days == 0 {
+            return Vec::new();
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+        // Use saturating_sub to prevent underflow
+        let cutoff = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
+
+        // Group runtimes by day
+        let mut by_day: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
+
+        for (conv_id, runtime) in &self.individual_runtimes {
+            if *runtime == 0 {
+                continue;
+            }
+            if let Some(created_at) = self.conversation_created_at.get(conv_id) {
+                let day_start = (*created_at / seconds_per_day) * seconds_per_day;
+                if day_start >= cutoff {
+                    *by_day.entry(day_start).or_insert(0) += runtime;
+                }
+            }
+        }
+
+        // Convert to sorted vector (oldest first)
+        let mut result: Vec<(u64, u64)> = by_day.into_iter().collect();
+        result.sort_by_key(|(day, _)| *day);
+        result
+    }
+
+    /// Get top N root conversations by total runtime (including all descendants).
+    /// Returns (conversation_id, total_runtime_ms) tuples sorted by runtime descending.
+    /// Only includes ROOT conversations (those without parents).
+    /// Used for the Stats tab's "Top 10 Longest Conversations" display.
+    pub fn get_top_conversations_by_runtime(&self, limit: usize) -> Vec<(String, u64)> {
+        // Build unified set of all conversation IDs from:
+        // - individual_runtimes keys
+        // - parents keys (children that may not have runtime)
+        // - children keys (parents that may not have direct runtime)
+        let mut all_conv_ids: std::collections::HashSet<&String> = std::collections::HashSet::new();
+
+        for id in self.individual_runtimes.keys() {
+            all_conv_ids.insert(id);
+        }
+        for id in self.parents.keys() {
+            all_conv_ids.insert(id);
+        }
+        for id in self.children.keys() {
+            all_conv_ids.insert(id);
+        }
+
+        // Find all root conversations (those without parents)
+        let root_conversations: Vec<&String> = all_conv_ids
+            .into_iter()
+            .filter(|id| !self.parents.contains_key(*id))
+            .collect();
+
+        // Calculate total runtime for each root (including all descendants)
+        let mut runtimes: Vec<(String, u64)> = root_conversations
+            .into_iter()
+            .map(|id| (id.clone(), self.get_total_runtime(id)))
+            .filter(|(_, runtime)| *runtime > 0)
+            .collect();
+
+        // Sort by runtime descending
+        runtimes.sort_by(|a, b| b.1.cmp(&a.1));
+        runtimes.truncate(limit);
+        runtimes
+    }
 }
 
 #[cfg(test)]

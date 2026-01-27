@@ -37,6 +37,7 @@ fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
             items.get(index).map(|item| item.thread_id.clone())
         }
         HomeTab::Reports => None, // Reports are not threads
+        HomeTab::Stats => None,   // Stats are not threads
     }
 }
 
@@ -139,16 +140,18 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => HomeTab::Reports,
                 HomeTab::Reports => HomeTab::Status,
                 HomeTab::Status => HomeTab::Feed,
-                HomeTab::Feed => HomeTab::Conversations,
+                HomeTab::Feed => HomeTab::Stats,
+                HomeTab::Stats => HomeTab::Conversations,
             };
         }
         KeyCode::BackTab if has_shift => {
             app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Feed,
+                HomeTab::Conversations => HomeTab::Stats,
                 HomeTab::Inbox => HomeTab::Conversations,
                 HomeTab::Reports => HomeTab::Inbox,
                 HomeTab::Status => HomeTab::Reports,
                 HomeTab::Feed => HomeTab::Status,
+                HomeTab::Stats => HomeTab::Feed,
             };
         }
         KeyCode::Right => {
@@ -199,6 +202,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
+                    HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
@@ -240,6 +244,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
+                    HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 if current > max {
                     app.set_current_selection(max);
@@ -392,6 +397,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             }
                         }
                     }
+                    HomeTab::Stats => {
+                        // Stats tab has no selectable items to open
+                    }
                 }
             }
         }
@@ -446,6 +454,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
                 HomeTab::Feed => app.feed_items().len().saturating_sub(1),
+                HomeTab::Stats => 0, // Stats tab has no list selection
             };
             if has_shift {
                 if let Some(thread_id) = get_thread_id_at_index(app, current) {
