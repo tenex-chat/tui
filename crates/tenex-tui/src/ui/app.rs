@@ -2690,10 +2690,7 @@ impl App {
 
     /// Open the agent browser view
     pub fn open_agent_browser(&mut self) {
-        self.home.agent_browser_index = 0;
-        self.home.agent_browser_filter.clear();
-        self.home.agent_browser_in_detail = false;
-        self.home.viewing_agent_id = None;
+        self.home.reset_agent_browser();
         self.scroll_offset = 0;
         self.view = View::AgentBrowser;
         self.input_mode = InputMode::Normal;

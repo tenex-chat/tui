@@ -15,7 +15,7 @@ use tenex_core::models::AgentDefinition;
 pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, area);
 
-    if app.home.agent_browser_in_detail {
+    if app.home.in_agent_detail() {
         if let Some(ref id) = app.home.viewing_agent_id {
             let agent = app.data_store.borrow()
                 .get_agent_definition(id)
