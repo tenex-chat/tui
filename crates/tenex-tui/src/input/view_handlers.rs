@@ -124,12 +124,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             }
         }
         KeyCode::Char('A') if has_shift => {
-            // Show/hide archived projects
-            if app.sidebar_focused {
-                app.toggle_show_archived_projects();
-            } else {
-                app.toggle_show_archived_projects();
-            }
+            // Show/hide archived (unified toggle for both projects and conversations)
+            app.toggle_show_archived();
         }
         KeyCode::Char('S') if has_shift && !app.sidebar_focused => {
             // Toggle scheduled events filter from main panel
