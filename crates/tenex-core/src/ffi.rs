@@ -252,8 +252,9 @@ impl TenexCore {
             return false;
         }
 
-        // Initialize nostrdb
-        let config = nostrdb::Config::new();
+        // Initialize nostrdb with mobile-appropriate mapsize
+        // iOS has memory constraints, so use 512MB instead of default
+        let config = nostrdb::Config::new().set_mapsize(512 * 1024 * 1024);
         let ndb = match Ndb::new(data_dir.to_str().unwrap_or("tenex_data"), &config) {
             Ok(ndb) => Arc::new(ndb),
             Err(e) => {

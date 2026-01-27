@@ -533,12 +533,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Get a list of projects.
      *
-     * In the full implementation, this would:
-     * 1. Query nostrdb for kind 31933 events
-     * 2. Parse them into Project structs
-     * 3. Convert to ProjectInfo for FFI
-     *
-     * For MVP, returns sample hardcoded projects to demonstrate the UI.
+     * Queries nostrdb for kind 31933 events and returns them as ProjectInfo.
      */
     func getProjects()  -> [ProjectInfo]
     
@@ -550,6 +545,9 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Initialize the core. Must be called before other operations.
      * Returns true if initialization succeeded.
+     *
+     * Note: This is lightweight and can be called from any thread.
+     * Heavy initialization (relay connection) happens during login.
      */
     func `init`()  -> Bool
     
@@ -560,6 +558,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
      * Check if a user is currently logged in.
+     * Returns true only if we have stored keys.
      */
     func isLoggedIn()  -> Bool
     
@@ -567,14 +566,29 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
-     * On success, stores the keys for subsequent operations.
+     * On success, connects to relays and starts subscriptions, THEN stores the keys.
+     * If relay connection fails, login fails and no state is changed.
      */
     func login(nsec: String) throws  -> LoginResult
     
     /**
      * Logout the current user.
+     * Disconnects from relays and clears all session state including in-memory data.
+     * This prevents stale data from previous accounts from leaking to new logins.
+     *
+     * This method is deterministic - it waits for the disconnect to complete before
+     * clearing state, preventing race conditions with subsequent login attempts.
+     *
+     * Returns an error if the disconnect fails or times out. In that case, the
+     * session state is NOT cleared to avoid leaving a zombie relay session.
      */
-    func logout() 
+    func logout() throws 
+    
+    /**
+     * Refresh data from relays.
+     * Call this to fetch the latest data from relays.
+     */
+    func refresh()  -> Bool
     
     /**
      * Get the version of tenex-core.
@@ -701,12 +715,7 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
     /**
      * Get a list of projects.
      *
-     * In the full implementation, this would:
-     * 1. Query nostrdb for kind 31933 events
-     * 2. Parse them into Project structs
-     * 3. Convert to ProjectInfo for FFI
-     *
-     * For MVP, returns sample hardcoded projects to demonstrate the UI.
+     * Queries nostrdb for kind 31933 events and returns them as ProjectInfo.
      */
 open func getProjects() -> [ProjectInfo]  {
     return try!  FfiConverterSequenceTypeProjectInfo.lift(try! rustCall() {
@@ -729,6 +738,9 @@ open func getReports(projectId: String) -> [ReportInfo]  {
     /**
      * Initialize the core. Must be called before other operations.
      * Returns true if initialization succeeded.
+     *
+     * Note: This is lightweight and can be called from any thread.
+     * Heavy initialization (relay connection) happens during login.
      */
 open func `init`() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -749,6 +761,7 @@ open func isInitialized() -> Bool  {
     
     /**
      * Check if a user is currently logged in.
+     * Returns true only if we have stored keys.
      */
 open func isLoggedIn() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -761,7 +774,8 @@ open func isLoggedIn() -> Bool  {
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
-     * On success, stores the keys for subsequent operations.
+     * On success, connects to relays and starts subscriptions, THEN stores the keys.
+     * If relay connection fails, login fails and no state is changed.
      */
 open func login(nsec: String)throws  -> LoginResult  {
     return try  FfiConverterTypeLoginResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -773,11 +787,30 @@ open func login(nsec: String)throws  -> LoginResult  {
     
     /**
      * Logout the current user.
+     * Disconnects from relays and clears all session state including in-memory data.
+     * This prevents stale data from previous accounts from leaking to new logins.
+     *
+     * This method is deterministic - it waits for the disconnect to complete before
+     * clearing state, preventing race conditions with subsequent login attempts.
+     *
+     * Returns an error if the disconnect fails or times out. In that case, the
+     * session state is NOT cleared to avoid leaving a zombie relay session.
      */
-open func logout()  {try! rustCall() {
+open func logout()throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_logout(self.uniffiClonePointer(),$0
     )
 }
+}
+    
+    /**
+     * Refresh data from relays.
+     * Call this to fetch the latest data from relays.
+     */
+open func refresh() -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_refresh(self.uniffiClonePointer(),$0
+    )
+})
 }
     
     /**
@@ -844,6 +877,105 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 }
 
 
+
+
+/**
+ * An ask event containing questions for user interaction.
+ */
+public struct AskEventInfo {
+    /**
+     * Title of the ask event
+     */
+    public var title: String?
+    /**
+     * Context/description for the questions
+     */
+    public var context: String
+    /**
+     * List of questions to display
+     */
+    public var questions: [AskQuestionInfo]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Title of the ask event
+         */title: String?, 
+        /**
+         * Context/description for the questions
+         */context: String, 
+        /**
+         * List of questions to display
+         */questions: [AskQuestionInfo]) {
+        self.title = title
+        self.context = context
+        self.questions = questions
+    }
+}
+
+#if compiler(>=6)
+extension AskEventInfo: Sendable {}
+#endif
+
+
+extension AskEventInfo: Equatable, Hashable {
+    public static func ==(lhs: AskEventInfo, rhs: AskEventInfo) -> Bool {
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.context != rhs.context {
+            return false
+        }
+        if lhs.questions != rhs.questions {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(title)
+        hasher.combine(context)
+        hasher.combine(questions)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAskEventInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskEventInfo {
+        return
+            try AskEventInfo(
+                title: FfiConverterOptionString.read(from: &buf), 
+                context: FfiConverterString.read(from: &buf), 
+                questions: FfiConverterSequenceTypeAskQuestionInfo.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AskEventInfo, into buf: inout [UInt8]) {
+        FfiConverterOptionString.write(value.title, into: &buf)
+        FfiConverterString.write(value.context, into: &buf)
+        FfiConverterSequenceTypeAskQuestionInfo.write(value.questions, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskEventInfo_lift(_ buf: RustBuffer) throws -> AskEventInfo {
+    return try FfiConverterTypeAskEventInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskEventInfo_lower(_ value: AskEventInfo) -> RustBuffer {
+    return FfiConverterTypeAskEventInfo.lower(value)
+}
 
 
 /**
@@ -1329,6 +1461,18 @@ public struct MessageInfo {
      * Role: user, assistant, system
      */
     public var role: String
+    /**
+     * Q-tags pointing to referenced events (delegation targets, ask events, etc.)
+     */
+    public var qTags: [String]
+    /**
+     * Ask event data if this message contains an ask (inline ask)
+     */
+    public var askEvent: AskEventInfo?
+    /**
+     * Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
+     */
+    public var toolName: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1353,7 +1497,16 @@ public struct MessageInfo {
          */isToolCall: Bool, 
         /**
          * Role: user, assistant, system
-         */role: String) {
+         */role: String, 
+        /**
+         * Q-tags pointing to referenced events (delegation targets, ask events, etc.)
+         */qTags: [String], 
+        /**
+         * Ask event data if this message contains an ask (inline ask)
+         */askEvent: AskEventInfo?, 
+        /**
+         * Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
+         */toolName: String?) {
         self.id = id
         self.content = content
         self.author = author
@@ -1361,6 +1514,9 @@ public struct MessageInfo {
         self.createdAt = createdAt
         self.isToolCall = isToolCall
         self.role = role
+        self.qTags = qTags
+        self.askEvent = askEvent
+        self.toolName = toolName
     }
 }
 
@@ -1392,6 +1548,15 @@ extension MessageInfo: Equatable, Hashable {
         if lhs.role != rhs.role {
             return false
         }
+        if lhs.qTags != rhs.qTags {
+            return false
+        }
+        if lhs.askEvent != rhs.askEvent {
+            return false
+        }
+        if lhs.toolName != rhs.toolName {
+            return false
+        }
         return true
     }
 
@@ -1403,6 +1568,9 @@ extension MessageInfo: Equatable, Hashable {
         hasher.combine(createdAt)
         hasher.combine(isToolCall)
         hasher.combine(role)
+        hasher.combine(qTags)
+        hasher.combine(askEvent)
+        hasher.combine(toolName)
     }
 }
 
@@ -1421,7 +1589,10 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
                 authorNpub: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 isToolCall: FfiConverterBool.read(from: &buf), 
-                role: FfiConverterString.read(from: &buf)
+                role: FfiConverterString.read(from: &buf), 
+                qTags: FfiConverterSequenceString.read(from: &buf), 
+                askEvent: FfiConverterOptionTypeAskEventInfo.read(from: &buf), 
+                toolName: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -1433,6 +1604,9 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterBool.write(value.isToolCall, into: &buf)
         FfiConverterString.write(value.role, into: &buf)
+        FfiConverterSequenceString.write(value.qTags, into: &buf)
+        FfiConverterOptionTypeAskEventInfo.write(value.askEvent, into: &buf)
+        FfiConverterOptionString.write(value.toolName, into: &buf)
     }
 }
 
@@ -1833,6 +2007,95 @@ public func FfiConverterTypeUserInfo_lower(_ value: UserInfo) -> RustBuffer {
     return FfiConverterTypeUserInfo.lower(value)
 }
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * A single question in an ask event.
+ */
+
+public enum AskQuestionInfo {
+    
+    /**
+     * Single-select question (user picks one option)
+     */
+    case singleSelect(title: String, question: String, suggestions: [String]
+    )
+    /**
+     * Multi-select question (user can pick multiple options)
+     */
+    case multiSelect(title: String, question: String, options: [String]
+    )
+}
+
+
+#if compiler(>=6)
+extension AskQuestionInfo: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAskQuestionInfo: FfiConverterRustBuffer {
+    typealias SwiftType = AskQuestionInfo
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskQuestionInfo {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .singleSelect(title: try FfiConverterString.read(from: &buf), question: try FfiConverterString.read(from: &buf), suggestions: try FfiConverterSequenceString.read(from: &buf)
+        )
+        
+        case 2: return .multiSelect(title: try FfiConverterString.read(from: &buf), question: try FfiConverterString.read(from: &buf), options: try FfiConverterSequenceString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AskQuestionInfo, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .singleSelect(title,question,suggestions):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(title, into: &buf)
+            FfiConverterString.write(question, into: &buf)
+            FfiConverterSequenceString.write(suggestions, into: &buf)
+            
+        
+        case let .multiSelect(title,question,options):
+            writeInt(&buf, Int32(2))
+            FfiConverterString.write(title, into: &buf)
+            FfiConverterString.write(question, into: &buf)
+            FfiConverterSequenceString.write(options, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskQuestionInfo_lift(_ buf: RustBuffer) throws -> AskQuestionInfo {
+    return try FfiConverterTypeAskQuestionInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskQuestionInfo_lower(_ value: AskQuestionInfo) -> RustBuffer {
+    return FfiConverterTypeAskQuestionInfo.lower(value)
+}
+
+
+extension AskQuestionInfo: Equatable, Hashable {}
+
+
+
+
+
+
 
 /**
  * Errors that can occur during TENEX operations.
@@ -1845,6 +2108,8 @@ public enum TenexError: Swift.Error {
     )
     case NotLoggedIn
     case Internal(message: String
+    )
+    case LogoutFailed(message: String
     )
 }
 
@@ -1867,6 +2132,9 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
             )
         case 2: return .NotLoggedIn
         case 3: return .Internal(
+            message: try FfiConverterString.read(from: &buf)
+            )
+        case 4: return .LogoutFailed(
             message: try FfiConverterString.read(from: &buf)
             )
 
@@ -1892,6 +2160,11 @@ public struct FfiConverterTypeTenexError: FfiConverterRustBuffer {
         
         case let .Internal(message):
             writeInt(&buf, Int32(3))
+            FfiConverterString.write(message, into: &buf)
+            
+        
+        case let .LogoutFailed(message):
+            writeInt(&buf, Int32(4))
             FfiConverterString.write(message, into: &buf)
             
         }
@@ -1947,6 +2220,30 @@ fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
         switch try readInt(&buf) as Int8 {
         case 0: return nil
         case 1: return try FfiConverterString.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeAskEventInfo: FfiConverterRustBuffer {
+    typealias SwiftType = AskEventInfo?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeAskEventInfo.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeAskEventInfo.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
     }
@@ -2126,6 +2423,31 @@ fileprivate struct FfiConverterSequenceTypeReportInfo: FfiConverterRustBuffer {
     }
 }
 
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeAskQuestionInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [AskQuestionInfo]
+
+    public static func write(_ value: [AskQuestionInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAskQuestionInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AskQuestionInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AskQuestionInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAskQuestionInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
 private enum InitializationResult {
     case ok
     case contractVersionMismatch
@@ -2153,25 +2475,28 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 57687) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_projects() != 49414) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 28510) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_init() != 23136) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_initialized() != 41100) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 10328) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 37564) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_login() != 1616) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_login() != 22769) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 63727) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 20996) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 31823) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_version() != 63230) {

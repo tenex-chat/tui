@@ -34,10 +34,14 @@ let project = Project(
                         "$(inherited)",
                         "$(SRCROOT)/../target/aarch64-apple-ios/release"
                     ],
-                    // Link the Rust static library
-                    "OTHER_LDFLAGS": [
+                    // Link the Rust static library - use full path to force static linking
+                    "OTHER_LDFLAGS[sdk=iphonesimulator*]": [
                         "$(inherited)",
-                        "-ltenex_core"
+                        "$(SRCROOT)/../target/aarch64-apple-ios-sim/release/libtenex_core.a"
+                    ],
+                    "OTHER_LDFLAGS[sdk=iphoneos*]": [
+                        "$(inherited)",
+                        "$(SRCROOT)/../target/aarch64-apple-ios/release/libtenex_core.a"
                     ],
                     // Swift import paths for the modulemap
                     "SWIFT_INCLUDE_PATHS": [

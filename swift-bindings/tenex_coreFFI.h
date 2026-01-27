@@ -322,6 +322,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_login(void*_Nonnull ptr, RustBu
 void uniffi_tenex_core_fn_method_tenexcore_logout(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
+int8_t uniffi_tenex_core_fn_method_tenexcore_refresh(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_version(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -670,6 +675,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_login(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_LOGOUT
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_LOGOUT
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_logout(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_refresh(void
     
 );
 #endif
