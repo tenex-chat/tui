@@ -216,6 +216,12 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
+            ConversationsTabView()
+                .tabItem {
+                    Label("Conversations", systemImage: "bubble.left.and.bubble.right.fill")
+                }
+                .environmentObject(coreManager)
+
             ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                 .tabItem {
                     Label("Projects", systemImage: "folder.fill")
