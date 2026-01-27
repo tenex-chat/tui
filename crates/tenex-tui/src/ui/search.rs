@@ -1093,21 +1093,19 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_multi_term_and_semantics_missing_term() {
-        // Only "error" found, "timeout" missing: should NOT match
+    fn test_scan_multi_term_title_and_content_combined() {
+        // "error" in title, "timeout" in content: both terms found so should match
         let terms = vec!["error".to_string(), "timeout".to_string()];
         let messages: Vec<MessageContent> = vec![];
 
         let result = scan_thread_for_terms(
             "thread-123",
             "Error in system",
-            "No timeout here",  // Intentional: we want to fail the match
+            "No timeout here",
             &messages,
             &terms,
         );
 
-        // Wait, "No timeout here" DOES contain "timeout". Let me fix this test.
-        // Actually it SHOULD match because "timeout" is in content
         assert!(result.all_terms_matched);
     }
 
@@ -1281,5 +1279,167 @@ mod tests {
 
         // "critical" is missing - should not match
         assert!(!result.all_terms_matched);
+    }
+
+    // ==========================================================================
+    // Integration-level behavioral tests for search functions
+    // ==========================================================================
+    // Note: Full integration tests for search_conversations and search_conversations_hierarchical
+    // would require a complete AppDataStore with nostrdb. These tests verify the core matching
+    // behavior through the shared scan_thread_for_terms function, which both search functions use.
+    // The tests below verify the key behaviors: AND semantics, message collection, and term tracking.
+
+    #[test]
+    fn test_and_semantics_term_in_title_only() {
+        // Verify AND semantics: both terms must appear somewhere in the conversation
+        // This tests the core behavior used by both search_conversations and search_conversations_hierarchical
+        let terms = vec!["api".to_string(), "auth".to_string()];
+
+        // Only "api" in title, no "auth" anywhere
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "API Design Document",
+            "Some content about endpoints",
+            &[],
+            &terms,
+        );
+
+        // Should NOT match because "auth" is missing
+        assert!(!result.all_terms_matched, "Should not match when one term is missing");
+    }
+
+    #[test]
+    fn test_and_semantics_term_in_reply_only() {
+        // Verify AND semantics: a term can be found in a reply to satisfy the AND
+        let terms = vec!["api".to_string(), "auth".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "reply-1",
+                content: "Added auth middleware",
+                pubkey: "dev-1",
+                created_at: 1000,
+            },
+        ];
+
+        // "api" in title, "auth" only in reply
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "API Design",
+            "Some content",
+            &messages,
+            &terms,
+        );
+
+        // Should match because both terms are found across conversation
+        assert!(result.all_terms_matched, "Should match when both terms found across title and reply");
+        assert!(result.title_matched(), "Title should be marked as matched");
+        assert_eq!(result.matching_messages.len(), 1, "Reply containing auth should be in matching_messages");
+    }
+
+    #[test]
+    fn test_message_collection_all_matches() {
+        // Verify that ALL messages matching ANY term are collected (OR for display)
+        // This is important for search_conversations_hierarchical result display
+        let terms = vec!["error".to_string(), "crash".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "First error occurred",
+                pubkey: "dev-1",
+                created_at: 1000,
+            },
+            MessageContent {
+                id: "msg-2",
+                content: "Unrelated message",
+                pubkey: "dev-2",
+                created_at: 2000,
+            },
+            MessageContent {
+                id: "msg-3",
+                content: "App crash detected",
+                pubkey: "dev-1",
+                created_at: 3000,
+            },
+            MessageContent {
+                id: "msg-4",
+                content: "Another error here and crash too",
+                pubkey: "dev-3",
+                created_at: 4000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "Bug Report",
+            "System issues",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        // Should collect 3 messages: msg-1 (error), msg-3 (crash), msg-4 (both)
+        assert_eq!(result.matching_messages.len(), 3, "Should collect all messages that match any term");
+    }
+
+    #[test]
+    fn test_term_tracking_across_locations() {
+        // Verify term indices are properly tracked (used for highlighting)
+        let terms = vec!["bug".to_string(), "fix".to_string(), "test".to_string()];
+        let messages = vec![
+            MessageContent {
+                id: "msg-1",
+                content: "Added a test for the issue",
+                pubkey: "dev-1",
+                created_at: 1000,
+            },
+        ];
+
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "Bug Fix Required",  // "bug" and "fix" here
+            "Some content",
+            &messages,
+            &terms,
+        );
+
+        assert!(result.all_terms_matched);
+        assert!(result.terms_in_title.contains(&0), "Term 'bug' should be tracked in title");
+        assert!(result.terms_in_title.contains(&1), "Term 'fix' should be tracked in title");
+        assert!(result.terms_in_messages.contains(&2), "Term 'test' should be tracked in messages");
+    }
+
+    #[test]
+    fn test_empty_terms_no_match() {
+        // Verify empty terms result in no match (edge case)
+        let terms: Vec<String> = vec![];
+
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "Any Title",
+            "Any content",
+            &[],
+            &terms,
+        );
+
+        assert!(!result.all_terms_matched, "Empty terms should not match");
+    }
+
+    #[test]
+    fn test_single_term_or_semantics() {
+        // Verify single-term search uses OR semantics (any location matches)
+        let terms = vec!["error".to_string()];
+
+        // Term only in content
+        let result = scan_thread_for_terms(
+            "conv-1",
+            "System Report",
+            "An error occurred",
+            &[],
+            &terms,
+        );
+
+        assert!(result.all_terms_matched, "Single term in content should match");
+        assert!(result.content_matched());
+        assert!(!result.title_matched());
     }
 }
