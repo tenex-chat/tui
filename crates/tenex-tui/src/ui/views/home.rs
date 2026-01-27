@@ -69,7 +69,6 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Reports => render_reports_list(f, app, padded_content),
             HomeTab::Status => render_status_list(f, app, padded_content),
             HomeTab::Feed => render_feed_cards(f, app, padded_content),
-            HomeTab::ActiveWork => render_active_work(f, app, padded_content),
             HomeTab::Stats => super::render_stats(f, app, padded_content),
         }
     }
@@ -209,8 +208,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
     spans.push(Span::styled("   ", Style::default()));
-    spans.push(Span::styled("Active", tab_style(HomeTab::ActiveWork)));
-    spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
 
     // Show archived mode indicator
@@ -249,9 +246,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Feed { "────" } else { "    " },
             if app.home_panel_focus == HomeTab::Feed { accent } else { blank }),
-        Span::styled("   ", blank),
-        Span::styled(if app.home_panel_focus == HomeTab::ActiveWork { "──────" } else { "      " },
-            if app.home_panel_focus == HomeTab::ActiveWork { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Stats { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Stats { accent } else { blank }),
