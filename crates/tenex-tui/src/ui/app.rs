@@ -562,10 +562,7 @@ impl App {
     }
 
     /// Filter messages for current view (subthread or main thread).
-    /// This helper is used by methods that need to iterate over display messages.
-    /// NOTE: Due to lifetime constraints with group_messages, this filtering logic
-    /// is duplicated in selected_message_id and display_item_count. The filtering
-    /// itself is identical but the grouped result has a lifetime tied to the messages.
+    /// This helper consolidates the filtering logic used by display methods.
     fn filter_messages_for_view<'a>(messages: &'a [Message], thread_id: Option<&str>, subthread_root: Option<&str>) -> Vec<&'a Message> {
         if let Some(root_id) = subthread_root {
             messages.iter()

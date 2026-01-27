@@ -1,5 +1,5 @@
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     text::{Line, Span},
 };
 use serde::{Deserialize, Serialize};
@@ -344,14 +344,14 @@ mod tests {
     }
 
     #[test]
-    fn test_render_tool_call() {
+    fn test_render_tool_line() {
         let tool_call = ToolCall {
             id: "123".to_string(),
             name: "test_tool".to_string(),
             parameters: serde_json::json!({"key": "value"}),
             result: None,
         };
-        let line = render_tool_call_compact(&tool_call);
+        let line = render_tool_line(&tool_call, Color::Gray, None);
         assert!(!line.spans.is_empty());
     }
 }
