@@ -647,12 +647,11 @@ pub static COMMANDS: &[Command] = &[
         key: 'o',
         label: "View agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && !app.home.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && !app.home.in_agent_detail(),
         execute: |app| {
             let agents = app.filtered_agent_definitions();
             if let Some(agent) = agents.get(app.home.agent_browser_index) {
-                app.home.viewing_agent_id = Some(agent.id.clone());
-                app.home.agent_browser_in_detail = true;
+                app.home.enter_agent_detail(agent.id.clone());
                 app.scroll_offset = 0;
             }
         },
@@ -663,7 +662,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'f',
         label: "Fork agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.home.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
@@ -677,7 +676,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'c',
         label: "Clone agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.home.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {

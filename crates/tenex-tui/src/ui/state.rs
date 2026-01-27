@@ -1131,6 +1131,11 @@ mod conversation_state_tests {
 /// - Time filter for conversation filtering
 /// - Archived conversations toggle
 /// - Agent browser navigation and filtering
+///
+/// # Agent Browser State
+/// The agent browser has two modes: list view and detail view.
+/// Detail view is active when `viewing_agent_id` is `Some(id)`.
+/// Use `enter_agent_detail()` and `exit_agent_detail()` to transition between modes.
 #[derive(Debug, Clone, Default)]
 pub struct HomeViewState {
     /// Filter by time since last activity
@@ -1141,9 +1146,7 @@ pub struct HomeViewState {
     pub agent_browser_index: usize,
     /// Search filter for agent browser
     pub agent_browser_filter: String,
-    /// Whether viewing agent detail (vs list)
-    pub agent_browser_in_detail: bool,
-    /// ID of agent being viewed in detail
+    /// ID of agent being viewed in detail (None = list view, Some = detail view)
     pub viewing_agent_id: Option<String>,
 }
 
@@ -1162,29 +1165,67 @@ impl HomeViewState {
         self.show_archived = !self.show_archived;
     }
 
-    /// Enter agent detail view
-    pub fn enter_agent_detail(&mut self, agent_id: String) {
-        self.viewing_agent_id = Some(agent_id);
-        self.agent_browser_in_detail = true;
+    /// Check if currently viewing agent detail (derived from viewing_agent_id)
+    pub fn in_agent_detail(&self) -> bool {
+        self.viewing_agent_id.is_some()
     }
 
-    /// Exit agent detail view back to list
+    /// Enter agent detail view for the specified agent
+    pub fn enter_agent_detail(&mut self, agent_id: String) {
+        self.viewing_agent_id = Some(agent_id);
+    }
+
+    /// Exit agent detail view and return to list
     pub fn exit_agent_detail(&mut self) {
-        self.agent_browser_in_detail = false;
         self.viewing_agent_id = None;
     }
 
-    /// Reset agent browser state (filter, index, detail view)
+    /// Reset agent browser state completely (index, filter, exit detail view)
     pub fn reset_agent_browser(&mut self) {
         self.agent_browser_index = 0;
         self.agent_browser_filter.clear();
-        self.agent_browser_in_detail = false;
         self.viewing_agent_id = None;
     }
 
-    /// Check if in agent detail view
-    pub fn in_agent_detail(&self) -> bool {
-        self.agent_browser_in_detail
+    /// Set the agent browser filter text
+    pub fn set_agent_filter(&mut self, filter: String) {
+        self.agent_browser_filter = filter;
+    }
+
+    /// Append a character to the agent browser filter and reset index to 0
+    pub fn append_to_filter(&mut self, c: char) {
+        self.agent_browser_filter.push(c);
+        self.agent_browser_index = 0;
+    }
+
+    /// Remove the last character from the filter (backspace behavior)
+    pub fn backspace_filter(&mut self) {
+        self.agent_browser_filter.pop();
+        self.agent_browser_index = 0;
+    }
+
+    /// Clear the agent browser filter
+    pub fn clear_agent_filter(&mut self) {
+        self.agent_browser_filter.clear();
+    }
+
+    /// Set the selected agent index in the browser list
+    pub fn set_agent_index(&mut self, index: usize) {
+        self.agent_browser_index = index;
+    }
+
+    /// Move selection up in the agent browser list
+    pub fn select_prev_agent(&mut self) {
+        if self.agent_browser_index > 0 {
+            self.agent_browser_index -= 1;
+        }
+    }
+
+    /// Move selection down in the agent browser list, bounded by count
+    pub fn select_next_agent(&mut self, count: usize) {
+        if self.agent_browser_index < count.saturating_sub(1) {
+            self.agent_browser_index += 1;
+        }
     }
 }
 
@@ -1199,8 +1240,9 @@ mod home_view_state_tests {
         assert!(!state.show_archived);
         assert_eq!(state.agent_browser_index, 0);
         assert!(state.agent_browser_filter.is_empty());
-        assert!(!state.agent_browser_in_detail);
         assert!(state.viewing_agent_id.is_none());
+        // in_agent_detail is derived from viewing_agent_id
+        assert!(!state.in_agent_detail());
     }
 
     #[test]
@@ -1248,38 +1290,167 @@ mod home_view_state_tests {
     fn test_agent_browser_navigation() {
         let mut state = HomeViewState::new();
 
-        // Initially not in detail view
+        // Initially not in detail view (derived from viewing_agent_id being None)
         assert!(!state.in_agent_detail());
+        assert!(state.viewing_agent_id.is_none());
 
-        // Enter detail view
+        // Enter detail view using the API method
         state.enter_agent_detail("agent-123".to_string());
         assert!(state.in_agent_detail());
         assert_eq!(state.viewing_agent_id, Some("agent-123".to_string()));
-        assert!(state.agent_browser_in_detail);
 
-        // Exit detail view
+        // Exit detail view using the API method
         state.exit_agent_detail();
         assert!(!state.in_agent_detail());
         assert!(state.viewing_agent_id.is_none());
-        assert!(!state.agent_browser_in_detail);
     }
 
     #[test]
     fn test_reset_agent_browser() {
         let mut state = HomeViewState::new();
 
-        // Set some state
-        state.agent_browser_index = 5;
-        state.agent_browser_filter = "test".to_string();
-        state.agent_browser_in_detail = true;
-        state.viewing_agent_id = Some("agent-456".to_string());
+        // Set some state using setters
+        state.set_agent_index(5);
+        state.set_agent_filter("test".to_string());
+        state.enter_agent_detail("agent-456".to_string());
 
-        // Reset
+        // Verify state before reset
+        assert_eq!(state.agent_browser_index, 5);
+        assert_eq!(state.agent_browser_filter, "test");
+        assert!(state.in_agent_detail());
+
+        // Reset clears everything
         state.reset_agent_browser();
 
         assert_eq!(state.agent_browser_index, 0);
         assert!(state.agent_browser_filter.is_empty());
-        assert!(!state.agent_browser_in_detail);
+        assert!(!state.in_agent_detail());
         assert!(state.viewing_agent_id.is_none());
+    }
+
+    #[test]
+    fn test_agent_filter_operations() {
+        let mut state = HomeViewState::new();
+
+        // Set filter
+        state.set_agent_filter("search term".to_string());
+        assert_eq!(state.agent_browser_filter, "search term");
+
+        // Clear filter
+        state.clear_agent_filter();
+        assert!(state.agent_browser_filter.is_empty());
+    }
+
+    #[test]
+    fn test_in_agent_detail_is_derived() {
+        let mut state = HomeViewState::new();
+
+        // Directly setting viewing_agent_id affects in_agent_detail()
+        state.viewing_agent_id = Some("test-agent".to_string());
+        assert!(state.in_agent_detail());
+
+        state.viewing_agent_id = None;
+        assert!(!state.in_agent_detail());
+
+        // This confirms the boolean is truly derived, not stored separately
+    }
+
+    #[test]
+    fn test_append_and_backspace_filter() {
+        let mut state = HomeViewState::new();
+        state.set_agent_index(5); // Set index to non-zero
+
+        // Append character resets index to 0
+        state.append_to_filter('a');
+        assert_eq!(state.agent_browser_filter, "a");
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Append more characters
+        state.append_to_filter('b');
+        state.append_to_filter('c');
+        assert_eq!(state.agent_browser_filter, "abc");
+
+        // Backspace removes last character and resets index
+        state.set_agent_index(3);
+        state.backspace_filter();
+        assert_eq!(state.agent_browser_filter, "ab");
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Continue backspacing
+        state.backspace_filter();
+        state.backspace_filter();
+        assert!(state.agent_browser_filter.is_empty());
+
+        // Backspace on empty is safe (no panic)
+        state.backspace_filter();
+        assert!(state.agent_browser_filter.is_empty());
+    }
+
+    #[test]
+    fn test_agent_index_navigation() {
+        let mut state = HomeViewState::new();
+
+        // Start at 0
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Can't go negative (select_prev does nothing at 0)
+        state.select_prev_agent();
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Navigate down with a count of 5 items
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 1);
+
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 2);
+
+        // Navigate to last item
+        state.select_next_agent(5);
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 4);
+
+        // Can't go past the end
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 4);
+
+        // Navigate back up
+        state.select_prev_agent();
+        assert_eq!(state.agent_browser_index, 3);
+    }
+
+    #[test]
+    fn test_complete_agent_browser_workflow() {
+        // Integration-style test: simulates a complete user workflow
+        let mut state = HomeViewState::new();
+
+        // User types a search filter
+        state.append_to_filter('t');
+        state.append_to_filter('e');
+        state.append_to_filter('s');
+        state.append_to_filter('t');
+        assert_eq!(state.agent_browser_filter, "test");
+
+        // User navigates through results (assume 3 agents matched)
+        state.select_next_agent(3);
+        state.select_next_agent(3);
+        assert_eq!(state.agent_browser_index, 2);
+
+        // User selects an agent to view details
+        state.enter_agent_detail("selected-agent-id".to_string());
+        assert!(state.in_agent_detail());
+        assert_eq!(state.viewing_agent_id, Some("selected-agent-id".to_string()));
+
+        // User exits back to list
+        state.exit_agent_detail();
+        assert!(!state.in_agent_detail());
+        // Filter and index should still be preserved
+        assert_eq!(state.agent_browser_filter, "test");
+        assert_eq!(state.agent_browser_index, 2);
+
+        // User clears everything
+        state.reset_agent_browser();
+        assert!(state.agent_browser_filter.is_empty());
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(!state.in_agent_detail());
     }
 }
