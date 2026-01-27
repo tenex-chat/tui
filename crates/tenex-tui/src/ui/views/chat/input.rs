@@ -26,8 +26,11 @@ pub(crate) fn has_attachments(app: &App) -> bool {
     !app.chat_editor().attachments.is_empty() || !app.chat_editor().image_attachments.is_empty()
 }
 
-pub(crate) fn has_status(app: &App) -> bool {
-    app.current_notification().is_some()
+pub(crate) fn has_status(_app: &App) -> bool {
+    // Transient notifications should only appear in the bottom status bar.
+    // The upper status bar (above input) was causing duplicate notifications.
+    // Always return false to disable the upper status line.
+    false
 }
 
 pub(crate) fn render_status_line(f: &mut Frame, app: &App, area: Rect) {

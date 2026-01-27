@@ -59,6 +59,34 @@ pub struct ConversationInfo {
     pub status: String,
 }
 
+/// A single question in an ask event.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum AskQuestionInfo {
+    /// Single-select question (user picks one option)
+    SingleSelect {
+        title: String,
+        question: String,
+        suggestions: Vec<String>,
+    },
+    /// Multi-select question (user can pick multiple options)
+    MultiSelect {
+        title: String,
+        question: String,
+        options: Vec<String>,
+    },
+}
+
+/// An ask event containing questions for user interaction.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AskEventInfo {
+    /// Title of the ask event
+    pub title: Option<String>,
+    /// Context/description for the questions
+    pub context: String,
+    /// List of questions to display
+    pub questions: Vec<AskQuestionInfo>,
+}
+
 /// A message within a conversation.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct MessageInfo {
@@ -76,6 +104,12 @@ pub struct MessageInfo {
     pub is_tool_call: bool,
     /// Role: user, assistant, system
     pub role: String,
+    /// Q-tags pointing to referenced events (delegation targets, ask events, etc.)
+    pub q_tags: Vec<String>,
+    /// Ask event data if this message contains an ask (inline ask)
+    pub ask_event: Option<AskEventInfo>,
+    /// Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
+    pub tool_name: Option<String>,
 }
 
 /// A report/article in a project (kind 30023 NIP-23 long-form content).
@@ -656,12 +690,41 @@ impl TenexCore {
                     .and_then(|pk| pk.to_bech32().ok())
                     .unwrap_or_else(|| format!("{}...", &m.pubkey[..16.min(m.pubkey.len())]));
 
-                // Determine role based on content patterns or author
-                let role = if m.content.contains("```") || m.content.contains("Tool:") {
+                // Determine role based on content patterns, tool usage, or author
+                // Messages with tool_name are always from assistants (tool calls or ask events)
+                let role = if m.tool_name.is_some() || m.content.contains("```") || m.content.contains("Tool:") {
                     "assistant".to_string()
                 } else {
                     "user".to_string()
                 };
+
+                // Convert ask_event if present
+                let ask_event = m.ask_event.as_ref().map(|ae| {
+                    let questions = ae.questions.iter().map(|q| {
+                        match q {
+                            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
+                                AskQuestionInfo::SingleSelect {
+                                    title: title.clone(),
+                                    question: question.clone(),
+                                    suggestions: suggestions.clone(),
+                                }
+                            }
+                            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
+                                AskQuestionInfo::MultiSelect {
+                                    title: title.clone(),
+                                    question: question.clone(),
+                                    options: options.clone(),
+                                }
+                            }
+                        }
+                    }).collect();
+
+                    AskEventInfo {
+                        title: ae.title.clone(),
+                        context: ae.context.clone(),
+                        questions,
+                    }
+                });
 
                 MessageInfo {
                     id: m.id.clone(),
@@ -669,8 +732,11 @@ impl TenexCore {
                     author: author_name,
                     author_npub,
                     created_at: m.created_at,
-                    is_tool_call: m.content.starts_with("Tool:") || m.content.contains("<tool_call>"),
+                    is_tool_call: m.content.starts_with("Tool:") || m.content.contains("<tool_call>") || m.tool_name.is_some(),
                     role,
+                    q_tags: m.q_tags.clone(),
+                    ask_event,
+                    tool_name: m.tool_name.clone(),
                 }
             })
             .collect()

@@ -3579,18 +3579,18 @@ impl App {
     /// Update the sidebar state with delegations and reports from the current conversation
     pub fn update_sidebar_from_messages(&mut self, messages: &[Message]) {
         use std::collections::HashSet;
-        use crate::ui::views::chat::grouping::should_treat_as_delegation;
+        use crate::ui::views::chat::grouping::should_render_q_tags;
 
         let store = self.data_store.borrow();
 
-        // Extract delegations from q-tags, but only from delegation tools
-        // Non-delegation tools (like report_write) may have q_tags for other purposes
+        // Extract delegations from q-tags, but filter out tools that use q_tags for internal purposes
+        // (e.g., report_write uses q_tags to link to the article it creates)
         let mut delegations = Vec::new();
         let mut seen_thread_ids: HashSet<String> = HashSet::new();
 
         for msg in messages {
-            // Skip q_tags from non-delegation tools
-            if !should_treat_as_delegation(msg.tool_name.as_deref()) {
+            // Skip q_tags from denylisted tools (they use q_tags for internal purposes)
+            if !should_render_q_tags(msg.tool_name.as_deref()) {
                 continue;
             }
             for thread_id in &msg.q_tags {
