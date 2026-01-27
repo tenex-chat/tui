@@ -566,9 +566,11 @@ fn handle_send_message(app: &mut App) {
                 // Create new thread (kind:1)
                 let title = content.lines().next().unwrap_or("New Thread").to_string();
 
-                let draft_id = app
-                    .find_draft_tab(&project_a_tag)
-                    .map(|(_, id)| id.to_string());
+                // CRITICAL FIX: Get draft_id from the ACTIVE tab, not just any draft tab
+                // for this project. This fixes the bug where sending from tab 2 would
+                // incorrectly convert tab 1 when multiple draft tabs exist.
+                let draft_id = app.tabs.active_tab()
+                    .and_then(|tab| tab.draft_id.clone());
 
                 // Use the draft_id as the conversation_id for the snapshot
                 let conversation_id = draft_id.clone().unwrap_or_else(|| format!("new-thread-{}", project_a_tag));
