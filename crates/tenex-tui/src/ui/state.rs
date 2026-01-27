@@ -868,7 +868,7 @@ mod tests {
 // CONVERSATION STATE
 // =============================================================================
 
-use crate::models::{Message, ProjectAgent, Thread};
+use crate::models::{Message, ProjectAgent, Thread, TimeFilter};
 use std::collections::HashMap;
 
 /// Buffer for local streaming content (per conversation)
@@ -1117,5 +1117,169 @@ mod conversation_state_tests {
         assert_eq!(state.selected_message_index, 0);
         // Note: show_llm_metadata is NOT cleared - it's a display preference
         assert!(state.show_llm_metadata);
+    }
+}
+
+// =============================================================================
+// HOME VIEW STATE
+// =============================================================================
+
+/// State for home view navigation - time filters, archive toggle, and agent browser.
+///
+/// This consolidates home-screen related navigation state that was previously
+/// scattered across the App struct. It manages:
+/// - Time filter for conversation filtering
+/// - Archived conversations toggle
+/// - Agent browser navigation and filtering
+#[derive(Debug, Clone, Default)]
+pub struct HomeViewState {
+    /// Filter by time since last activity
+    pub time_filter: Option<TimeFilter>,
+    /// Whether to show archived conversations in Recent/Inbox
+    pub show_archived: bool,
+    /// Selected index in agent browser list
+    pub agent_browser_index: usize,
+    /// Search filter for agent browser
+    pub agent_browser_filter: String,
+    /// Whether viewing agent detail (vs list)
+    pub agent_browser_in_detail: bool,
+    /// ID of agent being viewed in detail
+    pub viewing_agent_id: Option<String>,
+}
+
+impl HomeViewState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cycle through time filter options
+    pub fn cycle_time_filter(&mut self) {
+        self.time_filter = TimeFilter::cycle_next(self.time_filter);
+    }
+
+    /// Toggle showing archived conversations
+    pub fn toggle_archived(&mut self) {
+        self.show_archived = !self.show_archived;
+    }
+
+    /// Enter agent detail view
+    pub fn enter_agent_detail(&mut self, agent_id: String) {
+        self.viewing_agent_id = Some(agent_id);
+        self.agent_browser_in_detail = true;
+    }
+
+    /// Exit agent detail view back to list
+    pub fn exit_agent_detail(&mut self) {
+        self.agent_browser_in_detail = false;
+        self.viewing_agent_id = None;
+    }
+
+    /// Reset agent browser state (filter, index, detail view)
+    pub fn reset_agent_browser(&mut self) {
+        self.agent_browser_index = 0;
+        self.agent_browser_filter.clear();
+        self.agent_browser_in_detail = false;
+        self.viewing_agent_id = None;
+    }
+
+    /// Check if in agent detail view
+    pub fn in_agent_detail(&self) -> bool {
+        self.agent_browser_in_detail
+    }
+}
+
+#[cfg(test)]
+mod home_view_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_home_view_state_new() {
+        let state = HomeViewState::new();
+        assert!(state.time_filter.is_none());
+        assert!(!state.show_archived);
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(state.agent_browser_filter.is_empty());
+        assert!(!state.agent_browser_in_detail);
+        assert!(state.viewing_agent_id.is_none());
+    }
+
+    #[test]
+    fn test_cycle_time_filter() {
+        let mut state = HomeViewState::new();
+
+        // None -> OneHour
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::OneHour));
+
+        // OneHour -> FourHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::FourHours));
+
+        // FourHours -> TwelveHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::TwelveHours));
+
+        // TwelveHours -> TwentyFourHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::TwentyFourHours));
+
+        // TwentyFourHours -> SevenDays
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::SevenDays));
+
+        // SevenDays -> None
+        state.cycle_time_filter();
+        assert!(state.time_filter.is_none());
+    }
+
+    #[test]
+    fn test_toggle_archived() {
+        let mut state = HomeViewState::new();
+        assert!(!state.show_archived);
+
+        state.toggle_archived();
+        assert!(state.show_archived);
+
+        state.toggle_archived();
+        assert!(!state.show_archived);
+    }
+
+    #[test]
+    fn test_agent_browser_navigation() {
+        let mut state = HomeViewState::new();
+
+        // Initially not in detail view
+        assert!(!state.in_agent_detail());
+
+        // Enter detail view
+        state.enter_agent_detail("agent-123".to_string());
+        assert!(state.in_agent_detail());
+        assert_eq!(state.viewing_agent_id, Some("agent-123".to_string()));
+        assert!(state.agent_browser_in_detail);
+
+        // Exit detail view
+        state.exit_agent_detail();
+        assert!(!state.in_agent_detail());
+        assert!(state.viewing_agent_id.is_none());
+        assert!(!state.agent_browser_in_detail);
+    }
+
+    #[test]
+    fn test_reset_agent_browser() {
+        let mut state = HomeViewState::new();
+
+        // Set some state
+        state.agent_browser_index = 5;
+        state.agent_browser_filter = "test".to_string();
+        state.agent_browser_in_detail = true;
+        state.viewing_agent_id = Some("agent-456".to_string());
+
+        // Reset
+        state.reset_agent_browser();
+
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(state.agent_browser_filter.is_empty());
+        assert!(!state.agent_browser_in_detail);
+        assert!(state.viewing_agent_id.is_none());
     }
 }

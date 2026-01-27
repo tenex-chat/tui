@@ -975,9 +975,9 @@ pub(super) fn handle_normal_mode(
             handle_normal_mode_char(app, c)?;
         }
         KeyCode::Backspace => {
-            if app.view == View::AgentBrowser && !app.agent_browser_in_detail {
-                app.agent_browser_filter.pop();
-                app.agent_browser_index = 0;
+            if app.view == View::AgentBrowser && !app.home.agent_browser_in_detail {
+                app.home.agent_browser_filter.pop();
+                app.home.agent_browser_index = 0;
             }
         }
         KeyCode::Up => match app.view {
@@ -991,10 +991,10 @@ pub(super) fn handle_normal_mode(
                 app.scroll_up(3);
             }
             View::AgentBrowser => {
-                if app.agent_browser_in_detail {
+                if app.home.agent_browser_in_detail {
                     app.scroll_up(3);
-                } else if app.agent_browser_index > 0 {
-                    app.agent_browser_index -= 1;
+                } else if app.home.agent_browser_index > 0 {
+                    app.home.agent_browser_index -= 1;
                 }
             }
             _ => {}
@@ -1004,12 +1004,12 @@ pub(super) fn handle_normal_mode(
                 app.scroll_down(3);
             }
             View::AgentBrowser => {
-                if app.agent_browser_in_detail {
+                if app.home.agent_browser_in_detail {
                     app.scroll_down(3);
                 } else {
                     let count = app.filtered_agent_definitions().len();
-                    if app.agent_browser_index < count.saturating_sub(1) {
-                        app.agent_browser_index += 1;
+                    if app.home.agent_browser_index < count.saturating_sub(1) {
+                        app.home.agent_browser_index += 1;
                     }
                 }
             }
@@ -1050,11 +1050,11 @@ pub(super) fn handle_normal_mode(
                 handle_chat_enter(app)?;
             }
             View::AgentBrowser => {
-                if !app.agent_browser_in_detail {
+                if !app.home.agent_browser_in_detail {
                     let agents = app.filtered_agent_definitions();
-                    if let Some(agent) = agents.get(app.agent_browser_index) {
-                        app.viewing_agent_id = Some(agent.id.clone());
-                        app.agent_browser_in_detail = true;
+                    if let Some(agent) = agents.get(app.home.agent_browser_index) {
+                        app.home.viewing_agent_id = Some(agent.id.clone());
+                        app.home.agent_browser_in_detail = true;
                         app.scroll_offset = 0;
                     }
                 }
@@ -1081,14 +1081,14 @@ pub(super) fn handle_normal_mode(
                 app.scroll_offset = 0;
             }
             View::AgentBrowser => {
-                if app.agent_browser_in_detail {
-                    app.agent_browser_in_detail = false;
-                    app.viewing_agent_id = None;
+                if app.home.agent_browser_in_detail {
+                    app.home.agent_browser_in_detail = false;
+                    app.home.viewing_agent_id = None;
                     app.scroll_offset = 0;
                 } else {
                     app.go_home();
-                    app.agent_browser_filter.clear();
-                    app.agent_browser_index = 0;
+                    app.home.agent_browser_filter.clear();
+                    app.home.agent_browser_index = 0;
                 }
             }
             _ => {}
@@ -1135,12 +1135,12 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
         app.scroll_down(3);
     } else if c == 'k' && app.view == View::LessonViewer {
         app.scroll_up(3);
-    } else if c == 'j' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+    } else if c == 'j' && app.view == View::AgentBrowser && app.home.agent_browser_in_detail {
         app.scroll_down(3);
-    } else if c == 'k' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
+    } else if c == 'k' && app.view == View::AgentBrowser && app.home.agent_browser_in_detail {
         app.scroll_up(3);
-    } else if c == 'f' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
-        if let Some(ref agent_id) = app.viewing_agent_id.clone() {
+    } else if c == 'f' && app.view == View::AgentBrowser && app.home.agent_browser_in_detail {
+        if let Some(ref agent_id) = app.home.viewing_agent_id.clone() {
             if let Some(agent) = app
                 .all_agent_definitions()
                 .iter()
@@ -1152,8 +1152,8 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
                 );
             }
         }
-    } else if c == 'c' && app.view == View::AgentBrowser && app.agent_browser_in_detail {
-        if let Some(ref agent_id) = app.viewing_agent_id.clone() {
+    } else if c == 'c' && app.view == View::AgentBrowser && app.home.agent_browser_in_detail {
+        if let Some(ref agent_id) = app.home.viewing_agent_id.clone() {
             if let Some(agent) = app
                 .all_agent_definitions()
                 .iter()
@@ -1165,13 +1165,13 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
                 );
             }
         }
-    } else if c == 'n' && app.view == View::AgentBrowser && !app.agent_browser_in_detail {
+    } else if c == 'n' && app.view == View::AgentBrowser && !app.home.agent_browser_in_detail {
         app.modal_state =
             ui::modal::ModalState::CreateAgent(ui::modal::CreateAgentState::new());
-    } else if app.view == View::AgentBrowser && !app.agent_browser_in_detail && c != 'q' && c != 'n'
+    } else if app.view == View::AgentBrowser && !app.home.agent_browser_in_detail && c != 'q' && c != 'n'
     {
-        app.agent_browser_filter.push(c);
-        app.agent_browser_index = 0;
+        app.home.agent_browser_filter.push(c);
+        app.home.agent_browser_index = 0;
     } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
         let section_index = (c as usize) - ('1' as usize);
         if let Some(ref lesson_id) = app.viewing_lesson_id {

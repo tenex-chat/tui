@@ -190,7 +190,7 @@ pub static COMMANDS: &[Command] = &[
             app.view == View::Home
                 && !app.sidebar_focused
                 && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && !app.show_archived
+                && !app.home.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
@@ -204,7 +204,7 @@ pub static COMMANDS: &[Command] = &[
             app.view == View::Home
                 && !app.sidebar_focused
                 && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && app.show_archived
+                && app.home.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
@@ -647,12 +647,12 @@ pub static COMMANDS: &[Command] = &[
         key: 'o',
         label: "View agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && !app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && !app.home.agent_browser_in_detail,
         execute: |app| {
             let agents = app.filtered_agent_definitions();
-            if let Some(agent) = agents.get(app.agent_browser_index) {
-                app.viewing_agent_id = Some(agent.id.clone());
-                app.agent_browser_in_detail = true;
+            if let Some(agent) = agents.get(app.home.agent_browser_index) {
+                app.home.viewing_agent_id = Some(agent.id.clone());
+                app.home.agent_browser_in_detail = true;
                 app.scroll_offset = 0;
             }
         },
@@ -663,9 +663,9 @@ pub static COMMANDS: &[Command] = &[
         key: 'f',
         label: "Fork agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.agent_browser_in_detail,
         execute: |app| {
-            if let Some(agent_id) = &app.viewing_agent_id {
+            if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::fork_from(&agent));
@@ -677,9 +677,9 @@ pub static COMMANDS: &[Command] = &[
         key: 'c',
         label: "Clone agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.agent_browser_in_detail,
         execute: |app| {
-            if let Some(agent_id) = &app.viewing_agent_id {
+            if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::clone_from(&agent));
