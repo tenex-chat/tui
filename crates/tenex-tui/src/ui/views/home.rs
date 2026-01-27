@@ -1515,7 +1515,7 @@ fn render_hierarchical_search_item(
     is_selected: bool,
     area: Rect,
     store: &std::cell::Ref<crate::store::AppDataStore>,
-    query: &str,
+    _query: &str, // Kept for API compatibility; matched_terms from item is used instead
 ) {
     use crate::ui::search::HierarchicalSearchItem;
 
@@ -1561,12 +1561,17 @@ fn render_hierarchical_search_item(
             title_matched,
             content_matched,
             id_matched,
+            matched_terms,
             ..
         } => {
             let mut lines: Vec<Line> = Vec::new();
 
             // Title line with match type indicator and highlighting
-            let type_indicator = if *id_matched {
+            // For multi-term search, show [+] indicator
+            let is_multi_term = matched_terms.len() > 1;
+            let type_indicator = if is_multi_term {
+                "[+]"  // Multi-term AND match
+            } else if *id_matched {
                 "[I]"
             } else if *title_matched {
                 "[T]"
@@ -1575,7 +1580,9 @@ fn render_hierarchical_search_item(
             } else {
                 "[R]"
             };
-            let type_color = if *id_matched {
+            let type_color = if is_multi_term {
+                theme::ACCENT_WARNING  // Special color for multi-term matches
+            } else if *id_matched {
                 theme::TEXT_MUTED
             } else if *title_matched {
                 theme::ACCENT_PRIMARY
@@ -1588,8 +1595,9 @@ fn render_hierarchical_search_item(
             let title_max = (area.width as usize).saturating_sub(indent_width).saturating_sub(30).max(10);
 
             // Highlight matching text in title if title matched
+            // For multi-term, highlight all matching terms
             let title_spans = if *title_matched {
-                highlight_text_spans(thread_title, query, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY)
+                highlight_text_spans_multi(thread_title, matched_terms, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY)
             } else {
                 vec![Span::styled(
                     crate::ui::format::truncate_with_ellipsis(thread_title, title_max),
@@ -1629,9 +1637,9 @@ fn render_hierarchical_search_item(
                     Span::styled(author_name, Style::default().fg(author_color)),
                 ]));
 
-                // Message content with bracket highlighting
+                // Message content with bracket highlighting (supports multi-term)
                 let preview: String = msg.content.lines().next().unwrap_or("").chars().take(content_width).collect();
-                let highlighted_spans = build_bracket_highlight_spans(&preview, query, content_width);
+                let highlighted_spans = build_bracket_highlight_spans_multi(&preview, matched_terms, content_width);
                 let mut content_line_spans = vec![
                     Span::styled(&message_indent, Style::default().fg(theme::TEXT_MUTED)),
                 ];
@@ -1695,6 +1703,177 @@ fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> 
 
     if spans.is_empty() {
         vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))]
+    } else {
+        spans
+    }
+}
+
+/// Build highlighted spans with [brackets] around matching text for multiple terms
+/// Each term is highlighted where it appears in the text
+fn build_bracket_highlight_spans_multi(text: &str, terms: &[String], _max_width: usize) -> Vec<Span<'static>> {
+    if terms.is_empty() {
+        return vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))];
+    }
+
+    // For single term, delegate to existing function
+    if terms.len() == 1 {
+        return build_bracket_highlight_spans(text, &terms[0], _max_width);
+    }
+
+    let text_chars: Vec<char> = text.chars().collect();
+    let text_len = text_chars.len();
+
+    // Find all match ranges for all terms
+    let mut matches: Vec<(usize, usize)> = Vec::new(); // (start_char_idx, end_char_idx)
+
+    for term in terms {
+        let term_chars: Vec<char> = term.chars().collect();
+        let term_len = term_chars.len();
+        if term_len == 0 {
+            continue;
+        }
+
+        let mut i = 0;
+        while i <= text_len.saturating_sub(term_len) {
+            if chars_match_ascii_ignore_case(&text_chars, &term_chars, i) {
+                matches.push((i, i + term_len));
+                i += term_len; // Skip past this match
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Sort matches by start position
+    matches.sort_by_key(|(start, _)| *start);
+
+    // Merge overlapping matches
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in matches {
+        if let Some((_, last_end)) = merged.last_mut() {
+            if start <= *last_end {
+                // Overlapping or adjacent - extend the previous match
+                *last_end = (*last_end).max(end);
+            } else {
+                merged.push((start, end));
+            }
+        } else {
+            merged.push((start, end));
+        }
+    }
+
+    // Build spans
+    let mut spans = Vec::new();
+    let mut last_end = 0;
+
+    for (start, end) in merged {
+        // Add text before match
+        if start > last_end {
+            let before: String = text_chars[last_end..start].iter().collect();
+            spans.push(Span::styled(before, Style::default().fg(theme::TEXT_MUTED)));
+        }
+        // Add [matched] text with brackets and highlighting
+        let match_text: String = text_chars[start..end].iter().collect();
+        spans.push(Span::styled(
+            format!("[{}]", match_text),
+            Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD),
+        ));
+        last_end = end;
+    }
+
+    // Add remaining text
+    if last_end < text_len {
+        let remaining: String = text_chars[last_end..].iter().collect();
+        spans.push(Span::styled(remaining, Style::default().fg(theme::TEXT_MUTED)));
+    }
+
+    if spans.is_empty() {
+        vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))]
+    } else {
+        spans
+    }
+}
+
+/// Highlight text spans for multiple search terms
+/// Similar to highlight_text_spans but supports multiple terms
+fn highlight_text_spans_multi(
+    text: &str,
+    terms: &[String],
+    normal_color: ratatui::style::Color,
+    highlight_color: ratatui::style::Color,
+) -> Vec<Span<'static>> {
+    if terms.is_empty() {
+        return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
+    }
+
+    // For single term, delegate to existing function
+    if terms.len() == 1 {
+        return highlight_text_spans(text, &terms[0], normal_color, highlight_color);
+    }
+
+    let text_chars: Vec<char> = text.chars().collect();
+    let text_len = text_chars.len();
+
+    // Find all match ranges for all terms
+    let mut matches: Vec<(usize, usize)> = Vec::new();
+
+    for term in terms {
+        let term_chars: Vec<char> = term.chars().collect();
+        let term_len = term_chars.len();
+        if term_len == 0 {
+            continue;
+        }
+
+        let mut i = 0;
+        while i <= text_len.saturating_sub(term_len) {
+            if chars_match_ascii_ignore_case(&text_chars, &term_chars, i) {
+                matches.push((i, i + term_len));
+                i += term_len;
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    // Sort and merge overlapping matches
+    matches.sort_by_key(|(start, _)| *start);
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in matches {
+        if let Some((_, last_end)) = merged.last_mut() {
+            if start <= *last_end {
+                *last_end = (*last_end).max(end);
+            } else {
+                merged.push((start, end));
+            }
+        } else {
+            merged.push((start, end));
+        }
+    }
+
+    // Build spans
+    let mut spans = Vec::new();
+    let mut last_end = 0;
+
+    for (start, end) in merged {
+        if start > last_end {
+            let before: String = text_chars[last_end..start].iter().collect();
+            spans.push(Span::styled(before, Style::default().fg(normal_color)));
+        }
+        let match_text: String = text_chars[start..end].iter().collect();
+        spans.push(Span::styled(
+            match_text,
+            Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
+        ));
+        last_end = end;
+    }
+
+    if last_end < text_len {
+        let remaining: String = text_chars[last_end..].iter().collect();
+        spans.push(Span::styled(remaining, Style::default().fg(normal_color)));
+    }
+
+    if spans.is_empty() {
+        vec![Span::styled(text.to_string(), Style::default().fg(normal_color))]
     } else {
         spans
     }

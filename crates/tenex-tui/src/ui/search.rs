@@ -14,6 +14,14 @@
 //!         Conversation 3 title (has matches - normal)
 //!             -> matching message content here
 //! ```
+//!
+//! # Multi-term Search with '+' Operator
+//! The '+' operator allows combining multiple search terms with AND semantics:
+//! - Query: "error+timeout" finds conversations where BOTH "error" AND "timeout"
+//!   appear (each term can be in different messages within the same conversation)
+//! - Under each matching conversation, ALL messages matching ANY term are shown
+//! - Example: A conversation with one message containing "error" and another
+//!   containing "timeout" would match, and both messages would be displayed
 
 use crate::models::Thread;
 use crate::store::AppDataStore;
@@ -247,6 +255,9 @@ pub enum HierarchicalSearchItem {
         /// Whether matched by conversation ID
         id_matched: bool,
         depth: usize,
+        /// The search terms that were matched (for multi-term highlighting)
+        /// For single-term searches, this contains one term
+        matched_terms: Vec<String>,
     },
 }
 
@@ -268,6 +279,10 @@ pub enum SearchMatchType {
 /// Returns results matching the query in thread titles, content, or reply messages.
 /// Respects project filters (visible_projects) but NOT time filters.
 /// Empty visible_projects = show nothing (consistent with other lists)
+///
+/// # Multi-term Search ('+' operator)
+/// When the query contains '+', it's split into multiple terms with AND semantics:
+/// - A conversation matches only if ALL terms are found somewhere in the conversation
 pub fn search_conversations(
     query: &str,
     store: &Ref<AppDataStore>,
@@ -282,7 +297,13 @@ pub fn search_conversations(
         return vec![];
     }
 
-    let filter = query.to_lowercase();
+    // Parse search terms (supports '+' operator for AND semantics)
+    let terms = parse_search_terms(query);
+    if terms.is_empty() {
+        return vec![];
+    }
+
+    let is_multi_term = terms.len() > 1;
     let mut results = Vec::new();
     let mut seen_threads: HashSet<String> = HashSet::new();
 
@@ -299,34 +320,24 @@ pub fn search_conversations(
 
         // Search threads
         for thread in store.get_threads(&a_tag) {
-            // Check thread title
-            let title_matches = thread.title.to_lowercase().contains(&filter);
-            // Check thread content
-            let content_matches = thread.content.to_lowercase().contains(&filter);
-            // Check conversation ID (prefix match for shortened IDs like 12-char or full 64-char)
-            let id_matches = thread.id.to_lowercase().starts_with(&filter);
+            // Track which terms are found in different parts of the conversation
+            let mut terms_found_in_title: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_content: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_id: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_messages: HashSet<usize> = HashSet::new();
+            let mut first_matching_reply: Option<MatchingReply> = None;
 
-            if title_matches || content_matches || id_matches {
-                seen_threads.insert(thread.id.clone());
-
-                let match_type = if id_matches {
-                    SearchMatchType::ConversationId
-                } else if title_matches {
-                    SearchMatchType::ThreadTitle
-                } else {
-                    SearchMatchType::ThreadContent
-                };
-
-                results.push(SearchResult {
-                    thread: thread.clone(),
-                    thread_id: thread.id.clone(),
-                    thread_title: thread.title.clone(),
-                    project_a_tag: a_tag.clone(),
-                    project_name: project_name.clone(),
-                    matching_reply: None,
-                    match_type,
-                    created_at: thread.last_activity,
-                });
+            // Check each term against title, content, and ID
+            for (term_idx, term) in terms.iter().enumerate() {
+                if text_contains_term(&thread.title, term) {
+                    terms_found_in_title.insert(term_idx);
+                }
+                if text_contains_term(&thread.content, term) {
+                    terms_found_in_content.insert(term_idx);
+                }
+                if thread.id.to_lowercase().starts_with(term) {
+                    terms_found_in_id.insert(term_idx);
+                }
             }
 
             // Search messages/replies in this thread
@@ -337,38 +348,61 @@ pub fn search_conversations(
                     continue;
                 }
 
-                let content_lower = msg.content.to_lowercase();
-                if content_lower.contains(&filter) {
-                    // Don't add duplicate thread entries
-                    if seen_threads.contains(&thread.id) {
-                        // Update existing result with the reply info if it's a better match
-                        if let Some(existing) = results.iter_mut().find(|r| r.thread_id == thread.id) {
-                            if existing.matching_reply.is_none() {
-                                existing.matching_reply = Some(MatchingReply {
-                                    content: msg.content.clone(),
-                                    author_pubkey: msg.pubkey.clone(),
-                                });
-                                existing.match_type = SearchMatchType::Reply;
-                            }
-                        }
-                    } else {
-                        seen_threads.insert(thread.id.clone());
-
-                        results.push(SearchResult {
-                            thread: thread.clone(),
-                            thread_id: thread.id.clone(),
-                            thread_title: thread.title.clone(),
-                            project_a_tag: a_tag.clone(),
-                            project_name: project_name.clone(),
-                            matching_reply: Some(MatchingReply {
+                let msg_lower = msg.content.to_lowercase();
+                for (term_idx, term) in terms.iter().enumerate() {
+                    if msg_lower.contains(term) {
+                        terms_found_in_messages.insert(term_idx);
+                        // Keep first matching reply for display
+                        if first_matching_reply.is_none() {
+                            first_matching_reply = Some(MatchingReply {
                                 content: msg.content.clone(),
                                 author_pubkey: msg.pubkey.clone(),
-                            }),
-                            match_type: SearchMatchType::Reply,
-                            created_at: msg.created_at,
-                        });
+                            });
+                        }
                     }
                 }
+            }
+
+            // For multi-term search: ALL terms must be found somewhere in the conversation
+            // For single-term search: standard behavior (any match)
+            let all_terms_found = if is_multi_term {
+                let mut all_found_terms: HashSet<usize> = HashSet::new();
+                all_found_terms.extend(&terms_found_in_title);
+                all_found_terms.extend(&terms_found_in_content);
+                all_found_terms.extend(&terms_found_in_id);
+                all_found_terms.extend(&terms_found_in_messages);
+                all_found_terms.len() == terms.len()
+            } else {
+                !terms_found_in_title.is_empty()
+                    || !terms_found_in_content.is_empty()
+                    || !terms_found_in_id.is_empty()
+                    || !terms_found_in_messages.is_empty()
+            };
+
+            if all_terms_found && !seen_threads.contains(&thread.id) {
+                seen_threads.insert(thread.id.clone());
+
+                // Determine match type based on where matches were found
+                let match_type = if !terms_found_in_id.is_empty() {
+                    SearchMatchType::ConversationId
+                } else if !terms_found_in_title.is_empty() {
+                    SearchMatchType::ThreadTitle
+                } else if !terms_found_in_content.is_empty() {
+                    SearchMatchType::ThreadContent
+                } else {
+                    SearchMatchType::Reply
+                };
+
+                results.push(SearchResult {
+                    thread: thread.clone(),
+                    thread_id: thread.id.clone(),
+                    thread_title: thread.title.clone(),
+                    project_a_tag: a_tag.clone(),
+                    project_name: project_name.clone(),
+                    matching_reply: first_matching_reply,
+                    match_type,
+                    created_at: thread.last_activity,
+                });
             }
         }
     }
@@ -421,6 +455,36 @@ pub fn search_reports(
     results
 }
 
+/// Parse a search query into individual search terms.
+///
+/// The '+' operator splits the query into multiple terms that must ALL match
+/// (AND semantics at the conversation level). Each term is trimmed and lowercased.
+///
+/// # Examples
+/// - "error" -> ["error"]
+/// - "error+timeout" -> ["error", "timeout"]
+/// - "  error + timeout  " -> ["error", "timeout"]
+/// - "error++timeout" -> ["error", "timeout"] (empty terms ignored)
+/// - "" -> []
+pub fn parse_search_terms(query: &str) -> Vec<String> {
+    query
+        .split('+')
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Check if text contains a search term (case-insensitive)
+fn text_contains_term(text: &str, term: &str) -> bool {
+    text.to_lowercase().contains(term)
+}
+
+/// Check if text matches any of the search terms (OR logic)
+fn text_matches_any_term(text: &str, terms: &[String]) -> bool {
+    let text_lower = text.to_lowercase();
+    terms.iter().any(|term| text_lower.contains(term))
+}
+
 /// Raw search match data for a conversation (internal use)
 #[derive(Debug, Clone)]
 struct ConversationMatch {
@@ -431,6 +495,8 @@ struct ConversationMatch {
     title_matched: bool,
     content_matched: bool,
     id_matched: bool,
+    /// For multi-term searches, tracks which terms matched in this conversation
+    matched_terms: Vec<String>,
 }
 
 /// Search conversations and build hierarchical results
@@ -438,6 +504,13 @@ struct ConversationMatch {
 /// Returns a flat list of HierarchicalSearchItem that represents the tree structure
 /// with proper depth values for indentation. Context ancestors (conversations that
 /// don't match but are parents of matching conversations) are included with dimmed styling.
+///
+/// # Multi-term Search ('+' operator)
+/// When the query contains '+', it's split into multiple terms:
+/// - A conversation matches only if ALL terms are found somewhere in the conversation
+///   (title, content, or any reply) - AND semantics at conversation level
+/// - Under matching conversations, ALL messages that match ANY term are shown - OR semantics
+///   for reply display
 pub fn search_conversations_hierarchical(
     query: &str,
     store: &Ref<AppDataStore>,
@@ -447,7 +520,13 @@ pub fn search_conversations_hierarchical(
         return vec![];
     }
 
-    let filter = query.to_lowercase();
+    // Parse search terms (supports '+' operator for AND semantics)
+    let terms = parse_search_terms(query);
+    if terms.is_empty() {
+        return vec![];
+    }
+
+    let is_multi_term = terms.len() > 1;
 
     // Step 1: Collect all matching conversations with ALL their matching messages
     let mut matches_by_conv: HashMap<String, ConversationMatch> = HashMap::new();
@@ -461,13 +540,27 @@ pub fn search_conversations_hierarchical(
         let project_name = project.name.clone();
 
         for thread in store.get_threads(&a_tag) {
-            let title_matched = thread.title.to_lowercase().contains(&filter);
-            let content_matched = thread.content.to_lowercase().contains(&filter);
-            let id_matched = thread.id.to_lowercase().starts_with(&filter);
+            // Track which terms match in different parts of the conversation
+            let mut terms_found_in_title: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_content: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_id: HashSet<usize> = HashSet::new();
+            let mut terms_found_in_messages: HashSet<usize> = HashSet::new();
 
+            // Check each term against title, content, and ID
+            for (term_idx, term) in terms.iter().enumerate() {
+                if text_contains_term(&thread.title, term) {
+                    terms_found_in_title.insert(term_idx);
+                }
+                if text_contains_term(&thread.content, term) {
+                    terms_found_in_content.insert(term_idx);
+                }
+                if thread.id.to_lowercase().starts_with(term) {
+                    terms_found_in_id.insert(term_idx);
+                }
+            }
+
+            // Collect messages that match ANY term (OR logic for display)
             let mut matching_messages: Vec<MatchingMessage> = Vec::new();
-
-            // Collect ALL matching messages in this thread
             let messages = store.get_messages(&thread.id);
             for msg in messages {
                 // Skip root message if we're counting it via content_matched
@@ -475,7 +568,17 @@ pub fn search_conversations_hierarchical(
                     continue;
                 }
 
-                if msg.content.to_lowercase().contains(&filter) {
+                // Check if message matches any term
+                let msg_lower = msg.content.to_lowercase();
+                let mut msg_matches_any = false;
+                for (term_idx, term) in terms.iter().enumerate() {
+                    if msg_lower.contains(term) {
+                        terms_found_in_messages.insert(term_idx);
+                        msg_matches_any = true;
+                    }
+                }
+
+                if msg_matches_any {
                     matching_messages.push(MatchingMessage {
                         content: msg.content.clone(),
                         author_pubkey: msg.pubkey.clone(),
@@ -484,8 +587,34 @@ pub fn search_conversations_hierarchical(
                 }
             }
 
-            // If there's any match, record this conversation
-            if title_matched || content_matched || id_matched || !matching_messages.is_empty() {
+            // For multi-term search: ALL terms must be found somewhere in the conversation
+            // For single-term search: standard behavior (any match)
+            let all_terms_found = if is_multi_term {
+                // Combine all places where terms were found
+                let mut all_found_terms: HashSet<usize> = HashSet::new();
+                all_found_terms.extend(&terms_found_in_title);
+                all_found_terms.extend(&terms_found_in_content);
+                all_found_terms.extend(&terms_found_in_id);
+                all_found_terms.extend(&terms_found_in_messages);
+
+                // Check if ALL terms were found (AND logic)
+                all_found_terms.len() == terms.len()
+            } else {
+                // Single term: any match counts
+                !terms_found_in_title.is_empty()
+                    || !terms_found_in_content.is_empty()
+                    || !terms_found_in_id.is_empty()
+                    || !terms_found_in_messages.is_empty()
+            };
+
+            if all_terms_found {
+                let title_matched = !terms_found_in_title.is_empty();
+                let content_matched = !terms_found_in_content.is_empty();
+                let id_matched = !terms_found_in_id.is_empty();
+
+                // Build list of matched terms for display
+                let matched_terms = terms.clone();
+
                 matches_by_conv.insert(
                     thread.id.clone(),
                     ConversationMatch {
@@ -496,6 +625,7 @@ pub fn search_conversations_hierarchical(
                         title_matched,
                         content_matched,
                         id_matched,
+                        matched_terms,
                     },
                 );
             }
@@ -610,6 +740,7 @@ pub fn search_conversations_hierarchical(
                 content_matched: conv_match.content_matched,
                 id_matched: conv_match.id_matched,
                 depth,
+                matched_terms: conv_match.matched_terms.clone(),
             });
         } else if ancestor_ids.contains(conv_id) {
             // This is a context ancestor
@@ -691,5 +822,91 @@ impl HierarchicalSearchItem {
             HierarchicalSearchItem::ContextAncestor { project_a_tag, .. } => project_a_tag,
             HierarchicalSearchItem::MatchedConversation { project_a_tag, .. } => project_a_tag,
         }
+    }
+
+    /// Get the matched search terms (only for MatchedConversation)
+    pub fn matched_terms(&self) -> &[String] {
+        match self {
+            HierarchicalSearchItem::ContextAncestor { .. } => &[],
+            HierarchicalSearchItem::MatchedConversation { matched_terms, .. } => matched_terms,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_search_terms_single() {
+        let terms = parse_search_terms("error");
+        assert_eq!(terms, vec!["error"]);
+    }
+
+    #[test]
+    fn test_parse_search_terms_multiple() {
+        let terms = parse_search_terms("error+timeout");
+        assert_eq!(terms, vec!["error", "timeout"]);
+    }
+
+    #[test]
+    fn test_parse_search_terms_with_spaces() {
+        let terms = parse_search_terms("  error + timeout  ");
+        assert_eq!(terms, vec!["error", "timeout"]);
+    }
+
+    #[test]
+    fn test_parse_search_terms_empty_parts() {
+        // Empty parts between + should be ignored
+        let terms = parse_search_terms("error++timeout");
+        assert_eq!(terms, vec!["error", "timeout"]);
+    }
+
+    #[test]
+    fn test_parse_search_terms_empty_query() {
+        let terms = parse_search_terms("");
+        assert!(terms.is_empty());
+    }
+
+    #[test]
+    fn test_parse_search_terms_whitespace_only() {
+        let terms = parse_search_terms("   ");
+        assert!(terms.is_empty());
+    }
+
+    #[test]
+    fn test_parse_search_terms_three_terms() {
+        let terms = parse_search_terms("error+warning+info");
+        assert_eq!(terms, vec!["error", "warning", "info"]);
+    }
+
+    #[test]
+    fn test_parse_search_terms_lowercased() {
+        let terms = parse_search_terms("Error+WARNING+Info");
+        assert_eq!(terms, vec!["error", "warning", "info"]);
+    }
+
+    #[test]
+    fn test_text_contains_term() {
+        assert!(text_contains_term("This is an ERROR message", "error"));
+        assert!(text_contains_term("ERROR at start", "error"));
+        assert!(text_contains_term("at the end ERROR", "error"));
+        assert!(!text_contains_term("This has no match", "error"));
+    }
+
+    #[test]
+    fn test_text_matches_any_term() {
+        let terms = vec!["error".to_string(), "warning".to_string()];
+
+        assert!(text_matches_any_term("This is an error", &terms));
+        assert!(text_matches_any_term("This is a warning", &terms));
+        assert!(text_matches_any_term("error and warning", &terms));
+        assert!(!text_matches_any_term("This is info only", &terms));
+    }
+
+    #[test]
+    fn test_text_matches_any_term_empty_terms() {
+        let terms: Vec<String> = vec![];
+        assert!(!text_matches_any_term("anything", &terms));
     }
 }
