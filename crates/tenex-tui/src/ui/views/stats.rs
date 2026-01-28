@@ -36,10 +36,38 @@ const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
 // Number of days to show in the chart (fixed window for averaging)
 const STATS_WINDOW_DAYS: usize = 14;
 
+// Chart layout constants
+const CHART_BORDER_HEIGHT: u16 = 2; // Top and bottom borders
+const CHART_PADDING_HEIGHT: u16 = 2; // Internal padding
+
 // Month names for date formatting
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+
+/// Compute the required chart height to display all STATS_WINDOW_DAYS.
+///
+/// The chart needs space for:
+/// - STATS_WINDOW_DAYS lines (one per day)
+/// - CHART_BORDER_HEIGHT (top + bottom borders)
+/// - CHART_PADDING_HEIGHT (internal padding)
+///
+/// Layout policy: The chart gets its required height when space allows.
+/// If the terminal is too small, the chart gets what remains after
+/// allocating minimum space for metric cards and tables.
+fn compute_chart_height(total_height: u16, metric_cards_height: u16) -> u16 {
+    // Required height to show all days
+    let required = STATS_WINDOW_DAYS as u16 + CHART_BORDER_HEIGHT + CHART_PADDING_HEIGHT;
+
+    // Minimum height for tables section (at least show headers + 2 rows)
+    let min_tables_height = 8u16;
+
+    // Available space after metric cards and minimum tables
+    let available = total_height.saturating_sub(metric_cards_height + min_tables_height + 2);
+
+    // Give the chart its required height, but don't exceed available space
+    required.min(available).max(6) // At least 6 lines to show something
+}
 
 /// Render the Stats tab content with a dashboard layout
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
@@ -84,9 +112,9 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // │  Cost by Project             │  Top Conversations           │ <- Two Tables
     // └──────────────────────────────┴──────────────────────────────┘
 
-    // Calculate adaptive heights
+    // Calculate adaptive heights using helper function
     let metric_cards_height = 5u16;
-    let chart_height = 16u16.min(area.height.saturating_sub(20)); // Responsive chart height
+    let chart_height = compute_chart_height(area.height, metric_cards_height);
     let tables_height = area.height.saturating_sub(metric_cards_height + chart_height + 2);
 
     let vertical_chunks = Layout::vertical([
@@ -242,9 +270,11 @@ fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect
         runtime_by_day.iter().cloned().collect();
 
     // Generate last STATS_WINDOW_DAYS days with proper date labels
+    // Order: newest (today) first, oldest last - ensures today is always visible
+    // even if the chart area is too small to fit all days
     let mut lines: Vec<Line> = Vec::new();
 
-    for i in (0..STATS_WINDOW_DAYS).rev() {
+    for i in 0..STATS_WINDOW_DAYS {
         let day_start = today_start - i as u64 * seconds_per_day;
         let runtime = runtime_map.get(&day_start).copied().unwrap_or(0);
 
