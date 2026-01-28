@@ -116,6 +116,27 @@ fn default_jaeger_endpoint() -> String {
     "http://localhost:16686".to_string()
 }
 
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            last_project_a_tag: None,
+            selected_projects: Vec::new(),
+            time_filter: None,
+            show_llm_metadata: false,
+            archived_thread_ids: HashSet::new(),
+            archived_project_ids: HashSet::new(),
+            threads_default_collapsed: false,
+            approved_backend_pubkeys: HashSet::new(),
+            blocked_backend_pubkeys: HashSet::new(),
+            stored_credentials: None,
+            hide_scheduled: false,
+            workspaces: Vec::new(),
+            active_workspace_id: None,
+            jaeger_endpoint: default_jaeger_endpoint(),
+        }
+    }
+}
+
 pub struct PreferencesStorage {
     path: PathBuf,
     pub prefs: Preferences,
@@ -318,7 +339,6 @@ impl PreferencesStorage {
         self.prefs.hide_scheduled
     }
 
-<<<<<<< HEAD
     // ===== Workspace Methods =====
 
     pub fn workspaces(&self) -> &[Workspace] {
