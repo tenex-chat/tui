@@ -16,6 +16,52 @@ use std::collections::HashMap;
 use super::cards::{author_line, author_line_with_recipient, bottom_half_block_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines, top_half_block_line};
 use super::grouping::{group_messages, DisplayItem};
 
+/// Result of computing message background styling policy.
+/// Centralizes the decision of whether a message gets a "card" appearance.
+struct MessageBackgroundPolicy {
+    /// The background color to use for this message
+    bg: ratatui::style::Color,
+    /// Whether this message should render with card styling (half-block borders, padding)
+    /// True for: search matches, selected messages, or messages with p-tags (recipients)
+    has_card_bg: bool,
+}
+
+/// Compute the background styling policy for a message.
+///
+/// # Background Priority (highest to lowest):
+/// 1. Current search match → BG_SEARCH_CURRENT (card styling)
+/// 2. Any search match → BG_SEARCH_MATCH (card styling)
+/// 3. Selected message → BG_SELECTED (card styling)
+/// 4. Has p-tags (directed to recipients) → BG_CARD (card styling)
+/// 5. Default → BG_APP (no card styling)
+///
+/// Card styling means the message gets visual "card" treatment with
+/// top/bottom half-block borders and full-width background padding.
+fn compute_message_background_policy(
+    has_p_tags: bool,
+    is_selected: bool,
+    has_search_match: bool,
+    is_current_search: bool,
+    card_bg: ratatui::style::Color,
+    card_bg_selected: ratatui::style::Color,
+) -> MessageBackgroundPolicy {
+    let bg = if is_current_search {
+        theme::BG_SEARCH_CURRENT
+    } else if has_search_match {
+        theme::BG_SEARCH_MATCH
+    } else if is_selected {
+        card_bg_selected
+    } else if has_p_tags {
+        card_bg
+    } else {
+        theme::BG_APP
+    };
+
+    let has_card_bg = has_p_tags || is_selected || has_search_match || is_current_search;
+
+    MessageBackgroundPolicy { bg, has_card_bg }
+}
+
 /// Render markdown content with a custom indicator and padding.
 /// Used for ask event context rendering in both answered and unanswered paths.
 fn render_markdown_with_indicator(
@@ -191,20 +237,21 @@ pub(crate) fn render_messages_panel(
                         .map(|loc| loc.message_id == msg.id)
                         .unwrap_or(false);
 
-                    let bg = if is_current_search {
-                        theme::BG_SEARCH_CURRENT
-                    } else if has_search_match {
-                        theme::BG_SEARCH_MATCH
-                    } else if is_selected {
-                        card_bg_selected
-                    } else {
-                        card_bg
-                    };
-
                     // Check if this is a tool use message (has tool tag) or delegation (has q_tags)
                     let is_tool_use = msg.tool_name.is_some() || !msg.q_tags.is_empty();
-                    // Check if message has p-tags (recipients) - needed for padding decisions
+                    // Check if message has p-tags (recipients) - only these get card background by default
                     let has_p_tags = !msg.p_tags.is_empty();
+
+                    // Compute background policy once for the entire message rendering
+                    let bg_policy = compute_message_background_policy(
+                        has_p_tags,
+                        is_selected,
+                        has_search_match,
+                        is_current_search,
+                        card_bg,
+                        card_bg_selected,
+                    );
+                    let bg = bg_policy.bg;
 
                     if is_tool_use {
                         // Tool use message: render muted tool line only, no card background
@@ -276,8 +323,8 @@ pub(crate) fn render_messages_panel(
                         // (first in group, or has p-tags which show full header breaking the visual grouping)
                         let starts_new_card = !is_consecutive || has_p_tags;
 
-                        // Top half-block padding for new cards
-                        if starts_new_card {
+                        // Top half-block padding for new cards (only if message has card background)
+                        if starts_new_card && bg_policy.has_card_bg {
                             messages_text.push(top_half_block_line(indicator_color, bg, content_width));
                         }
 
@@ -394,7 +441,7 @@ pub(crate) fn render_messages_panel(
                     // Bottom half-block padding (for messages that end a visual card)
                     // This includes: last in group, or p-tag messages (which form their own card)
                     let ends_card = !has_next_consecutive || has_p_tags;
-                    if ends_card {
+                    if ends_card && bg_policy.has_card_bg {
                         // Only add half-block for non-tool, non-reasoning messages (those have card bg)
                         if !is_tool_use && !msg.is_reasoning {
                             messages_text.push(bottom_half_block_line(indicator_color, bg, content_width));
