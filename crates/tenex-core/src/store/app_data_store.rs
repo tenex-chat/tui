@@ -276,6 +276,9 @@ impl AppDataStore {
         // Load agent definitions (kind:4199)
         self.load_agent_definitions();
 
+        // Load MCP tools (kind:4200)
+        self.load_mcp_tools();
+
         // Load nudges (kind:4201)
         self.load_nudges();
 
@@ -306,6 +309,28 @@ impl AppDataStore {
             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
                 if let Some(agent_def) = AgentDefinition::from_note(&note) {
                     self.agent_definitions.insert(agent_def.id.clone(), agent_def);
+                }
+            }
+        }
+    }
+
+    /// Load all MCP tools from nostrdb
+    fn load_mcp_tools(&mut self) {
+        use nostrdb::{Filter, Transaction};
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([4200]).build();
+        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
+            return;
+        };
+
+        for result in results {
+            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(tool) = MCPTool::from_note(&note) {
+                    self.mcp_tools.insert(tool.id.clone(), tool);
                 }
             }
         }
@@ -781,6 +806,7 @@ impl AppDataStore {
             513 => { self.handle_metadata_event(note); None }
             4129 => { self.handle_lesson_event(note); None }
             4199 => { self.handle_agent_definition_event(note); None }
+            4200 => { self.handle_mcp_tool_event(note); None }
             4201 => { self.handle_nudge_event(note); None }
             24133 => { self.handle_operations_status_event(note); None }
             30023 => { self.handle_report_event(note); None }
@@ -1643,6 +1669,14 @@ impl AppDataStore {
 
     pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
         self.agent_definitions.get(id)
+    }
+
+    // ===== MCP Tool Methods (kind:4200) =====
+
+    fn handle_mcp_tool_event(&mut self, note: &Note) {
+        if let Some(tool) = MCPTool::from_note(note) {
+            self.mcp_tools.insert(tool.id.clone(), tool);
+        }
     }
 
     // ===== Nudge Methods (kind:4201) =====

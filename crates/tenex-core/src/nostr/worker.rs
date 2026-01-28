@@ -559,7 +559,16 @@ impl NostrWorker {
         );
         tlog!("CONN", "Subscribed to agent lessons (kind:4129)");
 
-        // 6. Per-project subscriptions (kind:513 metadata, kind:1 messages)
+        // 6. MCP Tools (kind:4200)
+        let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
+        let output = client.subscribe(vec![mcp_tool_filter], None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("MCP tools".to_string(), vec![4200], None),
+        );
+        tlog!("CONN", "Subscribed to MCP tools (kind:4200)");
+
+        // 7. Per-project subscriptions (kind:513 metadata, kind:1 messages)
         let project_atags: Vec<String> = get_projects(&self.ndb)
             .unwrap_or_default()
             .iter()
@@ -1629,6 +1638,10 @@ async fn sync_all_filters(
     // Agent lessons (kind 4129)
     let lesson_filter = Filter::new().kind(Kind::Custom(4129));
     total_new += sync_filter(client, lesson_filter, "4129", stats).await;
+
+    // MCP tools (kind 4200)
+    let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
+    total_new += sync_filter(client, mcp_tool_filter, "4200", stats).await;
 
     // Nudges (kind 4201) - authored by user
     let nudge_authored_filter = Filter::new()
