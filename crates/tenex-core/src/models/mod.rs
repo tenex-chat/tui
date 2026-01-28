@@ -3,6 +3,7 @@ pub mod conversation_metadata;
 pub mod draft;
 pub mod inbox;
 pub mod lesson;
+pub mod mcp_tool;
 pub mod message;
 pub mod nudge;
 pub mod operations_status;
@@ -22,6 +23,7 @@ pub use draft::{
 };
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
 pub use lesson::Lesson;
+pub use mcp_tool::MCPTool;
 pub use message::{AskEvent, AskQuestion, Message};
 pub use nudge::Nudge;
 pub use operations_status::OperationsStatus;
