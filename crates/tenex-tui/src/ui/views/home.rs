@@ -178,8 +178,23 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 }
 
+/// Build a tab badge span and its display width for counts > 0
+fn build_tab_badge(count: usize, color: ratatui::style::Color) -> (Option<Span<'static>>, usize) {
+    if count > 0 {
+        let text = format!(" ({})", count);
+        let width = text.width();
+        (Some(Span::styled(text, Style::default().fg(color))), width)
+    } else {
+        (None, 0)
+    }
+}
+
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let inbox_count = app.inbox_items().iter().filter(|i| !i.is_read).count();
+    let active_count = app.data_store.borrow().active_operations_count();
+
+    let (inbox_badge, inbox_badge_width) = build_tab_badge(inbox_count, theme::ACCENT_ERROR);
+    let (active_badge, active_badge_width) = build_tab_badge(active_count, theme::ACCENT_SUCCESS);
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
@@ -198,11 +213,8 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("Inbox", tab_style(HomeTab::Inbox)),
     ];
 
-    if inbox_count > 0 {
-        spans.push(Span::styled(
-            format!(" ({})", inbox_count),
-            Style::default().fg(theme::ACCENT_ERROR),
-        ));
+    if let Some(badge) = inbox_badge {
+        spans.push(badge);
     }
 
     spans.push(Span::styled("   ", Style::default()));
@@ -211,6 +223,11 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Active", tab_style(HomeTab::ActiveWork)));
+
+    if let Some(badge) = active_badge {
+        spans.push(badge);
+    }
+
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
 
@@ -220,13 +237,6 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let accent = Style::default().fg(theme::ACCENT_PRIMARY);
     let blank = Style::default();
 
-    // Calculate dynamic spacing for inbox count
-    let inbox_count_width = if inbox_count > 0 {
-        format!(" ({})", inbox_count).len()
-    } else {
-        0
-    };
-
     let indicator_spans = vec![
         Span::styled("         ", blank), // Padding for "  TENEX  "
         Span::styled(if app.home_panel_focus == HomeTab::Conversations { "─────────────" } else { "             " },
@@ -234,7 +244,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Inbox { accent } else { blank }),
-        Span::styled(" ".repeat(inbox_count_width), blank),
+        Span::styled(" ".repeat(inbox_badge_width), blank),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
             if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),
@@ -244,6 +254,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::ActiveWork { "──────" } else { "      " },
             if app.home_panel_focus == HomeTab::ActiveWork { accent } else { blank }),
+        Span::styled(" ".repeat(active_badge_width), blank),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Stats { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Stats { accent } else { blank }),
