@@ -454,10 +454,9 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Global",
         &[HotkeyContext::Global],
     ).with_priority(90), // High priority - works almost everywhere
-    HotkeyBinding::with_modifiers(
+    HotkeyBinding::ctrl(
         HotkeyId::WorkspaceManager,
-        KeyCode::Char('T'),
-        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+        KeyCode::Char('p'),
         "Workspaces",
         "Global",
         &[HotkeyContext::Global],
