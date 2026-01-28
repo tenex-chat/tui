@@ -73,7 +73,7 @@ impl ProjectDraftStorage {
 }
 
 /// App preferences (persisted to JSON file)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preferences {
     pub last_project_a_tag: Option<String>,
     #[serde(default)]
@@ -107,6 +107,34 @@ pub struct Preferences {
     /// Currently active workspace ID (None = manual project selection mode)
     #[serde(default)]
     pub active_workspace_id: Option<String>,
+    /// OpenTelemetry/Jaeger endpoint URL for viewing traces
+    #[serde(default = "default_jaeger_endpoint")]
+    pub jaeger_endpoint: String,
+}
+
+fn default_jaeger_endpoint() -> String {
+    "http://localhost:16686".to_string()
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            last_project_a_tag: None,
+            selected_projects: Vec::new(),
+            time_filter: None,
+            show_llm_metadata: false,
+            archived_thread_ids: HashSet::new(),
+            archived_project_ids: HashSet::new(),
+            threads_default_collapsed: false,
+            approved_backend_pubkeys: HashSet::new(),
+            blocked_backend_pubkeys: HashSet::new(),
+            stored_credentials: None,
+            hide_scheduled: false,
+            workspaces: Vec::new(),
+            active_workspace_id: None,
+            jaeger_endpoint: default_jaeger_endpoint(),
+        }
+    }
 }
 
 pub struct PreferencesStorage {
@@ -378,5 +406,27 @@ impl PreferencesStorage {
 
     pub fn active_workspace_id(&self) -> Option<&str> {
         self.prefs.active_workspace_id.as_deref()
+    }
+
+    // ===== Jaeger/OTL Endpoint Methods =====
+
+    pub fn jaeger_endpoint(&self) -> &str {
+        &self.prefs.jaeger_endpoint
+    }
+
+    /// Sets the Jaeger endpoint and persists to disk.
+    /// Returns an error if serialization or file writing fails.
+    pub fn set_jaeger_endpoint(&mut self, endpoint: String) -> Result<(), String> {
+        self.prefs.jaeger_endpoint = endpoint;
+        self.save_to_file_with_result()
+    }
+
+    /// Saves preferences to disk, returning an error if it fails.
+    fn save_to_file_with_result(&self) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.prefs)
+            .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
+        fs::write(&self.path, json)
+            .map_err(|e| format!("Failed to write preferences file: {}", e))?;
+        Ok(())
     }
 }
