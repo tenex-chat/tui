@@ -37,13 +37,6 @@ impl AnimationClock {
             "○"
         }
     }
-
-    /// Get the wave offset for character-by-character color animation
-    /// Returns a value that changes over time, suitable for creating a wave effect
-    pub fn wave_offset(&self) -> usize {
-        // Divide by 2 for a faster animation (every 2 frames = ~200ms at 10fps)
-        (self.frame_counter / 2) as usize
-    }
 }
 
 impl Default for AnimationClock {
@@ -101,24 +94,5 @@ mod tests {
         assert_eq!(clock.activity_indicator(), "○"); // Still off at frame 3
         clock.tick();
         assert_eq!(clock.activity_indicator(), "◉"); // Back on at frame 4
-    }
-
-    #[test]
-    fn test_wave_offset() {
-        let mut clock = AnimationClock::new();
-        let offset1 = clock.wave_offset();
-        assert_eq!(offset1, 0); // Frame 0
-        clock.tick(); // Frame 1
-        assert_eq!(clock.wave_offset(), 0); // Still 0 (divided by 2)
-        clock.tick(); // Frame 2
-        assert_eq!(clock.wave_offset(), 1); // Now 1
-        clock.tick(); // Frame 3
-        assert_eq!(clock.wave_offset(), 1); // Still 1
-        clock.tick(); // Frame 4
-        assert_eq!(clock.wave_offset(), 2); // Now 2
-        clock.tick(); // Frame 5
-        assert_eq!(clock.wave_offset(), 2); // Still 2
-        clock.tick(); // Frame 6
-        assert_eq!(clock.wave_offset(), 3); // Now 3
     }
 }

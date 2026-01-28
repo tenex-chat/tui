@@ -167,8 +167,8 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Status bar at the very bottom (always visible)
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
-    render_statusbar(f, chunks[idx], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset());
+    let (cumulative_runtime_ms, has_active_agents) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    render_statusbar(f, chunks[idx], app.current_notification(), cumulative_runtime_ms, has_active_agents);
 
     // Render agent selector popup if showing
     if matches!(app.modal_state, ModalState::AgentSelector { .. }) {

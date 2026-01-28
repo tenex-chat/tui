@@ -50,9 +50,9 @@ pub struct RuntimeHierarchy {
     /// Avoids O(n) calculation on every render.
     cached_total_unique_runtime: u64,
 
-    /// Cached sum of today's runtimes (flat aggregation) in **seconds**.
+    /// Cached sum of today's runtimes (flat aggregation).
     /// Calculated on demand and cached for the current day.
-    /// Stores (day_start_timestamp, cached_runtime_secs) to detect day changes.
+    /// Stores (day_start_timestamp, cached_runtime) to detect day changes.
     cached_today_runtime: Option<(u64, u64)>,
 }
 
@@ -243,10 +243,8 @@ impl RuntimeHierarchy {
     /// Calculate total runtime for a conversation including all descendants (recursive)
     /// This implements the hierarchical rollup:
     /// - conv1 = conv1_runtime + conv2_total + conv3_total + ...
-    /// Returns the total runtime (individual + descendants) in seconds
     pub fn get_total_runtime(&self, conversation_id: &str) -> u64 {
-        let total_ms = self.get_total_runtime_with_visited(conversation_id, &mut HashSet::new());
-        total_ms / 1000  // Convert milliseconds to seconds
+        self.get_total_runtime_with_visited(conversation_id, &mut HashSet::new())
     }
 
     /// Internal recursive implementation with cycle detection
@@ -350,15 +348,13 @@ impl RuntimeHierarchy {
     /// under their parents, this simply sums each conversation's runtime exactly once.
     /// Used for the global status bar runtime display.
     ///
-    /// **Returns:** Runtime in **seconds** (converts from internal milliseconds storage).
-    ///
     /// **Note:** Excludes runtime data from before RUNTIME_CUTOFF_TIMESTAMP
     /// (January 24, 2025) due to tracking methodology changes.
     ///
     /// This is O(n) as it filters by creation date. For unfiltered totals,
     /// the cached_total_unique_runtime is still maintained for internal use.
     pub fn get_total_unique_runtime(&self) -> u64 {
-        let total_ms: u64 = self.individual_runtimes
+        self.individual_runtimes
             .iter()
             .filter(|(conv_id, _)| {
                 self.conversation_created_at
@@ -367,17 +363,12 @@ impl RuntimeHierarchy {
                     .unwrap_or(false)
             })
             .map(|(_, runtime)| runtime)
-            .sum();
-
-        // Convert milliseconds to seconds for return
-        total_ms / 1000
+            .sum()
     }
 
     /// Get the sum of individual runtimes for conversations created TODAY only (UTC).
     /// Filters conversations by creation date (today's UTC day boundaries), then sums their runtimes.
     /// Used for the global status bar to show today's cumulative runtime.
-    ///
-    /// **Returns:** Runtime in **seconds** (converts from internal milliseconds storage).
     ///
     /// Uses caching: O(n) on first call or after cache invalidation, O(1) on subsequent calls
     /// within the same day.
@@ -396,14 +387,14 @@ impl RuntimeHierarchy {
         let current_day_start = (now / seconds_per_day) * seconds_per_day;
 
         // Check if cache is valid (same day)
-        if let Some((cached_day_start, cached_runtime_secs)) = self.cached_today_runtime {
+        if let Some((cached_day_start, cached_runtime)) = self.cached_today_runtime {
             if cached_day_start == current_day_start {
-                return cached_runtime_secs;
+                return cached_runtime;
             }
         }
 
         // Cache miss or day changed - recalculate
-        let today_runtime_ms: u64 = self
+        let today_runtime: u64 = self
             .individual_runtimes
             .iter()
             .filter(|(conv_id, _)| {
@@ -423,13 +414,10 @@ impl RuntimeHierarchy {
             .map(|(_, runtime)| runtime)
             .sum();
 
-        // Convert milliseconds to seconds for return
-        let today_runtime_secs = today_runtime_ms / 1000;
+        // Update cache
+        self.cached_today_runtime = Some((current_day_start, today_runtime));
 
-        // Update cache with seconds value
-        self.cached_today_runtime = Some((current_day_start, today_runtime_secs));
-
-        today_runtime_secs
+        today_runtime
     }
 
     /// Get runtime aggregated by calendar day (UTC).
@@ -528,10 +516,8 @@ impl RuntimeHierarchy {
     /// Calculate total runtime for a conversation including all descendants,
     /// but ONLY counting runtime from conversations created after RUNTIME_CUTOFF_TIMESTAMP.
     /// This is used for stats display to exclude pre-cutoff data.
-    /// Returns filtered total runtime in seconds (excludes pre-cutoff conversations)
     fn get_total_runtime_filtered(&self, conversation_id: &str) -> u64 {
-        let total_ms = self.get_total_runtime_filtered_with_visited(conversation_id, &mut HashSet::new());
-        total_ms / 1000  // Convert milliseconds to seconds
+        self.get_total_runtime_filtered_with_visited(conversation_id, &mut HashSet::new())
     }
 
     /// Internal recursive implementation with cycle detection and timestamp filtering
@@ -605,12 +591,12 @@ mod tests {
         hierarchy.add_child("conv1", "conv2");
         hierarchy.add_child("conv2", "conv3");
 
-        // conv3: 5min = 300 seconds
-        assert_eq!(hierarchy.get_total_runtime("conv3"), 300);
-        // conv2: 30s + 5min = 5min30s = 330 seconds
-        assert_eq!(hierarchy.get_total_runtime("conv2"), 330);
-        // conv1: 10s + 30s + 5min = 5min40s = 340 seconds
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 340);
+        // conv3: 5min
+        assert_eq!(hierarchy.get_total_runtime("conv3"), 300_000);
+        // conv2: 30s + 5min = 5min30s
+        assert_eq!(hierarchy.get_total_runtime("conv2"), 330_000);
+        // conv1: 10s + 30s + 5min = 5min40s
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 340_000);
     }
 
     #[test]
@@ -625,7 +611,7 @@ mod tests {
         hierarchy.add_child("conv1", "conv3");
 
         // conv1: 10s + 20s + 30s = 60s
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 60); // 60 seconds
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 60_000);
     }
 
     #[test]
@@ -640,7 +626,7 @@ mod tests {
 
         // Should not infinite loop, should only count each once
         let total = hierarchy.get_total_runtime("conv1");
-        assert_eq!(total, 30); // 10s + 20s = 30 seconds, no infinite loop
+        assert_eq!(total, 30_000); // 10s + 20s, no infinite loop
     }
 
     #[test]
@@ -652,7 +638,7 @@ mod tests {
         hierarchy.add_child("conv1", "conv1");
 
         assert!(!hierarchy.has_children("conv1"));
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 10); // 10 seconds
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 10_000);
     }
 
     #[test]
@@ -699,8 +685,8 @@ mod tests {
         hierarchy.set_parent("child", "parent1");
 
         // Verify initial state
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 40); // 10s + 30s
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 20); // just itself
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 40_000); // 10k + 30k
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 20_000); // just itself
         assert!(hierarchy.has_children("parent1"));
         assert!(!hierarchy.has_children("parent2"));
 
@@ -711,11 +697,11 @@ mod tests {
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent2".to_string()));
 
         // Old parent should no longer include child's runtime
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 10); // just itself now
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 10_000); // just itself now
         assert!(!hierarchy.has_children("parent1")); // no more children
 
         // New parent should include child's runtime
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // 20s + 30s
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // 20k + 30k
         assert!(hierarchy.has_children("parent2"));
     }
 
@@ -736,8 +722,8 @@ mod tests {
         hierarchy.set_parent("child2", "parent1");
 
         // Verify initial state
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 80); // 10s + 30s + 40s
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 20); // just itself
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 80_000); // 10k + 30k + 40k
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 20_000); // just itself
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 2);
         assert!(hierarchy.get_children("parent1").unwrap().contains("child1"));
         assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
@@ -746,14 +732,14 @@ mod tests {
         hierarchy.set_parent("child1", "parent2");
 
         // Verify: parent1 retains child2
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 50); // 10s + 40s (child2 only)
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 50_000); // 10k + 40k (child2 only)
         assert!(hierarchy.has_children("parent1")); // still has children
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 1);
         assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
         assert!(!hierarchy.get_children("parent1").unwrap().contains("child1")); // child1 gone
 
         // Verify: parent2 gained child1
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // 20s + 30s
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // 20k + 30k
         assert!(hierarchy.has_children("parent2"));
         assert_eq!(hierarchy.get_children("parent2").unwrap().len(), 1);
         assert!(hierarchy.get_children("parent2").unwrap().contains("child1"));
@@ -778,21 +764,21 @@ mod tests {
         hierarchy.set_parent("parent", "grandparent");
         hierarchy.set_parent("child", "parent");
 
-        // grandparent total = 10s + (20s + 30s) = 60s
-        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60);
-        // parent total = 20s + 30s = 50s
-        assert_eq!(hierarchy.get_total_runtime("parent"), 50);
+        // grandparent total = 10k + (20k + 30k) = 60k
+        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60_000);
+        // parent total = 20k + 30k = 50k
+        assert_eq!(hierarchy.get_total_runtime("parent"), 50_000);
 
         // Re-parent child directly to grandparent
         hierarchy.set_parent("child", "grandparent");
 
         // Now: grandparent -> parent, grandparent -> child (siblings)
-        // parent total = 20s (no children)
-        assert_eq!(hierarchy.get_total_runtime("parent"), 20);
+        // parent total = 20k (no children)
+        assert_eq!(hierarchy.get_total_runtime("parent"), 20_000);
         assert!(!hierarchy.has_children("parent"));
 
-        // grandparent total = 10s + 20s + 30s = 60s (same total, different structure)
-        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60);
+        // grandparent total = 10k + 20k + 30k = 60k (same total, different structure)
+        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60_000);
         assert!(hierarchy.has_children("grandparent"));
         assert_eq!(hierarchy.get_children("grandparent").unwrap().len(), 2);
     }
@@ -812,7 +798,7 @@ mod tests {
 
         // Should still work correctly
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent"), 30); // 30 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent"), 30_000);
         assert!(hierarchy.has_children("parent"));
         // Children set should have exactly 1 child (no duplicates)
         assert_eq!(hierarchy.get_children("parent").unwrap().len(), 1);
@@ -832,14 +818,14 @@ mod tests {
         hierarchy.add_child("parent1", "child");
 
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent1".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 40); // 40 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 40_000);
 
         // Use add_child again to re-parent (should work because it uses set_parent)
         hierarchy.add_child("parent2", "child");
 
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent2".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 10); // old parent lost child (10 seconds)
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // new parent gained child (50 seconds)
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 10_000); // old parent lost child
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // new parent gained child
     }
 
     #[test]
@@ -861,9 +847,9 @@ mod tests {
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent_b".to_string()));
 
         // parent_a should no longer include child
-        assert_eq!(hierarchy.get_total_runtime("parent_a"), 10); // 10 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent_a"), 10_000);
         // parent_b should now include child
-        assert_eq!(hierarchy.get_total_runtime("parent_b"), 50); // 50 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent_b"), 50_000);
     }
 
     #[test]
@@ -878,13 +864,13 @@ mod tests {
 
         // Add children incrementally
         hierarchy.set_parent("child1", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 30); // 30 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent"), 30_000);
 
         hierarchy.set_parent("child2", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 60); // 60 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent"), 60_000);
 
         hierarchy.set_parent("child3", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
 
         // Verify all children are tracked
         let children = hierarchy.get_children("parent").unwrap();
@@ -932,22 +918,22 @@ mod tests {
         hierarchy.set_parent("child2", "parent");
         hierarchy.set_parent("grandchild", "child1");
 
-        // Hierarchical runtime for parent = 10k + 20k + 30k + 40k = 100k ms (correct for that conversation)
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
+        // Hierarchical runtime for parent = 10k + 20k + 30k + 40k = 100k (correct for that conversation)
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
 
-        // But total unique runtime = sum of all individual runtimes = 100k ms = 100 secs
+        // But total unique runtime = sum of all individual runtimes = 100k
         // (same value, but conceptually each conversation counted once)
-        assert_eq!(hierarchy.get_total_unique_runtime(), 100);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 100_000);
 
         // Now add an unrelated conversation
         hierarchy.set_individual_runtime("unrelated", 50_000);
         hierarchy.set_conversation_created_at("unrelated", valid_timestamp);
 
         // Parent's hierarchical runtime unchanged
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
 
-        // But total unique runtime now includes unrelated = 150k ms = 150 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 150);
+        // But total unique runtime now includes unrelated = 150k
+        assert_eq!(hierarchy.get_total_unique_runtime(), 150_000);
     }
 
     // ===== Cache Correctness Tests =====
@@ -966,22 +952,22 @@ mod tests {
         hierarchy.set_individual_runtime("conv2", 20_000);
         hierarchy.set_conversation_created_at("conv2", valid_timestamp);
 
-        // Verify initial total (30k ms = 30 secs)
-        assert_eq!(hierarchy.get_total_unique_runtime(), 30);
+        // Verify initial total
+        assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
 
         // Update conv1's runtime (simulating more messages with llm-runtime)
         hierarchy.set_individual_runtime("conv1", 15_000);
 
-        // Cache should be updated: 15k + 20k = 35k ms = 35 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 35);
+        // Cache should be updated: 15k + 20k = 35k
+        assert_eq!(hierarchy.get_total_unique_runtime(), 35_000);
 
         // Update again with larger value
         hierarchy.set_individual_runtime("conv1", 50_000);
-        assert_eq!(hierarchy.get_total_unique_runtime(), 70);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 70_000);
 
         // Update conv2 as well
         hierarchy.set_individual_runtime("conv2", 30_000);
-        assert_eq!(hierarchy.get_total_unique_runtime(), 80);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 80_000);
     }
 
     #[test]
@@ -996,11 +982,11 @@ mod tests {
         hierarchy.set_conversation_created_at("conv1", valid_timestamp);
         hierarchy.set_individual_runtime("conv2", 20_000);
         hierarchy.set_conversation_created_at("conv2", valid_timestamp);
-        assert_eq!(hierarchy.get_total_unique_runtime(), 30);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
 
         // Set conv1 to 0
         hierarchy.set_individual_runtime("conv1", 0);
-        assert_eq!(hierarchy.get_total_unique_runtime(), 20);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 20_000);
 
         // Set conv2 to 0 as well
         hierarchy.set_individual_runtime("conv2", 0);
@@ -1022,8 +1008,8 @@ mod tests {
         hierarchy.set_conversation_created_at("conv2", valid_timestamp);
         hierarchy.set_parent("conv2", "conv1");
 
-        // Verify data exists (30k ms = 30 secs)
-        assert_eq!(hierarchy.get_total_unique_runtime(), 30);
+        // Verify data exists
+        assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
         assert_eq!(hierarchy.conversation_count(), 2);
         assert_eq!(hierarchy.relationship_count(), 1);
         assert!(hierarchy.get_conversation_created_at("conv1").is_some());
@@ -1053,22 +1039,21 @@ mod tests {
             hierarchy.set_individual_runtime(&format!("conv{}", i), 1000);
             hierarchy.set_conversation_created_at(&format!("conv{}", i), valid_timestamp);
         }
-        // 100 * 1000 ms = 100k ms = 100 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 100);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 100_000);
 
         // Update half of them
         for i in 0..50 {
             hierarchy.set_individual_runtime(&format!("conv{}", i), 2000);
         }
-        // 50 * 2000 + 50 * 1000 = 150_000 ms = 150 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 150);
+        // 50 * 2000 + 50 * 1000 = 150_000
+        assert_eq!(hierarchy.get_total_unique_runtime(), 150_000);
 
         // Set some to zero
         for i in 0..25 {
             hierarchy.set_individual_runtime(&format!("conv{}", i), 0);
         }
-        // 25 * 0 + 25 * 2000 + 50 * 1000 = 100_000 ms = 100 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 100);
+        // 25 * 0 + 25 * 2000 + 50 * 1000 = 100_000
+        assert_eq!(hierarchy.get_total_unique_runtime(), 100_000);
     }
 
     // ===== Today-Only Filtering Tests =====
@@ -1100,11 +1085,11 @@ mod tests {
         hierarchy.set_individual_runtime("old_conv", 100_000);
         hierarchy.set_conversation_created_at("old_conv", yesterday - seconds_per_day * 30);
 
-        // Total unique runtime should include all (180k ms = 180 secs)
-        assert_eq!(hierarchy.get_total_unique_runtime(), 180);
+        // Total unique runtime should include all
+        assert_eq!(hierarchy.get_total_unique_runtime(), 180_000);
 
-        // Today's unique runtime should only include today's conversations (30k ms = 30 secs)
-        assert_eq!(hierarchy.get_today_unique_runtime(), 30);
+        // Today's unique runtime should only include today's conversations
+        assert_eq!(hierarchy.get_today_unique_runtime(), 30_000);
     }
 
     #[test]
@@ -1126,11 +1111,10 @@ mod tests {
 
         // Total only includes conversations with valid creation dates (after cutoff)
         // Conversations without creation dates are excluded (no way to verify they're after cutoff)
-        // 10k ms = 10 secs
-        assert_eq!(hierarchy.get_total_unique_runtime(), 10);
+        assert_eq!(hierarchy.get_total_unique_runtime(), 10_000);
 
-        // Today only includes the one with a date (10k ms = 10 secs)
-        assert_eq!(hierarchy.get_today_unique_runtime(), 10);
+        // Today only includes the one with a date
+        assert_eq!(hierarchy.get_today_unique_runtime(), 10_000);
     }
 
     #[test]
@@ -1142,21 +1126,21 @@ mod tests {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        // Initial conversation (10k ms = 10 secs)
+        // Initial conversation
         hierarchy.set_individual_runtime("conv1", 10_000);
         hierarchy.set_conversation_created_at("conv1", now);
 
-        assert_eq!(hierarchy.get_today_unique_runtime(), 10);
+        assert_eq!(hierarchy.get_today_unique_runtime(), 10_000);
 
-        // Add another conversation - cache should be invalidated (30k ms = 30 secs)
+        // Add another conversation - cache should be invalidated
         hierarchy.set_individual_runtime("conv2", 20_000);
         hierarchy.set_conversation_created_at("conv2", now);
 
-        assert_eq!(hierarchy.get_today_unique_runtime(), 30);
+        assert_eq!(hierarchy.get_today_unique_runtime(), 30_000);
 
-        // Update existing runtime - cache should be invalidated (35k ms = 35 secs)
+        // Update existing runtime - cache should be invalidated
         hierarchy.set_individual_runtime("conv1", 15_000);
-        assert_eq!(hierarchy.get_today_unique_runtime(), 35);
+        assert_eq!(hierarchy.get_today_unique_runtime(), 35_000);
     }
 
     #[test]
@@ -1178,8 +1162,8 @@ mod tests {
         hierarchy.set_individual_runtime("old2", 20_000);
         hierarchy.set_conversation_created_at("old2", yesterday - seconds_per_day);
 
-        // Total includes old conversations (30k ms = 30 secs)
-        assert_eq!(hierarchy.get_total_unique_runtime(), 30);
+        // Total includes old conversations
+        assert_eq!(hierarchy.get_total_unique_runtime(), 30_000);
 
         // Today should be zero
         assert_eq!(hierarchy.get_today_unique_runtime(), 0);
@@ -1203,10 +1187,10 @@ mod tests {
 
         assert_eq!(hierarchy.get_today_unique_runtime(), 0);
 
-        // "Correct" the creation date to today - cache should invalidate (10k ms = 10 secs)
+        // "Correct" the creation date to today - cache should invalidate
         hierarchy.set_conversation_created_at("conv1", now);
 
-        assert_eq!(hierarchy.get_today_unique_runtime(), 10);
+        assert_eq!(hierarchy.get_today_unique_runtime(), 10_000);
     }
 
     // ===== Effective Last Activity Tests =====
