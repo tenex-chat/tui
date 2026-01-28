@@ -1891,6 +1891,14 @@ impl AppDataStore {
         operations
     }
 
+    /// Count active operations without allocation or sorting
+    pub fn active_operations_count(&self) -> usize {
+        self.operations_by_event
+            .values()
+            .filter(|s| !s.agent_pubkeys.is_empty())
+            .count()
+    }
+
     /// Get thread info for an event ID (could be thread root or message within thread).
     /// Returns (thread_id, thread_title) if found.
     pub fn get_thread_info_for_event(&self, event_id: &str) -> Option<(String, String)> {
