@@ -13,8 +13,9 @@ use ratatui::{
 pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &CreateProjectState) {
     // Header with step indicator
     let step_indicator = match state.step {
-        CreateProjectStep::Details => "Step 1/2: Details",
-        CreateProjectStep::SelectAgents => "Step 2/2: Select Agents",
+        CreateProjectStep::Details => "Step 1/3: Details",
+        CreateProjectStep::SelectAgents => "Step 2/3: Select Agents",
+        CreateProjectStep::SelectTools => "Step 3/3: Select MCP Tools",
     };
 
     let (popup_area, content_area) = Modal::new(step_indicator)
@@ -39,6 +40,9 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
         CreateProjectStep::SelectAgents => {
             render_agents_step(f, app, inner_area, state);
         }
+        CreateProjectStep::SelectTools => {
+            render_tools_step(f, app, inner_area, state);
+        }
     }
 
     // Hints at bottom
@@ -61,6 +65,19 @@ pub fn render_create_project(f: &mut Frame, app: &App, area: Rect, state: &Creat
             Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
         ],
         CreateProjectStep::SelectAgents => vec![
+            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS)),
+            Span::styled(" next", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Backspace", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
+        ],
+        CreateProjectStep::SelectTools => vec![
             Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
@@ -269,6 +286,116 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
         1,
     );
     let count_text = format!("{} agent(s) selected", state.agent_ids.len());
+    let count = Paragraph::new(count_text).style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(count, count_area);
+}
+
+fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjectState) {
+    // Search bar
+    let remaining = render_modal_search(f, area, &state.tool_selector.filter, "Search MCP tools...");
+
+    // Get filtered tools
+    let filtered_tools = app.mcp_tools_filtered_by(&state.tool_selector.filter);
+
+    // List area
+    let list_area = Rect::new(
+        remaining.x,
+        remaining.y + 1,
+        remaining.width,
+        remaining.height.saturating_sub(3),
+    );
+
+    if filtered_tools.is_empty() {
+        let msg = if state.tool_selector.filter.is_empty() {
+            "No MCP tools available."
+        } else {
+            "No tools match your search."
+        };
+        let empty_msg = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty_msg, list_area);
+    } else {
+        let visible_height = list_area.height as usize;
+        let selected_index = state.tool_selector.index.min(filtered_tools.len().saturating_sub(1));
+
+        let scroll_offset = if selected_index >= visible_height {
+            selected_index - visible_height + 1
+        } else {
+            0
+        };
+
+        let items: Vec<ListItem> = filtered_tools
+            .iter()
+            .enumerate()
+            .skip(scroll_offset)
+            .take(visible_height)
+            .map(|(i, tool)| {
+                let is_cursor = i == selected_index;
+                let is_selected = state.mcp_tool_ids.contains(&tool.id);
+
+                let mut spans = vec![];
+
+                // Checkbox
+                let checkbox = if is_selected { "[✓] " } else { "[ ] " };
+                let checkbox_style = if is_selected {
+                    Style::default().fg(theme::ACCENT_SUCCESS)
+                } else {
+                    Style::default().fg(theme::TEXT_MUTED)
+                };
+                spans.push(Span::styled(checkbox, checkbox_style));
+
+                // Cursor indicator
+                if is_cursor {
+                    spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)));
+                } else {
+                    spans.push(Span::styled(" ", Style::default()));
+                }
+
+                // Tool name
+                let name_style = if is_cursor {
+                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                } else if is_selected {
+                    Style::default().fg(theme::ACCENT_SUCCESS)
+                } else {
+                    Style::default().fg(theme::TEXT_PRIMARY)
+                };
+                spans.push(Span::styled(tool.name.clone(), name_style));
+
+                // Description preview
+                if !tool.description.is_empty() {
+                    let desc_preview = if tool.description.len() > 40 {
+                        format!(" - {}...", &tool.description[..37])
+                    } else {
+                        format!(" - {}", tool.description)
+                    };
+                    spans.push(Span::styled(desc_preview, Style::default().fg(theme::TEXT_MUTED)));
+                }
+
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        let list = List::new(items);
+        f.render_widget(list, list_area);
+    }
+
+    // Show selected count
+    let count_area = Rect::new(
+        remaining.x,
+        list_area.y + list_area.height,
+        remaining.width,
+        1,
+    );
+
+    // Calculate total (manual + auto from agents)
+    let total_tool_count = state.all_mcp_tool_ids(app).len();
+    let manual_count = state.mcp_tool_ids.len();
+
+    let count_text = if total_tool_count > manual_count {
+        format!("{} tool(s) selected ({} from agents)", total_tool_count, total_tool_count - manual_count)
+    } else {
+        format!("{} tool(s) selected", total_tool_count)
+    };
+
     let count = Paragraph::new(count_text).style(Style::default().fg(theme::TEXT_DIM));
     f.render_widget(count, count_area);
 }
