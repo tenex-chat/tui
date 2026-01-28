@@ -1022,8 +1022,8 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
     // Handle sidebar-focused state first
     if app.is_sidebar_focused() {
         match code {
-            // Escape or 'h' unfocuses sidebar
-            KeyCode::Esc | KeyCode::Char('h') => {
+            // Escape, 'h', or Left arrow unfocuses sidebar
+            KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left => {
                 app.set_sidebar_focused(false);
                 return Ok(true);
             }
