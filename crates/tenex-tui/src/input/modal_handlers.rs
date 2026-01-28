@@ -2813,7 +2813,9 @@ fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Backspace => {
                     // Clear active workspace (show all projects)
                     app.apply_workspace(None, &[]);
-                    app.set_warning_status("Cleared workspace - showing manual project selection");
+                    app.set_warning_status("Showing all projects");
+                    app.modal_state = ModalState::None;
+                    return;
                 }
                 _ => {}
             }

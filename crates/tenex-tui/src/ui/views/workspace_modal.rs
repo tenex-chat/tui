@@ -168,8 +168,8 @@ fn render_list_mode(
         Span::styled(" delete • ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("p", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(" pin • ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("Backspace", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(" clear", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Bksp", Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(" all projects", Style::default().fg(theme::TEXT_MUTED)),
     ]);
     f.render_widget(Paragraph::new(help_text), help_area);
 }

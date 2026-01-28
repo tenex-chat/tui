@@ -2734,8 +2734,8 @@ impl App {
     }
 
     /// Apply a workspace - sets visible_projects based on workspace's project list
-    /// Pass None to clear the active workspace (returns to manual project selection mode)
-    /// Closes tabs that don't belong to the new workspace's projects
+    /// Pass None to clear the active workspace and show ALL projects
+    /// Closes tabs that don't belong to the new workspace's projects (when switching to a workspace)
     pub fn apply_workspace(&mut self, workspace_id: Option<&str>, project_ids: &[String]) {
         self.preferences.borrow_mut().set_active_workspace(workspace_id);
 
@@ -2764,8 +2764,17 @@ impl App {
                     self.conversation.clear_selection();
                 }
             }
+        } else {
+            // No workspace - show ALL projects
+            let all_projects: HashSet<String> = self.data_store.borrow()
+                .get_projects()
+                .iter()
+                .map(|p| p.a_tag())
+                .collect();
+            self.visible_projects = all_projects;
+            self.save_selected_projects();
+            // Tabs are preserved when clearing workspace
         }
-        // If None, visible_projects stays as-is (manual selection mode), tabs preserved
     }
 
     /// Toggle a project's visibility (manual selection mode)
