@@ -73,7 +73,7 @@ impl ProjectDraftStorage {
 }
 
 /// App preferences (persisted to JSON file)
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preferences {
     pub last_project_a_tag: Option<String>,
     #[serde(default)]
@@ -107,6 +107,13 @@ pub struct Preferences {
     /// Currently active workspace ID (None = manual project selection mode)
     #[serde(default)]
     pub active_workspace_id: Option<String>,
+    /// OpenTelemetry/Jaeger endpoint URL for viewing traces
+    #[serde(default = "default_jaeger_endpoint")]
+    pub jaeger_endpoint: String,
+}
+
+fn default_jaeger_endpoint() -> String {
+    "http://localhost:16686".to_string()
 }
 
 pub struct PreferencesStorage {
@@ -311,6 +318,7 @@ impl PreferencesStorage {
         self.prefs.hide_scheduled
     }
 
+<<<<<<< HEAD
     // ===== Workspace Methods =====
 
     pub fn workspaces(&self) -> &[Workspace] {
@@ -378,5 +386,16 @@ impl PreferencesStorage {
 
     pub fn active_workspace_id(&self) -> Option<&str> {
         self.prefs.active_workspace_id.as_deref()
+    }
+
+    // ===== Jaeger/OTL Endpoint Methods =====
+
+    pub fn jaeger_endpoint(&self) -> &str {
+        &self.prefs.jaeger_endpoint
+    }
+
+    pub fn set_jaeger_endpoint(&mut self, endpoint: String) {
+        self.prefs.jaeger_endpoint = endpoint;
+        self.save_to_file();
     }
 }
