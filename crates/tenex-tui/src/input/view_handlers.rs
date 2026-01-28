@@ -936,6 +936,52 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                     }
                 }
                 KeyCode::Enter => {
+                    // Move to tool selection step
+                    state.step = CreateProjectStep::SelectTools;
+                    state.tool_selector.filter.clear();
+                    state.tool_selector.index = 0;
+                }
+                KeyCode::Char(c) => {
+                    state.agent_selector.filter.push(c);
+                    state.agent_selector.index = 0;
+                }
+                _ => {}
+            }
+        }
+        CreateProjectStep::SelectTools => {
+            let filtered_tools = app.mcp_tools_filtered_by(&state.tool_selector.filter);
+            let item_count = filtered_tools.len();
+
+            match code {
+                KeyCode::Esc => {
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Backspace if state.tool_selector.filter.is_empty() => {
+                    state.step = CreateProjectStep::SelectAgents;
+                }
+                KeyCode::Backspace => {
+                    state.tool_selector.filter.pop();
+                    state.tool_selector.index = 0;
+                }
+                KeyCode::Up => {
+                    if state.tool_selector.index > 0 {
+                        state.tool_selector.index -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if item_count > 0 && state.tool_selector.index + 1 < item_count {
+                        state.tool_selector.index += 1;
+                    }
+                }
+                KeyCode::Char(' ') => {
+                    if let Some(tool) = filtered_tools.get(state.tool_selector.index) {
+                        state.toggle_mcp_tool(tool.id.clone());
+                    }
+                }
+                KeyCode::Enter => {
+                    // Create the project - for now just use existing command without mcp_tool_ids
+                    // This will be updated in Task 9
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::CreateProject {
                             name: state.name.clone(),
@@ -951,8 +997,8 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                     return;
                 }
                 KeyCode::Char(c) => {
-                    state.agent_selector.filter.push(c);
-                    state.agent_selector.index = 0;
+                    state.tool_selector.filter.push(c);
+                    state.tool_selector.index = 0;
                 }
                 _ => {}
             }
