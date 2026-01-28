@@ -855,7 +855,7 @@ fn handle_request(
                         "agents": agents,
                         "branches": status.branches,
                         "all_models": status.all_models,
-                        "all_tools": status.all_tools,
+                        "all_tools": status.all_tools(),
                         "backend_pubkey": status.backend_pubkey,
                         "created_at": status.created_at,
                     })

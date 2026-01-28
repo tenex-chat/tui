@@ -312,8 +312,8 @@ impl ToolRegistry {
         let mut all_tools: HashSet<String> = HashSet::new();
 
         for status in statuses.values() {
-            for tool in &status.all_tools {
-                all_tools.insert(tool.clone());
+            for tool in status.all_tools() {
+                all_tools.insert(tool.to_string());
             }
         }
 
@@ -359,8 +359,8 @@ pub fn get_available_tools_from_statuses(
 ) -> Vec<String> {
     let mut all_tools: HashSet<String> = HashSet::new();
     for status in statuses.values() {
-        for tool in &status.all_tools {
-            all_tools.insert(tool.clone());
+        for tool in status.all_tools() {
+            all_tools.insert(tool.to_string());
         }
     }
     let mut tools: Vec<String> = all_tools.into_iter().collect();
