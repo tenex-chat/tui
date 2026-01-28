@@ -980,13 +980,15 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                     }
                 }
                 KeyCode::Enter => {
-                    // Create the project - for now just use existing command without mcp_tool_ids
-                    // This will be updated in Task 9
+                    // Create the project with all tool IDs (manual + from agents)
                     if let Some(ref core_handle) = app.core_handle {
+                        let all_tool_ids = state.all_mcp_tool_ids(app);
+
                         if let Err(e) = core_handle.send(NostrCommand::CreateProject {
                             name: state.name.clone(),
                             description: state.description.clone(),
                             agent_ids: state.agent_ids.clone(),
+                            mcp_tool_ids: all_tool_ids,
                         }) {
                             app.set_warning_status(&format!("Failed to create project: {}", e));
                         } else {
