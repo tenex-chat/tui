@@ -38,3 +38,4 @@ uuid = { version = "1", features = ["v4"] }
 parking_lot = "0.12"
 uniffi = "0.29"
 chrono = "0.4"
+tracing = "0.1"
