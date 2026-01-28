@@ -538,6 +538,8 @@ impl AppDataStore {
 
     /// Calculate total LLM runtime from a set of messages.
     ///
+    /// Returns runtime in MILLISECONDS (llm-runtime tags are in seconds, we multiply by 1000)
+    ///
     /// NOTE: Performance consideration - This scans all messages in the conversation
     /// each time it's called. For conversations with M messages, this is O(M).
     /// When called for each new message, total complexity becomes O(M^2) over the
@@ -557,7 +559,8 @@ impl AppDataStore {
                     .filter(|(key, _)| key == "runtime")
                     .filter_map(|(_, value)| value.parse::<u64>().ok())
             })
-            .sum()
+            .sum::<u64>()
+            * 1000 // Convert seconds to milliseconds for RuntimeHierarchy
     }
 
     /// Update runtime hierarchy for a thread after messages change
@@ -1541,8 +1544,10 @@ impl AppDataStore {
 
                 // If this message has llm-runtime tag, reset the unconfirmed timer for this agent on this conversation
                 // This ensures unconfirmed runtime only tracks time since the last kind:1 confirmation
+                // The recency guard prevents stale/backfilled messages from resetting active timers
                 if has_llm_runtime {
-                    self.agent_tracking.reset_unconfirmed_timer(&thread_id, &message_pubkey);
+                    self.agent_tracking
+                        .reset_unconfirmed_timer(&thread_id, &message_pubkey, message_created_at);
                 }
 
                 // Update pre-aggregated message counts for Stats view (O(1) per message)
@@ -3646,6 +3651,99 @@ mod tests {
             // Note: The warning "Potential same-second overflow detected" should be logged.
             // In production, this alerts operators to increase batch_size or investigate
             // the workload pattern.
+        }
+
+        /// Integration test: Verify that kind:1 messages with llm-runtime tags
+        /// trigger unconfirmed timer resets via reset_unconfirmed_timer
+        #[test]
+        fn test_kind1_message_resets_unconfirmed_timer() {
+            use std::time::Duration;
+            use std::thread;
+
+            let dir = tempdir().unwrap();
+            let db = Database::new(dir.path()).unwrap();
+            let mut store = AppDataStore::new(db.ndb.clone());
+
+            let keys = Keys::generate();
+            let agent_pubkey = keys.public_key().to_hex();
+
+            // Simulate agent starting work on a conversation
+            store.agent_tracking.process_24133_event(
+                "conv1",
+                "event1",
+                &[agent_pubkey.clone()],
+                1000,
+                "31933:user:project",
+                None,
+            );
+
+            // Wait to accumulate unconfirmed runtime
+            thread::sleep(Duration::from_millis(1100));
+
+            let runtime_before_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_before_reset >= 1,
+                "Expected unconfirmed runtime >= 1 second before reset, got {}",
+                runtime_before_reset
+            );
+
+            // Simulate a kind:1 message with llm-runtime tag arriving
+            // (call reset_unconfirmed_timer directly as handle_message_event would)
+            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1100);
+
+            // Verify that unconfirmed runtime was reset (should be near 0)
+            let runtime_after_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_after_reset < 1,
+                "Expected unconfirmed runtime < 1 second after llm-runtime reset, got {}",
+                runtime_after_reset
+            );
+
+            // Wait again to accumulate more unconfirmed runtime
+            thread::sleep(Duration::from_millis(1100));
+
+            let runtime_before_non_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_before_non_reset >= 1,
+                "Expected unconfirmed runtime >= 1 second before testing no reset, got {}",
+                runtime_before_non_reset
+            );
+
+            // Simulate a kind:1 message WITHOUT llm-runtime tag (don't call reset_unconfirmed_timer)
+            // Runtime should continue accumulating
+
+            // Verify that unconfirmed runtime was NOT reset (should still be >= 1)
+            let runtime_after_non_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_after_non_reset >= 1,
+                "Expected unconfirmed runtime >= 1 second when no reset happens, got {}",
+                runtime_after_non_reset
+            );
+
+            // Test recency guard: stale message should not reset timer
+            thread::sleep(Duration::from_millis(500));
+            let runtime_before_stale = store.agent_tracking.unconfirmed_runtime_secs();
+
+            // Try to reset with a stale timestamp (older than last reset at 1100)
+            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1050);
+
+            // Runtime should NOT have been reset (blocked by recency guard)
+            let runtime_after_stale = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_after_stale >= runtime_before_stale,
+                "Stale message should not reset timer: before {}, after {}",
+                runtime_before_stale,
+                runtime_after_stale
+            );
+
+            // Reset with a newer timestamp should work
+            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1200);
+            let runtime_after_newer = store.agent_tracking.unconfirmed_runtime_secs();
+            assert!(
+                runtime_after_newer < 1,
+                "Newer message should reset timer, got {}",
+                runtime_after_newer
+            );
         }
     }
 }

@@ -108,6 +108,11 @@ pub struct AgentTrackingState {
     /// Set of event IDs that have already contributed llm-runtime.
     /// Prevents double-counting on replays or reprocessing.
     runtime_event_ids: HashSet<String>,
+
+    /// Last reset timestamp (Unix seconds) per agent instance.
+    /// Prevents stale/backfilled messages from resetting active timers.
+    /// Key: (conversation_id, agent_pubkey), Value: created_at of last reset message
+    last_reset_created_at: HashMap<AgentInstanceKey, u64>,
 }
 
 impl AgentTrackingState {
@@ -122,6 +127,7 @@ impl AgentTrackingState {
         self.last_event_key.clear();
         self.confirmed_runtime_secs = 0;
         self.runtime_event_ids.clear();
+        self.last_reset_created_at.clear();
     }
 
     /// Get the number of active agent instances.
@@ -219,6 +225,11 @@ impl AgentTrackingState {
             key.conversation_id != conversation_id || current_agents.contains(key.agent_pubkey.as_str())
         });
 
+        // Also clean up last_reset_created_at for removed agents
+        self.last_reset_created_at.retain(|key, _| {
+            key.conversation_id != conversation_id || current_agents.contains(key.agent_pubkey.as_str())
+        });
+
         // Add new agents using entry().or_insert_with() for idempotency
         for pubkey in agent_pubkeys {
             let key = AgentInstanceKey::new(conversation_id, pubkey);
@@ -263,18 +274,36 @@ impl AgentTrackingState {
     /// ## Parameters:
     /// - `conversation_id`: The conversation (thread_id) the agent is working on
     /// - `agent_pubkey`: The agent's pubkey
+    /// - `message_created_at`: Unix timestamp (seconds) of the message triggering the reset
     ///
     /// ## Behavior:
     /// - If the agent is currently active on this conversation, resets its timer to NOW
+    /// - Only resets if the message is newer than or equal to the last reset message
+    /// - This prevents stale/backfilled messages from wiping legitimate unconfirmed runtime
     /// - If the agent is not active (or never was), this is a no-op
     /// - The agent remains active after reset - only the unconfirmed clock resets
-    pub fn reset_unconfirmed_timer(&mut self, conversation_id: &str, agent_pubkey: &str) {
+    pub fn reset_unconfirmed_timer(
+        &mut self,
+        conversation_id: &str,
+        agent_pubkey: &str,
+        message_created_at: u64,
+    ) {
         let key = AgentInstanceKey::new(conversation_id, agent_pubkey);
 
-        // If this agent is active, reset its timer to NOW
+        // If this agent is active, reset its timer to NOW (with recency guard)
         // (This will continue accumulating from 0, not stop the clock)
-        if self.active_agents.contains_key(&key) {
-            self.active_agents.insert(key, Instant::now());
+        if let Some(start_time) = self.active_agents.get_mut(&key) {
+            // Recency guard: only reset if this message is newer than or equal to last reset
+            let should_reset = self
+                .last_reset_created_at
+                .get(&key)
+                .map(|&last_reset| message_created_at >= last_reset)
+                .unwrap_or(true); // No prior reset, so allow this one
+
+            if should_reset {
+                *start_time = Instant::now();
+                self.last_reset_created_at.insert(key, message_created_at);
+            }
         }
     }
 
@@ -749,7 +778,7 @@ mod tests {
         assert!(runtime_before >= 1, "Expected runtime >= 1, got {}", runtime_before);
 
         // Reset the timer (simulating a kind:1 message with llm-runtime tag)
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Immediately after reset, unconfirmed runtime should be near 0
         let runtime_after = state.unconfirmed_runtime_secs();
@@ -777,7 +806,7 @@ mod tests {
 
         // Wait and reset
         thread::sleep(Duration::from_millis(1100));
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Wait again - timer should continue accumulating from reset point
         thread::sleep(Duration::from_millis(1100));
@@ -806,7 +835,7 @@ mod tests {
         let runtime_before = state.unconfirmed_runtime_secs();
 
         // Try to reset timer for a different conversation (agent not active there)
-        state.reset_unconfirmed_timer("conv2", "agent1");
+        state.reset_unconfirmed_timer("conv2", "agent1", 1001);
 
         // Runtime should be unchanged (noop)
         let runtime_after = state.unconfirmed_runtime_secs();
@@ -832,7 +861,7 @@ mod tests {
         let runtime_before = state.unconfirmed_runtime_secs();
 
         // Try to reset timer for agent2 (not active)
-        state.reset_unconfirmed_timer("conv1", "agent2");
+        state.reset_unconfirmed_timer("conv1", "agent2", 1001);
 
         // Runtime should be unchanged (noop)
         let runtime_after = state.unconfirmed_runtime_secs();
@@ -861,7 +890,7 @@ mod tests {
         assert!(runtime_before >= 2, "Expected runtime >= 2, got {}", runtime_before);
 
         // Reset only agent1's timer
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Runtime should drop to ~1 second (only agent2's contribution)
         let runtime_after = state.unconfirmed_runtime_secs();
@@ -897,7 +926,7 @@ mod tests {
         assert!(total_before >= 101, "Expected total >= 101, got {}", total_before);
 
         // Reset unconfirmed timer
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Total should drop to ~100 (confirmed only)
         let total_after = state.total_runtime_secs();
@@ -929,7 +958,7 @@ mod tests {
 
         // kind:1 message arrives with llm-runtime=5 (confirms 5 seconds)
         state.add_confirmed_runtime("msg1", 5);
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Confirmed = 5, unconfirmed ~0
         assert_eq!(state.confirmed_runtime_secs(), 5);
@@ -940,7 +969,7 @@ mod tests {
 
         // Another kind:1 message with llm-runtime=3 (confirms 3 more seconds)
         state.add_confirmed_runtime("msg2", 3);
-        state.reset_unconfirmed_timer("conv1", "agent1");
+        state.reset_unconfirmed_timer("conv1", "agent1", 1002);
 
         // Confirmed = 8, unconfirmed ~0
         assert_eq!(state.confirmed_runtime_secs(), 8);
@@ -975,5 +1004,51 @@ mod tests {
 
         // Total runtime is just confirmed (unconfirmed is 0 after removal)
         assert_eq!(state.total_runtime_secs(), 8);
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_recency_guard() {
+        let mut state = AgentTrackingState::new();
+
+        // Add agent to conversation at timestamp 1000
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait to accumulate runtime
+        thread::sleep(Duration::from_millis(1100));
+        let runtime_before = state.unconfirmed_runtime_secs();
+        assert!(runtime_before >= 1, "Expected runtime >= 1, got {}", runtime_before);
+
+        // Reset with a current message (timestamp 1100)
+        state.reset_unconfirmed_timer("conv1", "agent1", 1100);
+
+        // Should reset successfully
+        let runtime_after_current = state.unconfirmed_runtime_secs();
+        assert!(runtime_after_current < 1, "Expected runtime < 1 after current reset, got {}", runtime_after_current);
+
+        // Wait again to accumulate more runtime
+        thread::sleep(Duration::from_millis(1100));
+        let runtime_before_stale = state.unconfirmed_runtime_secs();
+        assert!(runtime_before_stale >= 1, "Expected runtime >= 1 before stale reset, got {}", runtime_before_stale);
+
+        // Try to reset with a stale message (timestamp 1050, older than last reset at 1100)
+        state.reset_unconfirmed_timer("conv1", "agent1", 1050);
+
+        // Should NOT reset - runtime should remain unchanged (recency guard blocks it)
+        let runtime_after_stale = state.unconfirmed_runtime_secs();
+        assert!(runtime_after_stale >= 1, "Expected runtime >= 1 after stale reset (should be blocked), got {}", runtime_after_stale);
+
+        // Reset with a newer message (timestamp 1200)
+        state.reset_unconfirmed_timer("conv1", "agent1", 1200);
+
+        // Should reset successfully
+        let runtime_after_newer = state.unconfirmed_runtime_secs();
+        assert!(runtime_after_newer < 1, "Expected runtime < 1 after newer reset, got {}", runtime_after_newer);
     }
 }
