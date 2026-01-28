@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use tenex_core::models::{AgentDefinition, MCPTool};
 use tenex_core::runtime::CoreHandle;
 use tenex_core::tlog;
 
@@ -2831,7 +2832,7 @@ impl App {
     }
 
     /// Get filtered agent definitions for the browser
-    pub fn filtered_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
+    pub fn filtered_agent_definitions(&self) -> Vec<AgentDefinition> {
         let filter = &self.home.agent_browser_filter;
         self.data_store.borrow()
             .get_agent_definitions()
@@ -2846,7 +2847,7 @@ impl App {
     }
 
     /// Get all agent definitions
-    pub fn all_agent_definitions(&self) -> Vec<tenex_core::models::AgentDefinition> {
+    pub fn all_agent_definitions(&self) -> Vec<AgentDefinition> {
         self.data_store.borrow()
             .get_agent_definitions()
             .into_iter()
@@ -2855,7 +2856,7 @@ impl App {
     }
 
     /// Get agent definitions filtered by a custom filter string
-    pub fn agent_definitions_filtered_by(&self, filter: &str) -> Vec<tenex_core::models::AgentDefinition> {
+    pub fn agent_definitions_filtered_by(&self, filter: &str) -> Vec<AgentDefinition> {
         self.data_store.borrow()
             .get_agent_definitions()
             .into_iter()
@@ -2870,7 +2871,7 @@ impl App {
     }
 
     /// Get a specific agent definition by ID
-    pub fn get_agent_definition(&self, id: &str) -> Option<tenex_core::models::AgentDefinition> {
+    pub fn get_agent_definition(&self, id: &str) -> Option<AgentDefinition> {
         self.data_store.borrow()
             .get_agent_definition(id)
             .cloned()
@@ -2879,7 +2880,7 @@ impl App {
     // ===== MCP Tool Methods =====
 
     /// Get all MCP tools, sorted by created_at descending
-    pub fn get_mcp_tools(&self) -> Vec<tenex_core::models::MCPTool> {
+    pub fn get_mcp_tools(&self) -> Vec<MCPTool> {
         self.data_store.borrow()
             .get_mcp_tools()
             .into_iter()
@@ -2888,14 +2889,14 @@ impl App {
     }
 
     /// Get a specific MCP tool by ID
-    pub fn get_mcp_tool(&self, id: &str) -> Option<tenex_core::models::MCPTool> {
+    pub fn get_mcp_tool(&self, id: &str) -> Option<MCPTool> {
         self.data_store.borrow()
             .get_mcp_tool(id)
             .cloned()
     }
 
     /// Get MCP tools filtered by a custom filter string
-    pub fn mcp_tools_filtered_by(&self, filter: &str) -> Vec<tenex_core::models::MCPTool> {
+    pub fn mcp_tools_filtered_by(&self, filter: &str) -> Vec<MCPTool> {
         self.data_store.borrow()
             .get_mcp_tools()
             .into_iter()
