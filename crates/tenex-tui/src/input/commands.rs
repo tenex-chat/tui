@@ -438,7 +438,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'H',
         label: "Show archived",
         section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && !app.show_archived,
+        available: |app| app.view == View::Home && app.sidebar_focused && !app.show_archived_projects,
         execute: |app| {
             app.toggle_show_archived();
         },
@@ -447,7 +447,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'H',
         label: "Hide archived",
         section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && app.show_archived,
+        available: |app| app.view == View::Home && app.sidebar_focused && app.show_archived_projects,
         execute: |app| {
             app.toggle_show_archived();
         },

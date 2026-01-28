@@ -14,6 +14,7 @@ use futures::{FutureExt, StreamExt};
 use nostr_sdk::prelude::*;
 use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
 
+use crate::models::agent_definition::AgentDefinition;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::{process_note_keys, CoreHandle};
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
@@ -24,6 +25,50 @@ fn get_data_dir() -> PathBuf {
     // Use a subdirectory in the user's data directory
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("tenex").join("nostrdb")
+}
+
+/// Helper to get the project a_tag from project_id
+fn get_project_a_tag(store: &RwLock<Option<AppDataStore>>, project_id: &str) -> Result<String, TenexError> {
+    let store_guard = store.read().map_err(|e| TenexError::Internal {
+        message: format!("Failed to acquire store lock: {}", e),
+    })?;
+    let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+        message: "Store not initialized".to_string(),
+    })?;
+
+    let project = store.get_projects()
+        .iter()
+        .find(|p| p.id == project_id)
+        .cloned()
+        .ok_or_else(|| TenexError::Internal {
+            message: format!("Project not found: {}", project_id),
+        })?;
+
+    Ok(project.a_tag())
+}
+
+/// Helper to get the core handle
+fn get_core_handle(core_handle: &RwLock<Option<CoreHandle>>) -> Result<CoreHandle, TenexError> {
+    let handle_guard = core_handle.read().map_err(|e| TenexError::Internal {
+        message: format!("Failed to acquire core handle lock: {}", e),
+    })?;
+    handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
+        message: "Core runtime not initialized - call init() first".to_string(),
+    }).cloned()
+}
+
+/// Convert an AgentDefinition to AgentInfo (shared helper to eliminate DRY violation)
+fn agent_to_info(agent: &AgentDefinition) -> AgentInfo {
+    AgentInfo {
+        id: agent.id.clone(),
+        pubkey: agent.pubkey.clone(),
+        d_tag: agent.d_tag.clone(),
+        name: agent.name.clone(),
+        description: agent.description.clone(),
+        role: agent.role.clone(),
+        picture: agent.picture.clone(),
+        model: agent.model.clone(),
+    }
 }
 
 /// A simplified project info struct for FFI export.
@@ -246,6 +291,36 @@ pub struct LoginResult {
     pub npub: String,
     /// Whether login was successful
     pub success: bool,
+}
+
+/// Result of sending a message.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SendMessageResult {
+    /// Event ID of the published message
+    pub event_id: String,
+    /// Whether the message was successfully sent
+    pub success: bool,
+}
+
+/// An agent definition for FFI export.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AgentInfo {
+    /// Unique identifier of the agent (event ID)
+    pub id: String,
+    /// Agent's public key (hex)
+    pub pubkey: String,
+    /// Agent's d-tag (slug)
+    pub d_tag: String,
+    /// Display name of the agent
+    pub name: String,
+    /// Description of the agent's purpose
+    pub description: String,
+    /// Role of the agent (e.g., "Developer", "PM")
+    pub role: String,
+    /// Profile picture URL, if any
+    pub picture: Option<String>,
+    /// Model used by the agent (e.g., "claude-3-opus")
+    pub model: Option<String>,
 }
 
 /// Information about the current logged-in user.
