@@ -72,25 +72,30 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
                 let store = app.data_store.borrow();
                 let agent_pubkeys = store.get_working_agents(&thread.id);
 
-                // Get project a_tag to look up agent names from project status
+                // Get project a_tag for potential fallback to project status
                 let project_a_tag = store.find_project_for_thread(&thread.id);
 
-                // Resolve pubkeys to agent names via project status
+                // Resolve pubkeys to agent names
+                // Priority: 1) kind:0 profile, 2) agent slug from project status, 3) short pubkey
                 agent_pubkeys
                     .iter()
                     .map(|pubkey| {
-                        // Look up agent name from project status
-                        project_a_tag.as_ref()
-                            .and_then(|a_tag| store.get_project_status(a_tag))
-                            .and_then(|status| {
-                                status.agents.iter()
-                                    .find(|a| a.pubkey == *pubkey)
-                                    .map(|a| a.name.clone())
-                            })
-                            .unwrap_or_else(|| {
-                                // Fallback to short pubkey if agent not found
-                                format!("{}...", &pubkey[..8.min(pubkey.len())])
-                            })
+                        // Primary: Use kind:0 profile name
+                        let profile_name = store.get_profile_name(pubkey);
+
+                        // If profile name is just short pubkey, try project status as fallback
+                        if profile_name.ends_with("...") {
+                            project_a_tag.as_ref()
+                                .and_then(|a_tag| store.get_project_status(a_tag))
+                                .and_then(|status| {
+                                    status.agents.iter()
+                                        .find(|a| a.pubkey == *pubkey)
+                                        .map(|a| a.name.clone())
+                                })
+                                .unwrap_or(profile_name)
+                        } else {
+                            profile_name
+                        }
                     })
                     .collect()
             };
@@ -249,6 +254,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Debug stats modal (Ctrl+T D)
     if let ModalState::DebugStats(ref state) = app.modal_state {
         super::super::render_debug_stats(f, area, app, state);
+    }
+
+    // Workspace manager modal
+    if let ModalState::WorkspaceManager(ref state) = app.modal_state {
+        let workspaces = app.preferences.borrow().workspaces().to_vec();
+        let projects = app.data_store.borrow().get_projects().to_vec();
+        let active_id = app.preferences.borrow().active_workspace_id().map(String::from);
+        super::super::render_workspace_manager(f, area, state, &workspaces, &projects, active_id.as_deref());
     }
 
     // Global search modal overlay (/)

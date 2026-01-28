@@ -13,6 +13,16 @@ pub struct ProjectDraft {
     pub last_modified: u64,
 }
 
+/// A workspace defines which projects are visible across all views
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workspace {
+    pub id: String,
+    pub name: String,
+    pub project_ids: Vec<String>,  // Project a-tags
+    pub created_at: u64,
+    pub pinned: bool,
+}
+
 impl ProjectDraft {
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
@@ -91,6 +101,12 @@ pub struct Preferences {
     /// If true, hide scheduled events from conversation list (default: false = show all)
     #[serde(default)]
     pub hide_scheduled: bool,
+    /// Saved workspaces (project groups)
+    #[serde(default)]
+    pub workspaces: Vec<Workspace>,
+    /// Currently active workspace ID (None = manual project selection mode)
+    #[serde(default)]
+    pub active_workspace_id: Option<String>,
 }
 
 pub struct PreferencesStorage {
@@ -293,5 +309,74 @@ impl PreferencesStorage {
         self.prefs.hide_scheduled = !self.prefs.hide_scheduled;
         self.save_to_file();
         self.prefs.hide_scheduled
+    }
+
+    // ===== Workspace Methods =====
+
+    pub fn workspaces(&self) -> &[Workspace] {
+        &self.prefs.workspaces
+    }
+
+    pub fn add_workspace(&mut self, name: String, project_ids: Vec<String>) -> Workspace {
+        let id = format!("ws_{}", std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis());
+        let workspace = Workspace {
+            id: id.clone(),
+            name,
+            project_ids,
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            pinned: false,
+        };
+        self.prefs.workspaces.push(workspace.clone());
+        self.save_to_file();
+        workspace
+    }
+
+    pub fn update_workspace(&mut self, id: &str, name: String, project_ids: Vec<String>) {
+        if let Some(ws) = self.prefs.workspaces.iter_mut().find(|w| w.id == id) {
+            ws.name = name;
+            ws.project_ids = project_ids;
+            self.save_to_file();
+        }
+    }
+
+    pub fn delete_workspace(&mut self, id: &str) {
+        self.prefs.workspaces.retain(|w| w.id != id);
+        // Clear active workspace if we deleted the active one
+        if self.prefs.active_workspace_id.as_deref() == Some(id) {
+            self.prefs.active_workspace_id = None;
+        }
+        self.save_to_file();
+    }
+
+    pub fn toggle_workspace_pinned(&mut self, id: &str) -> bool {
+        if let Some(ws) = self.prefs.workspaces.iter_mut().find(|w| w.id == id) {
+            ws.pinned = !ws.pinned;
+            let result = ws.pinned;
+            self.save_to_file();
+            result
+        } else {
+            false
+        }
+    }
+
+    pub fn set_active_workspace(&mut self, id: Option<&str>) {
+        self.prefs.active_workspace_id = id.map(String::from);
+        self.save_to_file();
+    }
+
+    pub fn active_workspace(&self) -> Option<&Workspace> {
+        self.prefs.active_workspace_id.as_ref().and_then(|id| {
+            self.prefs.workspaces.iter().find(|w| w.id == *id)
+        })
+    }
+
+    pub fn active_workspace_id(&self) -> Option<&str> {
+        self.prefs.active_workspace_id.as_deref()
     }
 }

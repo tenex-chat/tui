@@ -26,7 +26,7 @@ pub use message::{AskEvent, AskQuestion, Message};
 pub use nudge::Nudge;
 pub use operations_status::OperationsStatus;
 pub use project::Project;
-pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage};
+pub use project_draft::{PreferencesStorage, ProjectDraft, ProjectDraftStorage, Workspace};
 pub use project_status::{ProjectAgent, ProjectStatus};
 pub use report::Report;
 pub use thread::Thread;

@@ -280,6 +280,15 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
+        key: 'W',
+        label: "Manage Workspaces",
+        section: "Navigation",
+        available: |_| true,
+        execute: |app| {
+            app.modal_state = ModalState::WorkspaceManager(modal::WorkspaceManagerState::new());
+        },
+    },
+    Command {
         key: 'N',
         label: "New conversation (current project)",
         section: "Conversation",
@@ -780,11 +789,7 @@ fn toggle_project_visibility(app: &mut App) {
     let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
     if let Some(project) = all_projects.get(app.sidebar_project_index) {
         let a_tag = project.a_tag();
-        if app.visible_projects.contains(&a_tag) {
-            app.visible_projects.remove(&a_tag);
-        } else {
-            app.visible_projects.insert(a_tag);
-        }
+        app.toggle_project_visibility(&a_tag);
     }
 }
 

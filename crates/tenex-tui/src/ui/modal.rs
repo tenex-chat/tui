@@ -984,6 +984,114 @@ impl DraftNavigatorState {
     }
 }
 
+/// Mode for the workspace manager modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceMode {
+    List,    // Browse/switch workspaces
+    Create,  // Creating new workspace
+    Edit,    // Editing existing workspace
+    Delete,  // Confirming deletion
+}
+
+/// Focus within workspace create/edit mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceFocus {
+    Name,
+    Projects,
+}
+
+/// State for the workspace manager modal
+#[derive(Debug, Clone)]
+pub struct WorkspaceManagerState {
+    pub mode: WorkspaceMode,
+    pub selected_index: usize,
+    pub filter: String,
+    /// For create/edit mode - workspace name being edited
+    pub editing_name: String,
+    /// For create/edit mode - selected project a-tags
+    pub editing_project_ids: std::collections::HashSet<String>,
+    /// For edit mode - ID of workspace being edited
+    pub editing_workspace_id: Option<String>,
+    /// Index in project selector list
+    pub project_selector_index: usize,
+    /// Which field is focused in create/edit mode
+    pub focus: WorkspaceFocus,
+}
+
+impl WorkspaceManagerState {
+    pub fn new() -> Self {
+        Self {
+            mode: WorkspaceMode::List,
+            selected_index: 0,
+            filter: String::new(),
+            editing_name: String::new(),
+            editing_project_ids: std::collections::HashSet::new(),
+            editing_workspace_id: None,
+            project_selector_index: 0,
+            focus: WorkspaceFocus::Name,
+        }
+    }
+
+    pub fn enter_create_mode(&mut self) {
+        self.mode = WorkspaceMode::Create;
+        self.editing_name.clear();
+        self.editing_project_ids.clear();
+        self.editing_workspace_id = None;
+        self.project_selector_index = 0;
+        self.focus = WorkspaceFocus::Name;
+    }
+
+    pub fn enter_edit_mode(&mut self, workspace: &tenex_core::models::Workspace) {
+        self.mode = WorkspaceMode::Edit;
+        self.editing_name = workspace.name.clone();
+        self.editing_project_ids = workspace.project_ids.iter().cloned().collect();
+        self.editing_workspace_id = Some(workspace.id.clone());
+        self.project_selector_index = 0;
+        self.focus = WorkspaceFocus::Name;
+    }
+
+    pub fn enter_delete_mode(&mut self) {
+        self.mode = WorkspaceMode::Delete;
+    }
+
+    pub fn back_to_list(&mut self) {
+        self.mode = WorkspaceMode::List;
+        self.editing_name.clear();
+        self.editing_project_ids.clear();
+        self.editing_workspace_id = None;
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn toggle_project(&mut self, a_tag: &str) {
+        if self.editing_project_ids.contains(a_tag) {
+            self.editing_project_ids.remove(a_tag);
+        } else {
+            self.editing_project_ids.insert(a_tag.to_string());
+        }
+    }
+
+    pub fn can_save(&self) -> bool {
+        !self.editing_name.trim().is_empty()
+    }
+}
+
+impl Default for WorkspaceManagerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// State for command palette modal (Ctrl+T)
 /// Commands are defined in input/commands.rs
 #[derive(Debug, Clone)]
@@ -1313,6 +1421,8 @@ pub enum ModalState {
     NudgeDetail(NudgeDetailState),
     /// Nudge delete confirmation - confirm deletion of a nudge
     NudgeDeleteConfirm(NudgeDeleteConfirmState),
+    /// Workspace manager modal - create, edit, delete, switch workspaces
+    WorkspaceManager(WorkspaceManagerState),
 }
 
 impl Default for ModalState {
