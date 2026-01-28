@@ -519,8 +519,10 @@ fn render_card_content(
             String::new()
         };
         // Build recipient suffix (first recipient only in compact mode)
+        // Use flexible truncation - only truncate if name is very long
         let recipient_suffix = if let Some((name, _)) = first_recipient.as_ref() {
-            format!(" @{}", truncate_with_ellipsis(name, 12))
+            let max_recipient_len = 25; // Reasonable max, only truncate if necessary
+            format!(" @{}", truncate_with_ellipsis(name, max_recipient_len))
         } else {
             String::new()
         };
@@ -605,8 +607,10 @@ fn render_card_content(
         // LINE 4: spacing
 
         // Build recipient suffix for line 1
+        // Use flexible truncation - only truncate if name is very long
         let recipient_suffix = if let Some((name, _)) = first_recipient.as_ref() {
-            format!(" @{}", truncate_with_ellipsis(name, 15))
+            let max_recipient_len = 25; // Reasonable max, only truncate if necessary
+            format!(" @{}", truncate_with_ellipsis(name, max_recipient_len))
         } else {
             String::new()
         };
@@ -1067,7 +1071,15 @@ fn render_status_card(
     let has_activity = thread.status_current_activity.is_some();
 
     // Column widths for table layout (matching Conversations tab)
-    let middle_col_width = 22;
+    // Calculate flexible middle column width based on content
+    let author_display = format!("@{}", author_name);
+    let author_actual_len = author_display.chars().count();
+    let project_display_len = project_name.chars().count() + 1; // +1 for bullet glyph
+
+    // Middle column should fit the larger of author or project, with min 22 and max 30
+    let middle_col_content_width = author_actual_len.max(project_display_len);
+    let middle_col_width = middle_col_content_width.clamp(22, 30);
+
     let right_col_width = 14;
     let total_width = area.width as usize;
     let fixed_cols_width = middle_col_width + right_col_width + 2; // +2 for spacing
@@ -1134,9 +1146,8 @@ fn render_status_card(
     let line2_len = line2_content.chars().count();
     let line2_padding = main_col_width.saturating_sub(line2_len);
 
-    // Author (middle column)
-    let author_display = format!("@{}", author_name);
-    let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width.saturating_sub(1));
+    // Author (middle column) - author_display already calculated above
+    let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width);
     let author_len = author_truncated.chars().count();
     let author_padding = middle_col_width.saturating_sub(author_len);
 
@@ -1252,7 +1263,13 @@ fn render_feed_card(
     let bullet_color = theme::ACCENT_PRIMARY;
 
     // Column widths for table layout
-    let middle_col_width = 22;
+    // Calculate flexible middle column width based on content
+    let author_display = format!("@{}", author_name);
+    let project_display_len = project_name.chars().count() + 1; // +1 for bullet glyph
+
+    // Middle column should fit project with min 22 and max 30
+    let middle_col_width = project_display_len.clamp(22, 30);
+
     let right_col_width = 14;
     let total_width = area.width as usize;
     let fixed_cols_width = middle_col_width + right_col_width + 2;
@@ -1262,12 +1279,11 @@ fn render_feed_card(
     let mut lines: Vec<Line> = Vec::new();
 
     // LINE 1: [bullet] @author          [project]       [time]
-    let author_display = format!("@{}", author_name);
     let author_truncated = truncate_with_ellipsis(&author_display, main_col_width);
     let author_len = author_truncated.chars().count();
     let author_padding = main_col_width.saturating_sub(author_len);
 
-    let project_truncated = truncate_with_ellipsis(&project_name, middle_col_width.saturating_sub(2));
+    let project_truncated = truncate_with_ellipsis(&project_name, middle_col_width.saturating_sub(1));
     let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
     let project_len = project_display.chars().count();
     let project_padding = middle_col_width.saturating_sub(project_len);
