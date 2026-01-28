@@ -203,36 +203,28 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             app.toggle_hide_scheduled();
         }
         KeyCode::Tab => {
-            // On Stats tab, Tab switches between subtabs; otherwise switches between home tabs
-            if app.home_panel_focus == HomeTab::Stats {
-                app.stats_subtab = app.stats_subtab.next();
-            } else {
-                app.home_panel_focus = match app.home_panel_focus {
-                    HomeTab::Conversations => HomeTab::Inbox,
-                    HomeTab::Inbox => HomeTab::Reports,
-                    HomeTab::Reports => HomeTab::Status,
-                    HomeTab::Status => HomeTab::Feed,
-                    HomeTab::Feed => HomeTab::ActiveWork,
-                    HomeTab::ActiveWork => HomeTab::Stats,
-                    HomeTab::Stats => HomeTab::Conversations, // Fallback (won't reach)
-                };
-            }
+            // Tab switches between home tabs
+            app.home_panel_focus = match app.home_panel_focus {
+                HomeTab::Conversations => HomeTab::Inbox,
+                HomeTab::Inbox => HomeTab::Reports,
+                HomeTab::Reports => HomeTab::Status,
+                HomeTab::Status => HomeTab::Feed,
+                HomeTab::Feed => HomeTab::ActiveWork,
+                HomeTab::ActiveWork => HomeTab::Stats,
+                HomeTab::Stats => HomeTab::Conversations,
+            };
         }
         KeyCode::BackTab if has_shift => {
-            // On Stats tab, Shift+Tab switches between subtabs; otherwise switches between home tabs
-            if app.home_panel_focus == HomeTab::Stats {
-                app.stats_subtab = app.stats_subtab.prev();
-            } else {
-                app.home_panel_focus = match app.home_panel_focus {
-                    HomeTab::Conversations => HomeTab::Stats,
-                    HomeTab::Inbox => HomeTab::Conversations,
-                    HomeTab::Reports => HomeTab::Inbox,
-                    HomeTab::Status => HomeTab::Reports,
-                    HomeTab::Feed => HomeTab::Status,
-                    HomeTab::ActiveWork => HomeTab::Feed,
-                    HomeTab::Stats => HomeTab::ActiveWork, // Fallback (won't reach)
-                };
-            }
+            // Shift+Tab switches between home tabs in reverse
+            app.home_panel_focus = match app.home_panel_focus {
+                HomeTab::Conversations => HomeTab::Stats,
+                HomeTab::Inbox => HomeTab::Conversations,
+                HomeTab::Reports => HomeTab::Inbox,
+                HomeTab::Status => HomeTab::Reports,
+                HomeTab::Feed => HomeTab::Status,
+                HomeTab::ActiveWork => HomeTab::Feed,
+                HomeTab::Stats => HomeTab::ActiveWork,
+            };
         }
         KeyCode::Right => {
             // On Stats tab, Right switches subtabs; otherwise focuses sidebar

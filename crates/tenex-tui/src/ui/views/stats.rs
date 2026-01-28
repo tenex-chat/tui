@@ -191,7 +191,7 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     // Add hint for navigation
     spans.push(Span::raw("   "));
     spans.push(Span::styled(
-        "Tab/←/→ to switch",
+        "h/l or ←/→ to switch",
         Style::default().fg(theme::TEXT_DIM),
     ));
 
