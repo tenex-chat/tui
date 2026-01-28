@@ -4,16 +4,22 @@ struct ConversationsView: View {
     let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var conversations: [ConversationInfo] = []
+    @State private var hierarchy: ConversationHierarchy?
     @State private var isLoading = false
     @State private var selectedConversation: ConversationInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
 
+    /// Root conversations from precomputed hierarchy (sorted by effective last activity)
+    private var rootConversations: [ConversationInfo] {
+        hierarchy?.getSortedRoots() ?? []
+    }
+
     var body: some View {
         Group {
             if isLoading {
                 ProgressView("Loading conversations...")
-            } else if conversations.isEmpty {
+            } else if rootConversations.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 60))
@@ -24,12 +30,11 @@ struct ConversationsView: View {
                 }
             } else {
                 List {
-                    // Root conversations (no parent) - only show top-level with aggregated nested data
-                    let rootConversations = conversations.filter { $0.parentId == nil }
+                    // Root conversations - using precomputed hierarchy for O(1) data access
                     ForEach(rootConversations, id: \.id) { conversation in
-                        HierarchyConversationRow(
+                        OptimizedConversationRow(
                             conversation: conversation,
-                            allConversations: conversations,
+                            aggregatedData: hierarchy?.getData(for: conversation.id) ?? .empty,
                             onSelect: { selected in
                                 selectedConversation = selected
                             }
@@ -94,77 +99,31 @@ struct ConversationsView: View {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
             let fetched = coreManager.core.getConversations(projectId: project.id)
+            // Precompute hierarchy on background thread for O(1) access per row
+            let computedHierarchy = ConversationHierarchy(conversations: fetched)
             DispatchQueue.main.async {
                 self.conversations = fetched
+                self.hierarchy = computedHierarchy
                 self.isLoading = false
             }
         }
     }
 }
 
-// MARK: - Hierarchy Conversation Row (Shows aggregated info from nested conversations)
+// MARK: - Optimized Conversation Row (Uses precomputed hierarchy data)
 
-private struct HierarchyConversationRow: View {
+/// Conversation row that uses precomputed hierarchy data for O(1) access
+/// instead of recomputing O(n²) BFS on every render
+private struct OptimizedConversationRow: View {
     let conversation: ConversationInfo
-    let allConversations: [ConversationInfo]
+    let aggregatedData: AggregatedConversationData
     let onSelect: (ConversationInfo) -> Void
-
-    /// All descendants of this conversation (children, grandchildren, etc.)
-    private var allDescendants: [ConversationInfo] {
-        var descendants: [ConversationInfo] = []
-        var queue = allConversations.filter { $0.parentId == conversation.id }
-
-        while !queue.isEmpty {
-            let current = queue.removeFirst()
-            descendants.append(current)
-            let children = allConversations.filter { $0.parentId == current.id }
-            queue.append(contentsOf: children)
-        }
-
-        return descendants
-    }
-
-    /// Effective last activity (max across all nested conversations)
-    private var effectiveLastActivity: UInt64 {
-        let allActivities = [conversation.lastActivity] + allDescendants.map { $0.lastActivity }
-        return allActivities.max() ?? conversation.lastActivity
-    }
-
-    /// Total running time across all nested conversations
-    private var totalRunningTime: TimeInterval {
-        let allTimestamps = [conversation.lastActivity] + allDescendants.map { $0.lastActivity }
-        guard let earliest = allTimestamps.min(),
-              let latest = allTimestamps.max() else {
-            return 0
-        }
-        return TimeInterval(latest - earliest)
-    }
-
-    /// All unique participating agents (including from nested conversations)
-    private var participatingAgents: [String] {
-        var agents = Set<String>()
-        agents.insert(conversation.author)
-        for descendant in allDescendants {
-            agents.insert(descendant.author)
-        }
-        return agents.sorted()
-    }
-
-    /// Status color based on conversation status
-    private var statusColor: Color {
-        switch conversation.status {
-        case "active": return .green
-        case "waiting": return .orange
-        case "completed": return .gray
-        default: return .blue
-        }
-    }
 
     var body: some View {
         HStack(spacing: 12) {
             // Status indicator
             Circle()
-                .fill(statusColor)
+                .fill(conversationStatusColor(for: conversation.status))
                 .frame(width: 10, height: 10)
 
             VStack(alignment: .leading, spacing: 6) {
@@ -176,12 +135,12 @@ private struct HierarchyConversationRow: View {
 
                     Spacer()
 
-                    Text(formatRelativeTime(effectiveLastActivity))
+                    Text(ConversationFormatters.formatRelativeTime(aggregatedData.effectiveLastActivity))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
-                // Row 2: Summary and total running time
+                // Row 2: Summary and activity span (renamed from "total running time")
                 HStack(alignment: .top) {
                     if let summary = conversation.summary {
                         Text(summary)
@@ -197,25 +156,30 @@ private struct HierarchyConversationRow: View {
 
                     Spacer()
 
-                    if totalRunningTime > 0 {
-                        Text(formatDuration(totalRunningTime))
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                    // Show activity span (time from earliest to latest activity)
+                    if aggregatedData.activitySpan > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                            Text(ConversationFormatters.formatDuration(aggregatedData.activitySpan))
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                     }
                 }
 
                 // Row 3: Participating agent avatars
                 HStack(spacing: -8) {
-                    ForEach(participatingAgents.prefix(6), id: \.self) { agent in
-                        AgentAvatarView(agentName: agent)
+                    ForEach(aggregatedData.participatingAgents.prefix(6), id: \.self) { agent in
+                        SharedAgentAvatar(agentName: agent)
                     }
 
-                    if participatingAgents.count > 6 {
+                    if aggregatedData.participatingAgents.count > 6 {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: 24, height: 24)
                             .overlay {
-                                Text("+\(participatingAgents.count - 6)")
+                                Text("+\(aggregatedData.participatingAgents.count - 6)")
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)
@@ -236,65 +200,9 @@ private struct HierarchyConversationRow: View {
             onSelect(conversation)
         }
     }
-
-    private func formatRelativeTime(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let hours = Int(seconds) / 3600
-        let minutes = (Int(seconds) % 3600) / 60
-
-        if hours > 0 {
-            return "\(hours)h \(minutes)m"
-        } else if minutes > 0 {
-            return "\(minutes)m"
-        } else {
-            return "<1m"
-        }
-    }
 }
 
-// MARK: - Agent Avatar View
-
-private struct AgentAvatarView: View {
-    let agentName: String
-
-    private var avatarColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan, .mint]
-        let hash = agentName.hashValue
-        return colors[abs(hash) % colors.count]
-    }
-
-    private var initials: String {
-        let parts = agentName.split(separator: "-")
-        if parts.count >= 2 {
-            return String(parts.prefix(2).compactMap { $0.first }.map { String($0).uppercased() }.joined())
-        } else if let first = agentName.first {
-            let chars = agentName.prefix(2)
-            return String(chars).uppercased()
-        }
-        return "?"
-    }
-
-    var body: some View {
-        Circle()
-            .fill(avatarColor.gradient)
-            .frame(width: 24, height: 24)
-            .overlay {
-                Text(initials)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .overlay {
-                Circle()
-                    .stroke(Color(.systemBackground), lineWidth: 2)
-            }
-    }
-}
+// Note: AgentAvatarView removed - use SharedAgentAvatar from ConversationHierarchy.swift
 
 // MARK: - Messages View
 
@@ -417,7 +325,7 @@ struct MessageBubble: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    Text(formatTimestamp(message.createdAt))
+                    Text(ConversationFormatters.formatRelativeTime(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
@@ -448,13 +356,6 @@ struct MessageBubble: View {
 
             if !isUser { Spacer(minLength: 50) }
         }
-    }
-
-    private func formatTimestamp(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
