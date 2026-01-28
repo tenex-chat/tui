@@ -231,6 +231,10 @@ struct LoginView: View {
                         self.errorMessage = "Error: \(message)"
                     case .LogoutFailed(let message):
                         self.errorMessage = "Logout failed: \(message)"
+                    case .LockError(let resource):
+                        self.errorMessage = "Lock error: \(resource)"
+                    case .CoreNotInitialized:
+                        self.errorMessage = "Core not initialized"
                     }
                 }
             } catch {
