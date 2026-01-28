@@ -196,7 +196,8 @@ impl ConversationMetadata {
         if self.total_llm_runtime_ms == 0 {
             return None;
         }
-        let seconds = self.total_llm_runtime_ms as f64 / 1000.0;
+        // Note: Despite the field name, get_total_runtime() now returns seconds, not ms
+        let seconds = self.total_llm_runtime_ms as f64;
         if seconds >= 3600.0 {
             // Show as hours and minutes for longer runtimes
             let hours = (seconds / 3600.0).floor();
