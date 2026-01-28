@@ -2402,77 +2402,89 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
         NudgeFormStep::Permissions => {
             match state.permission_mode {
                 PermissionMode::Browse => {
-                    match key.code {
-                        KeyCode::Esc => {
-                            app.modal_state = ModalState::None;
-                            return;
-                        }
-                        KeyCode::Enter => {
-                            state.next_step();
-                        }
-                        KeyCode::Backspace => {
-                            state.prev_step();
-                        }
-                        KeyCode::Char('a') => {
-                            state.permission_mode = PermissionMode::AddAllow;
-                            state.tool_filter.clear();
-                            state.tool_index = 0;
-                            state.tool_scroll = 0;
-                        }
-                        KeyCode::Char('d') => {
-                            state.permission_mode = PermissionMode::AddDeny;
-                            state.tool_filter.clear();
-                            state.tool_index = 0;
-                            state.tool_scroll = 0;
-                        }
-                        KeyCode::Char('x') => {
-                            // Remove selected tool from both lists
-                            // (simplified - removes from both if present)
-                            // Fix #5: Sort tools for deterministic ordering
-                            let mut tools: Vec<String> = {
-                                let data_store = app.data_store.borrow();
-                                data_store
-                                    .project_statuses
-                                    .values()
-                                    .flat_map(|s| s.all_tools.iter().cloned())
-                                    .collect::<std::collections::HashSet<_>>()
-                                    .into_iter()
-                                    .collect()
-                            };
-                            tools.sort();
-                            let filtered = state.filter_tools(&tools);
-                            if let Some(tool) = filtered.get(state.tool_index) {
-                                state.permissions.remove_allow_tool(tool);
-                                state.permissions.remove_deny_tool(tool);
+                    use crate::ui::nudge::ToolMode;
+
+                    // Handle selection mode separately
+                    if state.selecting_configured {
+                        match key.code {
+                            KeyCode::Esc => {
+                                // Exit selection mode
+                                state.selecting_configured = false;
                             }
-                        }
-                        KeyCode::Up => {
-                            if state.tool_index > 0 {
-                                state.tool_index -= 1;
+                            KeyCode::Up => {
+                                state.configured_tool_up();
                             }
-                        }
-                        KeyCode::Down => {
-                            // Fix #5 & #6: Sort tools and use filtered length for bounds
-                            let mut tools: Vec<String> = {
-                                let data_store = app.data_store.borrow();
-                                data_store
-                                    .project_statuses
-                                    .values()
-                                    .flat_map(|s| s.all_tools.iter().cloned())
-                                    .collect::<std::collections::HashSet<_>>()
-                                    .into_iter()
-                                    .collect()
-                            };
-                            tools.sort();
-                            let filtered_count = state.filter_tools(&tools).len();
-                            if filtered_count > 0 && state.tool_index + 1 < filtered_count {
-                                state.tool_index += 1;
+                            KeyCode::Down => {
+                                state.configured_tool_down();
                             }
+                            KeyCode::Char('x') | KeyCode::Delete | KeyCode::Enter => {
+                                // Remove selected tool
+                                state.remove_selected_configured_tool();
+                                // If no more tools, exit selection mode
+                                if state.get_configured_tools().is_empty() {
+                                    state.selecting_configured = false;
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
+                    } else {
+                        // Normal browse mode
+                        match key.code {
+                            KeyCode::Esc => {
+                                app.modal_state = ModalState::None;
+                                return;
+                            }
+                            KeyCode::Enter => {
+                                state.next_step();
+                            }
+                            KeyCode::Backspace => {
+                                state.prev_step();
+                            }
+                            // Mode switching keys (XOR between Additive and Exclusive)
+                            KeyCode::Char('1') => {
+                                state.permissions.set_mode(ToolMode::Additive);
+                                state.selecting_configured = false;
+                                state.configured_tool_index = 0;
+                            }
+                            KeyCode::Char('2') => {
+                                state.permissions.set_mode(ToolMode::Exclusive);
+                                state.selecting_configured = false;
+                                state.configured_tool_index = 0;
+                            }
+                            // Additive mode: 'a' for allow, 'd' for deny
+                            KeyCode::Char('a') if state.permissions.is_additive_mode() => {
+                                state.permission_mode = PermissionMode::AddAllow;
+                                state.tool_filter.clear();
+                                state.tool_index = 0;
+                                state.tool_scroll = 0;
+                            }
+                            KeyCode::Char('d') if state.permissions.is_additive_mode() => {
+                                state.permission_mode = PermissionMode::AddDeny;
+                                state.tool_filter.clear();
+                                state.tool_index = 0;
+                                state.tool_scroll = 0;
+                            }
+                            // Exclusive mode: 'o' for only-tool
+                            KeyCode::Char('o') if state.permissions.is_exclusive_mode() => {
+                                state.permission_mode = PermissionMode::AddOnly;
+                                state.tool_filter.clear();
+                                state.tool_index = 0;
+                                state.tool_scroll = 0;
+                            }
+                            // Enter selection mode for removal (only if there are configured tools)
+                            KeyCode::Char('x') => {
+                                if !state.get_configured_tools().is_empty() {
+                                    state.selecting_configured = true;
+                                    state.configured_tool_index = 0;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
                 }
-                PermissionMode::AddAllow | PermissionMode::AddDeny => {
+                PermissionMode::AddAllow | PermissionMode::AddDeny | PermissionMode::AddOnly => {
+                    use crate::ui::nudge::get_available_tools_from_statuses;
+
                     match key.code {
                         KeyCode::Esc => {
                             state.permission_mode = PermissionMode::Browse;
@@ -2481,25 +2493,24 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                             state.tool_scroll = 0;
                         }
                         KeyCode::Enter => {
-                            // Add selected tool
-                            // Fix #5: Sort tools for deterministic ordering
-                            let mut tools: Vec<String> = {
+                            // Add selected tool based on current mode
+                            let tools = {
                                 let data_store = app.data_store.borrow();
-                                data_store
-                                    .project_statuses
-                                    .values()
-                                    .flat_map(|s| s.all_tools.iter().cloned())
-                                    .collect::<std::collections::HashSet<_>>()
-                                    .into_iter()
-                                    .collect()
+                                get_available_tools_from_statuses(&data_store.project_statuses)
                             };
-                            tools.sort();
                             let filtered = state.filter_tools(&tools);
                             if let Some(tool) = filtered.get(state.tool_index) {
-                                if state.permission_mode == PermissionMode::AddAllow {
-                                    state.permissions.add_allow_tool(tool.to_string());
-                                } else {
-                                    state.permissions.add_deny_tool(tool.to_string());
+                                match state.permission_mode {
+                                    PermissionMode::AddAllow => {
+                                        state.permissions.add_allow_tool((*tool).to_string());
+                                    }
+                                    PermissionMode::AddDeny => {
+                                        state.permissions.add_deny_tool((*tool).to_string());
+                                    }
+                                    PermissionMode::AddOnly => {
+                                        state.permissions.add_only_tool((*tool).to_string());
+                                    }
+                                    PermissionMode::Browse => {} // Shouldn't happen
                                 }
                             }
                             state.permission_mode = PermissionMode::Browse;
@@ -2513,18 +2524,10 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                             }
                         }
                         KeyCode::Down => {
-                            // Fix #5 & #6: Sort tools and use filtered length for bounds
-                            let mut tools: Vec<String> = {
+                            let tools = {
                                 let data_store = app.data_store.borrow();
-                                data_store
-                                    .project_statuses
-                                    .values()
-                                    .flat_map(|s| s.all_tools.iter().cloned())
-                                    .collect::<std::collections::HashSet<_>>()
-                                    .into_iter()
-                                    .collect()
+                                get_available_tools_from_statuses(&data_store.project_statuses)
                             };
-                            tools.sort();
                             let filtered_count = state.filter_tools(&tools).len();
                             if filtered_count > 0 && state.tool_index + 1 < filtered_count {
                                 state.tool_index += 1;
@@ -2532,13 +2535,13 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                         }
                         KeyCode::Char(c) => {
                             state.tool_filter.push(c);
-                            // Fix #6: Reset index when filter changes and clamp to new bounds
+                            // Reset index when filter changes and clamp to new bounds
                             state.tool_index = 0;
                             state.tool_scroll = 0;
                         }
                         KeyCode::Backspace => {
                             state.tool_filter.pop();
-                            // Fix #6: Reset index when filter changes
+                            // Reset index when filter changes
                             state.tool_index = 0;
                             state.tool_scroll = 0;
                         }
@@ -2557,17 +2560,34 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                     state.prev_step();
                 }
                 KeyCode::Enter => {
+                    // Check for validation errors first
+                    let errors = state.get_submission_errors();
+                    if !errors.is_empty() {
+                        // Show first error to user
+                        app.set_warning_status(&format!("Cannot submit: {}", errors[0]));
+                        app.modal_state = ModalState::NudgeCreate(state);
+                        return;
+                    }
+
                     if state.can_submit() {
                         // Submit the nudge (always creates a new one - Nostr events are immutable)
                         if let Some(ref core_handle) = app.core_handle {
-                            // Sanitize allow list - remove any tools that also appear in deny list
-                            // "Deny wins" conflict resolution: if a tool is in both, only keep it in deny
-                            let deny_set: std::collections::HashSet<_> = state.permissions.deny_tools.iter().collect();
-                            let sanitized_allow_tools: Vec<String> = state.permissions.allow_tools
-                                .iter()
-                                .filter(|tool| !deny_set.contains(tool))
-                                .cloned()
-                                .collect();
+                            // Mode-aware tool permissions:
+                            // - Exclusive mode: only send only_tools, ignore allow/deny
+                            // - Additive mode: send allow/deny (with conflict resolution), ignore only_tools
+                            let (sanitized_allow_tools, sanitized_deny_tools, only_tools) = if state.permissions.is_exclusive_mode() {
+                                // Exclusive mode: only send only_tools
+                                (Vec::new(), Vec::new(), state.permissions.only_tools.clone())
+                            } else {
+                                // Additive mode: sanitize allow list - "Deny wins" conflict resolution
+                                let deny_set: std::collections::HashSet<_> = state.permissions.deny_tools.iter().collect();
+                                let sanitized_allow: Vec<String> = state.permissions.allow_tools
+                                    .iter()
+                                    .filter(|tool| !deny_set.contains(tool))
+                                    .cloned()
+                                    .collect();
+                                (sanitized_allow, state.permissions.deny_tools.clone(), Vec::new())
+                            };
 
                             let result = core_handle.send(NostrCommand::CreateNudge {
                                 title: state.title.clone(),
@@ -2575,7 +2595,8 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                                 content: state.content.clone(),
                                 hashtags: state.hashtags.clone(),
                                 allow_tools: sanitized_allow_tools,
-                                deny_tools: state.permissions.deny_tools.clone(),
+                                deny_tools: sanitized_deny_tools,
+                                only_tools,
                             });
 
                             match result {

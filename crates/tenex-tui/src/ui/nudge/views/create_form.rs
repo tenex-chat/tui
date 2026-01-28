@@ -1,7 +1,7 @@
 //! Nudge create form - multi-step wizard for creating nudges
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::nudge::{NudgeFormFocus, NudgeFormState, NudgeFormStep, PermissionMode};
+use crate::ui::nudge::{NudgeFormFocus, NudgeFormState, NudgeFormStep, PermissionMode, ToolMode};
 use crate::ui::theme;
 use crate::ui::App;
 use ratatui::{
@@ -305,83 +305,60 @@ fn render_content_step(f: &mut Frame, area: Rect, state: &NudgeFormState) {
     );
 }
 
-/// Render the permissions step (tool allow/deny)
+/// Render the permissions step (tool allow/deny/only)
 fn render_permissions_step(f: &mut Frame, app: &App, area: Rect, state: &NudgeFormState) {
+    use super::super::get_available_tools_from_statuses;
+
     let label = Paragraph::new("Tool Permissions (Optional)")
         .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD));
     f.render_widget(label, Rect::new(area.x, area.y, area.width, 1));
 
-    let hint = Paragraph::new("Add tools to allow or deny when this nudge is active")
-        .style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(hint, Rect::new(area.x, area.y + 1, area.width, 1));
-
-    // Get available tools from project statuses
+    // Get available tools from project statuses using centralized helper
     let data_store = app.data_store.borrow();
-    // Fix #5: Sort tool list for deterministic ordering
-    let mut available_tools: Vec<String> = data_store
-        .project_statuses
-        .values()
-        .flat_map(|s| s.all_tools.iter().cloned())
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-    available_tools.sort();
+    let available_tools = get_available_tools_from_statuses(&data_store.project_statuses);
 
     // Check if we're in add mode (showing tool list)
     let is_adding = state.permission_mode == PermissionMode::AddAllow
-        || state.permission_mode == PermissionMode::AddDeny;
+        || state.permission_mode == PermissionMode::AddDeny
+        || state.permission_mode == PermissionMode::AddOnly;
 
     if is_adding {
-        // Fix #4: Render the actual tool list when in add mode
         render_tool_selector(f, area, state, &available_tools);
     } else {
-        // Two columns: Allow (left) and Deny (right)
-        let col_width = (area.width / 2).saturating_sub(1);
+        // Render mode selector
+        render_mode_selector(f, Rect::new(area.x, area.y + 2, area.width, 3), state);
 
-        // Allow column
-        let allow_area = Rect::new(area.x, area.y + 3, col_width, area.height.saturating_sub(5));
-        render_permission_column(
-            f,
-            allow_area,
-            "✓ Allow Tools",
-            &state.permissions.allow_tools,
-            theme::ACCENT_SUCCESS,
-            false,
-        );
+        // Render mode-specific content below the selector
+        let content_y = area.y + 6;
+        let content_height = area.height.saturating_sub(8);
 
-        // Deny column
-        let deny_area = Rect::new(
-            area.x + col_width + 2,
-            area.y + 3,
-            col_width,
-            area.height.saturating_sub(5),
-        );
-        render_permission_column(
-            f,
-            deny_area,
-            "✗ Deny Tools",
-            &state.permissions.deny_tools,
-            theme::ACCENT_ERROR,
-            false,
-        );
+        if state.permissions.is_exclusive_mode() {
+            // Exclusive mode: single column for only-tools
+            render_exclusive_mode_content(f, Rect::new(area.x, content_y, area.width, content_height), state);
+        } else {
+            // Additive mode: two columns for allow/deny
+            render_additive_mode_content(f, Rect::new(area.x, content_y, area.width, content_height), state);
+        }
     }
 
-    // Conflict warnings
-    let conflicts = state.permissions.detect_conflicts();
-    if !conflicts.is_empty() {
-        let warning = format!(
-            "⚠ Conflict: {} - deny will override allow",
-            conflicts
-                .iter()
-                .map(|c| c.tool_name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        );
-        let warning_para = Paragraph::new(warning).style(Style::default().fg(theme::ACCENT_WARNING));
-        f.render_widget(
-            warning_para,
-            Rect::new(area.x, area.y + area.height.saturating_sub(2), area.width, 1),
-        );
+    // Conflict warnings (only in Additive mode)
+    if state.permissions.is_additive_mode() && !is_adding {
+        let conflicts = state.permissions.detect_conflicts();
+        if !conflicts.is_empty() {
+            let warning = format!(
+                "⚠ Conflict: {} - deny will override allow",
+                conflicts
+                    .iter()
+                    .map(|c| c.tool_name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let warning_para = Paragraph::new(warning).style(Style::default().fg(theme::ACCENT_WARNING));
+            f.render_widget(
+                warning_para,
+                Rect::new(area.x, area.y + area.height.saturating_sub(2), area.width, 1),
+            );
+        }
     }
 
     // Tool count from available tools
@@ -395,11 +372,180 @@ fn render_permissions_step(f: &mut Frame, app: &App, area: Rect, state: &NudgeFo
     }
 }
 
-/// Render the tool selector when adding allow/deny tools
+/// Render the mode selector (XOR choice between Additive and Exclusive)
+fn render_mode_selector(f: &mut Frame, area: Rect, state: &NudgeFormState) {
+    let is_additive = state.permissions.is_additive_mode();
+
+    // Mode tabs
+    let additive_style = if is_additive {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .bg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let exclusive_style = if !is_additive {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .bg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+
+    let mode_line = Line::from(vec![
+        Span::styled(" Mode: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!(" [1] {} ", ToolMode::Additive.label()),
+            additive_style,
+        ),
+        Span::styled("  ", Style::default()),
+        Span::styled(
+            format!(" [2] {} ", ToolMode::Exclusive.label()),
+            exclusive_style,
+        ),
+    ]);
+    f.render_widget(Paragraph::new(mode_line), Rect::new(area.x, area.y, area.width, 1));
+
+    // Mode description
+    let current_mode = if is_additive {
+        ToolMode::Additive
+    } else {
+        ToolMode::Exclusive
+    };
+    let description = Paragraph::new(current_mode.description())
+        .style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(description, Rect::new(area.x, area.y + 1, area.width, 1));
+}
+
+/// Render content for Additive mode (allow + deny columns)
+fn render_additive_mode_content(f: &mut Frame, area: Rect, state: &NudgeFormState) {
+    let col_width = (area.width / 2).saturating_sub(1);
+
+    // Allow column
+    let allow_area = Rect::new(area.x, area.y, col_width, area.height);
+    render_permission_column(
+        f,
+        allow_area,
+        "✓ Allow Tools",
+        &state.permissions.allow_tools,
+        theme::ACCENT_SUCCESS,
+        false,
+        state,
+        "allow",
+    );
+
+    // Deny column
+    let deny_area = Rect::new(
+        area.x + col_width + 2,
+        area.y,
+        col_width,
+        area.height,
+    );
+    render_permission_column(
+        f,
+        deny_area,
+        "✗ Deny Tools",
+        &state.permissions.deny_tools,
+        theme::ACCENT_ERROR,
+        false,
+        state,
+        "deny",
+    );
+
+    // Hint for selection mode
+    if state.selecting_configured {
+        let configured_count = state.get_configured_tools().len();
+        let hint = format!("{} tools · ↑↓ select · x remove · Esc back", configured_count);
+        let hint_para = Paragraph::new(hint).style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(
+            hint_para,
+            Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1),
+        );
+    }
+}
+
+/// Render content for Exclusive mode (only-tools list)
+fn render_exclusive_mode_content(f: &mut Frame, area: Rect, state: &NudgeFormState) {
+    let border_color = if state.selecting_configured {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::ACCENT_WARNING
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(" ⚡ Exact Tools (overrides everything) ");
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Bail out gracefully if width is insufficient
+    if inner.width < 6 || inner.height == 0 {
+        return;
+    }
+
+    if state.permissions.only_tools.is_empty() {
+        let empty_msg = Paragraph::new("No tools specified - agent will have NO tools!")
+            .style(Style::default().fg(theme::ACCENT_ERROR));
+        f.render_widget(empty_msg, inner);
+    } else {
+        // Show tools as a vertical list for better selection UX
+        for (i, tool) in state.permissions.only_tools.iter().take(inner.height as usize).enumerate() {
+            let y = inner.y.saturating_add(i as u16);
+            let is_selected = state.selecting_configured && i == state.configured_tool_index;
+
+            let style = if is_selected {
+                Style::default().fg(theme::TEXT_PRIMARY).bg(theme::ACCENT_WARNING)
+            } else {
+                Style::default().fg(theme::ACCENT_WARNING)
+            };
+
+            // Safe width calculation with saturating_sub
+            // Use char-safe truncation to avoid UTF-8 boundary panic
+            let max_tool_len = inner.width.saturating_sub(4) as usize;
+            let char_count = tool.chars().count();
+            let display = if char_count > max_tool_len {
+                let truncated: String = tool.chars().take(max_tool_len.saturating_sub(1)).collect();
+                format!("• {}…", truncated)
+            } else {
+                format!("• {}", tool)
+            };
+
+            let line = Paragraph::new(display).style(style);
+            f.render_widget(line, Rect::new(inner.x, y, inner.width, 1));
+        }
+    }
+
+    // Tool count and selection hint
+    let hint_text = if state.selecting_configured {
+        format!("{} tools · ↑↓ select · x remove · Esc back", state.permissions.only_tools.len())
+    } else {
+        format!("{} tools selected", state.permissions.only_tools.len())
+    };
+    let count_para = Paragraph::new(hint_text).style(Style::default().fg(theme::TEXT_MUTED));
+    f.render_widget(
+        count_para,
+        Rect::new(
+            area.x,
+            area.y + area.height.saturating_sub(1),
+            area.width.saturating_sub(2),
+            1,
+        ),
+    );
+}
+
+/// Render the tool selector when adding allow/deny/only tools
 fn render_tool_selector(f: &mut Frame, area: Rect, state: &NudgeFormState, available_tools: &[String]) {
-    let is_allow_mode = state.permission_mode == PermissionMode::AddAllow;
-    let mode_label = if is_allow_mode { "Allow" } else { "Deny" };
-    let accent_color = if is_allow_mode { theme::ACCENT_SUCCESS } else { theme::ACCENT_ERROR };
+    let (mode_label, accent_color) = match state.permission_mode {
+        PermissionMode::AddAllow => ("Allow", theme::ACCENT_SUCCESS),
+        PermissionMode::AddDeny => ("Deny", theme::ACCENT_ERROR),
+        PermissionMode::AddOnly => ("Only", theme::ACCENT_WARNING),
+        PermissionMode::Browse => ("Browse", theme::TEXT_MUTED), // Shouldn't happen
+    };
 
     // Title
     let title = format!("Select tool to {} (Esc to cancel)", mode_label.to_lowercase());
@@ -458,9 +604,12 @@ fn render_tool_selector(f: &mut Frame, area: Rect, state: &NudgeFormState, avail
             let is_selected = actual_index == state.tool_index;
             let is_allowed = state.permissions.is_allowed(tool);
             let is_denied = state.permissions.is_denied(tool);
+            let is_only = state.permissions.is_only(tool);
 
             let style = if is_selected {
                 Style::default().fg(theme::TEXT_PRIMARY).bg(accent_color)
+            } else if is_only {
+                Style::default().fg(theme::ACCENT_WARNING)
             } else if is_allowed && is_denied {
                 // Conflict - highlight
                 Style::default().fg(theme::ACCENT_WARNING)
@@ -473,7 +622,9 @@ fn render_tool_selector(f: &mut Frame, area: Rect, state: &NudgeFormState, avail
             };
 
             // Show status indicator
-            let prefix = if is_allowed && is_denied {
+            let prefix = if is_only {
+                "⚡ "
+            } else if is_allowed && is_denied {
                 "⚠ "
             } else if is_allowed {
                 "✓ "
@@ -520,10 +671,14 @@ fn render_permission_column(
     tools: &[String],
     accent_color: ratatui::style::Color,
     is_adding: bool,
+    state: &NudgeFormState,
+    column_type: &str, // "allow" or "deny"
 ) {
+    let is_selecting_this = state.selecting_configured && !is_adding;
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(if is_adding {
+        .border_style(Style::default().fg(if is_adding || is_selecting_this {
             accent_color
         } else {
             theme::BORDER_INACTIVE
@@ -538,9 +693,29 @@ fn render_permission_column(
             .style(Style::default().fg(theme::TEXT_DIM));
         f.render_widget(empty, inner);
     } else {
+        // Calculate which tool indices belong to this column
+        let configured = state.get_configured_tools();
+        let allow_count = state.permissions.allow_tools.len();
+
         for (i, tool) in tools.iter().take(inner.height as usize).enumerate() {
-            let line = Paragraph::new(format!(" • {}", tool))
-                .style(Style::default().fg(theme::TEXT_PRIMARY));
+            // Determine if this tool is selected
+            let global_idx = if column_type == "allow" {
+                i
+            } else {
+                allow_count + i
+            };
+
+            let is_selected = state.selecting_configured
+                && state.configured_tool_index < configured.len()
+                && global_idx == state.configured_tool_index;
+
+            let style = if is_selected {
+                Style::default().fg(theme::TEXT_PRIMARY).bg(accent_color)
+            } else {
+                Style::default().fg(theme::TEXT_PRIMARY)
+            };
+
+            let line = Paragraph::new(format!(" • {}", tool)).style(style);
             f.render_widget(line, Rect::new(inner.x, inner.y + i as u16, inner.width, 1));
         }
     }
@@ -553,6 +728,12 @@ fn render_review_step(f: &mut Frame, area: Rect, state: &NudgeFormState) {
     f.render_widget(label, Rect::new(area.x, area.y, area.width, 1));
 
     let mut y = area.y + 2;
+
+    // Render any validation errors first
+    let error_height = render_validation_errors(f, Rect::new(area.x, y, area.width, 4), state);
+    if error_height > 0 {
+        y += error_height + 1; // Add spacing after errors
+    }
 
     // Title
     let title_line = Line::from(vec![
@@ -584,17 +765,56 @@ fn render_review_step(f: &mut Frame, area: Rect, state: &NudgeFormState) {
     }
 
     // Permissions summary
-    let allow_count = state.permissions.allow_tools.len();
-    let deny_count = state.permissions.deny_tools.len();
-    if allow_count > 0 || deny_count > 0 {
-        let perms_line = Line::from(vec![
-            Span::styled("Permissions: ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(format!("{} allowed", allow_count), Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled(", ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(format!("{} denied", deny_count), Style::default().fg(theme::ACCENT_ERROR)),
-        ]);
-        f.render_widget(Paragraph::new(perms_line), Rect::new(area.x, y, area.width, 1));
-        y += 1;
+    if state.permissions.is_exclusive_mode() {
+        let only_count = state.permissions.only_tools.len();
+        if only_count > 0 {
+            let perms_line = Line::from(vec![
+                Span::styled("Mode: ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled("EXCLUSIVE", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled(" - ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(format!("{} exact tools", only_count), Style::default().fg(theme::ACCENT_WARNING)),
+            ]);
+            f.render_widget(Paragraph::new(perms_line), Rect::new(area.x, y, area.width, 1));
+            y += 1;
+
+            // Show the tools
+            let tools_preview: String = state.permissions.only_tools.iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suffix = if only_count > 5 { format!(" +{} more", only_count - 5) } else { String::new() };
+            let tools_line = Line::from(vec![
+                Span::styled("  Tools: ", Style::default().fg(theme::TEXT_DIM)),
+                Span::styled(tools_preview, Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(suffix, Style::default().fg(theme::TEXT_DIM)),
+            ]);
+            f.render_widget(Paragraph::new(tools_line), Rect::new(area.x, y, area.width, 1));
+            y += 1;
+        } else {
+            let warning_line = Line::from(vec![
+                Span::styled("⚠ Mode: ", Style::default().fg(theme::ACCENT_ERROR)),
+                Span::styled("EXCLUSIVE with NO tools", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled(" - agent will have no tools!", Style::default().fg(theme::ACCENT_ERROR)),
+            ]);
+            f.render_widget(Paragraph::new(warning_line), Rect::new(area.x, y, area.width, 1));
+            y += 1;
+        }
+    } else {
+        let allow_count = state.permissions.allow_tools.len();
+        let deny_count = state.permissions.deny_tools.len();
+        if allow_count > 0 || deny_count > 0 {
+            let perms_line = Line::from(vec![
+                Span::styled("Mode: ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled("ADDITIVE", Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(" - ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(format!("{} allowed", allow_count), Style::default().fg(theme::ACCENT_SUCCESS)),
+                Span::styled(", ", Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(format!("{} denied", deny_count), Style::default().fg(theme::ACCENT_ERROR)),
+            ]);
+            f.render_widget(Paragraph::new(perms_line), Rect::new(area.x, y, area.width, 1));
+            y += 1;
+        }
     }
 
     y += 1;
@@ -629,17 +849,43 @@ fn render_step_hints(f: &mut Frame, area: Rect, state: &NudgeFormState) {
             "Type to edit · ↑↓←→ navigate · Tab next · Shift+Tab prev · Esc cancel"
         }
         NudgeFormStep::Permissions => {
-            "a add allow · d add deny · x remove · Enter next · Backspace prev · Esc cancel"
+            if state.permissions.is_exclusive_mode() {
+                "1/2 switch mode · o add only-tool · x remove · Enter next · Backspace prev · Esc cancel"
+            } else {
+                "1/2 switch mode · a allow · d deny · x remove · Enter next · Backspace prev · Esc cancel"
+            }
         }
         NudgeFormStep::Review => {
-            if state.can_submit() {
+            let errors = state.get_submission_errors();
+            if errors.is_empty() {
                 "Enter submit · Backspace prev · Esc cancel"
             } else {
-                "Complete required fields first · Backspace prev · Esc cancel"
+                // Show first validation error as hint
+                "⚠ Fix errors above · Backspace prev · Esc cancel"
             }
         }
     };
 
     let hint_para = Paragraph::new(hints).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hint_para, area);
+}
+
+/// Render validation errors in the review step
+fn render_validation_errors(f: &mut Frame, area: Rect, state: &NudgeFormState) -> u16 {
+    let errors = state.get_submission_errors();
+    if errors.is_empty() {
+        return 0;
+    }
+
+    let mut y = area.y;
+    for error in &errors {
+        let error_line = Line::from(vec![
+            Span::styled("⚠ ", Style::default().fg(theme::ACCENT_ERROR)),
+            Span::styled(error.as_str(), Style::default().fg(theme::ACCENT_ERROR)),
+        ]);
+        f.render_widget(Paragraph::new(error_line), Rect::new(area.x, y, area.width, 1));
+        y += 1;
+    }
+
+    errors.len() as u16
 }
