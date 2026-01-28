@@ -3,6 +3,7 @@
 //! Each command is defined once with its key, label, section, availability condition,
 //! and execution function. No duplication between display and execution.
 
+use crate::jaeger;
 use crate::models::Message;
 use crate::nostr::NostrCommand;
 use crate::store::{get_raw_event_json, get_trace_context};
@@ -848,14 +849,15 @@ fn open_message_trace(app: &mut App) {
     if let Some(item) = grouped.get(app.selected_message_index()) {
         if let Some(id) = get_message_id(item) {
             if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
-                let url = format!(
-                    "http://localhost:16686/trace/{}?uiFind={}",
-                    trace_ctx.trace_id, trace_ctx.span_id
-                );
-                #[cfg(target_os = "macos")]
-                let _ = std::process::Command::new("open").arg(&url).spawn();
-                #[cfg(target_os = "linux")]
-                let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                let jaeger_endpoint = app.preferences.borrow().jaeger_endpoint().to_string();
+                match jaeger::open_trace(&jaeger_endpoint, &trace_ctx.trace_id, Some(&trace_ctx.span_id)) {
+                    Ok(()) => {
+                        app.set_warning_status("Opening trace in browser...");
+                    }
+                    Err(e) => {
+                        app.set_warning_status(&format!("Failed to open trace: {}", e));
+                    }
+                }
             }
         }
     }
@@ -864,11 +866,15 @@ fn open_message_trace(app: &mut App) {
 fn open_conversation_trace(app: &mut App) {
     if let Some(thread) = app.selected_thread() {
         let trace_id = &thread.id[..32.min(thread.id.len())];
-        let url = format!("http://localhost:16686/trace/{}", trace_id);
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(&url).spawn();
-        #[cfg(target_os = "linux")]
-        let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+        let jaeger_endpoint = app.preferences.borrow().jaeger_endpoint().to_string();
+        match jaeger::open_trace(&jaeger_endpoint, trace_id, None) {
+            Ok(()) => {
+                app.set_warning_status("Opening trace in browser...");
+            }
+            Err(e) => {
+                app.set_warning_status(&format!("Failed to open trace: {}", e));
+            }
+        }
     }
 }
 
