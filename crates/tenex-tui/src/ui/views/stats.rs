@@ -3,10 +3,12 @@
 //! - Total running cost with metric cards
 //! - Cost per project table
 //! - Top conversations by runtime
+//! - Per-day message counts (user vs all) bar chart
 //!
-//! The Stats view has two subtabs:
+//! The Stats view has three subtabs:
 //! - Chart: Shows the 14-day LLM runtime chart (full height)
 //! - Rankings: Shows Cost by Project and Top Conversations tables side-by-side
+//! - Messages: Shows message counts per day (current user vs all project messages)
 //!
 //! Uses a modern dashboard layout with bordered sections and theme colors.
 
@@ -33,6 +35,12 @@ const BAR_EIGHTH: char = '▏';
 // Layout constants for consistent width calculations
 const CHART_LABEL_WIDTH: u16 = 22; // Space needed for date label + runtime display
 const MIN_CHART_WIDTH: u16 = CHART_LABEL_WIDTH; // Minimum width for chart to render
+
+// Messages chart needs extra space for "user/all" counts (e.g., "123/456")
+const MESSAGES_COUNTS_WIDTH: u16 = 8; // Extra width for dual count display
+const MESSAGES_LABEL_WIDTH: u16 = CHART_LABEL_WIDTH + MESSAGES_COUNTS_WIDTH; // Total label area for messages chart
+const MIN_MESSAGES_CHART_WIDTH: u16 = MESSAGES_LABEL_WIDTH; // Minimum width before falling back to empty state
+
 const TABLE_INSET: u16 = 2; // Padding inside table blocks
 const TABLE_COST_COL_WIDTH: u16 = 10; // Width for cost/runtime columns
 const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
@@ -79,6 +87,9 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
             (id.clone(), title, *runtime)
         })
         .collect();
+
+    // 5. Messages by day (user vs all)
+    let (user_messages_by_day, all_messages_by_day) = data_store.get_messages_by_day(STATS_WINDOW_DAYS);
 
     drop(data_store); // Release borrow
 
@@ -128,6 +139,10 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
             render_cost_by_project_table(f, &cost_by_project, table_chunks[0]);
             render_top_conversations_table(f, &top_conv_with_titles, table_chunks[1]);
         }
+        StatsSubtab::Messages => {
+            // Messages per day bar chart (user vs all)
+            render_messages_chart(f, &user_messages_by_day, &all_messages_by_day, vertical_chunks[2]);
+        }
     }
 }
 
@@ -147,6 +162,7 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     // Build the subtab pills
     let chart_active = active_subtab == StatsSubtab::Chart;
     let rankings_active = active_subtab == StatsSubtab::Rankings;
+    let messages_active = active_subtab == StatsSubtab::Messages;
 
     let mut spans = vec![Span::raw(" ")];
 
@@ -182,6 +198,26 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     } else {
         spans.push(Span::styled(
             " Rankings ",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_SECONDARY),
+        ));
+    }
+
+    spans.push(Span::raw("  "));
+
+    // Messages tab
+    if messages_active {
+        spans.push(Span::styled(
+            " Messages ",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::BG_TAB_ACTIVE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " Messages ",
             Style::default()
                 .fg(theme::TEXT_MUTED)
                 .bg(theme::BG_SECONDARY),
@@ -360,6 +396,131 @@ fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect
                 Span::styled(bar, Style::default().fg(theme::ACCENT_PRIMARY)),
                 Span::styled(
                     format!(" {}", runtime_str),
+                    Style::default().fg(theme::TEXT_PRIMARY),
+                ),
+            ]));
+        } else {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>7} ", day_label),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
+                Span::styled(
+                    format!("{} ", card::LIST_BULLET_GLYPH),
+                    Style::default().fg(theme::TEXT_DIM),
+                ),
+                Span::styled("—", Style::default().fg(theme::TEXT_DIM)),
+            ]));
+        }
+    }
+
+    // Add padding at top if we have space
+    let chart_area = Rect::new(
+        inner.x + 1,
+        inner.y + 1,
+        inner.width.saturating_sub(2),
+        inner.height.saturating_sub(2),
+    );
+
+    let paragraph = Paragraph::new(lines);
+    f.render_widget(paragraph, chart_area);
+}
+
+/// Render the messages bar chart showing user messages vs all messages per day
+/// Uses side-by-side bars for each day: user messages in primary color, all messages in secondary
+fn render_messages_chart(
+    f: &mut Frame,
+    user_messages_by_day: &[(u64, u64)],
+    all_messages_by_day: &[(u64, u64)],
+    area: Rect,
+) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+        .title(format!(" Messages (Last {} Days) ", STATS_WINDOW_DAYS))
+        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Width guard aligned with bar_max_width calculation (uses MIN_MESSAGES_CHART_WIDTH for consistency)
+    if inner.height < 3 || inner.width < MIN_MESSAGES_CHART_WIDTH {
+        render_empty_state(f, "Insufficient space for chart", inner);
+        return;
+    }
+
+    // Find max message count for scaling (across both user and all)
+    let max_user = user_messages_by_day.iter().map(|(_, c)| *c).max().unwrap_or(0);
+    let max_all = all_messages_by_day.iter().map(|(_, c)| *c).max().unwrap_or(0);
+    let max_count = max_user.max(max_all);
+
+    if max_count == 0 {
+        render_empty_state(f, "No message data available", inner);
+        return;
+    }
+
+    // Bar max width accounts for label + dual count display (uses same constant as width guard)
+    let bar_max_width = inner.width.saturating_sub(MESSAGES_LABEL_WIDTH) as usize;
+
+    // Build the chart data for last STATS_WINDOW_DAYS days
+    let seconds_per_day: u64 = 86400;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let today_start = (now / seconds_per_day) * seconds_per_day;
+
+    // Create maps for quick lookup
+    let user_map: std::collections::HashMap<u64, u64> =
+        user_messages_by_day.iter().cloned().collect();
+    let all_map: std::collections::HashMap<u64, u64> =
+        all_messages_by_day.iter().cloned().collect();
+
+    // Generate last STATS_WINDOW_DAYS days with proper date labels
+    // Order: newest (today) first, oldest last
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Add legend at top
+    lines.push(Line::from(vec![
+        Span::styled("        ", Style::default()),
+        Span::styled("█", Style::default().fg(theme::ACCENT_PRIMARY)),
+        Span::styled(" You  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("█", Style::default().fg(theme::ACCENT_SPECIAL)),
+        Span::styled(" All", Style::default().fg(theme::TEXT_MUTED)),
+    ]));
+    lines.push(Line::from(vec![Span::raw("")])); // Spacer
+
+    for i in 0..STATS_WINDOW_DAYS {
+        let day_start = today_start - i as u64 * seconds_per_day;
+        let user_count = user_map.get(&day_start).copied().unwrap_or(0);
+        let all_count = all_map.get(&day_start).copied().unwrap_or(0);
+
+        // Format date label using chrono for correct date calculation
+        let day_label = format_day_label_from_timestamp(day_start, today_start);
+
+        if all_count > 0 {
+            // Build user bar with fractional blocks for precise representation
+            let user_bar = create_unicode_bar(user_count, max_count, bar_max_width);
+            let user_bar_actual_len = user_bar.chars().count();
+
+            // Build all bar and extract the remainder portion (characters beyond user_bar length).
+            // This ensures consistent bar building - we use the exact characters from all_bar
+            // rather than generating new full blocks, avoiding overflow from fractional differences.
+            let all_bar = create_unicode_bar(all_count, max_count, bar_max_width);
+
+            // Extract remainder: skip the first user_bar_actual_len characters from all_bar
+            // This gives us exactly the portion that extends beyond the user bar
+            let all_bar_remainder: String = all_bar.chars().skip(user_bar_actual_len).collect();
+
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{:>7} ", day_label),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
+                Span::styled(user_bar, Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(all_bar_remainder, Style::default().fg(theme::ACCENT_SPECIAL)),
+                Span::styled(
+                    format!(" {}/{}", user_count, all_count),
                     Style::default().fg(theme::TEXT_PRIMARY),
                 ),
             ]));
@@ -808,5 +969,66 @@ mod tests {
         // One pixel wider should give 1 character of bar space
         let bar_max_width_plus_one = (MIN_CHART_WIDTH + 1).saturating_sub(CHART_LABEL_WIDTH);
         assert_eq!(bar_max_width_plus_one, 1);
+    }
+
+    #[test]
+    fn test_bar_composition_no_overflow() {
+        // Verify that combining user_bar with all_bar remainder never exceeds max_width
+        // This tests the fix for the bar composition overflow issue
+        let max_width = 20;
+
+        // Test various user/all combinations that could cause overflow
+        let test_cases = [
+            (10, 100),  // Small user, large all
+            (50, 100),  // Half user, full all
+            (99, 100),  // Almost equal
+            (1, 100),   // Tiny user, full all
+            (0, 100),   // Zero user (edge case)
+            (100, 100), // Equal values
+            (33, 77),   // Random values
+            (17, 89),   // Values that produce fractional blocks
+        ];
+
+        for (user_count, all_count) in test_cases {
+            let user_bar = create_unicode_bar(user_count, all_count, max_width);
+            let all_bar = create_unicode_bar(all_count, all_count, max_width);
+
+            let user_bar_len = user_bar.chars().count();
+            let all_bar_len = all_bar.chars().count();
+
+            // Extract remainder the same way render_messages_chart does
+            let all_bar_remainder: String = all_bar.chars().skip(user_bar_len).collect();
+            let remainder_len = all_bar_remainder.chars().count();
+
+            let combined_len = user_bar_len + remainder_len;
+
+            assert!(
+                combined_len <= max_width,
+                "Bar overflow for user={}, all={}: user_bar_len={}, remainder_len={}, combined={} > max_width={}",
+                user_count, all_count, user_bar_len, remainder_len, combined_len, max_width
+            );
+
+            // Also verify combined equals all_bar length (no gaps)
+            assert_eq!(
+                combined_len, all_bar_len,
+                "Bar gap for user={}, all={}: combined={} != all_bar_len={}",
+                user_count, all_count, combined_len, all_bar_len
+            );
+        }
+    }
+
+    #[test]
+    fn test_messages_chart_width_guard() {
+        // Verify MIN_MESSAGES_CHART_WIDTH is properly defined
+        // and bar_max_width calculation is consistent
+        let bar_max_width = MIN_MESSAGES_CHART_WIDTH.saturating_sub(MESSAGES_LABEL_WIDTH);
+        assert_eq!(bar_max_width, 0, "At minimum width, bar area should be zero");
+
+        // Verify MESSAGES_LABEL_WIDTH includes both label and counts
+        assert_eq!(
+            MESSAGES_LABEL_WIDTH,
+            CHART_LABEL_WIDTH + MESSAGES_COUNTS_WIDTH,
+            "Messages label width should be chart label + counts width"
+        );
     }
 }
