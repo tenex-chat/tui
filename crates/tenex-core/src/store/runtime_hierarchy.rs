@@ -243,8 +243,10 @@ impl RuntimeHierarchy {
     /// Calculate total runtime for a conversation including all descendants (recursive)
     /// This implements the hierarchical rollup:
     /// - conv1 = conv1_runtime + conv2_total + conv3_total + ...
+    /// Returns the total runtime (individual + descendants) in seconds
     pub fn get_total_runtime(&self, conversation_id: &str) -> u64 {
-        self.get_total_runtime_with_visited(conversation_id, &mut HashSet::new())
+        let total_ms = self.get_total_runtime_with_visited(conversation_id, &mut HashSet::new());
+        total_ms / 1000  // Convert milliseconds to seconds
     }
 
     /// Internal recursive implementation with cycle detection
@@ -526,8 +528,10 @@ impl RuntimeHierarchy {
     /// Calculate total runtime for a conversation including all descendants,
     /// but ONLY counting runtime from conversations created after RUNTIME_CUTOFF_TIMESTAMP.
     /// This is used for stats display to exclude pre-cutoff data.
+    /// Returns filtered total runtime in seconds (excludes pre-cutoff conversations)
     fn get_total_runtime_filtered(&self, conversation_id: &str) -> u64 {
-        self.get_total_runtime_filtered_with_visited(conversation_id, &mut HashSet::new())
+        let total_ms = self.get_total_runtime_filtered_with_visited(conversation_id, &mut HashSet::new());
+        total_ms / 1000  // Convert milliseconds to seconds
     }
 
     /// Internal recursive implementation with cycle detection and timestamp filtering
@@ -601,12 +605,12 @@ mod tests {
         hierarchy.add_child("conv1", "conv2");
         hierarchy.add_child("conv2", "conv3");
 
-        // conv3: 5min
-        assert_eq!(hierarchy.get_total_runtime("conv3"), 300_000);
-        // conv2: 30s + 5min = 5min30s
-        assert_eq!(hierarchy.get_total_runtime("conv2"), 330_000);
-        // conv1: 10s + 30s + 5min = 5min40s
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 340_000);
+        // conv3: 5min = 300 seconds
+        assert_eq!(hierarchy.get_total_runtime("conv3"), 300);
+        // conv2: 30s + 5min = 5min30s = 330 seconds
+        assert_eq!(hierarchy.get_total_runtime("conv2"), 330);
+        // conv1: 10s + 30s + 5min = 5min40s = 340 seconds
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 340);
     }
 
     #[test]
@@ -621,7 +625,7 @@ mod tests {
         hierarchy.add_child("conv1", "conv3");
 
         // conv1: 10s + 20s + 30s = 60s
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 60_000);
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 60); // 60 seconds
     }
 
     #[test]
@@ -636,7 +640,7 @@ mod tests {
 
         // Should not infinite loop, should only count each once
         let total = hierarchy.get_total_runtime("conv1");
-        assert_eq!(total, 30_000); // 10s + 20s, no infinite loop
+        assert_eq!(total, 30); // 10s + 20s = 30 seconds, no infinite loop
     }
 
     #[test]
@@ -648,7 +652,7 @@ mod tests {
         hierarchy.add_child("conv1", "conv1");
 
         assert!(!hierarchy.has_children("conv1"));
-        assert_eq!(hierarchy.get_total_runtime("conv1"), 10_000);
+        assert_eq!(hierarchy.get_total_runtime("conv1"), 10); // 10 seconds
     }
 
     #[test]
@@ -695,8 +699,8 @@ mod tests {
         hierarchy.set_parent("child", "parent1");
 
         // Verify initial state
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 40_000); // 10k + 30k
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 20_000); // just itself
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 40); // 10s + 30s
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 20); // just itself
         assert!(hierarchy.has_children("parent1"));
         assert!(!hierarchy.has_children("parent2"));
 
@@ -707,11 +711,11 @@ mod tests {
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent2".to_string()));
 
         // Old parent should no longer include child's runtime
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 10_000); // just itself now
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 10); // just itself now
         assert!(!hierarchy.has_children("parent1")); // no more children
 
         // New parent should include child's runtime
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // 20k + 30k
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // 20s + 30s
         assert!(hierarchy.has_children("parent2"));
     }
 
@@ -732,8 +736,8 @@ mod tests {
         hierarchy.set_parent("child2", "parent1");
 
         // Verify initial state
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 80_000); // 10k + 30k + 40k
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 20_000); // just itself
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 80); // 10s + 30s + 40s
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 20); // just itself
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 2);
         assert!(hierarchy.get_children("parent1").unwrap().contains("child1"));
         assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
@@ -742,14 +746,14 @@ mod tests {
         hierarchy.set_parent("child1", "parent2");
 
         // Verify: parent1 retains child2
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 50_000); // 10k + 40k (child2 only)
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 50); // 10s + 40s (child2 only)
         assert!(hierarchy.has_children("parent1")); // still has children
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 1);
         assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
         assert!(!hierarchy.get_children("parent1").unwrap().contains("child1")); // child1 gone
 
         // Verify: parent2 gained child1
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // 20k + 30k
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // 20s + 30s
         assert!(hierarchy.has_children("parent2"));
         assert_eq!(hierarchy.get_children("parent2").unwrap().len(), 1);
         assert!(hierarchy.get_children("parent2").unwrap().contains("child1"));
@@ -774,21 +778,21 @@ mod tests {
         hierarchy.set_parent("parent", "grandparent");
         hierarchy.set_parent("child", "parent");
 
-        // grandparent total = 10k + (20k + 30k) = 60k
-        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60_000);
-        // parent total = 20k + 30k = 50k
-        assert_eq!(hierarchy.get_total_runtime("parent"), 50_000);
+        // grandparent total = 10s + (20s + 30s) = 60s
+        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60);
+        // parent total = 20s + 30s = 50s
+        assert_eq!(hierarchy.get_total_runtime("parent"), 50);
 
         // Re-parent child directly to grandparent
         hierarchy.set_parent("child", "grandparent");
 
         // Now: grandparent -> parent, grandparent -> child (siblings)
-        // parent total = 20k (no children)
-        assert_eq!(hierarchy.get_total_runtime("parent"), 20_000);
+        // parent total = 20s (no children)
+        assert_eq!(hierarchy.get_total_runtime("parent"), 20);
         assert!(!hierarchy.has_children("parent"));
 
-        // grandparent total = 10k + 20k + 30k = 60k (same total, different structure)
-        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60_000);
+        // grandparent total = 10s + 20s + 30s = 60s (same total, different structure)
+        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60);
         assert!(hierarchy.has_children("grandparent"));
         assert_eq!(hierarchy.get_children("grandparent").unwrap().len(), 2);
     }
@@ -808,7 +812,7 @@ mod tests {
 
         // Should still work correctly
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent"), 30_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 30); // 30 seconds
         assert!(hierarchy.has_children("parent"));
         // Children set should have exactly 1 child (no duplicates)
         assert_eq!(hierarchy.get_children("parent").unwrap().len(), 1);
@@ -828,14 +832,14 @@ mod tests {
         hierarchy.add_child("parent1", "child");
 
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent1".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 40_000);
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 40); // 40 seconds
 
         // Use add_child again to re-parent (should work because it uses set_parent)
         hierarchy.add_child("parent2", "child");
 
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent2".to_string()));
-        assert_eq!(hierarchy.get_total_runtime("parent1"), 10_000); // old parent lost child
-        assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // new parent gained child
+        assert_eq!(hierarchy.get_total_runtime("parent1"), 10); // old parent lost child (10 seconds)
+        assert_eq!(hierarchy.get_total_runtime("parent2"), 50); // new parent gained child (50 seconds)
     }
 
     #[test]
@@ -857,9 +861,9 @@ mod tests {
         assert_eq!(hierarchy.get_parent("child"), Some(&"parent_b".to_string()));
 
         // parent_a should no longer include child
-        assert_eq!(hierarchy.get_total_runtime("parent_a"), 10_000);
+        assert_eq!(hierarchy.get_total_runtime("parent_a"), 10); // 10 seconds
         // parent_b should now include child
-        assert_eq!(hierarchy.get_total_runtime("parent_b"), 50_000);
+        assert_eq!(hierarchy.get_total_runtime("parent_b"), 50); // 50 seconds
     }
 
     #[test]
@@ -874,13 +878,13 @@ mod tests {
 
         // Add children incrementally
         hierarchy.set_parent("child1", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 30_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 30); // 30 seconds
 
         hierarchy.set_parent("child2", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 60_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 60); // 60 seconds
 
         hierarchy.set_parent("child3", "parent");
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
 
         // Verify all children are tracked
         let children = hierarchy.get_children("parent").unwrap();
@@ -929,7 +933,7 @@ mod tests {
         hierarchy.set_parent("grandchild", "child1");
 
         // Hierarchical runtime for parent = 10k + 20k + 30k + 40k = 100k ms (correct for that conversation)
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
 
         // But total unique runtime = sum of all individual runtimes = 100k ms = 100 secs
         // (same value, but conceptually each conversation counted once)
@@ -940,7 +944,7 @@ mod tests {
         hierarchy.set_conversation_created_at("unrelated", valid_timestamp);
 
         // Parent's hierarchical runtime unchanged
-        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100); // 100 seconds
 
         // But total unique runtime now includes unrelated = 150k ms = 150 secs
         assert_eq!(hierarchy.get_total_unique_runtime(), 150);

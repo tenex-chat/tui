@@ -733,7 +733,8 @@ fn render_top_conversations_table(
         .enumerate()
         .map(|(idx, (_id, title, runtime))| {
             let truncated_title = truncate_with_ellipsis(title, title_col_max_width);
-            let runtime_str = format_runtime(*runtime);
+            // runtime is in seconds, convert to ms for format_runtime
+            let runtime_str = format_runtime(*runtime * 1000);
             let bg = if idx % 2 == 0 {
                 theme::BG_APP
             } else {
