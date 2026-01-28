@@ -85,16 +85,9 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Status bar at the very bottom (always visible)
-    // Uses RuntimeHierarchy for persistent today's runtime + estimated growth from active agents
-    // Color reflects agent activity: green = active, red = inactive
     let statusbar_area = if has_tabs { chunks[4] } else { chunks[3] };
-    let mut data_store = app.data_store.borrow_mut();
-    let today_runtime = data_store.get_today_unique_runtime(); // Persistent Nostr data
-    let unconfirmed_runtime = data_store.unconfirmed_runtime_secs() * 1000; // Estimated from active agents
-    let cumulative_runtime = today_runtime.saturating_add(unconfirmed_runtime);
-    let has_active_agents = data_store.has_active_agents();
-    drop(data_store); // Release borrow before render
-    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime, has_active_agents);
+    let (cumulative_runtime_ms, has_active_agents) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime_ms, has_active_agents);
 
     // Projects modal overlay
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
