@@ -1267,6 +1267,63 @@ impl App {
         self.notifications.current()
     }
 
+    /// Get the thread_id from the current notification (if it has one)
+    pub fn current_notification_thread_id(&self) -> Option<String> {
+        self.notifications.current().and_then(|n| n.thread_id.clone())
+    }
+
+    /// Jump to the thread referenced by the current notification (if any)
+    /// Uses the canonical open_thread_from_home navigation flow to ensure proper
+    /// project/agent/branch context, draft restore, sidebar updates, and view history.
+    /// Returns true if we successfully navigated to the thread.
+    pub fn jump_to_notification_thread(&mut self) -> bool {
+        // Get thread_id from current notification
+        let Some(thread_id) = self.current_notification_thread_id() else {
+            // No notification with thread_id - show error (no notification to dismiss here)
+            self.notify(Notification::warning("No message to jump to"));
+            return false;
+        };
+
+        // Get thread and project info from data store
+        let lookup_result = {
+            let store = self.data_store.borrow();
+            let thread = store.get_thread_by_id(&thread_id).cloned();
+            let a_tag = store.find_project_for_thread(&thread_id);
+            (thread, a_tag)
+        };
+
+        match lookup_result {
+            (Some(thread), Some(project_a_tag)) => {
+                // Save current draft before navigating (mirrors other navigation paths)
+                self.save_chat_draft();
+
+                // Dismiss the notification first since we're about to navigate
+                self.dismiss_notification();
+
+                // Use canonical navigation flow - this handles:
+                // - Project/agent/branch context setup
+                // - Draft restoration
+                // - Sidebar updates
+                // - View history tracking
+                // - Auto-opening pending ask modals
+                self.open_thread_from_home(&thread, &project_a_tag);
+                true
+            }
+            (None, _) => {
+                // Thread not found - show error and dismiss stale notification
+                self.dismiss_notification();
+                self.notify(Notification::warning("Thread no longer exists"));
+                false
+            }
+            (_, None) => {
+                // Project not found - show error and dismiss stale notification
+                self.dismiss_notification();
+                self.notify(Notification::warning("Project for thread not found"));
+                false
+            }
+        }
+    }
+
     /// Scroll up by the given amount, clamping to valid range
     pub fn scroll_up(&mut self, amount: usize) {
         // First clamp scroll_offset to max if it's above (handles usize::MAX sentinel)

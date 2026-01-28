@@ -32,6 +32,8 @@ pub struct Notification {
     pub level: NotificationLevel,
     pub duration: Duration,
     pub shown_at: Option<Instant>,
+    /// Optional thread ID for "message for you" notifications (enables jump-to-thread)
+    pub thread_id: Option<String>,
 }
 
 impl Notification {
@@ -42,6 +44,7 @@ impl Notification {
             level: NotificationLevel::Info,
             duration: Duration::from_secs(3),
             shown_at: None,
+            thread_id: None,
         }
     }
 
@@ -52,6 +55,7 @@ impl Notification {
             level: NotificationLevel::Success,
             duration: Duration::from_secs(3),
             shown_at: None,
+            thread_id: None,
         }
     }
 
@@ -62,6 +66,7 @@ impl Notification {
             level: NotificationLevel::Warning,
             duration: Duration::from_secs(4),
             shown_at: None,
+            thread_id: None,
         }
     }
 
@@ -72,6 +77,19 @@ impl Notification {
             level: NotificationLevel::Error,
             duration: Duration::from_secs(5),
             shown_at: None,
+            thread_id: None,
+        }
+    }
+
+    /// Create a message notification for a specific thread (30 second duration)
+    /// This is for "message for you" notifications that can be jumped to
+    pub fn message_for_user(message: impl Into<String>, thread_id: String) -> Self {
+        Self {
+            message: message.into(),
+            level: NotificationLevel::Warning,
+            duration: Duration::from_secs(30),
+            shown_at: None,
+            thread_id: Some(thread_id),
         }
     }
 
