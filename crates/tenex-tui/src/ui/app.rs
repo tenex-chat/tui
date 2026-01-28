@@ -2869,6 +2869,45 @@ impl App {
             .collect()
     }
 
+    /// Get a specific agent definition by ID
+    pub fn get_agent_definition(&self, id: &str) -> Option<tenex_core::models::AgentDefinition> {
+        self.data_store.borrow()
+            .get_agent_definition(id)
+            .cloned()
+    }
+
+    // ===== MCP Tool Methods =====
+
+    /// Get all MCP tools, sorted by created_at descending
+    pub fn get_mcp_tools(&self) -> Vec<tenex_core::models::MCPTool> {
+        self.data_store.borrow()
+            .get_mcp_tools()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get a specific MCP tool by ID
+    pub fn get_mcp_tool(&self, id: &str) -> Option<tenex_core::models::MCPTool> {
+        self.data_store.borrow()
+            .get_mcp_tool(id)
+            .cloned()
+    }
+
+    /// Get MCP tools filtered by a custom filter string
+    pub fn mcp_tools_filtered_by(&self, filter: &str) -> Vec<tenex_core::models::MCPTool> {
+        self.data_store.borrow()
+            .get_mcp_tools()
+            .into_iter()
+            .filter(|tool| {
+                filter.is_empty() ||
+                fuzzy_matches(&tool.name, filter) ||
+                fuzzy_matches(&tool.description, filter)
+            })
+            .cloned()
+            .collect()
+    }
+
     // ===== Search Methods =====
 
     /// Get search results based on current search_filter
