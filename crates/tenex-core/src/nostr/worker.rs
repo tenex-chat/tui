@@ -101,6 +101,7 @@ pub enum NostrCommand {
     UpdateProjectAgents {
         project_a_tag: String,
         agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
     },
     /// Create a new project (kind:31933)
     CreateProject {
@@ -315,9 +316,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to boot project: {}", e);
                         }
                     }
-                    NostrCommand::UpdateProjectAgents { project_a_tag, agent_ids } => {
+                    NostrCommand::UpdateProjectAgents { project_a_tag, agent_ids, mcp_tool_ids } => {
                         debug_log(&format!("Worker: Updating project agents for {}", project_a_tag));
-                        if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids)) {
+                        if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids, mcp_tool_ids)) {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
@@ -974,7 +975,7 @@ impl NostrWorker {
         Ok(())
     }
 
-    async fn handle_update_project_agents(&self, project_a_tag: String, agent_ids: Vec<String>) -> Result<()> {
+    async fn handle_update_project_agents(&self, project_a_tag: String, agent_ids: Vec<String>, mcp_tool_ids: Vec<String>) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
@@ -1013,6 +1014,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
                 vec![agent_id.clone()],
+            ));
+        }
+
+        // Add MCP tool tags
+        for tool_id in &mcp_tool_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+                vec![tool_id.clone()],
             ));
         }
 

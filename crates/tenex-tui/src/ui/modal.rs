@@ -114,6 +114,13 @@ impl NudgeDeleteConfirmState {
     }
 }
 
+/// What type of item is being added in project settings
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectSettingsAddMode {
+    Agent,
+    McpTool,
+}
+
 /// State for project settings modal
 #[derive(Debug, Clone)]
 pub struct ProjectSettingsState {
@@ -124,7 +131,7 @@ pub struct ProjectSettingsState {
     pub original_mcp_tool_ids: Vec<String>,
     pub pending_mcp_tool_ids: Vec<String>,
     pub selector_index: usize,
-    pub in_add_mode: bool,
+    pub in_add_mode: Option<ProjectSettingsAddMode>,
     pub add_filter: String,
     pub add_index: usize,
 }
@@ -345,7 +352,7 @@ impl ProjectSettingsState {
             original_mcp_tool_ids: mcp_tool_ids.clone(),
             pending_mcp_tool_ids: mcp_tool_ids,
             selector_index: 0,
-            in_add_mode: false,
+            in_add_mode: None,
             add_filter: String::new(),
             add_index: 0,
         }

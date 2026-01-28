@@ -36,7 +36,7 @@ pub use nudge_crud::{
     render_nudge_detail, render_nudge_delete_confirm,
 };
 pub use nudge_selector::render_nudge_selector;
-pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index};
+pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
 pub use report_viewer::render_report_viewer;
 pub use stats::render_stats;
 pub use workspace_modal::render_workspace_manager;

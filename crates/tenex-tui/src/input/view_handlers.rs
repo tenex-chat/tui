@@ -748,7 +748,8 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
 }
 
 fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
-    use ui::views::{available_agent_count, get_agent_id_at_index};
+    use ui::modal::ProjectSettingsAddMode;
+    use ui::views::{available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
 
     let code = key.code;
 
@@ -760,10 +761,10 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
         }
     };
 
-    if state.in_add_mode {
+    if let Some(add_mode) = state.in_add_mode {
         match code {
             KeyCode::Esc => {
-                state.in_add_mode = false;
+                state.in_add_mode = None;
                 state.add_filter.clear();
                 state.add_index = 0;
             }
@@ -773,17 +774,32 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Down => {
-                let count = available_agent_count(app, &state);
+                let count = match add_mode {
+                    ProjectSettingsAddMode::Agent => available_agent_count(app, &state),
+                    ProjectSettingsAddMode::McpTool => available_mcp_tool_count(app, &state),
+                };
                 if state.add_index + 1 < count {
                     state.add_index += 1;
                 }
             }
             KeyCode::Enter => {
-                if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
-                    state.add_agent(agent_id);
-                    state.in_add_mode = false;
-                    state.add_filter.clear();
-                    state.add_index = 0;
+                match add_mode {
+                    ProjectSettingsAddMode::Agent => {
+                        if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
+                            state.add_agent(agent_id);
+                            state.in_add_mode = None;
+                            state.add_filter.clear();
+                            state.add_index = 0;
+                        }
+                    }
+                    ProjectSettingsAddMode::McpTool => {
+                        if let Some(tool_id) = get_mcp_tool_id_at_index(app, &state, state.add_index) {
+                            state.add_mcp_tool(tool_id);
+                            state.in_add_mode = None;
+                            state.add_filter.clear();
+                            state.add_index = 0;
+                        }
+                    }
                 }
             }
             KeyCode::Char(c) => {
@@ -814,7 +830,12 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char('a') => {
-                state.in_add_mode = true;
+                state.in_add_mode = Some(ProjectSettingsAddMode::Agent);
+                state.add_filter.clear();
+                state.add_index = 0;
+            }
+            KeyCode::Char('t') => {
+                state.in_add_mode = Some(ProjectSettingsAddMode::McpTool);
                 state.add_filter.clear();
                 state.add_index = 0;
             }
@@ -838,11 +859,13 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 if state.has_changes() {
                     let project_a_tag = state.project_a_tag.clone();
                     let agent_ids = state.pending_agent_ids.clone();
+                    let mcp_tool_ids = state.pending_mcp_tool_ids.clone();
 
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateProjectAgents {
                             project_a_tag,
                             agent_ids,
+                            mcp_tool_ids,
                         }) {
                             app.set_warning_status(&format!("Failed to update agents: {}", e));
                         } else {
