@@ -1,6 +1,6 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
-use crate::store::RuntimeHierarchy;
+use crate::store::{AgentTrackingState, RuntimeHierarchy};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -65,6 +65,10 @@ pub struct AppDataStore {
     // Runtime hierarchy - tracks individual conversation runtimes and parent-child relationships
     // for hierarchical runtime aggregation (parent runtime = own + all children recursively)
     pub runtime_hierarchy: RuntimeHierarchy,
+
+    // Real-time agent tracking - tracks active agents and estimates unconfirmed runtime.
+    // In-memory only, resets on app restart. See agent_tracking.rs for details.
+    pub agent_tracking: AgentTrackingState,
 }
 
 impl AppDataStore {
@@ -94,6 +98,7 @@ impl AppDataStore {
             pending_backend_approvals: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
+            agent_tracking: AgentTrackingState::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -132,6 +137,7 @@ impl AppDataStore {
         self.pending_backend_approvals.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
+        self.agent_tracking.clear();
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
@@ -1804,8 +1810,34 @@ impl AppDataStore {
 
     /// Shared helper to upsert an OperationsStatus into the store.
     /// Handles both JSON and Note-based event paths to eliminate duplication.
+    /// Also updates agent_tracking state for real-time active agent counts.
     fn upsert_operations_status(&mut self, status: OperationsStatus) {
         let event_id = status.event_id.clone();
+
+        // Use thread_id (conversation root) for tracking, falling back to event_id
+        // This ensures per-conversation (not per-event) timestamp tracking
+        let conversation_id = status.thread_id.as_deref().unwrap_or(&status.event_id);
+
+        // Update agent tracking state for real-time monitoring
+        // We pass None for current_project to track ALL active agents across all projects
+        // (status bar should show green when ANY agent is active on ANY project)
+        let processed = self.agent_tracking.process_24133_event(
+            conversation_id,
+            &status.agent_pubkeys,
+            status.created_at,
+            &status.project_coordinate,
+            None, // Track all projects, not filtered
+        );
+
+        // Skip processing if event was rejected (stale/out-of-order)
+        if !processed {
+            return;
+        }
+
+        // If llm-runtime tag is present, add confirmed runtime
+        if let Some(runtime_secs) = status.llm_runtime_secs {
+            self.agent_tracking.add_confirmed_runtime(runtime_secs);
+        }
 
         // If no agents are working, remove the entry (event is no longer being processed)
         if status.agent_pubkeys.is_empty() {
@@ -1898,6 +1930,27 @@ impl AppDataStore {
             .values()
             .filter(|s| !s.agent_pubkeys.is_empty())
             .count()
+    }
+
+    // ===== Real-Time Agent Tracking Methods =====
+
+    /// Check if any agents are currently active (across all projects).
+    /// Used to determine status bar color (green = active, red = inactive).
+    pub fn has_active_agents(&self) -> bool {
+        self.agent_tracking.has_active_agents()
+    }
+
+    /// Get the count of active agent instances.
+    /// Example: agent1 + agent2 on conv1, agent1 on conv2 = 3 instances.
+    pub fn active_agent_count(&self) -> usize {
+        self.agent_tracking.active_agent_count()
+    }
+
+    /// Get the total tracked runtime (confirmed + unconfirmed) in seconds.
+    /// - Confirmed: from llm-runtime tags when agents complete
+    /// - Unconfirmed: estimated from how long active agents have been running
+    pub fn tracked_runtime_secs(&self) -> u64 {
+        self.agent_tracking.total_runtime_secs()
     }
 
     /// Get thread info for an event ID (could be thread root or message within thread).

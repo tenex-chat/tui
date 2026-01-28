@@ -15,6 +15,8 @@ pub struct OperationsStatus {
     pub created_at: u64,
     /// Thread ID (conversation root) - extracted from q-tag or e-tag with "root" marker
     pub thread_id: Option<String>,
+    /// LLM runtime in seconds - extracted from llm-runtime tag when agent completes
+    pub llm_runtime_secs: Option<u64>,
 }
 
 impl OperationsStatus {
@@ -54,6 +56,7 @@ impl OperationsStatus {
         let mut agent_pubkeys: Vec<String> = Vec::new();
         let mut project_coordinate: Option<String> = None;
         let mut thread_id: Option<String> = None;
+        let mut llm_runtime_secs: Option<u64> = None;
 
         for tag_value in tags_value {
             // Skip malformed tags gracefully (tolerant parsing like ProjectStatus)
@@ -99,6 +102,16 @@ impl OperationsStatus {
                         }
                     }
                 }
+                "llm-runtime" => {
+                    // LLM runtime in seconds: ["llm-runtime", "<seconds>"]
+                    if llm_runtime_secs.is_none() {
+                        if let Some(s) = tag_arr.get(1).and_then(|v| v.as_str()) {
+                            llm_runtime_secs = s.parse::<u64>().ok();
+                        } else if let Some(n) = tag_arr.get(1).and_then(|v| v.as_u64()) {
+                            llm_runtime_secs = Some(n);
+                        }
+                    }
+                }
                 // "P" (uppercase) is user pubkey - ignored for OperationsStatus
                 _ => {}
             }
@@ -119,6 +132,7 @@ impl OperationsStatus {
             project_coordinate,
             created_at,
             thread_id,
+            llm_runtime_secs,
         })
     }
 
@@ -135,6 +149,7 @@ impl OperationsStatus {
         let mut agent_pubkeys: Vec<String> = Vec::new();
         let mut project_coordinate: Option<String> = None;
         let mut thread_id: Option<String> = None;
+        let mut llm_runtime_secs: Option<u64> = None;
 
         for tag in note.tags() {
             // Skip malformed tags gracefully
@@ -188,6 +203,14 @@ impl OperationsStatus {
                         }
                     }
                 }
+                "llm-runtime" => {
+                    // LLM runtime in seconds: ["llm-runtime", "<seconds>"]
+                    if llm_runtime_secs.is_none() {
+                        if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                            llm_runtime_secs = s.parse::<u64>().ok();
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -207,6 +230,7 @@ impl OperationsStatus {
             project_coordinate,
             created_at: note.created_at(),
             thread_id,
+            llm_runtime_secs,
         })
     }
 
