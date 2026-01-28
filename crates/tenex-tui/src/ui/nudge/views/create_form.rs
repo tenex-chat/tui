@@ -505,9 +505,12 @@ fn render_exclusive_mode_content(f: &mut Frame, area: Rect, state: &NudgeFormSta
             };
 
             // Safe width calculation with saturating_sub
+            // Use char-safe truncation to avoid UTF-8 boundary panic
             let max_tool_len = inner.width.saturating_sub(4) as usize;
-            let display = if tool.len() > max_tool_len {
-                format!("• {}…", &tool[..max_tool_len.saturating_sub(1)])
+            let char_count = tool.chars().count();
+            let display = if char_count > max_tool_len {
+                let truncated: String = tool.chars().take(max_tool_len.saturating_sub(1)).collect();
+                format!("• {}…", truncated)
             } else {
                 format!("• {}", tool)
             };
