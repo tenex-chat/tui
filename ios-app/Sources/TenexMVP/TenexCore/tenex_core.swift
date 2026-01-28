@@ -511,6 +511,22 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func archiveConversation(conversationId: String) 
     
     /**
+     * Get agents for a project.
+     *
+     * Returns agents configured for the specified project.
+     * Returns an error if the store cannot be accessed.
+     */
+    func getAgents(projectId: String) throws  -> [AgentInfo]
+    
+    /**
+     * Get all available agents (not filtered by project).
+     *
+     * Returns all known agent definitions.
+     * Returns an error if the store cannot be accessed.
+     */
+    func getAllAgents() throws  -> [AgentInfo]
+    
+    /**
      * Get all conversations across all projects with full info for the Conversations tab.
      * Returns conversations with activity tracking, archive status, and hierarchy data.
      * Sorted by: active conversations first (by effective_last_activity desc),
@@ -633,6 +649,22 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func refresh()  -> Bool
     
     /**
+     * Send a message to an existing conversation.
+     *
+     * Creates a new kind:1 event with e-tag pointing to the thread root.
+     * Returns the event ID on success.
+     */
+    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    
+    /**
+     * Send a new conversation (thread) to a project.
+     *
+     * Creates a new kind:1 event with title tag and project a-tag.
+     * Returns the event ID on success.
+     */
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    
+    /**
      * Set collapsed thread IDs (replace all).
      */
     func setCollapsedThreadIds(threadIds: [String]) 
@@ -743,6 +775,33 @@ open func archiveConversation(conversationId: String)  {try! rustCall() {
         FfiConverterString.lower(conversationId),$0
     )
 }
+}
+    
+    /**
+     * Get agents for a project.
+     *
+     * Returns agents configured for the specified project.
+     * Returns an error if the store cannot be accessed.
+     */
+open func getAgents(projectId: String)throws  -> [AgentInfo]  {
+    return try  FfiConverterSequenceTypeAgentInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_agents(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
+     * Get all available agents (not filtered by project).
+     *
+     * Returns all known agent definitions.
+     * Returns an error if the store cannot be accessed.
+     */
+open func getAllAgents()throws  -> [AgentInfo]  {
+    return try  FfiConverterSequenceTypeAgentInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_all_agents(self.uniffiClonePointer(),$0
+    )
+})
 }
     
     /**
@@ -964,6 +1023,40 @@ open func refresh() -> Bool  {
 }
     
     /**
+     * Send a message to an existing conversation.
+     *
+     * Creates a new kind:1 event with e-tag pointing to the thread root.
+     * Returns the event ID on success.
+     */
+open func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
+    return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_send_message(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),
+        FfiConverterString.lower(projectId),
+        FfiConverterString.lower(content),
+        FfiConverterOptionString.lower(agentPubkey),$0
+    )
+})
+}
+    
+    /**
+     * Send a new conversation (thread) to a project.
+     *
+     * Creates a new kind:1 event with title tag and project a-tag.
+     * Returns the event ID on success.
+     */
+open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
+    return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),
+        FfiConverterString.lower(title),
+        FfiConverterString.lower(content),
+        FfiConverterOptionString.lower(agentPubkey),$0
+    )
+})
+}
+    
+    /**
      * Set collapsed thread IDs (replace all).
      */
 open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
@@ -1082,6 +1175,175 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 }
 
 
+
+
+/**
+ * An agent definition for FFI export.
+ */
+public struct AgentInfo {
+    /**
+     * Unique identifier of the agent (event ID)
+     */
+    public var id: String
+    /**
+     * Agent's public key (hex)
+     */
+    public var pubkey: String
+    /**
+     * Agent's d-tag (slug)
+     */
+    public var dTag: String
+    /**
+     * Display name of the agent
+     */
+    public var name: String
+    /**
+     * Description of the agent's purpose
+     */
+    public var description: String
+    /**
+     * Role of the agent (e.g., "Developer", "PM")
+     */
+    public var role: String
+    /**
+     * Profile picture URL, if any
+     */
+    public var picture: String?
+    /**
+     * Model used by the agent (e.g., "claude-3-opus")
+     */
+    public var model: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unique identifier of the agent (event ID)
+         */id: String, 
+        /**
+         * Agent's public key (hex)
+         */pubkey: String, 
+        /**
+         * Agent's d-tag (slug)
+         */dTag: String, 
+        /**
+         * Display name of the agent
+         */name: String, 
+        /**
+         * Description of the agent's purpose
+         */description: String, 
+        /**
+         * Role of the agent (e.g., "Developer", "PM")
+         */role: String, 
+        /**
+         * Profile picture URL, if any
+         */picture: String?, 
+        /**
+         * Model used by the agent (e.g., "claude-3-opus")
+         */model: String?) {
+        self.id = id
+        self.pubkey = pubkey
+        self.dTag = dTag
+        self.name = name
+        self.description = description
+        self.role = role
+        self.picture = picture
+        self.model = model
+    }
+}
+
+#if compiler(>=6)
+extension AgentInfo: Sendable {}
+#endif
+
+
+extension AgentInfo: Equatable, Hashable {
+    public static func ==(lhs: AgentInfo, rhs: AgentInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.dTag != rhs.dTag {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.role != rhs.role {
+            return false
+        }
+        if lhs.picture != rhs.picture {
+            return false
+        }
+        if lhs.model != rhs.model {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(pubkey)
+        hasher.combine(dTag)
+        hasher.combine(name)
+        hasher.combine(description)
+        hasher.combine(role)
+        hasher.combine(picture)
+        hasher.combine(model)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAgentInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AgentInfo {
+        return
+            try AgentInfo(
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                dTag: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                role: FfiConverterString.read(from: &buf), 
+                picture: FfiConverterOptionString.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AgentInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.dTag, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterString.write(value.role, into: &buf)
+        FfiConverterOptionString.write(value.picture, into: &buf)
+        FfiConverterOptionString.write(value.model, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentInfo_lift(_ buf: RustBuffer) throws -> AgentInfo {
+    return try FfiConverterTypeAgentInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAgentInfo_lower(_ value: AgentInfo) -> RustBuffer {
+    return FfiConverterTypeAgentInfo.lower(value)
+}
 
 
 /**
@@ -2637,6 +2899,91 @@ public func FfiConverterTypeReportInfo_lower(_ value: ReportInfo) -> RustBuffer 
 
 
 /**
+ * Result of sending a message.
+ */
+public struct SendMessageResult {
+    /**
+     * Event ID of the published message
+     */
+    public var eventId: String
+    /**
+     * Whether the message was successfully sent
+     */
+    public var success: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event ID of the published message
+         */eventId: String, 
+        /**
+         * Whether the message was successfully sent
+         */success: Bool) {
+        self.eventId = eventId
+        self.success = success
+    }
+}
+
+#if compiler(>=6)
+extension SendMessageResult: Sendable {}
+#endif
+
+
+extension SendMessageResult: Equatable, Hashable {
+    public static func ==(lhs: SendMessageResult, rhs: SendMessageResult) -> Bool {
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.success != rhs.success {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(eventId)
+        hasher.combine(success)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSendMessageResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SendMessageResult {
+        return
+            try SendMessageResult(
+                eventId: FfiConverterString.read(from: &buf), 
+                success: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SendMessageResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterBool.write(value.success, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendMessageResult_lift(_ buf: RustBuffer) throws -> SendMessageResult {
+    return try FfiConverterTypeSendMessageResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) -> RustBuffer {
+    return FfiConverterTypeSendMessageResult.lower(value)
+}
+
+
+/**
  * Information about the current logged-in user.
  */
 public struct UserInfo {
@@ -3143,6 +3490,31 @@ fileprivate struct FfiConverterSequenceString: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAgentInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [AgentInfo]
+
+    public static func write(_ value: [AgentInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAgentInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AgentInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AgentInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAgentInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeConversationFullInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ConversationFullInfo]
 
@@ -3358,6 +3730,12 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_archive_conversation() != 34495) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 48100) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_all_agents() != 27201) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_all_conversations() != 64629) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -3410,6 +3788,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 31823) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 26591) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {

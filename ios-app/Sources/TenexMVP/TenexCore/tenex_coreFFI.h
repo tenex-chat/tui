@@ -272,6 +272,16 @@ void*_Nonnull uniffi_tenex_core_fn_constructor_tenexcore_new(RustCallStatus *_No
 void uniffi_tenex_core_fn_method_tenexcore_archive_conversation(void*_Nonnull ptr, RustBuffer conversation_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_AGENTS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_AGENTS
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_agents(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_ALL_AGENTS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_ALL_AGENTS
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_all_agents(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_ALL_CONVERSATIONS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_ALL_CONVERSATIONS
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_all_conversations(void*_Nonnull ptr, RustBuffer filter, RustCallStatus *_Nonnull out_status
@@ -360,6 +370,16 @@ void uniffi_tenex_core_fn_method_tenexcore_logout(void*_Nonnull ptr, RustCallSta
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
 int8_t uniffi_tenex_core_fn_method_tenexcore_refresh(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_MESSAGE
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_message(void*_Nonnull ptr, RustBuffer conversation_id, RustBuffer project_id, RustBuffer content, RustBuffer agent_pubkey, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, RustBuffer project_id, RustBuffer title, RustBuffer content, RustBuffer agent_pubkey, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_COLLAPSED_THREAD_IDS
@@ -678,6 +698,18 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_archive_conversation(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_AGENTS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_AGENTS
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_agents(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_ALL_AGENTS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_ALL_AGENTS
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_all_agents(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_ALL_CONVERSATIONS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_ALL_CONVERSATIONS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_all_conversations(void
@@ -783,6 +815,18 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_logout(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_refresh(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SEND_MESSAGE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SEND_MESSAGE
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_send_message(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SEND_THREAD
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SEND_THREAD
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_send_thread(void
     
 );
 #endif

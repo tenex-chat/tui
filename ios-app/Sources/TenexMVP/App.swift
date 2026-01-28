@@ -77,7 +77,7 @@ class TenexCoreManager: ObservableObject {
                 case .InvalidNsec(let message):
                     // Provably invalid - should delete stored credential
                     return .invalidCredential(error: message)
-                case .NotLoggedIn, .Internal, .LogoutFailed:
+                case .NotLoggedIn, .Internal, .LogoutFailed, .LockError, .CoreNotInitialized:
                     // These are transient/unexpected - don't delete credentials
                     return .transientError(error: error.localizedDescription)
                 }
