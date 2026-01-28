@@ -1957,6 +1957,10 @@ impl AppDataStore {
     /// If query is empty, returns all messages from the pubkey (up to limit).
     /// If project_a_tag is Some, filters to only that project.
     ///
+    /// For non-empty queries, uses NostrDB fulltext search to find candidate messages
+    /// first (which also finds messages not yet in memory), then filters by user pubkey.
+    /// For empty queries, falls back to in-memory scan of loaded messages.
+    ///
     /// Uses the same search semantics as conversation search:
     /// - '+' operator splits query into multiple terms (AND semantics)
     /// - ASCII case-insensitive matching for consistency with highlighting
@@ -1967,11 +1971,120 @@ impl AppDataStore {
         project_a_tag: Option<&str>,
         limit: usize,
     ) -> Vec<(String, String, u64, Option<String>)> {
-        use crate::search::{parse_search_terms, text_contains_term};
-        use std::collections::HashMap;
+        use crate::search::parse_search_terms;
 
         // Parse query into search terms (splits on '+', lowercases, trims)
         let terms = parse_search_terms(query);
+
+        // For non-empty queries, use NostrDB fulltext search first to get candidates
+        // This catches messages that may not be loaded into memory yet
+        if !terms.is_empty() {
+            return self.search_user_messages_with_db(user_pubkey, &terms, project_a_tag, limit);
+        }
+
+        // Empty query: fall back to in-memory scan (shows all recent messages)
+        self.search_user_messages_in_memory(user_pubkey, &terms, project_a_tag, limit)
+    }
+
+    /// Search user messages using NostrDB fulltext search for each term,
+    /// then intersect results and post-filter by user pubkey.
+    fn search_user_messages_with_db(
+        &self,
+        user_pubkey: &str,
+        terms: &[String],
+        project_a_tag: Option<&str>,
+        limit: usize,
+    ) -> Vec<(String, String, u64, Option<String>)> {
+        use crate::search::text_contains_term;
+        use nostrdb::Transaction;
+        use std::collections::HashMap;
+
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            // Fall back to in-memory if DB unavailable
+            return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+        };
+
+        // Precompute thread_id -> project_a_tag mapping
+        let thread_to_project: HashMap<&str, &str> = self
+            .threads_by_project
+            .iter()
+            .flat_map(|(a_tag, threads)| {
+                threads.iter().map(move |t| (t.id.as_str(), a_tag.as_str()))
+            })
+            .collect();
+
+        // Search using the first term to get candidate notes
+        // (text_search returns notes directly, which is more efficient)
+        let db_limit = (limit * 10).min(1000) as i32;
+        let Ok(notes) = self.ndb.text_search(&txn, &terms[0], None, db_limit) else {
+            // Fall back to in-memory if DB search fails
+            return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+        };
+
+        // Filter and process candidates directly from the search results
+        let mut results: Vec<(String, String, u64, Option<String>)> = Vec::new();
+
+        for note in notes.iter() {
+            // Only kind:1 messages
+            if note.kind() != 1 {
+                continue;
+            }
+
+            // Filter by user pubkey
+            let note_pubkey = hex::encode(note.pubkey());
+            if note_pubkey != user_pubkey {
+                continue;
+            }
+
+            let content = note.content().to_string();
+            let event_id = hex::encode(note.id());
+
+            // Post-filter: verify ALL terms match with our ASCII case-insensitive logic
+            // (NostrDB search may use different matching semantics, and we need multi-term AND)
+            let all_match = terms
+                .iter()
+                .all(|term| text_contains_term(&content, term));
+            if !all_match {
+                continue;
+            }
+
+            // Get thread ID and project for filtering
+            let thread_id = Self::extract_thread_id_from_note(note);
+            let thread_project = thread_id
+                .as_ref()
+                .and_then(|tid| thread_to_project.get(tid.as_str()).copied());
+
+            // Filter by project if specified
+            if let Some(filter_a_tag) = project_a_tag {
+                if thread_project != Some(filter_a_tag) {
+                    continue;
+                }
+            }
+
+            results.push((
+                event_id,
+                content,
+                note.created_at(),
+                thread_project.map(String::from),
+            ));
+        }
+
+        // Sort by recency and apply limit
+        results.sort_by(|a, b| b.2.cmp(&a.2));
+        results.truncate(limit);
+        results
+    }
+
+    /// Search user messages using in-memory scan (for empty queries)
+    fn search_user_messages_in_memory(
+        &self,
+        user_pubkey: &str,
+        terms: &[String],
+        project_a_tag: Option<&str>,
+        limit: usize,
+    ) -> Vec<(String, String, u64, Option<String>)> {
+        use crate::search::text_contains_term;
+        use std::collections::HashMap;
 
         // Precompute thread_id -> project_a_tag mapping once
         let thread_to_project: HashMap<&str, &str> = self
