@@ -2367,20 +2367,22 @@ impl AppDataStore {
 
     /// Get statusbar runtime data: cumulative runtime in milliseconds and active agent status.
     ///
-    /// Returns `(runtime_ms, has_active_agents)` where:
+    /// Returns `(runtime_ms, has_active_agents, active_agent_count)` where:
     /// - `runtime_ms`: Today's total unique runtime (persistent Nostr data) + estimated runtime
     ///   from currently active agents, all in milliseconds.
     /// - `has_active_agents`: Whether any agents are currently working (for status color).
+    /// - `active_agent_count`: Number of active agent instances (agent+conversation pairs).
     ///
     /// This is the single source of truth for statusbar runtime display, eliminating
     /// duplicate assembly logic across render files. The `* 1000` conversion from seconds
     /// to milliseconds happens here, in one place.
-    pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool) {
+    pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool, usize) {
         let today_runtime_ms = self.runtime_hierarchy.get_today_unique_runtime();
         let unconfirmed_runtime_ms = self.agent_tracking.unconfirmed_runtime_secs() * 1000;
         let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
         let has_active_agents = self.agent_tracking.has_active_agents();
-        (cumulative_runtime_ms, has_active_agents)
+        let active_agent_count = self.agent_tracking.active_agent_count();
+        (cumulative_runtime_ms, has_active_agents, active_agent_count)
     }
 
     /// Get active agents for a specific conversation.
