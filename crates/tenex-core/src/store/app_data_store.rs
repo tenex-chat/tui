@@ -2060,13 +2060,6 @@ impl AppDataStore {
         self.agent_tracking.active_agent_count()
     }
 
-    /// Get the total tracked runtime (confirmed + unconfirmed) in seconds.
-    /// - Confirmed: from llm-runtime tags when agents complete
-    /// - Unconfirmed: estimated from how long active agents have been running
-    pub fn tracked_runtime_secs(&self) -> u64 {
-        self.agent_tracking.total_runtime_secs()
-    }
-
     /// Get only the confirmed runtime in seconds (from llm-runtime tags).
     /// This excludes the estimated unconfirmed runtime from active agents.
     #[cfg(test)]
@@ -2079,6 +2072,24 @@ impl AppDataStore {
     /// Used to augment RuntimeHierarchy's today runtime with real-time estimates.
     pub fn unconfirmed_runtime_secs(&self) -> u64 {
         self.agent_tracking.unconfirmed_runtime_secs()
+    }
+
+    /// Get statusbar runtime data: cumulative runtime in milliseconds and active agent status.
+    ///
+    /// Returns `(runtime_ms, has_active_agents)` where:
+    /// - `runtime_ms`: Today's total unique runtime (persistent Nostr data) + estimated runtime
+    ///   from currently active agents, all in milliseconds.
+    /// - `has_active_agents`: Whether any agents are currently working (for status color).
+    ///
+    /// This is the single source of truth for statusbar runtime display, eliminating
+    /// duplicate assembly logic across render files. The `* 1000` conversion from seconds
+    /// to milliseconds happens here, in one place.
+    pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool) {
+        let today_runtime_ms = self.runtime_hierarchy.get_today_unique_runtime();
+        let unconfirmed_runtime_ms = self.agent_tracking.unconfirmed_runtime_secs() * 1000;
+        let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
+        let has_active_agents = self.agent_tracking.has_active_agents();
+        (cumulative_runtime_ms, has_active_agents)
     }
 
     /// Get active agents for a specific conversation.

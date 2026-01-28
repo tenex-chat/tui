@@ -33,7 +33,7 @@ fn format_runtime(total_ms: u64) -> String {
 const TODAY_LABEL: &str = "Today: ";
 
 /// Minimum width for the runtime column.
-/// Ensures column doesn't collapse below "Today: MM:SS " (14 chars) + 1 left padding + 2 buffer = 17
+/// Ensures column doesn't collapse below "Today: MM:SS " (13 chars) + 1 left padding + 3 buffer = 17
 const RUNTIME_COLUMN_MIN_WIDTH: u16 = 17;
 
 /// Format the full runtime label string (e.g., "Today: 05:32 ")
