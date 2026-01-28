@@ -105,9 +105,14 @@ impl AppDataStore {
     }
 
     pub fn set_user_pubkey(&mut self, pubkey: String) {
+        let pubkey_changed = self.user_pubkey.as_ref() != Some(&pubkey);
         self.user_pubkey = Some(pubkey.clone());
         // Populate inbox from existing messages
         self.populate_inbox_from_existing(&pubkey);
+        // Rebuild message counts if user changed (ensures historical counts are accurate)
+        if pubkey_changed {
+            self.rebuild_messages_by_day_counts();
+        }
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -755,7 +760,8 @@ impl AppDataStore {
     /// Both vectors cover the same time window (num_days).
     ///
     /// Uses pre-aggregated counters for O(num_days) performance instead of O(total_messages).
-    /// Single source of truth: messages_by_thread (no double-counting from agent_chatter).
+    /// Data is queried directly from nostrdb using the `.authors()` filter for user messages
+    /// and a-tag filters for project messages (no double-counting from agent_chatter).
     pub fn get_messages_by_day(&self, num_days: usize) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
         // Guard against zero days
         if num_days == 0 {
@@ -796,28 +802,186 @@ impl AppDataStore {
         (user_result, all_result)
     }
 
-    /// Rebuild message counts by day from messages_by_thread.
-    /// Called during startup after messages are loaded.
-    /// Single source of truth: messages_by_thread only (no agent_chatter to avoid double-counting).
+    /// Rebuild message counts by day from nostrdb directly.
+    /// Called during startup after messages are loaded, and when user pubkey changes.
+    ///
+    /// This queries nostrdb directly to get accurate counts:
+    /// - User messages: ALL kind:1 events authored by the current user's pubkey (using .authors() filter)
+    /// - All messages: ALL kind:1 events that a-tag any of our projects
+    ///
+    /// Uses pagination to iterate through ALL results without arbitrary caps.
+    /// This approach is more accurate than using messages_by_thread because it captures
+    /// ALL user messages regardless of whether they're associated with a project thread.
     fn rebuild_messages_by_day_counts(&mut self) {
         self.messages_by_day_counts.clear();
 
         let seconds_per_day: u64 = 86400;
-        let current_user = self.user_pubkey.as_deref();
+        let batch_size: i32 = 10_000; // Process in batches to avoid memory issues
+        let user_pubkey = self.user_pubkey.clone();
 
-        // Iterate through all messages in messages_by_thread
-        for messages in self.messages_by_thread.values() {
-            for msg in messages {
-                let day_start = (msg.created_at / seconds_per_day) * seconds_per_day;
+        // Collect project a-tags for the "all" query
+        let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
 
-                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+        // Query user messages directly from nostrdb using .authors() filter (efficient server-side filtering)
+        if let Some(ref user_pk) = user_pubkey {
+            // Convert hex pubkey to bytes for .authors() filter
+            if let Ok(pubkey_bytes) = hex::decode(user_pk) {
+                if pubkey_bytes.len() == 32 {
+                    let pubkey_array: [u8; 32] = pubkey_bytes.try_into().unwrap();
 
-                // Increment all count
-                entry.1 += 1;
+                    match Transaction::new(&self.ndb) {
+                        Ok(txn) => {
+                            // Paginate through ALL user messages using until timestamp
+                            let mut until_timestamp: Option<u64> = None;
+                            let mut total_user_messages: u64 = 0;
 
-                // Increment user count if matches current user
-                if current_user == Some(msg.pubkey.as_str()) {
-                    entry.0 += 1;
+                            loop {
+                                let mut filter_builder = nostrdb::Filter::new()
+                                    .kinds([1])
+                                    .authors([&pubkey_array]);
+
+                                if let Some(until) = until_timestamp {
+                                    filter_builder = filter_builder.until(until);
+                                }
+
+                                let filter = filter_builder.build();
+
+                                match self.ndb.query(&txn, &[filter], batch_size) {
+                                    Ok(results) => {
+                                        if results.is_empty() {
+                                            break; // No more results
+                                        }
+
+                                        let mut oldest_timestamp: Option<u64> = None;
+
+                                        for result in results.iter() {
+                                            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                                                let created_at = note.created_at();
+                                                let day_start = (created_at / seconds_per_day) * seconds_per_day;
+                                                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+                                                entry.0 += 1;
+                                                total_user_messages += 1;
+
+                                                // Track oldest for pagination
+                                                match oldest_timestamp {
+                                                    None => oldest_timestamp = Some(created_at),
+                                                    Some(t) if created_at < t => oldest_timestamp = Some(created_at),
+                                                    _ => {}
+                                                }
+                                            }
+                                        }
+
+                                        // If we got fewer results than batch_size, we're done
+                                        if results.len() < (batch_size as usize) {
+                                            break;
+                                        }
+
+                                        // Set until to oldest - 1 to get the next page (avoid duplicates)
+                                        match oldest_timestamp {
+                                            Some(t) if t > 0 => until_timestamp = Some(t - 1),
+                                            _ => break, // No valid timestamp to continue pagination
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Failed to query user messages from nostrdb: {:?}", e);
+                                        break;
+                                    }
+                                }
+                            }
+
+                            trace!("Counted {} total user messages", total_user_messages);
+                        }
+                        Err(e) => {
+                            warn!("Failed to create transaction for user messages query: {:?}", e);
+                        }
+                    }
+                } else {
+                    warn!("Invalid user pubkey length: {} (expected 32 bytes)", pubkey_bytes.len());
+                }
+            } else {
+                warn!("Failed to decode user pubkey from hex: {}", user_pk);
+            }
+        }
+
+        // Query all project messages directly from nostrdb (kind:1 with a-tag matching our projects)
+        if !project_a_tags.is_empty() {
+            match Transaction::new(&self.ndb) {
+                Ok(txn) => {
+                    // Track seen event IDs to avoid double-counting messages that a-tag multiple projects
+                    let mut seen_event_ids: HashSet<[u8; 32]> = HashSet::new();
+                    let mut total_project_messages: u64 = 0;
+
+                    for a_tag in &project_a_tags {
+                        // Paginate through ALL messages for this project
+                        let mut until_timestamp: Option<u64> = None;
+
+                        loop {
+                            let mut filter_builder = nostrdb::Filter::new()
+                                .kinds([1])
+                                .tags([a_tag.as_str()], 'a');
+
+                            if let Some(until) = until_timestamp {
+                                filter_builder = filter_builder.until(until);
+                            }
+
+                            let filter = filter_builder.build();
+
+                            match self.ndb.query(&txn, &[filter], batch_size) {
+                                Ok(results) => {
+                                    if results.is_empty() {
+                                        break; // No more results for this project
+                                    }
+
+                                    let mut oldest_timestamp: Option<u64> = None;
+
+                                    for result in results.iter() {
+                                        if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                                            let event_id = *note.id();
+
+                                            // Skip if we've already counted this event (multi-project a-tags)
+                                            if seen_event_ids.contains(&event_id) {
+                                                continue;
+                                            }
+                                            seen_event_ids.insert(event_id);
+
+                                            let created_at = note.created_at();
+                                            let day_start = (created_at / seconds_per_day) * seconds_per_day;
+                                            let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+                                            entry.1 += 1;
+                                            total_project_messages += 1;
+
+                                            // Track oldest for pagination
+                                            match oldest_timestamp {
+                                                None => oldest_timestamp = Some(created_at),
+                                                Some(t) if created_at < t => oldest_timestamp = Some(created_at),
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+
+                                    // If we got fewer results than batch_size, we're done with this project
+                                    if results.len() < (batch_size as usize) {
+                                        break;
+                                    }
+
+                                    // Set until to oldest - 1 to get the next page (avoid duplicates)
+                                    match oldest_timestamp {
+                                        Some(t) if t > 0 => until_timestamp = Some(t - 1),
+                                        _ => break, // No valid timestamp to continue pagination
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Failed to query project messages for a-tag '{}': {:?}", a_tag, e);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    trace!("Counted {} total project messages (deduplicated)", total_project_messages);
+                }
+                Err(e) => {
+                    warn!("Failed to create transaction for project messages query: {:?}", e);
                 }
             }
         }
