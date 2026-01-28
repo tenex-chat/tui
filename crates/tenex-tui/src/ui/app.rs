@@ -96,7 +96,6 @@ pub enum HomeTab {
     Conversations,
     Inbox,
     Reports,
-    Status,
     Feed,
     ActiveWork,
     Stats,
@@ -2147,58 +2146,6 @@ impl App {
             self.preferences.borrow_mut().set_thread_archived(thread_id, true);
         }
         self.notify(Notification::info(&format!("Archived {} conversations", count)));
-    }
-
-    /// Get threads with status metadata, sorted by activity
-    /// Returns threads that have status_label OR status_current_activity
-    /// Now properly filters by visible projects FIRST, then applies time filter without arbitrary limits.
-    pub fn status_threads(&self) -> Vec<(Thread, String)> {
-        // Empty visible_projects = show nothing
-        if self.visible_projects.is_empty() {
-            return vec![];
-        }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        // Calculate time cutoff if time filter is active
-        let time_cutoff = self.home.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
-
-        // Get threads from visible projects with time filter applied at the data layer
-        // No artificial limit - time filter is the primary constraint
-        let threads = self.data_store.borrow().get_recent_threads_for_projects(
-            &self.visible_projects,
-            time_cutoff,
-            None,
-        );
-
-        let prefs = self.preferences.borrow();
-
-        let mut status_threads: Vec<(Thread, String)> = threads.into_iter()
-            // Must have status metadata (label or current activity)
-            .filter(|(thread, _)| {
-                thread.status_label.is_some() || thread.status_current_activity.is_some()
-            })
-            // Archive filter
-            .filter(|(thread, _)| {
-                self.home.show_archived || !prefs.is_thread_archived(&thread.id)
-            })
-            .collect();
-
-        // Sort: threads with current_activity first, then by effective_last_activity descending
-        status_threads.sort_by(|(a, _), (b, _)| {
-            let a_has_activity = a.status_current_activity.is_some();
-            let b_has_activity = b.status_current_activity.is_some();
-            match (a_has_activity, b_has_activity) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => b.effective_last_activity.cmp(&a.effective_last_activity),
-            }
-        });
-
-        status_threads
     }
 
     /// Get recent threads across all projects for Home view (filtered by visible_projects, time_filter, archived)

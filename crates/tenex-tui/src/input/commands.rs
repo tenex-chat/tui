@@ -75,7 +75,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Status)
+                && matches!(app.home_panel_focus, HomeTab::Conversations)
         },
         execute: |app| {
             let threads = app.recent_threads();
@@ -138,7 +138,7 @@ pub static COMMANDS: &[Command] = &[
                 && !app.sidebar_focused
                 && matches!(
                     app.home_panel_focus,
-                    HomeTab::Conversations | HomeTab::Inbox | HomeTab::Status
+                    HomeTab::Conversations | HomeTab::Inbox
                 ))
                 || app.view == View::Chat
         },
@@ -151,7 +151,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             (app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Status))
+                && matches!(app.home_panel_focus, HomeTab::Conversations))
                 || app.view == View::Chat
         },
         execute: |app| {
@@ -1040,33 +1040,6 @@ fn archive_toggle(app: &mut App) {
                             };
                             app.set_warning_status(&status);
                         }
-                    }
-                }
-                HomeTab::Status => {
-                    let status_items = app.status_threads();
-                    if let Some((thread, _)) = status_items.get(app.current_selection()) {
-                        let thread_id = thread.id.clone();
-                        let thread_title = thread.title.clone();
-                        let is_now_archived = app.toggle_thread_archived(&thread_id);
-
-                        app.last_undo_action = Some(if is_now_archived {
-                            UndoAction::ThreadArchived {
-                                thread_id,
-                                thread_title: thread_title.clone(),
-                            }
-                        } else {
-                            UndoAction::ThreadUnarchived {
-                                thread_id,
-                                thread_title: thread_title.clone(),
-                            }
-                        });
-
-                        let status = if is_now_archived {
-                            format!("Archived: {} (Ctrl+T u to undo)", thread_title)
-                        } else {
-                            format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
-                        };
-                        app.set_warning_status(&status);
                     }
                 }
                 _ => {
