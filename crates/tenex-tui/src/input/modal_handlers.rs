@@ -5,6 +5,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::jaeger;
 use crate::nostr::NostrCommand;
 use crate::ui;
 use crate::ui::modal::AppSetting;
@@ -2982,20 +2983,35 @@ fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 match state.selected_setting() {
                     Some(AppSetting::JaegerEndpoint) => {
                         let new_endpoint = state.jaeger_endpoint_input.clone();
-                        let save_result =
-                            app.preferences.borrow_mut().set_jaeger_endpoint(new_endpoint);
-                        match save_result {
-                            Ok(()) => {
-                                app.set_warning_status("Jaeger endpoint saved");
+
+                        // Validate the endpoint before saving
+                        match jaeger::validate_and_normalize_endpoint(&new_endpoint) {
+                            Ok(normalized) => {
+                                // Save the normalized endpoint
+                                let save_result =
+                                    app.preferences.borrow_mut().set_jaeger_endpoint(normalized);
+                                match save_result {
+                                    Ok(()) => {
+                                        app.set_warning_status("Jaeger endpoint saved");
+                                        state.stop_editing();
+                                    }
+                                    Err(e) => {
+                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                        // Don't stop editing - let user fix the issue
+                                    }
+                                }
                             }
                             Err(e) => {
-                                app.set_warning_status(&format!("Failed to save: {}", e));
+                                // Validation failed - show error and keep editing
+                                app.set_warning_status(&format!("Invalid endpoint: {}", e));
+                                // Don't stop editing - let user fix the issue
                             }
                         }
                     }
-                    None => {}
+                    None => {
+                        state.stop_editing();
+                    }
                 }
-                state.stop_editing();
             } else {
                 // Start editing the currently selected setting
                 state.start_editing();
