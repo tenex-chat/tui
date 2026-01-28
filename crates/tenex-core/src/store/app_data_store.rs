@@ -1811,8 +1811,15 @@ impl AppDataStore {
     /// Shared helper to upsert an OperationsStatus into the store.
     /// Handles both JSON and Note-based event paths to eliminate duplication.
     /// Also updates agent_tracking state for real-time active agent counts.
+    ///
+    /// ## Event Semantics:
+    /// Each 24133 event is an authoritative snapshot of active agents for a conversation.
+    /// The nostr_event_id (the 24133 event's own ID) is used for:
+    /// 1. Same-second ordering (tiebreaker when timestamps match)
+    /// 2. Runtime deduplication (prevent double-counting on replays)
     fn upsert_operations_status(&mut self, status: OperationsStatus) {
         let event_id = status.event_id.clone();
+        let nostr_event_id = status.nostr_event_id.clone();
 
         // Use thread_id (conversation root) for tracking, falling back to event_id
         // This ensures per-conversation (not per-event) timestamp tracking
@@ -1823,6 +1830,7 @@ impl AppDataStore {
         // (status bar should show green when ANY agent is active on ANY project)
         let processed = self.agent_tracking.process_24133_event(
             conversation_id,
+            &nostr_event_id, // Pass nostr_event_id for same-second ordering
             &status.agent_pubkeys,
             status.created_at,
             &status.project_coordinate,
@@ -1834,9 +1842,10 @@ impl AppDataStore {
             return;
         }
 
-        // If llm-runtime tag is present, add confirmed runtime
+        // If llm-runtime tag is present, add confirmed runtime (with deduplication)
         if let Some(runtime_secs) = status.llm_runtime_secs {
-            self.agent_tracking.add_confirmed_runtime(runtime_secs);
+            // add_confirmed_runtime handles deduplication by nostr_event_id internally
+            self.agent_tracking.add_confirmed_runtime(&nostr_event_id, runtime_secs);
         }
 
         // If no agents are working, remove the entry (event is no longer being processed)
@@ -1951,6 +1960,13 @@ impl AppDataStore {
     /// - Unconfirmed: estimated from how long active agents have been running
     pub fn tracked_runtime_secs(&self) -> u64 {
         self.agent_tracking.total_runtime_secs()
+    }
+
+    /// Get only the confirmed runtime in seconds (from llm-runtime tags).
+    /// This excludes the estimated unconfirmed runtime from active agents.
+    #[cfg(test)]
+    pub fn confirmed_runtime_secs(&self) -> u64 {
+        self.agent_tracking.confirmed_runtime_secs()
     }
 
     /// Get thread info for an event ID (could be thread root or message within thread).
@@ -2479,5 +2495,233 @@ mod tests {
         );
 
         assert_eq!(results.len(), 3, "Empty query should return all 3 messages");
+    }
+
+    // ===== Agent Tracking Integration Tests =====
+
+    /// Test handle_status_event_json parses and routes 24133 events correctly
+    #[test]
+    fn test_handle_status_event_json_24133() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Valid 24133 event JSON
+        let json = r#"{
+            "kind": 24133,
+            "id": "abc123",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conv123"],
+                ["p", "agent1"],
+                ["p", "agent2"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        // Should not panic and should update state
+        store.handle_status_event_json(json);
+
+        // Verify agent tracking state was updated
+        assert!(store.has_active_agents());
+        assert_eq!(store.active_agent_count(), 2);
+    }
+
+    /// Test handle_status_event_json ignores malformed JSON
+    #[test]
+    fn test_handle_status_event_json_malformed() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Malformed JSON should not panic
+        store.handle_status_event_json("{ invalid json }");
+        store.handle_status_event_json("");
+        store.handle_status_event_json("null");
+
+        // State should remain empty
+        assert!(!store.has_active_agents());
+    }
+
+    /// Test handle_status_event_json ignores unknown kinds
+    #[test]
+    fn test_handle_status_event_json_unknown_kind() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Event with unknown kind (not 24010 or 24133)
+        let json = r#"{
+            "kind": 12345,
+            "id": "xyz",
+            "created_at": 1000,
+            "tags": []
+        }"#;
+
+        store.handle_status_event_json(json);
+
+        // Should not affect any state
+        assert!(!store.has_active_agents());
+    }
+
+    /// Test upsert_operations_status updates agent tracking with deduplication
+    #[test]
+    fn test_upsert_operations_status_runtime_deduplication() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // First 24133 event with llm-runtime (agent finishes work - empty p-tags)
+        // Using empty p-tags to test only confirmed runtime (no active agents to inflate total)
+        let json1 = r#"{
+            "kind": 24133,
+            "id": "event1",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conv123"],
+                ["a", "31933:user:project"],
+                ["llm-runtime", "100"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json1);
+        // Use confirmed_runtime_secs to isolate from unconfirmed runtime
+        assert_eq!(store.confirmed_runtime_secs(), 100);
+
+        // Same event again (simulating replay) - should NOT double-count
+        store.handle_status_event_json(json1);
+        assert_eq!(store.confirmed_runtime_secs(), 100); // Still 100, not 200
+
+        // Different event with runtime - should add
+        let json2 = r#"{
+            "kind": 24133,
+            "id": "event2",
+            "created_at": 1001,
+            "tags": [
+                ["e", "conv123"],
+                ["a", "31933:user:project"],
+                ["llm-runtime", "50"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json2);
+        assert_eq!(store.confirmed_runtime_secs(), 150); // 100 + 50
+    }
+
+    /// Test upsert_operations_status handles same-second events with different event IDs
+    #[test]
+    fn test_upsert_operations_status_same_second_ordering() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // First event at t=1000
+        let json1 = r#"{
+            "kind": 24133,
+            "id": "aaa",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conv123"],
+                ["p", "agent1"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json1);
+        assert_eq!(store.active_agent_count(), 1);
+
+        // Second event at same timestamp with different (larger) event_id
+        let json2 = r#"{
+            "kind": 24133,
+            "id": "bbb",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conv123"],
+                ["p", "agent2"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json2);
+        // Should accept the second event (bbb > aaa lexicographically)
+        assert_eq!(store.active_agent_count(), 1);
+    }
+
+    /// Test upsert_operations_status uses thread_id for conversation tracking
+    #[test]
+    fn test_upsert_operations_status_thread_id_tracking() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Event with q-tag (thread_id)
+        let json = r#"{
+            "kind": 24133,
+            "id": "event1",
+            "created_at": 1000,
+            "tags": [
+                ["e", "message123"],
+                ["q", "thread_root"],
+                ["p", "agent1"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json);
+
+        // Second event for same thread but different message
+        let json2 = r#"{
+            "kind": 24133,
+            "id": "event2",
+            "created_at": 1001,
+            "tags": [
+                ["e", "message456"],
+                ["q", "thread_root"],
+                ["p", "agent2"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json2);
+
+        // Should replace agent1 with agent2 (same conversation via thread_id)
+        assert_eq!(store.active_agent_count(), 1);
+    }
+
+    /// Test empty p-tags removes agents from conversation
+    #[test]
+    fn test_upsert_operations_status_empty_p_tags() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Add agent
+        let json1 = r#"{
+            "kind": 24133,
+            "id": "event1",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conv123"],
+                ["p", "agent1"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json1);
+        assert!(store.has_active_agents());
+
+        // Remove all agents with empty p-tags
+        let json2 = r#"{
+            "kind": 24133,
+            "id": "event2",
+            "created_at": 1001,
+            "tags": [
+                ["e", "conv123"],
+                ["a", "31933:user:project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json2);
+        assert!(!store.has_active_agents());
     }
 }

@@ -4,11 +4,16 @@ use nostrdb::Note;
 /// Published by the backend to indicate which agents are working on which events.
 ///
 /// Structure:
-/// - e-tag: event ID being processed
+/// - e-tag: event ID being processed (conversation/message reference)
 /// - p-tags (lowercase): agent pubkeys currently working
 /// - a-tag: project coordinate
+/// - id: the nostr event ID of this 24133 event itself
 #[derive(Debug, Clone)]
 pub struct OperationsStatus {
+    /// The nostr event ID of this 24133 event itself.
+    /// Used for deduplication and same-second ordering.
+    pub nostr_event_id: String,
+    /// The event being processed (from e-tag)
     pub event_id: String,
     pub agent_pubkeys: Vec<String>,
     pub project_coordinate: String,
@@ -35,6 +40,7 @@ impl OperationsStatus {
     /// Create from pre-parsed serde_json::Value (avoids double parsing)
     ///
     /// Kind:24133 event structure:
+    /// - id: the nostr event ID of this event
     /// - e-tag: conversation_id (event being processed)
     /// - p-tags (lowercase): agent pubkeys currently working
     /// - P-tag (uppercase): user pubkey (ignored for now)
@@ -45,6 +51,8 @@ impl OperationsStatus {
             return None;
         }
 
+        // Extract the nostr event ID (used for deduplication/ordering)
+        let nostr_event_id = event.get("id")?.as_str()?.to_string();
         let created_at = event.get("created_at")?.as_u64()?;
 
         let tags_value = event.get("tags")?.as_array()?;
@@ -127,6 +135,7 @@ impl OperationsStatus {
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 
         Some(OperationsStatus {
+            nostr_event_id,
             event_id,
             agent_pubkeys,
             project_coordinate,
@@ -141,6 +150,9 @@ impl OperationsStatus {
         if note.kind() != 24133 {
             return None;
         }
+
+        // Extract the nostr event ID (used for deduplication/ordering)
+        let nostr_event_id = hex::encode(note.id());
 
         // Collect all e-tags, tracking root vs non-root separately
         // Tolerant parsing - skip malformed tags gracefully
@@ -225,6 +237,7 @@ impl OperationsStatus {
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 
         Some(OperationsStatus {
+            nostr_event_id,
             event_id,
             agent_pubkeys,
             project_coordinate,
