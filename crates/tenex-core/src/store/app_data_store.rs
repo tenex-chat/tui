@@ -1956,6 +1956,10 @@ impl AppDataStore {
     /// Returns (event_id, content, created_at, project_a_tag) sorted by recency.
     /// If query is empty, returns all messages from the pubkey (up to limit).
     /// If project_a_tag is Some, filters to only that project.
+    ///
+    /// Uses the same search semantics as conversation search:
+    /// - '+' operator splits query into multiple terms (AND semantics)
+    /// - ASCII case-insensitive matching for consistency with highlighting
     pub fn search_user_messages(
         &self,
         user_pubkey: &str,
@@ -1963,98 +1967,64 @@ impl AppDataStore {
         project_a_tag: Option<&str>,
         limit: usize,
     ) -> Vec<(String, String, u64, Option<String>)> {
-        // Use nostrdb text search if we have a query
-        if !query.trim().is_empty() {
-            let Ok(txn) = Transaction::new(&self.ndb) else {
-                return vec![];
-            };
+        use crate::search::{parse_search_terms, text_contains_term};
+        use std::collections::HashMap;
 
-            let Ok(notes) = self.ndb.text_search(&txn, query, None, (limit * 8) as i32) else {
-                return vec![];
-            };
+        // Parse query into search terms (splits on '+', lowercases, trims)
+        let terms = parse_search_terms(query);
 
-            // Fail closed: if pubkey is invalid, return empty results (don't leak other users' messages)
-            let user_pubkey_bytes: [u8; 32] = match hex::decode(user_pubkey)
-                .ok()
-                .and_then(|b| b.try_into().ok())
-            {
-                Some(bytes) => bytes,
-                None => return vec![], // Invalid pubkey - fail closed
-            };
+        // Precompute thread_id -> project_a_tag mapping once
+        let thread_to_project: HashMap<&str, &str> = self
+            .threads_by_project
+            .iter()
+            .flat_map(|(a_tag, threads)| {
+                threads.iter().map(move |t| (t.id.as_str(), a_tag.as_str()))
+            })
+            .collect();
 
-            let mut results: Vec<(String, String, u64, Option<String>)> = notes
-                .iter()
-                .filter(|note| {
-                    // Filter by pubkey (always enforced now)
-                    if note.pubkey() != &user_pubkey_bytes {
-                        return false;
-                    }
-                    // Filter by kind:1
-                    if note.kind() != 1 {
-                        return false;
-                    }
-                    true
-                })
-                .filter_map(|note| {
-                    let event_id = hex::encode(note.id());
-                    let content = note.content().to_string();
-                    let created_at = note.created_at();
+        let mut results: Vec<(String, String, u64, Option<String>)> = Vec::new();
 
-                    // Extract project a-tag
-                    let note_project_a_tag = Self::extract_a_tag_from_note(note);
+        for (thread_id, messages) in &self.messages_by_thread {
+            // Fast project lookup using precomputed map
+            let thread_project_a_tag = thread_to_project.get(thread_id.as_str()).copied();
 
-                    // Filter by project if specified
-                    if let Some(filter_a_tag) = project_a_tag {
-                        if note_project_a_tag.as_deref() != Some(filter_a_tag) {
-                            return None;
-                        }
-                    }
+            // Filter by project if specified
+            if let Some(filter_a_tag) = project_a_tag {
+                if thread_project_a_tag != Some(filter_a_tag) {
+                    continue;
+                }
+            }
 
-                    Some((event_id, content, created_at, note_project_a_tag))
-                })
-                .collect();
+            for message in messages {
+                // Only include messages from this user
+                if message.pubkey != user_pubkey {
+                    continue;
+                }
 
-            // Sort by recency (newest first)
-            results.sort_by(|a, b| b.2.cmp(&a.2));
-            results.truncate(limit);
-            results
-        } else {
-            // No query: use in-memory search from messages_by_thread
-            let user_pubkey_str = user_pubkey;
-            let mut results: Vec<(String, String, u64, Option<String>)> = Vec::new();
-
-            for (thread_id, messages) in &self.messages_by_thread {
-                // Find project a-tag for this thread
-                let thread_project_a_tag = self.threads_by_project
-                    .iter()
-                    .find_map(|(a_tag, threads)| {
-                        threads.iter().find(|t| t.id == *thread_id).map(|_| a_tag.clone())
-                    });
-
-                // Filter by project if specified
-                if let Some(filter_a_tag) = project_a_tag {
-                    if thread_project_a_tag.as_deref() != Some(filter_a_tag) {
+                // If there are search terms, ALL must match (AND semantics)
+                // Uses ASCII case-insensitive matching like conversation search
+                if !terms.is_empty() {
+                    let all_match = terms
+                        .iter()
+                        .all(|term| text_contains_term(&message.content, term));
+                    if !all_match {
                         continue;
                     }
                 }
 
-                for message in messages {
-                    if message.pubkey == user_pubkey_str {
-                        results.push((
-                            message.id.clone(),
-                            message.content.clone(),
-                            message.created_at,
-                            thread_project_a_tag.clone(),
-                        ));
-                    }
-                }
+                results.push((
+                    message.id.clone(),
+                    message.content.clone(),
+                    message.created_at,
+                    thread_project_a_tag.map(String::from),
+                ));
             }
-
-            // Sort by recency (newest first)
-            results.sort_by(|a, b| b.2.cmp(&a.2));
-            results.truncate(limit);
-            results
         }
+
+        // Sort by recency (newest first)
+        results.sort_by(|a, b| b.2.cmp(&a.2));
+        results.truncate(limit);
+        results
     }
 
     /// Extract a-tag from a note's tags
