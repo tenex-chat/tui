@@ -538,7 +538,7 @@ impl AppDataStore {
 
     /// Calculate total LLM runtime from a set of messages.
     ///
-    /// Returns runtime in MILLISECONDS (llm-runtime tags are in seconds, we multiply by 1000)
+    /// Returns runtime in MILLISECONDS (llm-runtime tag values are already in milliseconds)
     ///
     /// Filters out messages created before RUNTIME_CUTOFF_TIMESTAMP (Jan 24, 2025)
     /// due to tracking methodology changes that make older data incomparable.
@@ -3812,7 +3812,7 @@ mod tests {
     }
 
     #[test]
-    fn test_calculate_runtime_from_messages_seconds_to_milliseconds() {
+    fn test_calculate_runtime_from_messages_sums_milliseconds() {
         // Test that llm-runtime values (already in milliseconds) are summed correctly
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400;
 
