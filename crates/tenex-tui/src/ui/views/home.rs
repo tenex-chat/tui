@@ -1345,10 +1345,15 @@ fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Build rows for the table
+    let selected_idx = app.current_selection();
+    let is_focused = app.home_panel_focus == HomeTab::ActiveWork && !app.sidebar_focused;
+
+    // Build rows for the table with selection highlighting
     let mut rows: Vec<Row> = Vec::new();
 
-    for op in &operations {
+    for (i, op) in operations.iter().enumerate() {
+        let is_selected = is_focused && i == selected_idx;
+
         // Get agent names (comma-separated if multiple)
         let agent_names: Vec<String> = op.agent_pubkeys
             .iter()
@@ -1379,16 +1384,48 @@ fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
         // Calculate duration
         let duration = crate::ui::format::format_duration_since(op.created_at);
 
+        // Set row style based on selection (use BG_SELECTED for consistency with other tabs)
+        let row_style = if is_selected {
+            Style::default().bg(theme::BG_SELECTED)
+        } else {
+            Style::default()
+        };
+
+        // Set text styles based on selection
+        let agent_style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let conv_style = if is_selected {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let project_style = if is_selected {
+            Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::ACCENT_SUCCESS)
+        };
+
+        let duration_style = if is_selected {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        // Add selection indicator
+        let bullet = if is_selected { card::BULLET } else { card::SPACER };
+        let agent_display = format!("{} {}", bullet, truncate_with_ellipsis(&agent_str, 18));
+
         rows.push(Row::new(vec![
-            Cell::from(truncate_with_ellipsis(&agent_str, 20))
-                .style(Style::default().fg(theme::TEXT_PRIMARY)),
-            Cell::from(truncate_with_ellipsis(&conv_title, 30))
-                .style(Style::default().fg(theme::TEXT_PRIMARY)),
-            Cell::from(truncate_with_ellipsis(&project_name, 20))
-                .style(Style::default().fg(theme::ACCENT_SUCCESS)),
-            Cell::from(duration)
-                .style(Style::default().fg(theme::TEXT_MUTED)),
-        ]));
+            Cell::from(agent_display).style(agent_style),
+            Cell::from(truncate_with_ellipsis(&conv_title, 30)).style(conv_style),
+            Cell::from(truncate_with_ellipsis(&project_name, 20)).style(project_style),
+            Cell::from(duration).style(duration_style),
+        ]).style(row_style));
     }
 
     drop(data_store);
