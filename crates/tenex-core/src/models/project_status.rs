@@ -231,3 +231,244 @@ impl ProjectStatus {
         self.agents.iter().find(|a| a.is_pm)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to generate common tool tags for testing
+    fn tool_tag_fixtures() -> Vec<Vec<String>> {
+        vec![
+            // Tool tags with agent assignments (3+ elements)
+            vec!["tool".to_string(), "Read".to_string(), "agent1".to_string()],
+            vec!["tool".to_string(), "Write".to_string(), "agent1".to_string()],
+            vec!["tool".to_string(), "Bash".to_string(), "agent1".to_string()],
+            // Tool tags WITHOUT agent assignments (2 elements) - these should still be collected
+            vec!["tool".to_string(), "rag_create_collection".to_string()],
+            vec!["tool".to_string(), "rag_add_documents".to_string()],
+            vec!["tool".to_string(), "rag_query".to_string()],
+            vec!["tool".to_string(), "rag_delete_collection".to_string()],
+            vec!["tool".to_string(), "rag_list_collections".to_string()],
+            vec!["tool".to_string(), "rag_subscription_create".to_string()],
+            vec!["tool".to_string(), "rag_subscription_list".to_string()],
+            vec!["tool".to_string(), "rag_subscription_get".to_string()],
+            vec!["tool".to_string(), "rag_subscription_delete".to_string()],
+            vec!["tool".to_string(), "schedule_task_cancel".to_string()],
+            vec!["tool".to_string(), "schedule_task".to_string()],
+            vec!["tool".to_string(), "schedule_task_once".to_string()],
+            vec!["tool".to_string(), "schedule_tasks_list".to_string()],
+            vec!["tool".to_string(), "kill_shell".to_string()],
+            vec!["tool".to_string(), "conversation_index".to_string()],
+        ]
+    }
+
+    /// Helper to assert that critical must-have tools are present
+    /// Only checks for unassigned tools that should always be in all_tools
+    fn assert_must_have_unassigned_tools(all_tools: &[String]) {
+        // RAG tools (unassigned)
+        assert!(all_tools.contains(&"rag_create_collection".to_string()), "Missing rag_create_collection");
+        assert!(all_tools.contains(&"rag_add_documents".to_string()), "Missing rag_add_documents");
+        assert!(all_tools.contains(&"rag_query".to_string()), "Missing rag_query");
+        assert!(all_tools.contains(&"rag_delete_collection".to_string()), "Missing rag_delete_collection");
+        assert!(all_tools.contains(&"rag_list_collections".to_string()), "Missing rag_list_collections");
+
+        // Scheduling tools (unassigned)
+        assert!(all_tools.contains(&"schedule_task_cancel".to_string()), "Missing schedule_task_cancel");
+        assert!(all_tools.contains(&"schedule_task".to_string()), "Missing schedule_task");
+        assert!(all_tools.contains(&"schedule_task_once".to_string()), "Missing schedule_task_once");
+        assert!(all_tools.contains(&"schedule_tasks_list".to_string()), "Missing schedule_tasks_list");
+
+        // Other critical tools (unassigned)
+        assert!(all_tools.contains(&"kill_shell".to_string()), "Missing kill_shell");
+        assert!(all_tools.contains(&"conversation_index".to_string()), "Missing conversation_index");
+    }
+
+    /// Helper to assert that tools with agent assignments are present
+    fn assert_assigned_tools(all_tools: &[String]) {
+        assert!(all_tools.contains(&"Read".to_string()), "Missing Read");
+        assert!(all_tools.contains(&"Write".to_string()), "Missing Write");
+        assert!(all_tools.contains(&"Bash".to_string()), "Missing Bash");
+    }
+
+    #[test]
+    fn test_all_tools_extraction() {
+        // Simulate a kind:24010 event with various tool tags
+        let mut tags = vec![
+            vec!["a".to_string(), "31933:pubkey:identifier".to_string()],
+            vec!["agent".to_string(), "agent1_pubkey".to_string(), "agent1".to_string()],
+        ];
+        tags.extend(tool_tag_fixtures());
+
+        let backend_pubkey = "backend123".to_string();
+        let status = ProjectStatus::from_tags(1234567890, tags, backend_pubkey).unwrap();
+
+        // Verify all tools are extracted
+        println!("Extracted tools: {:?}", status.all_tools);
+        println!("Tool count: {}", status.all_tools.len());
+
+        // Use helpers to assert must-have tools
+        assert_must_have_unassigned_tools(&status.all_tools);
+        assert_assigned_tools(&status.all_tools);
+
+        // Verify total count (should have all 18 tools)
+        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools, got {}", status.all_tools.len());
+    }
+
+    #[test]
+    fn test_all_tools_extraction_from_json() {
+        // Simulate a kind:24010 event as JSON (how it comes from the backend)
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend123",
+            "created_at": 1234567890,
+            "tags": [
+                ["a", "31933:pubkey:identifier"],
+                ["agent", "agent1_pubkey", "agent1"],
+                ["tool", "Read", "agent1"],
+                ["tool", "Write", "agent1"],
+                ["tool", "Bash", "agent1"],
+                ["tool", "rag_create_collection"],
+                ["tool", "rag_add_documents"],
+                ["tool", "rag_query"],
+                ["tool", "rag_delete_collection"],
+                ["tool", "rag_list_collections"],
+                ["tool", "rag_subscription_create"],
+                ["tool", "rag_subscription_list"],
+                ["tool", "rag_subscription_get"],
+                ["tool", "rag_subscription_delete"],
+                ["tool", "schedule_task_cancel"],
+                ["tool", "schedule_task"],
+                ["tool", "schedule_task_once"],
+                ["tool", "schedule_tasks_list"],
+                ["tool", "kill_shell"],
+                ["tool", "conversation_index"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // Verify all tools are extracted
+        println!("Extracted tools from JSON: {:?}", status.all_tools);
+        println!("Tool count from JSON: {}", status.all_tools.len());
+
+        // Use helpers to assert must-have tools
+        assert_must_have_unassigned_tools(&status.all_tools);
+        assert_assigned_tools(&status.all_tools);
+
+        // Verify total count
+        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools from JSON, got {}", status.all_tools.len());
+    }
+
+    /// This test simulates the exact scenario the user reported:
+    /// A kind:24010 event with tool tags that have NO agent assignments
+    #[test]
+    fn test_tools_without_agent_assignments() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey_hex",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "agent_pubkey_1", "claude-code"],
+                ["agent", "agent_pubkey_2", "architect"],
+                ["tool", "Read", "claude-code"],
+                ["tool", "Write", "claude-code"],
+                ["tool", "Bash", "claude-code", "architect"],
+                ["tool", "rag_create_collection"],
+                ["tool", "rag_add_documents"],
+                ["tool", "rag_query"],
+                ["tool", "rag_delete_collection"],
+                ["tool", "rag_list_collections"],
+                ["tool", "rag_subscription_create"],
+                ["tool", "rag_subscription_list"],
+                ["tool", "rag_subscription_get"],
+                ["tool", "rag_subscription_delete"],
+                ["tool", "schedule_task_cancel"],
+                ["tool", "schedule_task"],
+                ["tool", "schedule_task_once"],
+                ["tool", "schedule_tasks_list"],
+                ["tool", "kill_shell"],
+                ["tool", "conversation_index"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).expect("Failed to parse status");
+
+        // These tools have NO agent assignments (2-element tags)
+        let unassigned_tools = vec![
+            "rag_create_collection",
+            "rag_add_documents",
+            "rag_query",
+            "rag_delete_collection",
+            "rag_list_collections",
+            "rag_subscription_create",
+            "rag_subscription_list",
+            "rag_subscription_get",
+            "rag_subscription_delete",
+            "schedule_task_cancel",
+            "schedule_task",
+            "schedule_task_once",
+            "schedule_tasks_list",
+            "kill_shell",
+            "conversation_index",
+        ];
+
+        // ALL unassigned tools MUST be in all_tools
+        for tool in &unassigned_tools {
+            assert!(
+                status.all_tools.contains(&tool.to_string()),
+                "Tool '{}' is missing from all_tools! This is the bug we're fixing.",
+                tool
+            );
+        }
+
+        // Assigned tools should also be there
+        assert!(status.all_tools.contains(&"Read".to_string()));
+        assert!(status.all_tools.contains(&"Write".to_string()));
+        assert!(status.all_tools.contains(&"Bash".to_string()));
+
+        println!("✓ All {} tools correctly extracted from kind:24010 event", status.all_tools.len());
+        println!("✓ Tools: {:?}", status.all_tools);
+    }
+
+    #[test]
+    fn test_real_user_event_parsing() {
+        // This is the EXACT event from the user's bug report
+        // It contains 128 tool tags total (verified with jq)
+        // Now using a fixture file to avoid massive inline JSON
+        let json = include_str!("../../tests/fixtures/real_status_event_128_tools.json");
+
+        let status = ProjectStatus::from_json(json).expect("Failed to parse real event");
+
+        println!("\n=== Real Event Parsing Test ===");
+        println!("Extracted {} tools", status.all_tools.len());
+
+        // Use helper to assert must-have unassigned tools (the ones that were missing in the bug)
+        assert_must_have_unassigned_tools(&status.all_tools);
+
+        // Assert we have a good number of tools (at least the must-haves)
+        // We use >= instead of exact count to make test more resilient
+        assert!(
+            status.all_tools.len() >= 100,
+            "Expected at least 100 tools from real event, got {}",
+            status.all_tools.len()
+        );
+
+        println!("✓ Successfully extracted {} tools from real user event", status.all_tools.len());
+        println!("✓ All previously reported missing tools are present");
+    }
+
+    // Note: from_note() coverage
+    // We don't have a dedicated test for from_note() because:
+    // 1. It requires complex nostrdb::Note object creation (C FFI)
+    // 2. from_note() simply extracts tags from Note and delegates to from_tags()
+    // 3. from_tags() is thoroughly tested above (including with real event data)
+    // 4. The tag extraction logic in from_note() is straightforward string/hex conversion
+    // 5. Production usage validates that from_note() works correctly
+    //
+    // If you need to test from_note() specifically, you would need to:
+    // - Set up a nostrdb instance
+    // - Import an event into it
+    // - Query it to get a Note reference
+    // This is better suited for integration tests rather than unit tests.
+}
