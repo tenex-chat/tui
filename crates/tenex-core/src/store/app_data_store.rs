@@ -4,6 +4,7 @@ use crate::store::RuntimeHierarchy;
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tracing::{trace, warn};
 
 /// Reactive data store - single source of truth for app-level concepts.
 /// Rebuilt from nostrdb on startup, updated incrementally on new events.
@@ -2056,9 +2057,26 @@ impl AppDataStore {
         // Search using the first term to get candidate notes
         // (text_search returns notes directly, which is more efficient)
         let db_limit = (limit * 10).min(1000) as i32;
-        let Ok(notes) = self.ndb.text_search(&txn, &terms[0], None, db_limit) else {
-            // Fall back to in-memory if DB search fails
-            return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+        let notes = match self.ndb.text_search(&txn, &terms[0], None, db_limit) {
+            Ok(notes) if !notes.is_empty() => notes,
+            Ok(_empty) => {
+                // NostrDB fulltext index may not be fully populated, so use in-memory
+                // as a reliable fallback that searches already-loaded messages
+                trace!(
+                    query = %terms[0],
+                    "NostrDB text_search returned empty results, falling back to in-memory search"
+                );
+                return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+            }
+            Err(e) => {
+                // Log the DB error and fall back to in-memory search
+                warn!(
+                    query = %terms[0],
+                    error = %e,
+                    "NostrDB text_search failed, falling back to in-memory search"
+                );
+                return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+            }
         };
 
         // Filter and process candidates directly from the search results
@@ -2250,5 +2268,163 @@ impl AppDataStore {
     /// Check if there are pending backend approvals
     pub fn has_pending_backend_approvals(&self) -> bool {
         !self.pending_backend_approvals.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::Database;
+    use tempfile::tempdir;
+
+    /// Helper to create a test message with minimal required fields
+    fn make_test_message(id: &str, pubkey: &str, thread_id: &str, content: &str, created_at: u64) -> Message {
+        Message {
+            id: id.to_string(),
+            content: content.to_string(),
+            pubkey: pubkey.to_string(),
+            thread_id: thread_id.to_string(),
+            created_at,
+            reply_to: None,
+            is_reasoning: false,
+            ask_event: None,
+            q_tags: vec![],
+            a_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            tool_args: None,
+            llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
+        }
+    }
+
+    /// Regression test: Verify that when NostrDB text_search returns empty results,
+    /// the in-memory fallback is used and correctly finds messages.
+    ///
+    /// This ensures the fix for message search stays intact - previously the code
+    /// would silently fail when the fulltext index wasn't populated, returning no
+    /// results even when messages existed in memory.
+    #[test]
+    fn test_search_user_messages_falls_back_to_in_memory_when_db_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let user_pubkey = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
+        let thread_id = "thread123";
+
+        // Add a message directly to in-memory store (simulating loaded messages)
+        // This message won't be in NostrDB's fulltext index since we're adding it directly
+        let message = make_test_message(
+            "msg1",
+            user_pubkey,
+            thread_id,
+            "This is a test message with searchable content about rust programming",
+            1000,
+        );
+
+        store.messages_by_thread
+            .entry(thread_id.to_string())
+            .or_default()
+            .push(message);
+
+        // Search for a term that exists in the message
+        // NostrDB's text_search will return empty (no indexed content),
+        // so this should fall back to in-memory search
+        let results = store.search_user_messages(
+            user_pubkey,
+            "rust",
+            None,
+            10,
+        );
+
+        // Verify the in-memory fallback found our message
+        assert_eq!(results.len(), 1, "Expected 1 result from in-memory fallback");
+        assert_eq!(results[0].0, "msg1", "Expected to find the message we added");
+        assert!(
+            results[0].1.contains("rust programming"),
+            "Content should match the message we added"
+        );
+    }
+
+    /// Test that multi-term search (using '+' operator) works with in-memory fallback
+    #[test]
+    fn test_search_user_messages_multi_term_in_memory_fallback() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let user_pubkey = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
+        let thread_id = "thread123";
+
+        // Add messages - one with both terms, one with only one term
+        let message1 = make_test_message(
+            "msg1",
+            user_pubkey,
+            thread_id,
+            "Error occurred with timeout after 5 seconds",
+            1000,
+        );
+        let message2 = make_test_message(
+            "msg2",
+            user_pubkey,
+            thread_id,
+            "Error occurred while processing request",  // has "error" but NOT "timeout"
+            900, // older
+        );
+
+        store.messages_by_thread
+            .entry(thread_id.to_string())
+            .or_default()
+            .extend(vec![message1, message2]);
+
+        // Search for messages containing both "error" AND "timeout"
+        // Only msg1 should match (msg2 has error but not timeout)
+        let results = store.search_user_messages(
+            user_pubkey,
+            "error+timeout",
+            None,
+            10,
+        );
+
+        assert_eq!(results.len(), 1, "Expected 1 result matching both terms");
+        assert_eq!(results[0].0, "msg1", "Only msg1 has both error and timeout");
+    }
+
+    /// Test that empty query returns all messages via in-memory scan
+    #[test]
+    fn test_search_user_messages_empty_query_returns_all() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let user_pubkey = "abc123def456abc123def456abc123def456abc123def456abc123def456abc1";
+        let thread_id = "thread123";
+
+        // Add multiple messages
+        for i in 0..3 {
+            let message = make_test_message(
+                &format!("msg{}", i),
+                user_pubkey,
+                thread_id,
+                &format!("Message number {}", i),
+                1000 + i as u64,
+            );
+            store.messages_by_thread
+                .entry(thread_id.to_string())
+                .or_default()
+                .push(message);
+        }
+
+        // Empty query should return all messages
+        let results = store.search_user_messages(
+            user_pubkey,
+            "",
+            None,
+            10,
+        );
+
+        assert_eq!(results.len(), 3, "Empty query should return all 3 messages");
     }
 }
