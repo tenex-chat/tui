@@ -19,7 +19,8 @@ pub use agent_definition::AgentDefinition;
 pub use conversation_metadata::ConversationMetadata;
 pub use draft::{
     ChatDraft, DraftImageAttachment, DraftPasteAttachment, DraftStorage, DraftStorageError,
-    NamedDraft, NamedDraftStorage,
+    NamedDraft, NamedDraftStorage, PendingPublishSnapshot, SendState,
+    PUBLISHED_DRAFT_GRACE_PERIOD_SECS,
 };
 pub use inbox::{AgentChatter, InboxEventType, InboxItem};
 pub use lesson::Lesson;
