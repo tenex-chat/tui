@@ -1268,7 +1268,7 @@ impl App {
             .iter()
             .filter(|p| {
                 // Filter out archived projects unless showing archived
-                self.show_archived || !prefs.is_project_archived(&p.a_tag())
+                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
             })
             .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
@@ -1351,30 +1351,9 @@ impl App {
         Ok(())
     }
 
-    /// Add a notification to the queue
-    pub fn notify(&mut self, notification: Notification) {
-        self.notifications.push(notification);
-    }
-
-    /// Convenience: set a warning status message (legacy compatibility)
-    /// Prefer using notify() with specific notification types for new code
-    pub fn set_status(&mut self, msg: &str) {
-        self.notifications.push(Notification::warning(msg));
-    }
-
-    /// Dismiss the current notification
-    pub fn dismiss_notification(&mut self) {
-        self.notifications.dismiss();
-    }
-
-    /// Get the current notification message (for display)
-    pub fn current_notification(&self) -> Option<&Notification> {
-        self.notifications.current()
-    }
-
     /// Get the thread_id from the current notification (if it has one)
     pub fn current_notification_thread_id(&self) -> Option<String> {
-        self.notifications.current().and_then(|n| n.thread_id.clone())
+        self.notification_manager.current().and_then(|n| n.thread_id.clone())
     }
 
     /// Jump to the thread referenced by the current notification (if any)
@@ -1795,19 +1774,19 @@ impl App {
     /// to the new thread-based key (thread.id).
     pub fn convert_draft_to_tab(&mut self, draft_id: &str, thread: &Thread) {
         // Migrate the draft storage: load from old key, delete old entry, save with new key
-        let draft_opt = self.draft_storage.borrow().load(draft_id);
+        let draft_opt = self.draft_service.load_chat_draft(draft_id);
         if let Some(mut draft) = draft_opt {
             // Update the conversation_id to the new thread ID
             draft.conversation_id = thread.id.clone();
 
             // Delete the old draft keyed by project:new
-            if let Err(e) = self.draft_storage.borrow_mut().delete(draft_id) {
+            if let Err(e) = self.draft_service.delete_chat_draft(draft_id) {
                 tlog!("DRAFT", "WARNING: failed to delete old draft key '{}': {}", draft_id, e);
             }
 
             // Save with the new thread ID as key (only if there's content to preserve)
             if !draft.is_empty() {
-                if let Err(e) = self.draft_storage.borrow_mut().save(draft) {
+                if let Err(e) = self.draft_service.save_chat_draft(draft) {
                     tlog!("DRAFT", "ERROR migrating draft to new key '{}': {}", thread.id, e);
                 }
             }

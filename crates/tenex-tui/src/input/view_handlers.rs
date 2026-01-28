@@ -517,10 +517,10 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             if let Some(thread) = thread {
                                 app.open_thread_from_home(&thread, &project_a_tag);
                             } else {
-                                app.set_status("Could not find conversation thread");
+                                app.set_warning_status("Could not find conversation thread");
                             }
                         } else {
-                            app.set_status("No conversation linked to this operation");
+                            app.set_warning_status("No conversation linked to this operation");
                         }
                     }
                     HomeTab::Stats => {
