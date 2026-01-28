@@ -85,10 +85,14 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Status bar at the very bottom (always visible)
-    // Uses today-only runtime filtering for the status bar display
+    // Uses real-time agent tracking for cumulative runtime (confirmed + unconfirmed)
+    // Color reflects agent activity: green = active, red = inactive
     let statusbar_area = if has_tabs { chunks[4] } else { chunks[3] };
-    let cumulative_runtime = app.data_store.borrow_mut().get_today_unique_runtime();
-    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime);
+    let data_store = app.data_store.borrow();
+    let cumulative_runtime = data_store.tracked_runtime_secs() * 1000; // Convert to ms
+    let has_active_agents = data_store.has_active_agents();
+    drop(data_store); // Release borrow before render
+    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime, has_active_agents);
 
     // Projects modal overlay
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {

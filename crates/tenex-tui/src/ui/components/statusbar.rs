@@ -50,11 +50,16 @@ fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
 /// Render the status bar at the bottom of the screen
 /// Shows notification (left/center) and cumulative runtime (right)
 /// Uses fixed-width columns to prevent layout breakage from long notifications
+///
+/// ## Color Logic
+/// - `has_active_agents = true`: "Today:" label shown in GREEN (agents working)
+/// - `has_active_agents = false`: "Today:" label shown in RED (no agents working)
 pub fn render_statusbar(
     f: &mut Frame,
     area: Rect,
     current_notification: Option<&Notification>,
     cumulative_runtime_ms: u64,
+    has_active_agents: bool,
 ) {
     // Calculate dynamic width for runtime column based on actual content
     let runtime_column_width = calculate_runtime_width(cumulative_runtime_ms);
@@ -97,13 +102,20 @@ pub fn render_statusbar(
     f.render_widget(notification_paragraph, notification_area);
 
     // Render runtime (right side) - right-aligned within its fixed column
+    // Color indicates agent activity: GREEN = agents working, RED = no agents working
+    let runtime_color = if has_active_agents {
+        theme::ACCENT_SUCCESS // Green - agents are actively working
+    } else {
+        theme::ACCENT_ERROR   // Red - no agents working
+    };
+
     let runtime_str = format_today_label(cumulative_runtime_ms);
     let runtime_width = runtime_str.width();
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
     let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
 
     let runtime_paragraph = Paragraph::new(padded_runtime)
-        .style(Style::default().fg(theme::TEXT_MUTED).bg(theme::BG_SIDEBAR));
+        .style(Style::default().fg(runtime_color).bg(theme::BG_SIDEBAR));
 
     f.render_widget(runtime_paragraph, runtime_area);
 }

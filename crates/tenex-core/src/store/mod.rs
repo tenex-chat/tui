@@ -1,9 +1,11 @@
+pub mod agent_tracking;
 pub mod app_data_store;
 pub mod db;
 pub mod events;
 pub mod runtime_hierarchy;
 pub mod views;
 
+pub use agent_tracking::{AgentInstanceKey, AgentTrackingState};
 pub use app_data_store::AppDataStore;
 pub use db::Database;
 pub use events::{get_raw_event_json, get_trace_context, ingest_events, TraceInfo};
