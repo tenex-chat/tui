@@ -1532,9 +1532,18 @@ impl AppDataStore {
                 let message_created_at = message.created_at;
                 let message_pubkey = message.pubkey.clone();
 
+                // Check if this message has llm-runtime tag (confirms runtime, resets unconfirmed timer)
+                let has_llm_runtime = message.llm_metadata.iter().any(|(key, _)| key == "runtime");
+
                 // Insert in sorted position (oldest first)
                 let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
                 messages.insert(insert_pos, message);
+
+                // If this message has llm-runtime tag, reset the unconfirmed timer for this agent on this conversation
+                // This ensures unconfirmed runtime only tracks time since the last kind:1 confirmation
+                if has_llm_runtime {
+                    self.agent_tracking.reset_unconfirmed_timer(&thread_id, &message_pubkey);
+                }
 
                 // Update pre-aggregated message counts for Stats view (O(1) per message)
                 self.increment_message_day_count(message_created_at, &message_pubkey);

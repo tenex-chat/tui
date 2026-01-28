@@ -249,6 +249,35 @@ impl AgentTrackingState {
         true
     }
 
+    /// Reset the unconfirmed timer for a specific agent on a specific conversation.
+    ///
+    /// This is called when a kind:1 message with an llm-runtime tag is received,
+    /// which "confirms" a portion of the unconfirmed runtime. The timer is reset
+    /// to NOW (Instant::now()), allowing the clock to continue running but starting
+    /// from zero again.
+    ///
+    /// This prevents overcounting runtime: without resets, the unconfirmed clock
+    /// would accumulate from when the agent started until removed by a 24133 event,
+    /// even though kind:1 messages periodically confirm portions of that runtime.
+    ///
+    /// ## Parameters:
+    /// - `conversation_id`: The conversation (thread_id) the agent is working on
+    /// - `agent_pubkey`: The agent's pubkey
+    ///
+    /// ## Behavior:
+    /// - If the agent is currently active on this conversation, resets its timer to NOW
+    /// - If the agent is not active (or never was), this is a no-op
+    /// - The agent remains active after reset - only the unconfirmed clock resets
+    pub fn reset_unconfirmed_timer(&mut self, conversation_id: &str, agent_pubkey: &str) {
+        let key = AgentInstanceKey::new(conversation_id, agent_pubkey);
+
+        // If this agent is active, reset its timer to NOW
+        // (This will continue accumulating from 0, not stop the clock)
+        if self.active_agents.contains_key(&key) {
+            self.active_agents.insert(key, Instant::now());
+        }
+    }
+
     /// Get active agents for a specific conversation.
     /// Returns agent pubkeys currently working on the conversation.
     pub fn get_active_agents_for_conversation(&self, conversation_id: &str) -> Vec<&str> {
@@ -696,5 +725,255 @@ mod tests {
         assert_eq!(state.active_agent_count(), 1);
         let agents = state.get_active_agents_for_conversation("conv1");
         assert_eq!(agents, vec!["agent1"]);
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_for_active_agent() {
+        let mut state = AgentTrackingState::new();
+
+        // Add agent to conversation
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait a bit to accumulate unconfirmed runtime
+        thread::sleep(Duration::from_millis(1100));
+
+        // Should have ~1 second of unconfirmed runtime
+        let runtime_before = state.unconfirmed_runtime_secs();
+        assert!(runtime_before >= 1, "Expected runtime >= 1, got {}", runtime_before);
+
+        // Reset the timer (simulating a kind:1 message with llm-runtime tag)
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Immediately after reset, unconfirmed runtime should be near 0
+        let runtime_after = state.unconfirmed_runtime_secs();
+        assert!(runtime_after < 1, "Expected runtime < 1 after reset, got {}", runtime_after);
+
+        // Agent should still be active
+        assert_eq!(state.active_agent_count(), 1);
+        let agents = state.get_active_agents_for_conversation("conv1");
+        assert_eq!(agents, vec!["agent1"]);
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_continues_accumulating() {
+        let mut state = AgentTrackingState::new();
+
+        // Add agent to conversation
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait and reset
+        thread::sleep(Duration::from_millis(1100));
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Wait again - timer should continue accumulating from reset point
+        thread::sleep(Duration::from_millis(1100));
+
+        // Should have accumulated ~1 second since reset
+        let runtime = state.unconfirmed_runtime_secs();
+        assert!(runtime >= 1, "Expected runtime >= 1 after reset and wait, got {}", runtime);
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_inactive_agent_noop() {
+        let mut state = AgentTrackingState::new();
+
+        // Add agent to conv1
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait and accumulate runtime
+        thread::sleep(Duration::from_millis(1100));
+        let runtime_before = state.unconfirmed_runtime_secs();
+
+        // Try to reset timer for a different conversation (agent not active there)
+        state.reset_unconfirmed_timer("conv2", "agent1");
+
+        // Runtime should be unchanged (noop)
+        let runtime_after = state.unconfirmed_runtime_secs();
+        assert_eq!(runtime_before, runtime_after, "Runtime should be unchanged for inactive agent");
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_wrong_agent_noop() {
+        let mut state = AgentTrackingState::new();
+
+        // Add agent1 to conv1
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait and accumulate runtime
+        thread::sleep(Duration::from_millis(1100));
+        let runtime_before = state.unconfirmed_runtime_secs();
+
+        // Try to reset timer for agent2 (not active)
+        state.reset_unconfirmed_timer("conv1", "agent2");
+
+        // Runtime should be unchanged (noop)
+        let runtime_after = state.unconfirmed_runtime_secs();
+        assert_eq!(runtime_before, runtime_after, "Runtime should be unchanged for non-active agent");
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_multiple_agents() {
+        let mut state = AgentTrackingState::new();
+
+        // Add two agents to conv1
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string(), "agent2".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait to accumulate runtime
+        thread::sleep(Duration::from_millis(1100));
+
+        // Both agents contribute, so runtime should be ~2 seconds
+        let runtime_before = state.unconfirmed_runtime_secs();
+        assert!(runtime_before >= 2, "Expected runtime >= 2, got {}", runtime_before);
+
+        // Reset only agent1's timer
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Runtime should drop to ~1 second (only agent2's contribution)
+        let runtime_after = state.unconfirmed_runtime_secs();
+        assert!(runtime_after >= 1 && runtime_after < 2,
+                "Expected runtime between 1-2 after resetting one agent, got {}", runtime_after);
+
+        // Both agents should still be active
+        assert_eq!(state.active_agent_count(), 2);
+    }
+
+    #[test]
+    fn test_reset_unconfirmed_timer_with_confirmed_runtime() {
+        let mut state = AgentTrackingState::new();
+
+        // Add confirmed runtime
+        state.add_confirmed_runtime("event1", 100);
+
+        // Add active agent
+        state.process_24133_event(
+            "conv1",
+            "event2",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait to accumulate unconfirmed runtime
+        thread::sleep(Duration::from_millis(1100));
+
+        // Total should be confirmed + unconfirmed (~101)
+        let total_before = state.total_runtime_secs();
+        assert!(total_before >= 101, "Expected total >= 101, got {}", total_before);
+
+        // Reset unconfirmed timer
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Total should drop to ~100 (confirmed only)
+        let total_after = state.total_runtime_secs();
+        assert!(total_after >= 100 && total_after <= 101,
+                "Expected total ~100 after reset, got {}", total_after);
+
+        // Confirmed runtime should be unchanged
+        assert_eq!(state.confirmed_runtime_secs(), 100);
+    }
+
+    #[test]
+    fn test_streaming_confirmation_scenario() {
+        let mut state = AgentTrackingState::new();
+
+        // Scenario: agent starts working (24133 adds agent)
+        state.process_24133_event(
+            "conv1",
+            "event1",
+            &["agent1".to_string()],
+            1000,
+            "31933:user:project",
+            None,
+        );
+
+        // Wait ~1 second
+        thread::sleep(Duration::from_millis(1100));
+        let runtime1 = state.unconfirmed_runtime_secs();
+        assert!(runtime1 >= 1, "Expected runtime >= 1, got {}", runtime1);
+
+        // kind:1 message arrives with llm-runtime=5 (confirms 5 seconds)
+        state.add_confirmed_runtime("msg1", 5);
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Confirmed = 5, unconfirmed ~0
+        assert_eq!(state.confirmed_runtime_secs(), 5);
+        assert!(state.unconfirmed_runtime_secs() < 1);
+
+        // Wait another ~1 second
+        thread::sleep(Duration::from_millis(1100));
+
+        // Another kind:1 message with llm-runtime=3 (confirms 3 more seconds)
+        state.add_confirmed_runtime("msg2", 3);
+        state.reset_unconfirmed_timer("conv1", "agent1");
+
+        // Confirmed = 8, unconfirmed ~0
+        assert_eq!(state.confirmed_runtime_secs(), 8);
+        assert!(state.unconfirmed_runtime_secs() < 1);
+
+        // Wait ~1 second
+        thread::sleep(Duration::from_millis(1100));
+
+        // Check unconfirmed before removal (should be ~1 second since last reset)
+        let unconfirmed_before_removal = state.unconfirmed_runtime_secs();
+        assert!(unconfirmed_before_removal >= 1 && unconfirmed_before_removal < 2,
+                "Expected unconfirmed ~1 before removal, got {}", unconfirmed_before_removal);
+
+        // 24133 removes agent (stops clock by removing agent from active_agents map)
+        state.process_24133_event(
+            "conv1",
+            "event2",
+            &[], // No agents
+            1002,
+            "31933:user:project",
+            None,
+        );
+
+        // After removal, unconfirmed goes to 0 because agent is no longer in active_agents
+        // This is correct behavior: the unconfirmed time before removal should have been
+        // captured by a final kind:1 message with llm-runtime tag
+        assert_eq!(state.unconfirmed_runtime_secs(), 0,
+                "Expected unconfirmed = 0 after agent removal");
+
+        // Agent should no longer be active
+        assert_eq!(state.active_agent_count(), 0);
+
+        // Total runtime is just confirmed (unconfirmed is 0 after removal)
+        assert_eq!(state.total_runtime_secs(), 8);
     }
 }
