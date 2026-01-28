@@ -189,6 +189,8 @@ pub enum DataChange {
     ProjectStatus {
         json: String,
     },
+    /// MCP tools changed (kind:4200 events)
+    MCPToolsChanged,
 }
 
 pub struct NostrWorker {
