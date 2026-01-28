@@ -506,11 +506,6 @@ impl App {
         self.animation_clock.activity_pulse()
     }
 
-    /// Get wave offset for character-by-character animations
-    pub fn wave_offset(&self) -> usize {
-        self.animation_clock.wave_offset()
-    }
-
     // =============================================================================
     // NOTIFICATION METHODS
     // =============================================================================

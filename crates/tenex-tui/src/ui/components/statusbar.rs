@@ -3,7 +3,7 @@
 
 use ratatui::{
     layout::{Constraint, Layout, Rect},
-    style::{Color, Style},
+    style::Style,
     text::{Line, Span},
     widgets::Paragraph,
     Frame,
@@ -53,17 +53,14 @@ fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
 /// Uses fixed-width columns to prevent layout breakage from long notifications
 ///
 /// ## Color Logic
-/// - `has_active_agents = true`: "Today:" label shown in GREEN with wave animation (agents working)
+/// - `has_active_agents = true`: "Today:" label shown in GREEN (agents working)
 /// - `has_active_agents = false`: "Today:" label shown in RED (no agents working)
-/// - Animation speed and brightness scale with `active_agent_count` (1 agent = baseline, 10 agents = much faster/brighter)
 pub fn render_statusbar(
     f: &mut Frame,
     area: Rect,
     current_notification: Option<&Notification>,
     cumulative_runtime_ms: u64,
     has_active_agents: bool,
-    active_agent_count: usize,
-    wave_offset: usize,
 ) {
     // Calculate dynamic width for runtime column based on actual content
     let runtime_column_width = calculate_runtime_width(cumulative_runtime_ms);
@@ -107,57 +104,19 @@ pub fn render_statusbar(
 
     // Render runtime (right side) - right-aligned within its fixed column
     // Color indicates agent activity: GREEN = agents working, RED = no agents working
-    // When agents are active, apply a wave animation character by character
+    let runtime_color = if has_active_agents {
+        theme::ACCENT_SUCCESS // Green - agents are actively working
+    } else {
+        theme::ACCENT_ERROR   // Red - no agents working
+    };
+
     let runtime_str = format_today_label(cumulative_runtime_ms);
     let runtime_width = runtime_str.width();
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
+    let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
 
-    let runtime_line = if has_active_agents {
-        // GREEN mode with wave animation - apply to entire string
-        let mut spans = vec![Span::raw(" ".repeat(padding))];
-
-        // Dynamic parameters based on active agent count
-        // Speed: 1 agent = 0.3 (baseline), 10 agents = 3.0 (10x faster)
-        // Scale from 0.3 to 3.0 as agent count goes from 1 to 10
-        let agent_count_clamped = active_agent_count.max(1).min(10) as f32;
-        let speed_multiplier = 0.3 * agent_count_clamped;
-
-        // Brightness amplitude: 1 agent = ±0.3 (baseline), 10 agents = ±0.6 (double brightness range)
-        // Scale from 0.3 to 0.6 as agent count goes from 1 to 10
-        let brightness_amplitude = 0.3 + (0.3 * (agent_count_clamped - 1.0) / 9.0);
-
-        // Create a smooth brightness wave that travels across the text
-        // Base green color: RGB(106, 153, 85)
-
-        for (i, ch) in runtime_str.chars().enumerate() {
-            // Create a traveling sine wave
-            // wave_offset moves the wave (speed scales with agent count), i determines position along the string
-            let phase = ((wave_offset as f32 * speed_multiplier) + (i as f32 * 0.8)) * std::f32::consts::PI * 2.0 / 12.0;
-
-            // Sine wave gives us a value between -1 and 1
-            let wave_value = phase.sin();
-
-            // Map sine wave to brightness multiplier (range scales with agent count)
-            let brightness = 1.0 + (wave_value * brightness_amplitude);
-
-            // Apply brightness to base green color (106, 153, 85)
-            let r = ((106.0 * brightness).min(255.0).max(0.0)) as u8;
-            let g = ((153.0 * brightness).min(255.0).max(0.0)) as u8;
-            let b = ((85.0 * brightness).min(255.0).max(0.0)) as u8;
-
-            let color = Color::Rgb(r, g, b);
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
-        }
-
-        Line::from(spans)
-    } else {
-        // RED mode - no animation
-        let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
-        Line::from(Span::styled(padded_runtime, Style::default().fg(theme::ACCENT_ERROR)))
-    };
-
-    let runtime_paragraph = Paragraph::new(runtime_line)
-        .style(Style::default().bg(theme::BG_SIDEBAR));
+    let runtime_paragraph = Paragraph::new(padded_runtime)
+        .style(Style::default().fg(runtime_color).bg(theme::BG_SIDEBAR));
 
     f.render_widget(runtime_paragraph, runtime_area);
 }
