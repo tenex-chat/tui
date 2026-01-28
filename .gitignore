@@ -11,3 +11,4 @@ addresses.txt
 *.swp
 *.swo
 *~
+ios-app/build/
