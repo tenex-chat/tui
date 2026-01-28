@@ -28,21 +28,22 @@ fn format_runtime(total_ms: u64) -> String {
     }
 }
 
-/// Label prefix for the runtime display
-const TODAY_LABEL: &str = "Today: ";
+/// Label prefix for the runtime display.
+/// "Session" because this is in-memory runtime that resets on application restart.
+const SESSION_LABEL: &str = "Session: ";
 
 /// Minimum width for the runtime column.
-/// Ensures column doesn't collapse below "Today: MM:SS " (13 chars) + 1 left padding + 2 buffer = 16
-const RUNTIME_COLUMN_MIN_WIDTH: u16 = 16;
+/// Ensures column doesn't collapse below "Session: MM:SS " (15 chars) + 1 left padding + 2 buffer = 18
+const RUNTIME_COLUMN_MIN_WIDTH: u16 = 18;
 
-/// Format the full runtime label string (e.g., "Today: 05:32 ")
-fn format_today_label(cumulative_runtime_ms: u64) -> String {
-    format!("{}{} ", TODAY_LABEL, format_runtime(cumulative_runtime_ms))
+/// Format the full runtime label string (e.g., "Session: 05:32 ")
+fn format_session_label(cumulative_runtime_ms: u64) -> String {
+    format!("{}{} ", SESSION_LABEL, format_runtime(cumulative_runtime_ms))
 }
 
 /// Calculate the width needed for the runtime string
 fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
-    let runtime_str = format_today_label(cumulative_runtime_ms);
+    let runtime_str = format_session_label(cumulative_runtime_ms);
     // Add 1 for left padding, ensure minimum width
     (runtime_str.width() + 1).max(RUNTIME_COLUMN_MIN_WIDTH as usize) as u16
 }
@@ -52,8 +53,8 @@ fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
 /// Uses fixed-width columns to prevent layout breakage from long notifications
 ///
 /// ## Color Logic
-/// - `has_active_agents = true`: "Today:" label shown in GREEN (agents working)
-/// - `has_active_agents = false`: "Today:" label shown in RED (no agents working)
+/// - `has_active_agents = true`: "Session:" label shown in GREEN (agents working)
+/// - `has_active_agents = false`: "Session:" label shown in RED (no agents working)
 pub fn render_statusbar(
     f: &mut Frame,
     area: Rect,
@@ -109,7 +110,7 @@ pub fn render_statusbar(
         theme::ACCENT_ERROR   // Red - no agents working
     };
 
-    let runtime_str = format_today_label(cumulative_runtime_ms);
+    let runtime_str = format_session_label(cumulative_runtime_ms);
     let runtime_width = runtime_str.width();
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
     let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
