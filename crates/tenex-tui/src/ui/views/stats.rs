@@ -2,11 +2,15 @@
 //! - Per-day runtime bar chart with proper Unicode bars
 //! - Total running cost with metric cards
 //! - Cost per project table
-//! - Top 10 longest conversations
+//! - Top conversations by runtime
+//!
+//! The Stats view has two subtabs:
+//! - Chart: Shows the 14-day LLM runtime chart (full height)
+//! - Rankings: Shows Cost by Project and Top Conversations tables side-by-side
 //!
 //! Uses a modern dashboard layout with bordered sections and theme colors.
 
-use crate::ui::{card, format::truncate_with_ellipsis, theme, App};
+use crate::ui::{card, format::truncate_with_ellipsis, theme, App, StatsSubtab};
 use chrono::{Datelike, TimeZone, Utc};
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -36,12 +40,15 @@ const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
 // Number of days to show in the chart (fixed window for averaging)
 const STATS_WINDOW_DAYS: usize = 14;
 
+// Number of items to show in ranking tables (expanded view with all vertical space)
+const RANKINGS_TABLE_ROWS: usize = 20;
+
 // Month names for date formatting
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
-/// Render the Stats tab content with a dashboard layout
+/// Render the Stats tab content with a dashboard layout featuring subtabs
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // Get today's runtime first (requires mutable borrow)
     let today_runtime = app.data_store.borrow_mut().get_today_unique_runtime();
@@ -58,8 +65,8 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // 3. Cost by project
     let cost_by_project = data_store.get_cost_by_project();
 
-    // 4. Top 10 conversations by runtime
-    let top_conversations = data_store.get_top_conversations_by_runtime(10);
+    // 4. Top conversations by runtime (expanded for Rankings view)
+    let top_conversations = data_store.get_top_conversations_by_runtime(RANKINGS_TABLE_ROWS);
 
     // Get thread titles for the top conversations
     let top_conv_with_titles: Vec<(String, String, u64)> = top_conversations
@@ -75,42 +82,121 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
 
     drop(data_store); // Release borrow
 
-    // Dashboard Layout:
+    // Dashboard Layout with Subtabs:
     // ┌─────────────────────────────────────────────────────────────┐
     // │  [Total Cost]  [24h Runtime]  [Avg (14d)]                  │ <- Metric Cards Row
     // ├─────────────────────────────────────────────────────────────┤
-    // │  Runtime Chart (Last 14 Days)                               │ <- Bar Chart
-    // ├──────────────────────────────┬──────────────────────────────┤
-    // │  Cost by Project             │  Top Conversations           │ <- Two Tables
-    // └──────────────────────────────┴──────────────────────────────┘
+    // │  [Chart] [Rankings]                                         │ <- Subtab Navigation
+    // ├─────────────────────────────────────────────────────────────┤
+    // │                                                             │
+    // │  Content Area (changes based on active subtab)              │
+    // │                                                             │
+    // └─────────────────────────────────────────────────────────────┘
 
     // Calculate adaptive heights
     let metric_cards_height = 5u16;
-    let chart_height = 16u16.min(area.height.saturating_sub(20)); // Responsive chart height
-    let tables_height = area.height.saturating_sub(metric_cards_height + chart_height + 2);
+    let subtab_nav_height = 3u16;
+    let content_height = area.height.saturating_sub(metric_cards_height + subtab_nav_height);
 
     let vertical_chunks = Layout::vertical([
         Constraint::Length(metric_cards_height), // Metric cards
-        Constraint::Length(chart_height),        // Bar chart
-        Constraint::Min(tables_height),          // Tables section
+        Constraint::Length(subtab_nav_height),   // Subtab navigation
+        Constraint::Min(content_height),         // Content area
     ])
     .split(area);
 
-    // 1. Render Metric Cards Row
+    // 1. Render Metric Cards Row (always visible)
     render_metric_cards(f, total_cost, today_runtime, &runtime_by_day, vertical_chunks[0]);
 
-    // 2. Render Runtime Bar Chart
-    render_runtime_chart(f, &runtime_by_day, vertical_chunks[1]);
+    // 2. Render Subtab Navigation
+    render_subtab_navigation(f, app.stats_subtab, vertical_chunks[1]);
 
-    // 3. Render Tables Side by Side
-    let table_chunks = Layout::horizontal([
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
-    .split(vertical_chunks[2]);
+    // 3. Render Content based on active subtab
+    match app.stats_subtab {
+        StatsSubtab::Chart => {
+            // Full-height chart view
+            render_runtime_chart(f, &runtime_by_day, vertical_chunks[2]);
+        }
+        StatsSubtab::Rankings => {
+            // Side-by-side tables view
+            let table_chunks = Layout::horizontal([
+                Constraint::Percentage(50),
+                Constraint::Percentage(50),
+            ])
+            .split(vertical_chunks[2]);
 
-    render_cost_by_project_table(f, &cost_by_project, table_chunks[0]);
-    render_top_conversations_table(f, &top_conv_with_titles, table_chunks[1]);
+            render_cost_by_project_table(f, &cost_by_project, table_chunks[0]);
+            render_top_conversations_table(f, &top_conv_with_titles, table_chunks[1]);
+        }
+    }
+}
+
+/// Render the subtab navigation bar with pill-shaped tabs
+fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rect) {
+    let block = Block::default()
+        .borders(Borders::BOTTOM)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.width < 20 || inner.height < 1 {
+        return;
+    }
+
+    // Build the subtab pills
+    let chart_active = active_subtab == StatsSubtab::Chart;
+    let rankings_active = active_subtab == StatsSubtab::Rankings;
+
+    let mut spans = vec![Span::raw(" ")];
+
+    // Chart tab
+    if chart_active {
+        spans.push(Span::styled(
+            " Chart ",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::BG_TAB_ACTIVE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " Chart ",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_SECONDARY),
+        ));
+    }
+
+    spans.push(Span::raw("  "));
+
+    // Rankings tab
+    if rankings_active {
+        spans.push(Span::styled(
+            " Rankings ",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::BG_TAB_ACTIVE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " Rankings ",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_SECONDARY),
+        ));
+    }
+
+    // Add hint for navigation
+    spans.push(Span::raw("   "));
+    spans.push(Span::styled(
+        "Tab/←/→ to switch",
+        Style::default().fg(theme::TEXT_DIM),
+    ));
+
+    let paragraph = Paragraph::new(Line::from(spans));
+    f.render_widget(paragraph, inner);
 }
 
 /// Render the top metric cards row
@@ -393,10 +479,10 @@ fn render_cost_by_project_table(f: &mut Frame, cost_by_project: &[(String, Strin
         .saturating_sub(TABLE_COST_COL_WIDTH as usize)
         .saturating_sub(1); // column spacing
 
-    // Create table rows
+    // Create table rows (use all available items up to RANKINGS_TABLE_ROWS)
     let rows: Vec<Row> = cost_by_project
         .iter()
-        .take(10)
+        .take(RANKINGS_TABLE_ROWS)
         .enumerate()
         .map(|(idx, (_a_tag, name, cost))| {
             let truncated_name = truncate_with_ellipsis(name, name_col_max_width);
