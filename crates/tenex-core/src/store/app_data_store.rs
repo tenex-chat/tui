@@ -560,7 +560,7 @@ impl AppDataStore {
                     .filter_map(|(_, value)| value.parse::<u64>().ok())
             })
             .sum::<u64>()
-            * 1000 // Convert seconds to milliseconds for RuntimeHierarchy
+            // Values are already in milliseconds from llm-runtime tags
     }
 
     /// Update runtime hierarchy for a thread after messages change
@@ -3755,7 +3755,7 @@ mod tests {
         pubkey: &str,
         thread_id: &str,
         created_at: u64,
-        runtime_secs: u64,
+        runtime_ms: u64,
     ) -> Message {
         Message {
             id: id.to_string(),
@@ -3771,7 +3771,7 @@ mod tests {
             p_tags: vec![],
             tool_name: None,
             tool_args: None,
-            llm_metadata: vec![("runtime".to_string(), runtime_secs.to_string())],
+            llm_metadata: vec![("runtime".to_string(), runtime_ms.to_string())],
             delegation_tag: None,
             branch: None,
         }
@@ -3784,14 +3784,14 @@ mod tests {
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400; // 1 day after cutoff
 
         let messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff, 100), // Should be filtered out
-            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 50), // Should be included
+            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff, 100000), // Should be filtered out
+            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 50), // Should be included (50ms)
         ];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
-        // Only the post-cutoff message should be counted: 50 seconds * 1000 = 50000 ms
-        assert_eq!(runtime_ms, 50_000, "Only post-cutoff messages should be counted");
+        // Only the post-cutoff message should be counted: 50 milliseconds
+        assert_eq!(runtime_ms, 50, "Only post-cutoff messages should be counted");
     }
 
     #[test]
@@ -3801,31 +3801,31 @@ mod tests {
         let before_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
 
         let messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", before_cutoff, 100), // Should be filtered out
-            make_message_with_runtime("msg2", "pubkey1", "thread1", at_cutoff, 50), // Should be included
+            make_message_with_runtime("msg1", "pubkey1", "thread1", before_cutoff, 100000), // Should be filtered out
+            make_message_with_runtime("msg2", "pubkey1", "thread1", at_cutoff, 50), // Should be included (50ms)
         ];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
-        // Only the message at cutoff should be counted: 50 seconds * 1000 = 50000 ms
-        assert_eq!(runtime_ms, 50_000, "Messages at cutoff should be included");
+        // Only the message at cutoff should be counted: 50 milliseconds
+        assert_eq!(runtime_ms, 50, "Messages at cutoff should be included");
     }
 
     #[test]
     fn test_calculate_runtime_from_messages_seconds_to_milliseconds() {
-        // Test conversion from seconds (llm-runtime tag) to milliseconds (RuntimeHierarchy)
+        // Test that llm-runtime values (already in milliseconds) are summed correctly
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400;
 
         let messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", post_cutoff, 5),   // 5 seconds
-            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 10),  // 10 seconds
-            make_message_with_runtime("msg3", "pubkey1", "thread1", post_cutoff, 120), // 2 minutes
+            make_message_with_runtime("msg1", "pubkey1", "thread1", post_cutoff, 5000),   // 5 seconds = 5000ms
+            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 10000),  // 10 seconds = 10000ms
+            make_message_with_runtime("msg3", "pubkey1", "thread1", post_cutoff, 120000), // 2 minutes = 120000ms
         ];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
-        // Total: (5 + 10 + 120) seconds = 135 seconds = 135000 milliseconds
-        assert_eq!(runtime_ms, 135_000, "Should convert seconds to milliseconds correctly");
+        // Total: (5000 + 10000 + 120000) milliseconds = 135000 milliseconds
+        assert_eq!(runtime_ms, 135_000, "Should sum milliseconds correctly");
     }
 
     #[test]
@@ -3857,22 +3857,22 @@ mod tests {
         let post_cutoff_2 = RUNTIME_CUTOFF_TIMESTAMP + 100_000;
 
         let messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff_1, 1000), // Excluded
-            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff_2, 500),  // Excluded
-            make_message_with_runtime("msg3", "pubkey1", "thread1", at_cutoff, 10),      // Included
-            make_message_with_runtime("msg4", "pubkey1", "thread1", post_cutoff_1, 20),  // Included
-            make_message_with_runtime("msg5", "pubkey1", "thread1", post_cutoff_2, 30),  // Included
+            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff_1, 1000000), // Excluded
+            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff_2, 500000),  // Excluded
+            make_message_with_runtime("msg3", "pubkey1", "thread1", at_cutoff, 10),      // Included (10ms)
+            make_message_with_runtime("msg4", "pubkey1", "thread1", post_cutoff_1, 20),  // Included (20ms)
+            make_message_with_runtime("msg5", "pubkey1", "thread1", post_cutoff_2, 30),  // Included (30ms)
         ];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
-        // Only msg3, msg4, msg5 should be counted: (10 + 20 + 30) = 60 seconds = 60000 ms
-        assert_eq!(runtime_ms, 60_000, "Should only count messages at or after cutoff");
+        // Only msg3, msg4, msg5 should be counted: (10 + 20 + 30) = 60 milliseconds
+        assert_eq!(runtime_ms, 60, "Should only count messages at or after cutoff");
     }
 
     #[test]
     fn test_end_to_end_runtime_flow_with_cutoff() {
-        // End-to-end test: llm metadata (seconds) → calculate_runtime (ms) → RuntimeHierarchy → stats
+        // End-to-end test: llm metadata (ms) → calculate_runtime (ms) → RuntimeHierarchy → stats
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
@@ -3882,8 +3882,8 @@ mod tests {
 
         // Thread 1: Messages before cutoff (should be filtered out)
         let thread1_messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff, 100),
-            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff, 200),
+            make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff, 100000),
+            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff, 200000),
         ];
 
         // Thread 2: Messages after cutoff (should be included)
@@ -3907,18 +3907,18 @@ mod tests {
 
         // Verify thread2 runtime is calculated correctly
         let thread2_individual = store.runtime_hierarchy.get_individual_runtime("thread2");
-        // (50 + 75) seconds = 125 seconds = 125000 milliseconds
-        assert_eq!(thread2_individual, 125_000, "Thread2 should have correct runtime in milliseconds");
+        // (50 + 75) milliseconds = 125 milliseconds
+        assert_eq!(thread2_individual, 125, "Thread2 should have correct runtime in milliseconds");
 
         // Verify total unique runtime only includes thread2
         let total = store.runtime_hierarchy.get_total_unique_runtime();
-        assert_eq!(total, 125_000, "Total should only include post-cutoff conversations");
+        assert_eq!(total, 125, "Total should only include post-cutoff conversations");
 
         // Verify top conversations includes only thread2
         let top = store.runtime_hierarchy.get_top_conversations_by_runtime(10);
         assert_eq!(top.len(), 1, "Should only have 1 conversation in top list");
         assert_eq!(top[0].0, "thread2");
-        assert_eq!(top[0].1, 125_000);
+        assert_eq!(top[0].1, 125);
     }
 
     #[test]
@@ -3932,7 +3932,7 @@ mod tests {
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
 
         // Parent conversation: created before cutoff, with q-tag pointing to child
-        let mut parent_msg = make_message_with_runtime("msg1", "pubkey1", "parent", pre_cutoff, 100);
+        let mut parent_msg = make_message_with_runtime("msg1", "pubkey1", "parent", pre_cutoff, 100000);
         parent_msg.q_tags.push("child".to_string());
         let parent_messages = vec![parent_msg];
 
@@ -3952,18 +3952,18 @@ mod tests {
         let parent_runtime = store.runtime_hierarchy.get_individual_runtime("parent");
         assert_eq!(parent_runtime, 0);
 
-        // Child should have 50 seconds = 50000 ms
+        // Child should have 50 milliseconds
         let child_runtime = store.runtime_hierarchy.get_individual_runtime("child");
-        assert_eq!(child_runtime, 50_000);
+        assert_eq!(child_runtime, 50);
 
         // Unfiltered total for parent includes child
         let parent_total_unfiltered = store.runtime_hierarchy.get_total_runtime("parent");
-        assert_eq!(parent_total_unfiltered, 50_000);
+        assert_eq!(parent_total_unfiltered, 50);
 
         // Top conversations should show parent with only child's runtime (filtered)
         let top = store.runtime_hierarchy.get_top_conversations_by_runtime(10);
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].0, "parent");
-        assert_eq!(top[0].1, 50_000, "Parent's filtered total should only include child");
+        assert_eq!(top[0].1, 50, "Parent's filtered total should only include child");
     }
 }
