@@ -101,6 +101,32 @@ pub enum HomeTab {
     Stats,
 }
 
+/// Subtabs within the Stats view
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub enum StatsSubtab {
+    #[default]
+    Chart,
+    Rankings,
+}
+
+impl StatsSubtab {
+    /// Get the next subtab (wraps around)
+    pub fn next(self) -> Self {
+        match self {
+            StatsSubtab::Chart => StatsSubtab::Rankings,
+            StatsSubtab::Rankings => StatsSubtab::Chart,
+        }
+    }
+
+    /// Get the previous subtab (wraps around)
+    pub fn prev(self) -> Self {
+        match self {
+            StatsSubtab::Chart => StatsSubtab::Rankings,
+            StatsSubtab::Rankings => StatsSubtab::Chart,
+        }
+    }
+}
+
 // ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState
 // are now in ui::state module
 
@@ -316,6 +342,8 @@ pub struct App {
     /// Channel sender for publish confirmations (draft_key, event_id)
     /// Used to notify the runtime when a message has been published
     pub publish_confirm_tx: Option<tokio::sync::mpsc::Sender<(String, String)>>,
+    /// Current subtab within the Stats view
+    pub stats_subtab: StatsSubtab,
 }
 
 impl App {
@@ -405,6 +433,7 @@ impl App {
             input_context_focus: None,
             sidebar_search: crate::ui::search::SidebarSearchState::new(),
             publish_confirm_tx: None,
+            stats_subtab: StatsSubtab::default(),
         }
     }
 

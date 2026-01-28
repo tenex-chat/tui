@@ -11,7 +11,7 @@ use crate::ui;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;
-use crate::ui::{App, HomeTab, InputMode, ModalState, View};
+use crate::ui::{App, HomeTab, InputMode, ModalState, StatsSubtab, View};
 
 // =============================================================================
 // HOME VIEW
@@ -127,37 +127,64 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             // Show/hide archived (unified toggle for both projects and conversations)
             app.toggle_show_archived();
         }
+        // Vim-style h/l navigation for Stats subtabs
+        KeyCode::Char('h') if app.home_panel_focus == HomeTab::Stats => {
+            app.stats_subtab = app.stats_subtab.prev();
+        }
+        KeyCode::Char('l') if app.home_panel_focus == HomeTab::Stats => {
+            app.stats_subtab = app.stats_subtab.next();
+        }
         KeyCode::Char('S') if has_shift && !app.sidebar_focused => {
             // Toggle scheduled events filter from main panel
             app.toggle_hide_scheduled();
         }
         KeyCode::Tab => {
-            app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Inbox,
-                HomeTab::Inbox => HomeTab::Reports,
-                HomeTab::Reports => HomeTab::Status,
-                HomeTab::Status => HomeTab::Feed,
-                HomeTab::Feed => HomeTab::ActiveWork,
-                HomeTab::ActiveWork => HomeTab::Stats,
-                HomeTab::Stats => HomeTab::Conversations,
-            };
+            // On Stats tab, Tab switches between subtabs; otherwise switches between home tabs
+            if app.home_panel_focus == HomeTab::Stats {
+                app.stats_subtab = app.stats_subtab.next();
+            } else {
+                app.home_panel_focus = match app.home_panel_focus {
+                    HomeTab::Conversations => HomeTab::Inbox,
+                    HomeTab::Inbox => HomeTab::Reports,
+                    HomeTab::Reports => HomeTab::Status,
+                    HomeTab::Status => HomeTab::Feed,
+                    HomeTab::Feed => HomeTab::ActiveWork,
+                    HomeTab::ActiveWork => HomeTab::Stats,
+                    HomeTab::Stats => HomeTab::Conversations, // Fallback (won't reach)
+                };
+            }
         }
         KeyCode::BackTab if has_shift => {
-            app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Stats,
-                HomeTab::Inbox => HomeTab::Conversations,
-                HomeTab::Reports => HomeTab::Inbox,
-                HomeTab::Status => HomeTab::Reports,
-                HomeTab::Feed => HomeTab::Status,
-                HomeTab::ActiveWork => HomeTab::Feed,
-                HomeTab::Stats => HomeTab::ActiveWork,
-            };
+            // On Stats tab, Shift+Tab switches between subtabs; otherwise switches between home tabs
+            if app.home_panel_focus == HomeTab::Stats {
+                app.stats_subtab = app.stats_subtab.prev();
+            } else {
+                app.home_panel_focus = match app.home_panel_focus {
+                    HomeTab::Conversations => HomeTab::Stats,
+                    HomeTab::Inbox => HomeTab::Conversations,
+                    HomeTab::Reports => HomeTab::Inbox,
+                    HomeTab::Status => HomeTab::Reports,
+                    HomeTab::Feed => HomeTab::Status,
+                    HomeTab::ActiveWork => HomeTab::Feed,
+                    HomeTab::Stats => HomeTab::ActiveWork, // Fallback (won't reach)
+                };
+            }
         }
         KeyCode::Right => {
-            app.sidebar_focused = true;
+            // On Stats tab, Right switches subtabs; otherwise focuses sidebar
+            if app.home_panel_focus == HomeTab::Stats {
+                app.stats_subtab = app.stats_subtab.next();
+            } else {
+                app.sidebar_focused = true;
+            }
         }
         KeyCode::Left => {
-            app.sidebar_focused = false;
+            // On Stats tab, Left switches subtabs; otherwise unfocuses sidebar
+            if app.home_panel_focus == HomeTab::Stats {
+                app.stats_subtab = app.stats_subtab.prev();
+            } else {
+                app.sidebar_focused = false;
+            }
         }
         KeyCode::Up => {
             if app.sidebar_focused {
