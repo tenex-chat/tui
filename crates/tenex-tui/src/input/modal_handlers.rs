@@ -1054,19 +1054,20 @@ fn execute_project_action(
             app.modal_state = ModalState::None;
         }
         ProjectAction::Settings => {
-            let agent_ids = {
+            let (agent_ids, mcp_tool_ids) = {
                 let store = app.data_store.borrow();
                 store
                     .get_projects()
                     .iter()
                     .find(|p| p.a_tag() == state.project_a_tag)
-                    .map(|p| p.agent_ids.clone())
+                    .map(|p| (p.agent_ids.clone(), p.mcp_tool_ids.clone()))
                     .unwrap_or_default()
             };
             app.modal_state = ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
                 state.project_a_tag.clone(),
                 state.project_name.clone(),
                 agent_ids,
+                mcp_tool_ids,
             ));
         }
         ProjectAction::NewConversation => {

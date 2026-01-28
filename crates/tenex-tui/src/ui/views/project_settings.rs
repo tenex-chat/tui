@@ -37,6 +37,11 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
         content_area.height,
     );
 
+    // Calculate available height for sections
+    let total_content_height = remaining.height.saturating_sub(3); // Reserve space for hints
+    let agents_height = total_content_height / 2;
+    let tools_height = total_content_height.saturating_sub(agents_height);
+
     // Agents section header
     let agents_header_area = Rect::new(remaining.x, remaining.y, remaining.width, 1);
     let agent_count = state.pending_agent_ids.len();
@@ -51,7 +56,7 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
         remaining.x,
         remaining.y + 2,
         remaining.width,
-        remaining.height.saturating_sub(5),
+        agents_height.saturating_sub(2),
     );
 
     if state.pending_agent_ids.is_empty() {
@@ -131,6 +136,58 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
         f.render_widget(list, list_area);
     }
 
+    // MCP Tools section header
+    let tools_header_y = remaining.y + agents_height + 1;
+    let tools_header_area = Rect::new(remaining.x, tools_header_y, remaining.width, 1);
+    let tool_count = state.pending_mcp_tool_ids.len();
+    let tools_header_text = format!("MCP Tools ({})", tool_count);
+    let tools_header = Paragraph::new(Line::from(vec![
+        Span::styled(tools_header_text, Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::ITALIC)),
+    ]));
+    f.render_widget(tools_header, tools_header_area);
+
+    // MCP Tools list area
+    let tools_list_area = Rect::new(
+        remaining.x,
+        tools_header_y + 2,
+        remaining.width,
+        tools_height.saturating_sub(2),
+    );
+
+    if state.pending_mcp_tool_ids.is_empty() {
+        let empty_msg = Paragraph::new("No MCP tools assigned. Press 't' to add tools.")
+            .style(Style::default().fg(theme::TEXT_MUTED));
+        f.render_widget(empty_msg, tools_list_area);
+    } else {
+        let tool_items: Vec<ListItem> = state
+            .pending_mcp_tool_ids
+            .iter()
+            .enumerate()
+            .map(|(i, tool_id)| {
+                // Try to get tool name from data store
+                let tool_name = app
+                    .data_store
+                    .borrow()
+                    .get_mcp_tool(tool_id)
+                    .map(|t| t.name.clone())
+                    .unwrap_or_else(|| format!("{}...", &tool_id[..16.min(tool_id.len())]));
+
+                let mut spans = vec![];
+
+                // Simple prefix
+                spans.push(Span::styled("  ", Style::default()));
+
+                // Tool name
+                spans.push(Span::styled(tool_name, Style::default().fg(theme::TEXT_PRIMARY)));
+
+                ListItem::new(Line::from(spans))
+            })
+            .collect();
+
+        let tools_list = List::new(tool_items);
+        f.render_widget(tools_list, tools_list_area);
+    }
+
     // Hints at bottom
     let hints_area = Rect::new(
         popup_area.x + 2,
@@ -141,7 +198,10 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &ProjectSet
 
     let mut hint_spans = vec![
         Span::styled("a", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(" add", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" add agent", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("t", Style::default().fg(theme::ACCENT_WARNING)),
+        Span::styled(" add tool", Style::default().fg(theme::TEXT_MUTED)),
     ];
 
     if !state.pending_agent_ids.is_empty() {

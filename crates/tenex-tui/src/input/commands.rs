@@ -758,10 +758,12 @@ fn open_project_settings(app: &mut App) {
         let a_tag = project.a_tag();
         let project_name = project.name.clone();
         let agent_ids = project.agent_ids.clone();
+        let mcp_tool_ids = project.mcp_tool_ids.clone();
         app.modal_state = ModalState::ProjectSettings(modal::ProjectSettingsState::new(
             a_tag,
             project_name,
             agent_ids,
+            mcp_tool_ids,
         ));
     }
 }

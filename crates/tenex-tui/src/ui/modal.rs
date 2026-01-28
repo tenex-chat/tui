@@ -121,6 +121,8 @@ pub struct ProjectSettingsState {
     pub project_name: String,
     pub original_agent_ids: Vec<String>,
     pub pending_agent_ids: Vec<String>,
+    pub original_mcp_tool_ids: Vec<String>,
+    pub pending_mcp_tool_ids: Vec<String>,
     pub selector_index: usize,
     pub in_add_mode: bool,
     pub add_filter: String,
@@ -334,12 +336,14 @@ impl CreateAgentState {
 }
 
 impl ProjectSettingsState {
-    pub fn new(project_a_tag: String, project_name: String, agent_ids: Vec<String>) -> Self {
+    pub fn new(project_a_tag: String, project_name: String, agent_ids: Vec<String>, mcp_tool_ids: Vec<String>) -> Self {
         Self {
             project_a_tag,
             project_name,
             original_agent_ids: agent_ids.clone(),
             pending_agent_ids: agent_ids,
+            original_mcp_tool_ids: mcp_tool_ids.clone(),
+            pending_mcp_tool_ids: mcp_tool_ids,
             selector_index: 0,
             in_add_mode: false,
             add_filter: String::new(),
@@ -349,6 +353,7 @@ impl ProjectSettingsState {
 
     pub fn has_changes(&self) -> bool {
         self.original_agent_ids != self.pending_agent_ids
+            || self.original_mcp_tool_ids != self.pending_mcp_tool_ids
     }
 
     pub fn add_agent(&mut self, event_id: String) {
@@ -371,6 +376,21 @@ impl ProjectSettingsState {
             let agent_id = self.pending_agent_ids.remove(index);
             self.pending_agent_ids.insert(0, agent_id);
             self.selector_index = 0;
+        }
+    }
+
+    pub fn add_mcp_tool(&mut self, tool_id: String) {
+        if !self.pending_mcp_tool_ids.contains(&tool_id) {
+            self.pending_mcp_tool_ids.push(tool_id);
+        }
+    }
+
+    pub fn remove_mcp_tool(&mut self, index: usize) {
+        if index < self.pending_mcp_tool_ids.len() {
+            self.pending_mcp_tool_ids.remove(index);
+            if self.selector_index >= self.pending_mcp_tool_ids.len() && self.selector_index > 0 {
+                self.selector_index -= 1;
+            }
         }
     }
 }

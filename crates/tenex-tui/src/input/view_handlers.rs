@@ -344,9 +344,10 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let a_tag = project.a_tag();
                 let project_name = project.name.clone();
                 let agent_ids = project.agent_ids.clone();
+                let mcp_tool_ids = project.mcp_tool_ids.clone();
 
                 app.modal_state = ui::modal::ModalState::ProjectSettings(
-                    ui::modal::ProjectSettingsState::new(a_tag, project_name, agent_ids),
+                    ui::modal::ProjectSettingsState::new(a_tag, project_name, agent_ids, mcp_tool_ids),
                 );
             }
         }
