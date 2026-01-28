@@ -6,7 +6,8 @@ pub struct Project {
     pub name: String,
     pub pubkey: String,
     pub participants: Vec<String>,
-    pub agent_ids: Vec<String>,  // Agent definition event IDs (kind 4199)
+    pub agent_ids: Vec<String>,      // Agent definition event IDs (kind 4199)
+    pub mcp_tool_ids: Vec<String>,   // MCP tool event IDs (kind 4200)
     pub created_at: u64,
 }
 
@@ -23,6 +24,7 @@ impl Project {
         let mut name: Option<String> = None;
         let mut participants = Vec::new();
         let mut agent_ids = Vec::new();
+        let mut mcp_tool_ids = Vec::new();
 
         for tag in note.tags() {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
@@ -51,6 +53,16 @@ impl Project {
                         }
                     }
                 }
+                Some("mcp") => {
+                    if let Some(elem) = tag.get(1) {
+                        // nostrdb stores event IDs as binary Id variant, not as strings
+                        if let Some(id_bytes) = elem.variant().id() {
+                            mcp_tool_ids.push(hex::encode(id_bytes));
+                        } else if let Some(s) = elem.variant().str() {
+                            mcp_tool_ids.push(s.to_string());
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -65,6 +77,7 @@ impl Project {
             pubkey,
             participants,
             agent_ids,
+            mcp_tool_ids,
             created_at: note.created_at(),
         })
     }
@@ -86,6 +99,7 @@ mod tests {
             pubkey: "a".repeat(64),
             participants: vec![],
             agent_ids: vec![],
+            mcp_tool_ids: vec![],
             created_at: 0,
         };
 
