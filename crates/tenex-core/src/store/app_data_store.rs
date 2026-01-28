@@ -812,6 +812,11 @@ impl AppDataStore {
     /// Uses pagination to iterate through ALL results without arbitrary caps.
     /// This approach is more accurate than using messages_by_thread because it captures
     /// ALL user messages regardless of whether they're associated with a project thread.
+    ///
+    /// ## Pagination Safety
+    /// - Uses inclusive `until` with seen-event-id guards to handle same-second events safely
+    /// - Assumes nostrdb::query returns events ordered by created_at descending (newest first)
+    /// - Pagination cursor is always updated from ALL page results, not just non-duplicate events
     fn rebuild_messages_by_day_counts(&mut self) {
         self.messages_by_day_counts.clear();
 
@@ -832,7 +837,9 @@ impl AppDataStore {
                     match Transaction::new(&self.ndb) {
                         Ok(txn) => {
                             // Paginate through ALL user messages using until timestamp
+                            // Use seen-event-id guard to handle same-second pagination safely
                             let mut until_timestamp: Option<u64> = None;
+                            let mut seen_event_ids: HashSet<[u8; 32]> = HashSet::new();
                             let mut total_user_messages: u64 = 0;
 
                             loop {
@@ -852,22 +859,32 @@ impl AppDataStore {
                                             break; // No more results
                                         }
 
-                                        let mut oldest_timestamp: Option<u64> = None;
+                                        let mut page_oldest_timestamp: Option<u64> = None;
+                                        let mut new_events_in_page = 0;
 
                                         for result in results.iter() {
                                             if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
+                                                let event_id = *note.id();
                                                 let created_at = note.created_at();
+
+                                                // Always track oldest timestamp for pagination (from ALL results)
+                                                match page_oldest_timestamp {
+                                                    None => page_oldest_timestamp = Some(created_at),
+                                                    Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
+                                                    _ => {}
+                                                }
+
+                                                // Skip if we've already processed this event (same-second boundary)
+                                                if seen_event_ids.contains(&event_id) {
+                                                    continue;
+                                                }
+                                                seen_event_ids.insert(event_id);
+
                                                 let day_start = (created_at / seconds_per_day) * seconds_per_day;
                                                 let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
                                                 entry.0 += 1;
                                                 total_user_messages += 1;
-
-                                                // Track oldest for pagination
-                                                match oldest_timestamp {
-                                                    None => oldest_timestamp = Some(created_at),
-                                                    Some(t) if created_at < t => oldest_timestamp = Some(created_at),
-                                                    _ => {}
-                                                }
+                                                new_events_in_page += 1;
                                             }
                                         }
 
@@ -876,10 +893,20 @@ impl AppDataStore {
                                             break;
                                         }
 
-                                        // Set until to oldest - 1 to get the next page (avoid duplicates)
-                                        match oldest_timestamp {
-                                            Some(t) if t > 0 => until_timestamp = Some(t - 1),
-                                            _ => break, // No valid timestamp to continue pagination
+                                        // If page had no new events, we've exhausted unique events at this timestamp boundary
+                                        if new_events_in_page == 0 {
+                                            // Still need to continue pagination with older timestamp
+                                            match page_oldest_timestamp {
+                                                Some(t) if t > 0 => until_timestamp = Some(t - 1),
+                                                _ => break,
+                                            }
+                                        } else {
+                                            // Use inclusive pagination (same timestamp) to catch more same-second events
+                                            // The seen_event_ids guard prevents double-counting
+                                            match page_oldest_timestamp {
+                                                Some(t) => until_timestamp = Some(t),
+                                                None => break,
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -908,6 +935,7 @@ impl AppDataStore {
             match Transaction::new(&self.ndb) {
                 Ok(txn) => {
                     // Track seen event IDs to avoid double-counting messages that a-tag multiple projects
+                    // This also handles same-second pagination safety
                     let mut seen_event_ids: HashSet<[u8; 32]> = HashSet::new();
                     let mut total_project_messages: u64 = 0;
 
@@ -932,30 +960,36 @@ impl AppDataStore {
                                         break; // No more results for this project
                                     }
 
-                                    let mut oldest_timestamp: Option<u64> = None;
+                                    // Track page-level oldest timestamp separately from deduplication
+                                    // BUG FIX: Always update pagination cursor from ALL page results,
+                                    // even if events are duplicates (seen from another project)
+                                    let mut page_oldest_timestamp: Option<u64> = None;
+                                    let mut new_events_in_page = 0;
 
                                     for result in results.iter() {
                                         if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
                                             let event_id = *note.id();
+                                            let created_at = note.created_at();
 
-                                            // Skip if we've already counted this event (multi-project a-tags)
+                                            // Always track oldest timestamp for pagination (from ALL results)
+                                            // This ensures we advance the cursor even when all events are duplicates
+                                            match page_oldest_timestamp {
+                                                None => page_oldest_timestamp = Some(created_at),
+                                                Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
+                                                _ => {}
+                                            }
+
+                                            // Skip if we've already counted this event (multi-project a-tags or same-second boundary)
                                             if seen_event_ids.contains(&event_id) {
                                                 continue;
                                             }
                                             seen_event_ids.insert(event_id);
 
-                                            let created_at = note.created_at();
                                             let day_start = (created_at / seconds_per_day) * seconds_per_day;
                                             let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
                                             entry.1 += 1;
                                             total_project_messages += 1;
-
-                                            // Track oldest for pagination
-                                            match oldest_timestamp {
-                                                None => oldest_timestamp = Some(created_at),
-                                                Some(t) if created_at < t => oldest_timestamp = Some(created_at),
-                                                _ => {}
-                                            }
+                                            new_events_in_page += 1;
                                         }
                                     }
 
@@ -964,10 +998,20 @@ impl AppDataStore {
                                         break;
                                     }
 
-                                    // Set until to oldest - 1 to get the next page (avoid duplicates)
-                                    match oldest_timestamp {
-                                        Some(t) if t > 0 => until_timestamp = Some(t - 1),
-                                        _ => break, // No valid timestamp to continue pagination
+                                    // If page had no new events, we've exhausted unique events at this timestamp boundary
+                                    // Must still advance pagination to find older unique events
+                                    if new_events_in_page == 0 {
+                                        match page_oldest_timestamp {
+                                            Some(t) if t > 0 => until_timestamp = Some(t - 1),
+                                            _ => break,
+                                        }
+                                    } else {
+                                        // Use inclusive pagination (same timestamp) to catch more same-second events
+                                        // The seen_event_ids guard prevents double-counting
+                                        match page_oldest_timestamp {
+                                            Some(t) => until_timestamp = Some(t),
+                                            None => break,
+                                        }
                                     }
                                 }
                                 Err(e) => {
@@ -2695,5 +2739,278 @@ mod tests {
         );
 
         assert_eq!(results.len(), 3, "Empty query should return all 3 messages");
+    }
+
+    // ========================================================================================
+    // Tests for rebuild_messages_by_day_counts pagination fixes
+    // ========================================================================================
+
+    mod pagination_tests {
+        use super::*;
+        use crate::store::events::{ingest_events, wait_for_event_processing};
+        use crate::models::project::Project;
+        use nostr_sdk::prelude::*;
+
+        /// Helper to create a kind:1 event with specific timestamp and a-tag
+        fn make_kind1_event(keys: &Keys, content: &str, created_at: u64, a_tag: Option<&str>) -> Event {
+            let mut builder = EventBuilder::new(Kind::TextNote, content);
+
+            if let Some(a) = a_tag {
+                builder = builder.tag(Tag::custom(
+                    TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                    vec![a.to_string()],
+                ));
+            }
+
+            // Use custom_created_at to set specific timestamp
+            builder.custom_created_at(Timestamp::from(created_at))
+                .sign_with_keys(keys)
+                .unwrap()
+        }
+
+        /// Helper to create a Project struct directly for testing
+        fn make_test_project(id: &str, name: &str, pubkey: &str) -> Project {
+            Project {
+                id: id.to_string(),
+                name: name.to_string(),
+                pubkey: pubkey.to_string(),
+                participants: vec![],
+                agent_ids: vec![],
+                mcp_tool_ids: vec![],
+                created_at: 0,
+            }
+        }
+
+        /// Test: User message pagination across multiple batches
+        /// Verifies that we correctly paginate through more events than a single batch
+        #[test]
+        fn test_user_messages_pagination_multiple_batches() {
+            let dir = tempdir().unwrap();
+            let db = Database::new(dir.path()).unwrap();
+
+            let keys = Keys::generate();
+            let user_pubkey = keys.public_key().to_hex();
+
+            // Create 25 messages with different timestamps across 3 days
+            let mut events = Vec::new();
+            let base_time: u64 = 86400 * 100; // Day 100
+
+            for i in 0..25 {
+                let day_offset = i / 10; // 10 msgs on day 0, 10 on day 1, 5 on day 2
+                let timestamp = base_time + (day_offset as u64 * 86400) + (i as u64 * 60); // 1 min apart
+                events.push(make_kind1_event(&keys, &format!("msg {}", i), timestamp, None));
+            }
+
+            // Ingest all events
+            ingest_events(&db.ndb, &events, None).unwrap();
+
+            // Wait for at least one to be processed
+            let filter = nostrdb::Filter::new()
+                .kinds([1])
+                .authors([&hex::decode(&user_pubkey).unwrap().try_into().unwrap()])
+                .build();
+            wait_for_event_processing(&db.ndb, filter, 5000);
+
+            // Small sleep to ensure all events are ingested
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Create store and rebuild
+            let mut store = AppDataStore::new(db.ndb.clone());
+            store.user_pubkey = Some(user_pubkey);
+            store.rebuild_messages_by_day_counts();
+
+            // Verify counts - should have messages on 3 days
+            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            assert!(total_user >= 20, "Should count at least 20 user messages, got {}", total_user);
+        }
+
+        /// Test: Same-second events are not lost during pagination
+        /// This is the critical fix - previously `until = oldest - 1` would skip same-second events
+        #[test]
+        fn test_same_second_events_not_lost() {
+            let dir = tempdir().unwrap();
+            let db = Database::new(dir.path()).unwrap();
+
+            let keys = Keys::generate();
+            let user_pubkey = keys.public_key().to_hex();
+
+            // Create 15 messages ALL with the same timestamp (bursty same-second case)
+            let same_timestamp: u64 = 86400 * 100;
+            let mut events = Vec::new();
+
+            for i in 0..15 {
+                events.push(make_kind1_event(
+                    &keys,
+                    &format!("same-second msg {}", i),
+                    same_timestamp,
+                    None,
+                ));
+            }
+
+            // Ingest all events
+            ingest_events(&db.ndb, &events, None).unwrap();
+
+            // Wait for processing
+            let filter = nostrdb::Filter::new()
+                .kinds([1])
+                .authors([&hex::decode(&user_pubkey).unwrap().try_into().unwrap()])
+                .build();
+            wait_for_event_processing(&db.ndb, filter, 5000);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Create store and rebuild
+            let mut store = AppDataStore::new(db.ndb.clone());
+            store.user_pubkey = Some(user_pubkey);
+            store.rebuild_messages_by_day_counts();
+
+            // Verify ALL same-second events are counted
+            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            assert_eq!(
+                total_user, 15,
+                "Should count all 15 same-second events, got {}. Same-second event loss bug!",
+                total_user
+            );
+        }
+
+        /// Test: Cross-project deduplication works correctly
+        /// Events that a-tag multiple projects should only be counted once
+        #[test]
+        fn test_cross_project_deduplication() {
+            let dir = tempdir().unwrap();
+            let db = Database::new(dir.path()).unwrap();
+
+            let keys = Keys::generate();
+            let user_pubkey = keys.public_key().to_hex();
+
+            let a_tag1 = format!("31933:{}:proj1", user_pubkey);
+            let a_tag2 = format!("31933:{}:proj2", user_pubkey);
+
+            // Create messages:
+            // - 3 messages for project 1 only
+            // - 3 messages for project 2 only
+            // - 2 messages that a-tag BOTH projects (should only be counted once)
+            let mut events = Vec::new();
+            let base_time: u64 = 86400 * 100;
+
+            for i in 0..3 {
+                events.push(make_kind1_event(&keys, &format!("proj1 only {}", i), base_time + i as u64, Some(&a_tag1)));
+            }
+            for i in 0..3 {
+                events.push(make_kind1_event(&keys, &format!("proj2 only {}", i), base_time + 100 + i as u64, Some(&a_tag2)));
+            }
+
+            // Create messages that reference both projects (using two a-tags)
+            for i in 0..2 {
+                let event = EventBuilder::new(Kind::TextNote, &format!("both projects {}", i))
+                    .tag(Tag::custom(
+                        TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                        vec![a_tag1.clone()],
+                    ))
+                    .tag(Tag::custom(
+                        TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                        vec![a_tag2.clone()],
+                    ))
+                    .custom_created_at(Timestamp::from(base_time + 200 + i as u64))
+                    .sign_with_keys(&keys)
+                    .unwrap();
+                events.push(event);
+            }
+
+            ingest_events(&db.ndb, &events, None).unwrap();
+
+            // Wait for messages
+            let filter = nostrdb::Filter::new().kinds([1]).build();
+            wait_for_event_processing(&db.ndb, filter, 5000);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Create store with both projects (directly add Project structs)
+            let mut store = AppDataStore::new(db.ndb.clone());
+            store.user_pubkey = Some(user_pubkey.clone());
+            store.projects.push(make_test_project("proj1", "Project 1", &user_pubkey));
+            store.projects.push(make_test_project("proj2", "Project 2", &user_pubkey));
+            store.rebuild_messages_by_day_counts();
+
+            // Verify deduplication: 3 + 3 + 2 = 8 unique messages
+            let total_all: u64 = store.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            assert_eq!(
+                total_all, 8,
+                "Should count 8 unique project messages (not 10 with double-counting), got {}",
+                total_all
+            );
+        }
+
+        /// Test: Project pagination continues even when page contains only duplicates
+        /// This is the fix for Bug #1 - previously the loop would break early
+        #[test]
+        fn test_project_pagination_continues_through_duplicate_pages() {
+            let dir = tempdir().unwrap();
+            let db = Database::new(dir.path()).unwrap();
+
+            let keys = Keys::generate();
+            let user_pubkey = keys.public_key().to_hex();
+
+            let a_tag1 = format!("31933:{}:proj1", user_pubkey);
+            let a_tag2 = format!("31933:{}:proj2", user_pubkey);
+
+            // Create messages designed to trigger the bug:
+            // - First batch of messages a-tag BOTH projects (time 200-210)
+            // - Second batch of messages a-tag ONLY project 2 (time 100-110) - older, unique to proj2
+            //
+            // When iterating project 2:
+            // - First page sees the dual-tagged messages (already seen from project 1)
+            // - Without the fix, oldest_timestamp stays None and loop breaks
+            // - With the fix, we continue and find the older unique messages
+
+            let mut events = Vec::new();
+            let base_time: u64 = 86400 * 100;
+
+            // Newer messages that a-tag both projects
+            for i in 0..5 {
+                let event = EventBuilder::new(Kind::TextNote, &format!("both projects {}", i))
+                    .tag(Tag::custom(
+                        TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                        vec![a_tag1.clone()],
+                    ))
+                    .tag(Tag::custom(
+                        TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
+                        vec![a_tag2.clone()],
+                    ))
+                    .custom_created_at(Timestamp::from(base_time + 200 + i as u64))
+                    .sign_with_keys(&keys)
+                    .unwrap();
+                events.push(event);
+            }
+
+            // Older messages that only a-tag project 2
+            for i in 0..5 {
+                events.push(make_kind1_event(
+                    &keys,
+                    &format!("proj2 only old {}", i),
+                    base_time + 100 + i as u64,
+                    Some(&a_tag2),
+                ));
+            }
+
+            ingest_events(&db.ndb, &events, None).unwrap();
+            let filter = nostrdb::Filter::new().kinds([1]).build();
+            wait_for_event_processing(&db.ndb, filter, 5000);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+
+            // Create store with both projects (directly add Project structs)
+            let mut store = AppDataStore::new(db.ndb.clone());
+            store.user_pubkey = Some(user_pubkey.clone());
+            store.projects.push(make_test_project("proj1", "Project 1", &user_pubkey));
+            store.projects.push(make_test_project("proj2", "Project 2", &user_pubkey));
+            store.rebuild_messages_by_day_counts();
+
+            // Verify: 5 dual-tagged + 5 proj2-only = 10 unique messages
+            let total_all: u64 = store.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            assert_eq!(
+                total_all, 10,
+                "Should count all 10 messages including older proj2-only ones, got {}. \
+                Early termination bug when page contains only duplicates!",
+                total_all
+            );
+        }
     }
 }
