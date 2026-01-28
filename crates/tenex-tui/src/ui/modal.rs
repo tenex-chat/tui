@@ -1225,7 +1225,7 @@ pub enum HistorySearchEntryKind {
         /// Project a-tag the message belongs to
         project_a_tag: Option<String>,
     },
-    /// An unsent draft (not yet published)
+    /// An unsent chat/versioned/archived draft (associated with a conversation)
     Draft {
         /// Draft identifier (conversation_id for chat drafts)
         draft_id: String,
@@ -1233,6 +1233,16 @@ pub enum HistorySearchEntryKind {
         conversation_id: String,
         /// Project a-tag the draft belongs to
         project_a_tag: Option<String>,
+    },
+    /// A named draft (project-scoped, not associated with a specific conversation)
+    /// Navigates to the project rather than a conversation
+    NamedDraft {
+        /// Unique draft identifier
+        draft_id: String,
+        /// Human-readable name of the draft
+        name: String,
+        /// Project a-tag (also the navigation target)
+        project_a_tag: String,
     },
 }
 
@@ -1248,9 +1258,12 @@ pub struct HistorySearchEntry {
 }
 
 impl HistorySearchEntry {
-    /// Check if this entry is an unsent draft
+    /// Check if this entry is an unsent draft (either chat/versioned/archived or named)
     pub fn is_draft(&self) -> bool {
-        matches!(self.kind, HistorySearchEntryKind::Draft { .. })
+        matches!(
+            self.kind,
+            HistorySearchEntryKind::Draft { .. } | HistorySearchEntryKind::NamedDraft { .. }
+        )
     }
 
     /// Get the project a-tag for this entry
@@ -1258,6 +1271,7 @@ impl HistorySearchEntry {
         match &self.kind {
             HistorySearchEntryKind::Message { project_a_tag, .. } => project_a_tag.as_deref(),
             HistorySearchEntryKind::Draft { project_a_tag, .. } => project_a_tag.as_deref(),
+            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => Some(project_a_tag.as_str()),
         }
     }
 
@@ -1266,15 +1280,25 @@ impl HistorySearchEntry {
         match &self.kind {
             HistorySearchEntryKind::Message { event_id, .. } => event_id,
             HistorySearchEntryKind::Draft { draft_id, .. } => draft_id,
+            HistorySearchEntryKind::NamedDraft { draft_id, .. } => draft_id,
         }
     }
 
-    /// Get the navigation target ID (conversation_id for drafts, event_id for messages)
+    /// Get the navigation target ID
+    /// - Messages: event_id
+    /// - Chat/versioned/archived drafts: conversation_id
+    /// - Named drafts: project_a_tag (navigates to project)
     pub fn navigation_id(&self) -> &str {
         match &self.kind {
             HistorySearchEntryKind::Message { event_id, .. } => event_id,
             HistorySearchEntryKind::Draft { conversation_id, .. } => conversation_id,
+            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => project_a_tag,
         }
+    }
+
+    /// Check if this is a named draft (project-scoped, not conversation-scoped)
+    pub fn is_named_draft(&self) -> bool {
+        matches!(self.kind, HistorySearchEntryKind::NamedDraft { .. })
     }
 }
 
