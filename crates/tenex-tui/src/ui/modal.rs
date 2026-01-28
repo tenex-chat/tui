@@ -151,9 +151,8 @@ pub struct CreateProjectState {
     pub description: String,
     pub agent_ids: Vec<String>,
     pub agent_selector: SelectorState,
-    pub selected_mcp_tool_ids: Vec<String>,
-    pub mcp_tool_filter: String,
-    pub mcp_tool_selector_index: usize,
+    pub mcp_tool_ids: Vec<String>,
+    pub tool_selector: SelectorState,
 }
 
 impl CreateProjectState {
@@ -165,9 +164,8 @@ impl CreateProjectState {
             description: String::new(),
             agent_ids: Vec::new(),
             agent_selector: SelectorState::default(),
-            selected_mcp_tool_ids: Vec::new(),
-            mcp_tool_filter: String::new(),
-            mcp_tool_selector_index: 0,
+            mcp_tool_ids: Vec::new(),
+            tool_selector: SelectorState::default(),
         }
     }
 
@@ -187,23 +185,12 @@ impl CreateProjectState {
         }
     }
 
-    pub fn toggle_mcp_tool_selection(&mut self, tool_id: String) {
-        if let Some(pos) = self.selected_mcp_tool_ids.iter().position(|id| id == &tool_id) {
-            self.selected_mcp_tool_ids.remove(pos);
+    pub fn toggle_mcp_tool(&mut self, tool_id: String) {
+        if let Some(pos) = self.mcp_tool_ids.iter().position(|id| id == &tool_id) {
+            self.mcp_tool_ids.remove(pos);
         } else {
-            self.selected_mcp_tool_ids.push(tool_id);
+            self.mcp_tool_ids.push(tool_id);
         }
-    }
-
-    pub fn clear_mcp_tool_filter(&mut self) {
-        self.mcp_tool_filter.clear();
-        self.mcp_tool_selector_index = 0;
-    }
-
-    pub fn reset_mcp_tool_selection(&mut self) {
-        self.selected_mcp_tool_ids.clear();
-        self.mcp_tool_filter.clear();
-        self.mcp_tool_selector_index = 0;
     }
 
     pub fn all_mcp_tool_ids(&self, app: &crate::ui::app::App) -> Vec<String> {
@@ -212,7 +199,7 @@ impl CreateProjectState {
         let mut tool_ids = HashSet::new();
 
         // Add manually selected tools
-        for id in &self.selected_mcp_tool_ids {
+        for id in &self.mcp_tool_ids {
             tool_ids.insert(id.clone());
         }
 
