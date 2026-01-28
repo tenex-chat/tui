@@ -3,11 +3,17 @@
 //! Consolidates `DraftStorage` and `NamedDraftStorage` behind a unified service
 //! that owns the `RefCell` internally, preventing scattered `borrow_mut()` calls
 //! throughout the codebase.
+//!
+//! BULLETPROOF PERSISTENCE: This service is designed to NEVER lose user data.
+//! - Every keystroke is saved
+//! - Versioned drafts prevent message overwrites
+//! - State machine prevents premature clearing
+//! - Backup rotation protects against file corruption
 
 use std::cell::RefCell;
 use tenex_core::models::draft::{
     ChatDraft, DraftStorage, DraftStorageError, NamedDraft, NamedDraftStorage,
-    PendingPublishSnapshot,
+    PendingPublishSnapshot, SendState,
 };
 
 /// Unified service for draft persistence.
@@ -175,6 +181,284 @@ impl DraftService {
     pub fn update_named_draft(&self, id: &str, text: String) -> Result<(), DraftStorageError> {
         self.named_draft_storage.borrow_mut().update(id, text)
     }
+
+    // =========================================================================
+    // Bulletproof Draft Operations (New)
+    // =========================================================================
+
+    /// Check if storage was recovered from backup (show notification to user once)
+    pub fn was_recovered_from_backup(&self) -> bool {
+        self.draft_storage.borrow().recovered_from_backup
+    }
+
+    /// Force flush to disk immediately (call after critical operations)
+    pub fn flush(&self) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().flush()
+    }
+
+    // =========================================================================
+    // Versioned Draft Operations (Multi-message support)
+    // =========================================================================
+
+    /// Save a versioned draft (for multi-message tracking)
+    pub fn save_versioned_draft(&self, draft: ChatDraft) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().save_versioned(draft)
+    }
+
+    /// Load a specific versioned draft
+    pub fn load_versioned_draft(&self, conversation_id: &str, message_sequence: u32) -> Option<ChatDraft> {
+        self.draft_storage.borrow().load_versioned(conversation_id, message_sequence)
+    }
+
+    /// Get all versioned drafts for a conversation
+    pub fn get_versioned_drafts_for_conversation(&self, conversation_id: &str) -> Vec<ChatDraft> {
+        self.draft_storage
+            .borrow()
+            .get_versioned_drafts_for_conversation(conversation_id)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get all versioned drafts (for recovery/debugging)
+    pub fn get_all_versioned_drafts(&self) -> Vec<ChatDraft> {
+        self.draft_storage
+            .borrow()
+            .get_all_versioned_drafts()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get current message sequence for a conversation
+    pub fn get_current_sequence(&self, conversation_id: &str) -> u32 {
+        self.draft_storage.borrow().get_current_sequence(conversation_id)
+    }
+
+    // =========================================================================
+    // State Machine Operations (Bulletproof clearing)
+    // =========================================================================
+
+    /// Mark draft as pending send (when user hits send button)
+    /// NEVER deletes - only transitions state
+    pub fn mark_draft_pending_send(&self, conversation_id: &str) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().mark_draft_pending_send(conversation_id)
+    }
+
+    /// Mark draft as sent awaiting confirmation
+    pub fn mark_draft_sent_awaiting(&self, conversation_id: &str) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().mark_draft_sent_awaiting(conversation_id)
+    }
+
+    /// Mark draft as confirmed (after relay confirms)
+    /// STILL doesn't delete - cleanup happens separately after grace period
+    pub fn mark_draft_confirmed(&self, conversation_id: &str, event_id: Option<String>) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().mark_draft_confirmed(conversation_id, event_id)
+    }
+
+    // =========================================================================
+    // Archive Operations
+    // =========================================================================
+
+    /// Archive old confirmed drafts (move to drafts_archive.json)
+    /// Returns number of drafts archived
+    pub fn archive_old_confirmed_drafts(&self) -> Result<usize, DraftStorageError> {
+        self.draft_storage.borrow_mut().archive_old_confirmed_drafts()
+    }
+
+    /// Get all archived drafts
+    pub fn get_archived_drafts(&self) -> Vec<ChatDraft> {
+        self.draft_storage.borrow().get_archived_drafts()
+    }
+
+    // =========================================================================
+    // Pre-conversation Draft Operations (New conversation handling)
+    // =========================================================================
+
+    /// Get or create a draft for a new conversation in a project
+    /// Uses session ID for tracking before real conversation_id exists
+    pub fn get_or_create_project_draft(&self, project_a_tag: &str) -> Result<ChatDraft, DraftStorageError> {
+        self.draft_storage.borrow_mut().get_or_create_project_draft(project_a_tag)
+    }
+
+    /// Migrate a pre-conversation draft to a real conversation ID
+    /// Call after first message is sent and we have a thread ID
+    pub fn migrate_draft_to_conversation(
+        &self,
+        old_draft_key: &str,
+        new_conversation_id: &str,
+    ) -> Result<(), DraftStorageError> {
+        self.draft_storage.borrow_mut().migrate_draft_to_conversation(old_draft_key, new_conversation_id)
+    }
+
+    /// Get all drafts for a specific project
+    pub fn get_drafts_for_project(&self, project_a_tag: &str) -> Vec<ChatDraft> {
+        self.draft_storage
+            .borrow()
+            .get_drafts_for_project(project_a_tag)
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    /// Get all pre-conversation drafts (typing in new conversation)
+    pub fn get_pre_conversation_drafts(&self) -> Vec<ChatDraft> {
+        self.draft_storage
+            .borrow()
+            .get_pre_conversation_drafts()
+            .into_iter()
+            .cloned()
+            .collect()
+    }
+
+    // =========================================================================
+    // Comprehensive Search (for Ctrl+R integration)
+    // =========================================================================
+
+    /// Get ALL drafts from all sources for search/recovery
+    /// Includes: current drafts, versioned drafts, archived drafts, named drafts
+    pub fn get_all_searchable_drafts(&self) -> AllDrafts {
+        let draft_storage = self.draft_storage.borrow();
+        let named_storage = self.named_draft_storage.borrow();
+
+        AllDrafts {
+            chat_drafts: draft_storage.get_all_drafts().into_iter().cloned().collect(),
+            versioned_drafts: draft_storage.get_all_versioned_drafts().into_iter().cloned().collect(),
+            archived_drafts: draft_storage.get_archived_drafts(),
+            named_drafts: named_storage.get_all().into_iter().cloned().collect(),
+            pending_publishes: draft_storage.get_pending_publishes().into_iter().cloned().collect(),
+        }
+    }
+}
+
+/// Container for all draft types (for comprehensive search)
+#[derive(Debug, Clone, Default)]
+pub struct AllDrafts {
+    pub chat_drafts: Vec<ChatDraft>,
+    pub versioned_drafts: Vec<ChatDraft>,
+    pub archived_drafts: Vec<ChatDraft>,
+    pub named_drafts: Vec<NamedDraft>,
+    pub pending_publishes: Vec<PendingPublishSnapshot>,
+}
+
+impl AllDrafts {
+    /// Check if there are any drafts at all
+    pub fn is_empty(&self) -> bool {
+        self.chat_drafts.is_empty()
+            && self.versioned_drafts.is_empty()
+            && self.archived_drafts.is_empty()
+            && self.named_drafts.is_empty()
+    }
+
+    /// Get total count of all drafts
+    pub fn total_count(&self) -> usize {
+        self.chat_drafts.len()
+            + self.versioned_drafts.len()
+            + self.archived_drafts.len()
+            + self.named_drafts.len()
+    }
+
+    /// Search all drafts by text content (case-insensitive)
+    pub fn search(&self, query: &str) -> Vec<SearchableDraft> {
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+
+        // Search chat drafts
+        for draft in &self.chat_drafts {
+            if draft.text.to_lowercase().contains(&query_lower) {
+                results.push(SearchableDraft::Chat(draft.clone()));
+            }
+        }
+
+        // Search versioned drafts
+        for draft in &self.versioned_drafts {
+            if draft.text.to_lowercase().contains(&query_lower) {
+                results.push(SearchableDraft::Versioned(draft.clone()));
+            }
+        }
+
+        // Search archived drafts
+        for draft in &self.archived_drafts {
+            if draft.text.to_lowercase().contains(&query_lower) {
+                results.push(SearchableDraft::Archived(draft.clone()));
+            }
+        }
+
+        // Search named drafts
+        for draft in &self.named_drafts {
+            if draft.text.to_lowercase().contains(&query_lower)
+                || draft.name.to_lowercase().contains(&query_lower)
+            {
+                results.push(SearchableDraft::Named(draft.clone()));
+            }
+        }
+
+        // Sort by last modified (most recent first)
+        results.sort_by(|a, b| b.last_modified().cmp(&a.last_modified()));
+
+        results
+    }
+}
+
+/// A draft that can be searched (wraps different draft types)
+#[derive(Debug, Clone)]
+pub enum SearchableDraft {
+    Chat(ChatDraft),
+    Versioned(ChatDraft),
+    Archived(ChatDraft),
+    Named(NamedDraft),
+}
+
+impl SearchableDraft {
+    /// Get the text content of this draft
+    pub fn text(&self) -> &str {
+        match self {
+            SearchableDraft::Chat(d) => &d.text,
+            SearchableDraft::Versioned(d) => &d.text,
+            SearchableDraft::Archived(d) => &d.text,
+            SearchableDraft::Named(d) => &d.text,
+        }
+    }
+
+    /// Get the last modified timestamp
+    pub fn last_modified(&self) -> u64 {
+        match self {
+            SearchableDraft::Chat(d) => d.last_modified,
+            SearchableDraft::Versioned(d) => d.last_modified,
+            SearchableDraft::Archived(d) => d.last_modified,
+            SearchableDraft::Named(d) => d.last_modified,
+        }
+    }
+
+    /// Get the conversation/project ID
+    pub fn context_id(&self) -> &str {
+        match self {
+            SearchableDraft::Chat(d) => &d.conversation_id,
+            SearchableDraft::Versioned(d) => &d.conversation_id,
+            SearchableDraft::Archived(d) => &d.conversation_id,
+            SearchableDraft::Named(d) => &d.project_a_tag,
+        }
+    }
+
+    /// Get the draft type as a string for display
+    pub fn draft_type(&self) -> &'static str {
+        match self {
+            SearchableDraft::Chat(_) => "Chat",
+            SearchableDraft::Versioned(_) => "Versioned",
+            SearchableDraft::Archived(_) => "Archived",
+            SearchableDraft::Named(_) => "Named",
+        }
+    }
+
+    /// Get the send state (for chat drafts)
+    pub fn send_state(&self) -> Option<SendState> {
+        match self {
+            SearchableDraft::Chat(d) => Some(d.send_state),
+            SearchableDraft::Versioned(d) => Some(d.send_state),
+            SearchableDraft::Archived(d) => Some(d.send_state),
+            SearchableDraft::Named(_) => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -196,22 +480,34 @@ mod tests {
         assert!(service.named_draft_last_error().is_none());
     }
 
-    #[test]
-    fn test_chat_draft_save_load_roundtrip() {
-        let (service, _temp_dir) = create_test_service();
-
-        let draft = ChatDraft {
-            conversation_id: "test-conv-123".to_string(),
-            text: "Hello, this is a test draft".to_string(),
+    /// Helper to create a test ChatDraft with all required fields
+    fn create_test_chat_draft(conversation_id: &str, text: &str) -> ChatDraft {
+        ChatDraft {
+            conversation_id: conversation_id.to_string(),
+            session_id: None,
+            project_a_tag: None,
+            message_sequence: 0,
+            send_state: SendState::Typing,
+            text: text.to_string(),
             attachments: vec![],
             image_attachments: vec![],
-            selected_agent_pubkey: Some("agent-pubkey".to_string()),
-            selected_branch: Some("main".to_string()),
+            selected_agent_pubkey: None,
+            selected_branch: None,
             last_modified: 1234567890,
             reference_conversation_id: None,
             published_at: None,
             published_event_id: None,
-        };
+            confirmed_at: None,
+        }
+    }
+
+    #[test]
+    fn test_chat_draft_save_load_roundtrip() {
+        let (service, _temp_dir) = create_test_service();
+
+        let mut draft = create_test_chat_draft("test-conv-123", "Hello, this is a test draft");
+        draft.selected_agent_pubkey = Some("agent-pubkey".to_string());
+        draft.selected_branch = Some("main".to_string());
 
         // Save the draft
         let save_result = service.save_chat_draft(draft.clone());
@@ -231,18 +527,7 @@ mod tests {
     fn test_chat_draft_delete() {
         let (service, _temp_dir) = create_test_service();
 
-        let draft = ChatDraft {
-            conversation_id: "to-delete".to_string(),
-            text: "Will be deleted".to_string(),
-            attachments: vec![],
-            image_attachments: vec![],
-            selected_agent_pubkey: None,
-            selected_branch: None,
-            last_modified: 1234567890,
-            reference_conversation_id: None,
-            published_at: None,
-            published_event_id: None,
-        };
+        let draft = create_test_chat_draft("to-delete", "Will be deleted");
 
         service.save_chat_draft(draft).unwrap();
         assert!(service.load_chat_draft("to-delete").is_some());
@@ -305,6 +590,10 @@ mod tests {
         // Try to save a draft - this should fail and set an error
         let draft = ChatDraft {
             conversation_id: "test-conv".to_string(),
+            session_id: None,
+            project_a_tag: None,
+            message_sequence: 0,
+            send_state: SendState::Typing,
             text: "Test".to_string(),
             attachments: vec![],
             image_attachments: vec![],
@@ -314,6 +603,7 @@ mod tests {
             reference_conversation_id: None,
             published_at: None,
             published_event_id: None,
+            confirmed_at: None,
         };
 
         // This should fail due to invalid path
@@ -424,18 +714,7 @@ mod tests {
         let (service, _temp_dir) = create_test_service();
 
         // Create a draft without publishing
-        let draft = ChatDraft {
-            conversation_id: "unpublished-conv".to_string(),
-            text: "Draft content".to_string(),
-            attachments: vec![],
-            image_attachments: vec![],
-            selected_agent_pubkey: None,
-            selected_branch: None,
-            last_modified: 1234567890,
-            reference_conversation_id: None,
-            published_at: None, // Not published
-            published_event_id: None,
-        };
+        let draft = create_test_chat_draft("unpublished-conv", "Draft content");
 
         service.save_chat_draft(draft).unwrap();
 
@@ -454,18 +733,10 @@ mod tests {
         let (service, _temp_dir) = create_test_service();
 
         // Create a draft with content and selections
-        let draft = ChatDraft {
-            conversation_id: "clear-test".to_string(),
-            text: "Some content to clear".to_string(),
-            attachments: vec![],
-            image_attachments: vec![],
-            selected_agent_pubkey: Some("agent-123".to_string()),
-            selected_branch: Some("feature-branch".to_string()),
-            last_modified: 1234567890,
-            reference_conversation_id: Some("ref-conv".to_string()),
-            published_at: None,
-            published_event_id: None,
-        };
+        let mut draft = create_test_chat_draft("clear-test", "Some content to clear");
+        draft.selected_agent_pubkey = Some("agent-123".to_string());
+        draft.selected_branch = Some("feature-branch".to_string());
+        draft.reference_conversation_id = Some("ref-conv".to_string());
 
         service.save_chat_draft(draft).unwrap();
 
