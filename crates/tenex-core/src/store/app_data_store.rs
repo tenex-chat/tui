@@ -65,6 +65,10 @@ pub struct AppDataStore {
     // Runtime hierarchy - tracks individual conversation runtimes and parent-child relationships
     // for hierarchical runtime aggregation (parent runtime = own + all children recursively)
     pub runtime_hierarchy: RuntimeHierarchy,
+
+    // Pre-aggregated message counts by day for Stats view performance
+    // Maps day_start_timestamp -> (user_count, all_count) for O(1) lookup instead of O(total_messages) per frame
+    messages_by_day_counts: HashMap<u64, (u64, u64)>,
 }
 
 impl AppDataStore {
@@ -94,6 +98,7 @@ impl AppDataStore {
             pending_backend_approvals: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
+            messages_by_day_counts: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -132,6 +137,7 @@ impl AppDataStore {
         self.pending_backend_approvals.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
+        self.messages_by_day_counts.clear();
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
@@ -261,6 +267,9 @@ impl AppDataStore {
             // Temporary sort by last_activity - will be re-sorted by effective_last_activity after hierarchy is built
             threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
         }
+
+        // Rebuild pre-aggregated message counts by day for Stats view
+        self.rebuild_messages_by_day_counts();
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -739,6 +748,98 @@ impl AppDataStore {
         result
     }
 
+    /// Get message counts aggregated by day for the Stats tab bar chart.
+    /// Returns two vectors:
+    /// - First: messages from the current user (day_start_timestamp, count) tuples
+    /// - Second: all messages from anyone a-tagging our projects (day_start_timestamp, count) tuples
+    /// Both vectors cover the same time window (num_days).
+    ///
+    /// Uses pre-aggregated counters for O(num_days) performance instead of O(total_messages).
+    /// Single source of truth: messages_by_thread (no double-counting from agent_chatter).
+    pub fn get_messages_by_day(&self, num_days: usize) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+        // Guard against zero days
+        if num_days == 0 {
+            return (Vec::new(), Vec::new());
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Calculate the start of today (UTC)
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+
+        // Calculate the earliest day to include
+        let earliest_day = today_start - ((num_days - 1) as u64 * seconds_per_day);
+
+        // Extract counts for the requested window from pre-aggregated data (O(num_days))
+        let mut user_result: Vec<(u64, u64)> = Vec::new();
+        let mut all_result: Vec<(u64, u64)> = Vec::new();
+
+        for (&day_start, &(user_count, all_count)) in &self.messages_by_day_counts {
+            if day_start >= earliest_day {
+                if user_count > 0 {
+                    user_result.push((day_start, user_count));
+                }
+                if all_count > 0 {
+                    all_result.push((day_start, all_count));
+                }
+            }
+        }
+
+        // Sort by day_start ascending for chart display
+        user_result.sort_by_key(|(day, _)| *day);
+        all_result.sort_by_key(|(day, _)| *day);
+
+        (user_result, all_result)
+    }
+
+    /// Rebuild message counts by day from messages_by_thread.
+    /// Called during startup after messages are loaded.
+    /// Single source of truth: messages_by_thread only (no agent_chatter to avoid double-counting).
+    fn rebuild_messages_by_day_counts(&mut self) {
+        self.messages_by_day_counts.clear();
+
+        let seconds_per_day: u64 = 86400;
+        let current_user = self.user_pubkey.as_deref();
+
+        // Iterate through all messages in messages_by_thread
+        for messages in self.messages_by_thread.values() {
+            for msg in messages {
+                let day_start = (msg.created_at / seconds_per_day) * seconds_per_day;
+
+                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+
+                // Increment all count
+                entry.1 += 1;
+
+                // Increment user count if matches current user
+                if current_user == Some(msg.pubkey.as_str()) {
+                    entry.0 += 1;
+                }
+            }
+        }
+    }
+
+    /// Increment message counts for a single message (called from handle_message_event).
+    /// This maintains the pre-aggregated counters incrementally for O(1) updates.
+    fn increment_message_day_count(&mut self, created_at: u64, pubkey: &str) {
+        let seconds_per_day: u64 = 86400;
+        let day_start = (created_at / seconds_per_day) * seconds_per_day;
+
+        let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+
+        // Increment all count
+        entry.1 += 1;
+
+        // Increment user count if matches current user
+        if self.user_pubkey.as_deref() == Some(pubkey) {
+            entry.0 += 1;
+        }
+    }
+
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
     /// Only applies the MOST RECENT metadata event for each thread.
     /// Uses project-scoped metadata loading to avoid global query limits.
@@ -1146,10 +1247,14 @@ impl AppDataStore {
             // Check if message already exists (avoid duplicates)
             if !messages.iter().any(|m| m.id == message_id) {
                 let message_created_at = message.created_at;
+                let message_pubkey = message.pubkey.clone();
 
                 // Insert in sorted position (oldest first)
                 let insert_pos = messages.partition_point(|m| m.created_at < message_created_at);
                 messages.insert(insert_pos, message);
+
+                // Update pre-aggregated message counts for Stats view (O(1) per message)
+                self.increment_message_day_count(message_created_at, &message_pubkey);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
