@@ -85,10 +85,84 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
             .collect();
         let tags_line = Paragraph::new(Line::from(tags));
         f.render_widget(tags_line, Rect::new(content_area.x, y, content_area.width, 1));
-        y += 2;
-    } else {
         y += 1;
     }
+
+    // Tool Permissions section
+    let has_only_tools = !nudge.only_tools.is_empty();
+    let has_additive_tools = !nudge.allowed_tools.is_empty() || !nudge.denied_tools.is_empty();
+
+    if has_only_tools || has_additive_tools {
+        y += 1;
+
+        if has_only_tools {
+            // Exclusive mode: only-tool display
+            let only_count = nudge.only_tools.len();
+            let tools_preview: String = nudge.only_tools.iter()
+                .take(6)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
+            let suffix = if only_count > 6 { format!(" +{} more", only_count - 6) } else { String::new() };
+
+            let perms_line = Line::from(vec![
+                Span::styled("⚡ ", Style::default().fg(theme::ACCENT_WARNING)),
+                Span::styled("EXCLUSIVE MODE", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled(format!(" ({} tools): ", only_count), Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(tools_preview, Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::styled(suffix, Style::default().fg(theme::TEXT_DIM)),
+            ]);
+            f.render_widget(Paragraph::new(perms_line), Rect::new(content_area.x, y, content_area.width, 1));
+            y += 1;
+        } else {
+            // Additive mode: allow/deny display
+            let mut perms_spans = vec![
+                Span::styled("Tools: ", Style::default().fg(theme::TEXT_MUTED)),
+            ];
+
+            if !nudge.allowed_tools.is_empty() {
+                let allow_preview: String = nudge.allowed_tools.iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let allow_suffix = if nudge.allowed_tools.len() > 3 {
+                    format!(" +{}", nudge.allowed_tools.len() - 3)
+                } else {
+                    String::new()
+                };
+                perms_spans.push(Span::styled("✓ ", Style::default().fg(theme::ACCENT_SUCCESS)));
+                perms_spans.push(Span::styled(allow_preview, Style::default().fg(theme::ACCENT_SUCCESS)));
+                perms_spans.push(Span::styled(allow_suffix, Style::default().fg(theme::TEXT_DIM)));
+            }
+
+            if !nudge.allowed_tools.is_empty() && !nudge.denied_tools.is_empty() {
+                perms_spans.push(Span::styled("  ", Style::default()));
+            }
+
+            if !nudge.denied_tools.is_empty() {
+                let deny_preview: String = nudge.denied_tools.iter()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let deny_suffix = if nudge.denied_tools.len() > 3 {
+                    format!(" +{}", nudge.denied_tools.len() - 3)
+                } else {
+                    String::new()
+                };
+                perms_spans.push(Span::styled("✗ ", Style::default().fg(theme::ACCENT_ERROR)));
+                perms_spans.push(Span::styled(deny_preview, Style::default().fg(theme::ACCENT_ERROR)));
+                perms_spans.push(Span::styled(deny_suffix, Style::default().fg(theme::TEXT_DIM)));
+            }
+
+            let perms_line = Paragraph::new(Line::from(perms_spans));
+            f.render_widget(perms_line, Rect::new(content_area.x, y, content_area.width, 1));
+            y += 1;
+        }
+    }
+
+    y += 1;
 
     // Content section
     let content_label = Paragraph::new("Content")

@@ -13,9 +13,15 @@ pub struct Nudge {
     pub hashtags: Vec<String>,
     pub created_at: u64,
     /// Tools to add to agent's available tools (allow-tool tags)
+    /// Used in additive/subtractive mode - mutually exclusive with only_tools
     pub allowed_tools: Vec<String>,
     /// Tools to remove from agent's available tools (deny-tool tags)
+    /// Used in additive/subtractive mode - mutually exclusive with only_tools
     pub denied_tools: Vec<String>,
+    /// Exclusive tool list (only-tool tags)
+    /// When present, overrides all other tool permissions - agent gets EXACTLY these tools
+    /// Mutually exclusive with allow_tools/deny_tools
+    pub only_tools: Vec<String>,
     /// ID of the nudge this one supersedes (supersedes tag)
     pub supersedes: Option<String>,
 }
@@ -37,6 +43,7 @@ impl Nudge {
         let mut hashtags: Vec<String> = Vec::new();
         let mut allowed_tools: Vec<String> = Vec::new();
         let mut denied_tools: Vec<String> = Vec::new();
+        let mut only_tools: Vec<String> = Vec::new();
         let mut supersedes: Option<String> = None;
 
         for tag in note.tags() {
@@ -49,6 +56,7 @@ impl Nudge {
                             "t" => hashtags.push(value.to_string()),
                             "allow-tool" => allowed_tools.push(value.to_string()),
                             "deny-tool" => denied_tools.push(value.to_string()),
+                            "only-tool" => only_tools.push(value.to_string()),
                             "supersedes" => supersedes = Some(value.to_string()),
                             _ => {}
                         }
@@ -67,6 +75,7 @@ impl Nudge {
             created_at,
             allowed_tools,
             denied_tools,
+            only_tools,
             supersedes,
         })
     }

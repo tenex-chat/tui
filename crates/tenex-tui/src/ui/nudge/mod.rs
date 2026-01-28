@@ -12,4 +12,4 @@ pub mod validation;
 pub mod views;
 
 pub use form_state::{NudgeFormState, NudgeFormFocus, NudgeFormStep, PermissionMode};
-pub use tool_permissions::ToolPermissions;
+pub use tool_permissions::{ToolPermissions, ToolMode, get_available_tools_from_statuses};

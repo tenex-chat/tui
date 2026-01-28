@@ -94,10 +94,12 @@ impl NudgeFormFocus {
 pub enum PermissionMode {
     /// Viewing/navigating the tool list
     Browse,
-    /// Adding a tool to allow list
+    /// Adding a tool to allow list (Additive mode)
     AddAllow,
-    /// Adding a tool to deny list
+    /// Adding a tool to deny list (Additive mode)
     AddDeny,
+    /// Adding a tool to only list (Exclusive mode)
+    AddOnly,
 }
 
 /// State for the nudge creation form
@@ -132,6 +134,12 @@ pub struct NudgeFormState {
     pub tool_index: usize,
     /// Scroll offset for tool list
     pub tool_scroll: usize,
+    /// Selected index within the configured tools (for removal)
+    /// In Exclusive mode: index into only_tools
+    /// In Additive mode: index into combined allow_tools + deny_tools
+    pub configured_tool_index: usize,
+    /// Whether we're currently selecting from configured tools (for removal)
+    pub selecting_configured: bool,
 
     // Review
     pub review_scroll: usize,
@@ -155,6 +163,8 @@ impl NudgeFormState {
             tool_filter: String::new(),
             tool_index: 0,
             tool_scroll: 0,
+            configured_tool_index: 0,
+            selecting_configured: false,
             review_scroll: 0,
         }
     }
@@ -164,12 +174,26 @@ impl NudgeFormState {
     /// Note: Nostr events are immutable, so we can't edit them. Instead, we copy the nudge's
     /// data and allow the user to create a new nudge with modifications.
     pub fn copy_from_nudge(nudge: &Nudge) -> Self {
+        use super::tool_permissions::ToolMode;
+
         let mut permissions = ToolPermissions::new();
-        for tool in &nudge.allowed_tools {
-            permissions.add_allow_tool(tool.clone());
-        }
-        for tool in &nudge.denied_tools {
-            permissions.add_deny_tool(tool.clone());
+
+        // Determine mode based on which tools are present
+        // Exclusive mode (only_tools) takes priority
+        if !nudge.only_tools.is_empty() {
+            permissions.set_mode(ToolMode::Exclusive);
+            for tool in &nudge.only_tools {
+                permissions.add_only_tool(tool.clone());
+            }
+        } else {
+            // Additive mode (default)
+            permissions.set_mode(ToolMode::Additive);
+            for tool in &nudge.allowed_tools {
+                permissions.add_allow_tool(tool.clone());
+            }
+            for tool in &nudge.denied_tools {
+                permissions.add_deny_tool(tool.clone());
+            }
         }
 
         let first_line_len = nudge.content.lines().next().map(|l| l.len()).unwrap_or(0);
@@ -189,6 +213,8 @@ impl NudgeFormState {
             tool_filter: String::new(),
             tool_index: 0,
             tool_scroll: 0,
+            configured_tool_index: 0,
+            selecting_configured: false,
             review_scroll: 0,
         }
     }
@@ -209,8 +235,52 @@ impl NudgeFormState {
     }
 
     /// Check if form is ready to submit
+    ///
+    /// Blocks submission when:
+    /// - Title is empty
+    /// - Content is empty
+    /// - Exclusive mode with no tools (agent would have no tools!)
     pub fn can_submit(&self) -> bool {
-        !self.title.trim().is_empty() && !self.content.trim().is_empty()
+        use super::tool_permissions::ToolMode;
+
+        if self.title.trim().is_empty() || self.content.trim().is_empty() {
+            return false;
+        }
+
+        // Block submission in Exclusive mode with no tools
+        if self.permissions.mode == ToolMode::Exclusive && self.permissions.only_tools.is_empty() {
+            return false;
+        }
+
+        true
+    }
+
+    /// Get validation errors that would prevent submission
+    pub fn get_submission_errors(&self) -> Vec<String> {
+        use super::tool_permissions::ToolMode;
+
+        let mut errors = Vec::new();
+
+        if self.title.trim().is_empty() {
+            errors.push("Title cannot be empty".to_string());
+        }
+
+        if self.content.trim().is_empty() {
+            errors.push("Content cannot be empty".to_string());
+        }
+
+        if self.permissions.mode == ToolMode::Exclusive && self.permissions.only_tools.is_empty() {
+            errors.push("Exclusive mode requires at least one tool".to_string());
+        }
+
+        // Check for mixed modes (should be prevented by UI, but validate anyway)
+        let has_additive = !self.permissions.allow_tools.is_empty() || !self.permissions.deny_tools.is_empty();
+        let has_exclusive = !self.permissions.only_tools.is_empty();
+        if has_additive && has_exclusive {
+            errors.push("Cannot mix 'only-tool' with 'allow-tool'/'deny-tool'".to_string());
+        }
+
+        errors
     }
 
     /// Move to next step if possible
@@ -430,10 +500,249 @@ impl NudgeFormState {
                 .collect()
         }
     }
+
+    /// Get the list of currently configured tools for display/removal
+    /// Returns (tool_name, category) pairs
+    pub fn get_configured_tools(&self) -> Vec<(String, &'static str)> {
+        use super::tool_permissions::ToolMode;
+
+        match self.permissions.mode {
+            ToolMode::Exclusive => {
+                self.permissions.only_tools
+                    .iter()
+                    .map(|t| (t.clone(), "only"))
+                    .collect()
+            }
+            ToolMode::Additive => {
+                let mut tools = Vec::new();
+                for t in &self.permissions.allow_tools {
+                    tools.push((t.clone(), "allow"));
+                }
+                for t in &self.permissions.deny_tools {
+                    tools.push((t.clone(), "deny"));
+                }
+                tools
+            }
+        }
+    }
+
+    /// Remove the currently selected configured tool
+    pub fn remove_selected_configured_tool(&mut self) {
+        use super::tool_permissions::ToolMode;
+
+        let configured = self.get_configured_tools();
+        if self.configured_tool_index >= configured.len() {
+            return;
+        }
+
+        let (tool, category) = &configured[self.configured_tool_index];
+        match self.permissions.mode {
+            ToolMode::Exclusive => {
+                self.permissions.remove_only_tool(tool);
+            }
+            ToolMode::Additive => {
+                match *category {
+                    "allow" => self.permissions.remove_allow_tool(tool),
+                    "deny" => self.permissions.remove_deny_tool(tool),
+                    _ => {}
+                }
+            }
+        }
+
+        // Adjust index if needed
+        let new_count = self.get_configured_tools().len();
+        if self.configured_tool_index >= new_count && new_count > 0 {
+            self.configured_tool_index = new_count - 1;
+        }
+    }
+
+    /// Move configured tool selection up
+    pub fn configured_tool_up(&mut self) {
+        if self.configured_tool_index > 0 {
+            self.configured_tool_index -= 1;
+        }
+    }
+
+    /// Move configured tool selection down
+    pub fn configured_tool_down(&mut self) {
+        let count = self.get_configured_tools().len();
+        if count > 0 && self.configured_tool_index + 1 < count {
+            self.configured_tool_index += 1;
+        }
+    }
 }
 
 impl Default for NudgeFormState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use super::super::tool_permissions::ToolMode;
+
+    #[test]
+    fn test_can_submit_requires_title() {
+        let mut state = NudgeFormState::new();
+        state.content = "Some content".to_string();
+
+        // No title - cannot submit
+        assert!(!state.can_submit());
+
+        // Whitespace only title - cannot submit
+        state.title = "   ".to_string();
+        assert!(!state.can_submit());
+
+        // Valid title - can submit
+        state.title = "My Nudge".to_string();
+        assert!(state.can_submit());
+    }
+
+    #[test]
+    fn test_can_submit_requires_content() {
+        let mut state = NudgeFormState::new();
+        state.title = "My Nudge".to_string();
+
+        // No content - cannot submit
+        assert!(!state.can_submit());
+
+        // Whitespace only content - cannot submit
+        state.content = "   ".to_string();
+        assert!(!state.can_submit());
+
+        // Valid content - can submit
+        state.content = "Some instructions".to_string();
+        assert!(state.can_submit());
+    }
+
+    #[test]
+    fn test_can_submit_blocks_empty_exclusive_mode() {
+        let mut state = NudgeFormState::new();
+        state.title = "My Nudge".to_string();
+        state.content = "Some content".to_string();
+
+        // In additive mode (default) with no tools - can submit
+        assert!(state.can_submit());
+
+        // Switch to exclusive mode with no tools - cannot submit
+        state.permissions.set_mode(ToolMode::Exclusive);
+        assert!(!state.can_submit());
+
+        // Add a tool - can submit
+        state.permissions.add_only_tool("Read".to_string());
+        assert!(state.can_submit());
+    }
+
+    #[test]
+    fn test_get_submission_errors_empty_exclusive() {
+        let mut state = NudgeFormState::new();
+        state.title = "My Nudge".to_string();
+        state.content = "Some content".to_string();
+        state.permissions.set_mode(ToolMode::Exclusive);
+
+        let errors = state.get_submission_errors();
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("Exclusive mode"));
+    }
+
+    #[test]
+    fn test_get_submission_errors_mixed_modes() {
+        let mut state = NudgeFormState::new();
+        state.title = "My Nudge".to_string();
+        state.content = "Some content".to_string();
+
+        // Manually create invalid mixed state
+        state.permissions.allow_tools.push("Read".to_string());
+        state.permissions.only_tools.push("Write".to_string());
+
+        let errors = state.get_submission_errors();
+        assert!(errors.iter().any(|e| e.contains("mix")));
+    }
+
+    #[test]
+    fn test_get_submission_errors_multiple() {
+        let mut state = NudgeFormState::new();
+        // No title, no content, exclusive mode with no tools
+
+        state.permissions.set_mode(ToolMode::Exclusive);
+
+        let errors = state.get_submission_errors();
+        assert!(errors.len() >= 3); // At least title, content, and exclusive mode errors
+    }
+
+    #[test]
+    fn test_configured_tools_exclusive_mode() {
+        let mut state = NudgeFormState::new();
+        state.permissions.set_mode(ToolMode::Exclusive);
+        state.permissions.add_only_tool("Tool1".to_string());
+        state.permissions.add_only_tool("Tool2".to_string());
+
+        let configured = state.get_configured_tools();
+        assert_eq!(configured.len(), 2);
+        assert!(configured.iter().any(|(t, c)| t == "Tool1" && *c == "only"));
+        assert!(configured.iter().any(|(t, c)| t == "Tool2" && *c == "only"));
+    }
+
+    #[test]
+    fn test_configured_tools_additive_mode() {
+        let mut state = NudgeFormState::new();
+        state.permissions.add_allow_tool("AllowTool".to_string());
+        state.permissions.add_deny_tool("DenyTool".to_string());
+
+        let configured = state.get_configured_tools();
+        assert_eq!(configured.len(), 2);
+        assert!(configured.iter().any(|(t, c)| t == "AllowTool" && *c == "allow"));
+        assert!(configured.iter().any(|(t, c)| t == "DenyTool" && *c == "deny"));
+    }
+
+    #[test]
+    fn test_remove_selected_configured_tool() {
+        let mut state = NudgeFormState::new();
+        state.permissions.set_mode(ToolMode::Exclusive);
+        state.permissions.add_only_tool("Tool1".to_string());
+        state.permissions.add_only_tool("Tool2".to_string());
+        state.permissions.add_only_tool("Tool3".to_string());
+
+        // Select and remove second tool
+        state.configured_tool_index = 1;
+        state.remove_selected_configured_tool();
+
+        assert_eq!(state.permissions.only_tools.len(), 2);
+        assert!(state.permissions.is_only("Tool1"));
+        assert!(state.permissions.is_only("Tool3"));
+        assert!(!state.permissions.is_only("Tool2"));
+    }
+
+    #[test]
+    fn test_configured_tool_navigation() {
+        let mut state = NudgeFormState::new();
+        state.permissions.set_mode(ToolMode::Exclusive);
+        state.permissions.add_only_tool("Tool1".to_string());
+        state.permissions.add_only_tool("Tool2".to_string());
+        state.permissions.add_only_tool("Tool3".to_string());
+
+        assert_eq!(state.configured_tool_index, 0);
+
+        state.configured_tool_down();
+        assert_eq!(state.configured_tool_index, 1);
+
+        state.configured_tool_down();
+        assert_eq!(state.configured_tool_index, 2);
+
+        // Should not go beyond bounds
+        state.configured_tool_down();
+        assert_eq!(state.configured_tool_index, 2);
+
+        state.configured_tool_up();
+        assert_eq!(state.configured_tool_index, 1);
+
+        state.configured_tool_up();
+        assert_eq!(state.configured_tool_index, 0);
+
+        // Should not go below 0
+        state.configured_tool_up();
+        assert_eq!(state.configured_tool_index, 0);
     }
 }

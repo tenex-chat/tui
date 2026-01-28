@@ -1,8 +1,13 @@
 //! Nudge validation logic
 //!
 //! Validates nudge content, title, and tool permissions
+//!
+//! Supports two mutually exclusive permission modes:
+//! - Additive: allow-tool + deny-tool (modifies agent's defaults)
+//! - Exclusive: only-tool (complete override)
 
 use super::ToolPermissions;
+use super::tool_permissions::ToolMode;
 
 /// Validation errors for nudge data
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,10 +22,14 @@ pub enum NudgeValidationError {
     ContentTooLong { max: usize, actual: usize },
     /// Hashtag is invalid (empty, starts with #, etc.)
     InvalidHashtag(String),
-    /// Tool permission conflict detected
+    /// Tool permission conflict detected (Additive mode only)
     ToolConflict { tool: String },
     /// Tool name not found in registry
     UnknownTool { tool: String },
+    /// Mixed mode: both only-tool and allow/deny-tool present
+    MixedModes,
+    /// Exclusive mode with no tools (warning, not error)
+    EmptyExclusiveTools,
 }
 
 impl std::fmt::Display for NudgeValidationError {
@@ -42,6 +51,12 @@ impl std::fmt::Display for NudgeValidationError {
             }
             NudgeValidationError::UnknownTool { tool } => {
                 write!(f, "Unknown tool: '{}'", tool)
+            }
+            NudgeValidationError::MixedModes => {
+                write!(f, "Cannot mix 'only-tool' with 'allow-tool'/'deny-tool' - choose one mode")
+            }
+            NudgeValidationError::EmptyExclusiveTools => {
+                write!(f, "Exclusive mode with no tools - agent will have no tools!")
             }
         }
     }
@@ -141,24 +156,55 @@ impl NudgeValidation {
     ) -> Vec<NudgeValidationError> {
         let mut errors = Vec::new();
 
-        // Check for conflicts
-        for conflict in permissions.detect_conflicts() {
-            errors.push(NudgeValidationError::ToolConflict {
-                tool: conflict.tool_name,
-            });
+        // Check for mixed modes (should be prevented by UI, but validate anyway)
+        let has_additive = !permissions.allow_tools.is_empty() || !permissions.deny_tools.is_empty();
+        let has_exclusive = !permissions.only_tools.is_empty();
+
+        if has_additive && has_exclusive {
+            errors.push(NudgeValidationError::MixedModes);
+            return errors; // Don't continue validation with invalid state
         }
 
-        // Optionally validate tool names against registry
-        if self.validate_tool_names {
-            if let Some(tools) = available_tools {
-                for tool in &permissions.allow_tools {
-                    if !tools.contains(tool) {
-                        errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+        // Mode-specific validation
+        match permissions.mode {
+            ToolMode::Additive => {
+                // Check for conflicts (tool in both allow and deny)
+                for conflict in permissions.detect_conflicts() {
+                    errors.push(NudgeValidationError::ToolConflict {
+                        tool: conflict.tool_name,
+                    });
+                }
+
+                // Optionally validate tool names against registry
+                if self.validate_tool_names {
+                    if let Some(tools) = available_tools {
+                        for tool in &permissions.allow_tools {
+                            if !tools.contains(tool) {
+                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                            }
+                        }
+                        for tool in &permissions.deny_tools {
+                            if !tools.contains(tool) {
+                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                            }
+                        }
                     }
                 }
-                for tool in &permissions.deny_tools {
-                    if !tools.contains(tool) {
-                        errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+            }
+            ToolMode::Exclusive => {
+                // Error if no tools specified in exclusive mode (agent will have NO tools)
+                if permissions.only_tools.is_empty() {
+                    errors.push(NudgeValidationError::EmptyExclusiveTools);
+                }
+
+                // Optionally validate tool names against registry
+                if self.validate_tool_names {
+                    if let Some(tools) = available_tools {
+                        for tool in &permissions.only_tools {
+                            if !tools.contains(tool) {
+                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                            }
+                        }
                     }
                 }
             }
@@ -234,5 +280,67 @@ mod tests {
         let errors = v.validate_permissions(&perms, None);
         assert_eq!(errors.len(), 1);
         assert!(matches!(errors[0], NudgeValidationError::ToolConflict { .. }));
+    }
+
+    #[test]
+    fn test_validate_exclusive_mode() {
+        let v = NudgeValidation::new();
+        let mut perms = ToolPermissions::new();
+        perms.set_mode(ToolMode::Exclusive);
+        perms.add_only_tool("grep".to_string());
+        perms.add_only_tool("fs_read".to_string());
+
+        let errors = v.validate_permissions(&perms, None);
+        assert!(errors.is_empty()); // Valid exclusive mode
+    }
+
+    #[test]
+    fn test_validate_mixed_modes_error() {
+        let v = NudgeValidation::new();
+        let mut perms = ToolPermissions::new();
+        // Manually set invalid state (UI should prevent this)
+        perms.allow_tools.push("Read".to_string());
+        perms.only_tools.push("grep".to_string());
+
+        let errors = v.validate_permissions(&perms, None);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], NudgeValidationError::MixedModes));
+    }
+
+    #[test]
+    fn test_validate_empty_exclusive_tools_error() {
+        let v = NudgeValidation::new();
+        let mut perms = ToolPermissions::new();
+        perms.set_mode(ToolMode::Exclusive);
+        // No tools added - should error
+
+        let errors = v.validate_permissions(&perms, None);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(errors[0], NudgeValidationError::EmptyExclusiveTools));
+    }
+
+    #[test]
+    fn test_validate_additive_mode_no_error_when_empty() {
+        let v = NudgeValidation::new();
+        let perms = ToolPermissions::new(); // Additive mode by default, no tools
+
+        let errors = v.validate_permissions(&perms, None);
+        assert!(errors.is_empty()); // Additive mode allows no tools
+    }
+
+    #[test]
+    fn test_validation_error_display() {
+        assert_eq!(
+            NudgeValidationError::EmptyTitle.to_string(),
+            "Title cannot be empty"
+        );
+        assert_eq!(
+            NudgeValidationError::EmptyExclusiveTools.to_string(),
+            "Exclusive mode with no tools - agent will have no tools!"
+        );
+        assert_eq!(
+            NudgeValidationError::MixedModes.to_string(),
+            "Cannot mix 'only-tool' with 'allow-tool'/'deny-tool' - choose one mode"
+        );
     }
 }
