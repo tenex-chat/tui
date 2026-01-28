@@ -48,7 +48,7 @@ pub(crate) async fn run_app(
     // BULLETPROOF: Surface draft storage load/parse errors at startup
     if let Some(error) = app.draft_storage_last_error() {
         log_diagnostic(&format!("BULLETPROOF: Draft storage error at startup: {}", error));
-        app.set_status(&format!("WARNING: Draft load error - {}", error));
+        app.set_warning_status(&format!("WARNING: Draft load error - {}", error));
         app.draft_storage_clear_error();
     }
 
@@ -228,7 +228,7 @@ pub(crate) async fn run_app(
                         app.dismiss_notification();
                     }
                     UploadResult::Error(msg) => {
-                        app.set_status(&msg);
+                        app.set_warning_status(&msg);
                     }
                 }
             }
@@ -297,7 +297,7 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                         app.mark_tab_waiting_for_user(&thread_id);
 
                         // Push status bar notification if not viewing this thread
-                        let is_viewing_thread = app.selected_thread.as_ref()
+                        let is_viewing_thread = app.selected_thread()
                             .map(|t| t.id.as_str()) == Some(thread_id.as_str());
 
                         if !is_viewing_thread {
@@ -320,7 +320,7 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                 app.clear_local_stream_buffer(&thread_id);
 
                 // If this message is in the current thread...
-                if app.selected_thread.as_ref().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {
+                if app.selected_thread().map(|t| t.id.as_str()) == Some(thread_id.as_str()) {
                     // Scroll to bottom
                     app.scroll_offset = usize::MAX;
 
@@ -350,9 +350,9 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
             }
             CoreEvent::ProjectStatus(status) => {
                 if app.selected_project.as_ref().map(|p| p.a_tag()) == Some(status.project_coordinate.clone()) {
-                    if app.selected_agent.is_none() {
+                    if app.selected_agent().is_none() {
                         if let Some(pm) = status.pm_agent() {
-                            app.selected_agent = Some(pm.clone());
+                            app.set_selected_agent(Some(pm.clone()));
                         }
                     }
                     if app.selected_branch.is_none() {
@@ -414,7 +414,7 @@ fn check_pending_new_thread(app: &mut App) {
         app.creating_thread = false;
 
         // Update selected_thread and open the tab
-        app.selected_thread = Some(thread.clone());
+        app.set_selected_thread(Some(thread.clone()));
         app.open_tab(&thread, &project_a_tag);
         app.scroll_offset = usize::MAX; // Scroll to bottom
         app.input_mode = InputMode::Editing;

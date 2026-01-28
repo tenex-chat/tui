@@ -142,8 +142,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Agent display with model info (no @ prefix)
     let (agent_display, agent_model_display) = app
-        .selected_agent
-        .as_ref()
+        .selected_agent()
         .map(|a| {
             let model = a.model
                 .as_ref()

@@ -156,7 +156,7 @@ pub static COMMANDS: &[Command] = &[
         },
         execute: |app| {
             if app.view == View::Chat {
-                if let Some(thread) = &app.selected_thread {
+                if let Some(thread) = app.selected_thread() {
                     export_thread_as_jsonl(app, &thread.id.clone());
                 }
             } else if app.view == View::Home {
@@ -187,7 +187,10 @@ pub static COMMANDS: &[Command] = &[
         label: "Show archived",
         section: "Filter",
         available: |app| {
-            app.view == View::Home && !app.sidebar_focused && !app.show_archived
+            app.view == View::Home
+                && !app.sidebar_focused
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
+                && !app.home.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
@@ -198,7 +201,10 @@ pub static COMMANDS: &[Command] = &[
         label: "Hide archived",
         section: "Filter",
         available: |app| {
-            app.view == View::Home && !app.sidebar_focused && app.show_archived
+            app.view == View::Home
+                && !app.sidebar_focused
+                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
+                && app.home.show_archived
         },
         execute: |app| {
             app.toggle_show_archived();
@@ -291,17 +297,17 @@ pub static COMMANDS: &[Command] = &[
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
                     let project_name = project.name.clone();
-                    let inherited_agent = app.selected_agent.clone();
+                    let inherited_agent = app.selected_agent().cloned();
                     let inherited_branch = app.selected_branch.clone();
 
                     app.save_chat_draft();
                     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
 
-                    app.selected_agent = inherited_agent;
+                    app.set_selected_agent(inherited_agent);
                     app.selected_branch = inherited_branch;
                     app.chat_editor_mut().clear();
-                    app.set_status("New conversation (same project, agent, and branch)");
+                    app.set_warning_status("New conversation (same project, agent, and branch)");
                 }
             } else {
                 // Home view: use the existing new_conversation_current_project function
@@ -485,8 +491,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Chat
                 && app
-                    .selected_thread
-                    .as_ref()
+                    .selected_thread()
                     .and_then(|t| t.parent_conversation_id.as_ref())
                     .is_some()
         },
@@ -496,21 +501,21 @@ pub static COMMANDS: &[Command] = &[
         key: 'c',
         label: "Copy conversation ID",
         section: "Conversation",
-        available: |app| app.view == View::Chat && app.selected_thread.is_some(),
+        available: |app| app.view == View::Chat && app.selected_thread().is_some(),
         execute: copy_conversation_id,
     },
     Command {
         key: 'O',
         label: "Open trace",
         section: "Conversation",
-        available: |app| app.view == View::Chat && app.selected_thread.is_some(),
+        available: |app| app.view == View::Chat && app.selected_thread().is_some(),
         execute: open_conversation_trace,
     },
     Command {
         key: 'r',
         label: "Reference conversation",
         section: "Conversation",
-        available: |app| app.view == View::Chat && app.selected_thread.is_some(),
+        available: |app| app.view == View::Chat && app.selected_thread().is_some(),
         execute: reference_conversation,
     },
     Command {
@@ -565,8 +570,7 @@ pub static COMMANDS: &[Command] = &[
             app.view == View::Chat
                 && app.input_mode == InputMode::Normal
                 && app
-                    .selected_thread
-                    .as_ref()
+                    .selected_thread()
                     .map(|t| app.data_store.borrow().is_event_busy(&t.id))
                     .unwrap_or(false)
         },
@@ -621,12 +625,11 @@ pub static COMMANDS: &[Command] = &[
         key: 'o',
         label: "View agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && !app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && !app.home.in_agent_detail(),
         execute: |app| {
             let agents = app.filtered_agent_definitions();
-            if let Some(agent) = agents.get(app.agent_browser_index) {
-                app.viewing_agent_id = Some(agent.id.clone());
-                app.agent_browser_in_detail = true;
+            if let Some(agent) = agents.get(app.home.agent_browser_index) {
+                app.home.enter_agent_detail(agent.id.clone());
                 app.scroll_offset = 0;
             }
         },
@@ -637,9 +640,9 @@ pub static COMMANDS: &[Command] = &[
         key: 'f',
         label: "Fork agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
-            if let Some(agent_id) = &app.viewing_agent_id {
+            if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::fork_from(&agent));
@@ -651,9 +654,9 @@ pub static COMMANDS: &[Command] = &[
         key: 'c',
         label: "Clone agent",
         section: "Agent",
-        available: |app| app.view == View::AgentBrowser && app.agent_browser_in_detail,
+        available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
-            if let Some(agent_id) = &app.viewing_agent_id {
+            if let Some(agent_id) = &app.home.viewing_agent_id {
                 if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::clone_from(&agent));
@@ -747,13 +750,20 @@ fn new_conversation_current_project(app: &mut App) {
         app.selected_project = Some(project);
 
         // Auto-select PM agent and default branch from status
-        if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
-            if let Some(pm) = status.pm_agent() {
-                app.selected_agent = Some(pm.clone());
+        // Extract values before making mutable calls to avoid borrow issues
+        let (pm_agent, default_branch) = {
+            let store = app.data_store.borrow();
+            if let Some(status) = store.get_project_status(&a_tag) {
+                (status.pm_agent().cloned(), status.default_branch().map(String::from))
+            } else {
+                (None, None)
             }
-            if app.selected_branch.is_none() {
-                app.selected_branch = status.default_branch().map(String::from);
-            }
+        };
+        if let Some(pm) = pm_agent {
+            app.set_selected_agent(Some(pm));
+        }
+        if app.selected_branch.is_none() {
+            app.selected_branch = default_branch;
         }
 
         let tab_idx = app.open_draft_tab(&a_tag, &name);
@@ -761,7 +771,7 @@ fn new_conversation_current_project(app: &mut App) {
         app.view = View::Chat;
         app.chat_editor_mut().clear();
     } else {
-        app.set_status("No project available for new conversation");
+        app.set_warning_status("No project available for new conversation");
     }
 }
 
@@ -808,33 +818,33 @@ fn boot_project(app: &mut App) {
 
 fn copy_selected_message(app: &mut App) {
     let messages = app.messages();
-    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let subthread_root = app.subthread_root.as_deref();
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let subthread_root = app.subthread_root().map(|s| s.as_str());
 
     let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
-    if let Some(item) = grouped.get(app.selected_message_index) {
+    if let Some(item) = grouped.get(app.selected_message_index()) {
         let content = match item {
             DisplayItem::SingleMessage { message, .. } => message.content.as_str(),
             DisplayItem::DelegationPreview { thread_id, .. } => thread_id.as_str(),
         };
 
         if let Err(e) = arboard::Clipboard::new().and_then(|mut c| c.set_text(content)) {
-            app.set_status(&format!("Failed to copy: {}", e));
+            app.set_warning_status(&format!("Failed to copy: {}", e));
         } else {
-            app.set_status("Content copied to clipboard");
+            app.set_warning_status("Content copied to clipboard");
         }
     }
 }
 
 fn view_raw_event(app: &mut App) {
     let messages = app.messages();
-    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let subthread_root = app.subthread_root.as_deref();
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let subthread_root = app.subthread_root().map(|s| s.as_str());
 
     let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
-    if let Some(item) = grouped.get(app.selected_message_index) {
+    if let Some(item) = grouped.get(app.selected_message_index()) {
         if let Some(id) = get_message_id(item) {
             if let Some(json) = get_raw_event_json(&app.db.ndb, &id) {
                 let pretty_json =
@@ -855,12 +865,12 @@ fn view_raw_event(app: &mut App) {
 
 fn open_message_trace(app: &mut App) {
     let messages = app.messages();
-    let thread_id = app.selected_thread.as_ref().map(|t| t.id.as_str());
-    let subthread_root = app.subthread_root.as_deref();
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let subthread_root = app.subthread_root().map(|s| s.as_str());
 
     let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
 
-    if let Some(item) = grouped.get(app.selected_message_index) {
+    if let Some(item) = grouped.get(app.selected_message_index()) {
         if let Some(id) = get_message_id(item) {
             if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
                 let url = format!(
@@ -877,7 +887,7 @@ fn open_message_trace(app: &mut App) {
 }
 
 fn open_conversation_trace(app: &mut App) {
-    if let Some(thread) = &app.selected_thread {
+    if let Some(thread) = app.selected_thread() {
         let trace_id = &thread.id[..32.min(thread.id.len())];
         let url = format!("http://localhost:16686/trace/{}", trace_id);
         #[cfg(target_os = "macos")]
@@ -903,9 +913,9 @@ fn stop_agents(app: &mut App) {
                     event_ids: vec![stop_thread_id.clone()],
                     agent_pubkeys: working_agents,
                 }) {
-                    app.set_status(&format!("Failed to stop: {}", e));
+                    app.set_warning_status(&format!("Failed to stop: {}", e));
                 } else {
-                    app.set_status("Stop command sent");
+                    app.set_warning_status("Stop command sent");
                 }
             }
         }
@@ -913,7 +923,7 @@ fn stop_agents(app: &mut App) {
 }
 
 fn go_to_parent(app: &mut App) {
-    if let Some(thread) = &app.selected_thread {
+    if let Some(thread) = app.selected_thread() {
         if let Some(parent_id) = &thread.parent_conversation_id {
             let parent_data = {
                 let store = app.data_store.borrow();
@@ -927,7 +937,7 @@ fn go_to_parent(app: &mut App) {
             if let Some((parent, a_tag)) = parent_data {
                 app.open_thread_from_home(&parent, &a_tag);
             } else {
-                app.set_status(&format!(
+                app.set_warning_status(&format!(
                     "Parent conversation not found: {}",
                     &parent_id[..8]
                 ));
@@ -964,7 +974,7 @@ fn archive_toggle(app: &mut App) {
                 } else {
                     format!("Unarchived: {} (Ctrl+T u to undo)", project_name)
                 };
-                app.set_status(&status);
+                app.set_warning_status(&status);
             }
         } else {
             // Archive/unarchive thread based on current home tab
@@ -993,7 +1003,7 @@ fn archive_toggle(app: &mut App) {
                         } else {
                             format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
                         };
-                        app.set_status(&status);
+                        app.set_warning_status(&status);
                     }
                 }
                 HomeTab::Inbox => {
@@ -1028,7 +1038,7 @@ fn archive_toggle(app: &mut App) {
                             } else {
                                 format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
                             };
-                            app.set_status(&status);
+                            app.set_warning_status(&status);
                         }
                     }
                 }
@@ -1056,16 +1066,16 @@ fn archive_toggle(app: &mut App) {
                         } else {
                             format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
                         };
-                        app.set_status(&status);
+                        app.set_warning_status(&status);
                     }
                 }
                 _ => {
-                    app.set_status("Archive not available in this tab");
+                    app.set_warning_status("Archive not available in this tab");
                 }
             }
         }
     } else if app.view == View::Chat {
-        if let Some(ref thread) = app.selected_thread {
+        if let Some(ref thread) = app.selected_thread() {
             let thread_id = thread.id.clone();
             let thread_title = thread.title.clone();
             let is_now_archived = app.toggle_thread_archived(&thread_id);
@@ -1087,7 +1097,7 @@ fn archive_toggle(app: &mut App) {
             } else {
                 format!("Unarchived: {} (Ctrl+T u to undo)", thread_title)
             };
-            app.set_status(&status);
+            app.set_warning_status(&status);
         }
     }
 }
@@ -1096,7 +1106,7 @@ fn undo_last_action(app: &mut App) {
     let action = match app.last_undo_action.take() {
         Some(a) => a,
         None => {
-            app.set_status("Nothing to undo");
+            app.set_warning_status("Nothing to undo");
             return;
         }
     };
@@ -1107,39 +1117,39 @@ fn undo_last_action(app: &mut App) {
             thread_title,
         } => {
             app.toggle_thread_archived(&thread_id);
-            app.set_status(&format!("Undone: unarchived {}", thread_title));
+            app.set_warning_status(&format!("Undone: unarchived {}", thread_title));
         }
         UndoAction::ThreadUnarchived {
             thread_id,
             thread_title,
         } => {
             app.toggle_thread_archived(&thread_id);
-            app.set_status(&format!("Undone: archived {}", thread_title));
+            app.set_warning_status(&format!("Undone: archived {}", thread_title));
         }
         UndoAction::ProjectArchived {
             project_a_tag,
             project_name,
         } => {
             app.toggle_project_archived(&project_a_tag);
-            app.set_status(&format!("Undone: unarchived {}", project_name));
+            app.set_warning_status(&format!("Undone: unarchived {}", project_name));
         }
         UndoAction::ProjectUnarchived {
             project_a_tag,
             project_name,
         } => {
             app.toggle_project_archived(&project_a_tag);
-            app.set_status(&format!("Undone: archived {}", project_name));
+            app.set_warning_status(&format!("Undone: archived {}", project_name));
         }
     }
 }
 
 fn archive_and_close_tab(app: &mut App) {
     if app.view != View::Chat {
-        app.set_status("Archive+close only available in chat view");
+        app.set_warning_status("Archive+close only available in chat view");
         return;
     }
 
-    if let Some(ref thread) = app.selected_thread {
+    if let Some(ref thread) = app.selected_thread() {
         let thread_id = thread.id.clone();
         let thread_title = thread.title.clone();
 
@@ -1162,7 +1172,7 @@ fn archive_and_close_tab(app: &mut App) {
         } else {
             format!("Unarchived and closed: {} (Ctrl+T u to undo)", thread_title)
         };
-        app.set_status(&status);
+        app.set_warning_status(&status);
 
         app.close_current_tab();
     } else {
@@ -1171,7 +1181,7 @@ fn archive_and_close_tab(app: &mut App) {
 }
 
 fn copy_conversation_id(app: &mut App) {
-    if let Some(ref thread) = app.selected_thread {
+    if let Some(ref thread) = app.selected_thread() {
         let conversation_id = &thread.id;
         // Truncate to first 12 characters (short ID format)
         let short_id: String = conversation_id.chars().take(12).collect();
@@ -1180,17 +1190,17 @@ fn copy_conversation_id(app: &mut App) {
         match Clipboard::new() {
             Ok(mut clipboard) => {
                 if clipboard.set_text(&short_id).is_ok() {
-                    app.set_status(&format!("Copied short ID: {}", short_id));
+                    app.set_warning_status(&format!("Copied short ID: {}", short_id));
                 } else {
-                    app.set_status("Failed to copy to clipboard");
+                    app.set_warning_status("Failed to copy to clipboard");
                 }
             }
             Err(e) => {
-                app.set_status(&format!("Clipboard error: {}", e));
+                app.set_warning_status(&format!("Clipboard error: {}", e));
             }
         }
     } else {
-        app.set_status("No conversation selected");
+        app.set_warning_status("No conversation selected");
     }
 }
 
@@ -1203,17 +1213,17 @@ fn copy_conversation_id(app: &mut App) {
 fn reference_conversation(app: &mut App) {
     // Get required context from current state
     let (source_thread_id, project_a_tag, project_name, agent, branch) = {
-        let thread = match &app.selected_thread {
+        let thread = match app.selected_thread() {
             Some(t) => t,
             None => {
-                app.set_status("No conversation to reference");
+                app.set_warning_status("No conversation to reference");
                 return;
             }
         };
         let project = match &app.selected_project {
             Some(p) => p,
             None => {
-                app.set_status("No project selected");
+                app.set_warning_status("No project selected");
                 return;
             }
         };
@@ -1221,7 +1231,7 @@ fn reference_conversation(app: &mut App) {
             thread.id.clone(),
             project.a_tag(),
             project.name.clone(),
-            app.selected_agent.clone(),
+            app.selected_agent().cloned(),
             app.selected_branch.clone(),
         )
     };
@@ -1238,7 +1248,7 @@ fn reference_conversation(app: &mut App) {
     app.switch_to_tab(tab_idx);
 
     // Restore agent and branch from source conversation
-    app.selected_agent = agent.clone();
+    app.set_selected_agent(agent.clone());
     app.selected_branch = branch;
 
     // Pre-fill the editor with the context message as a text attachment
@@ -1259,7 +1269,7 @@ fn reference_conversation(app: &mut App) {
 
     app.view = View::Chat;
     app.input_mode = InputMode::Editing;
-    app.set_status(&format!(
+    app.set_warning_status(&format!(
         "New conversation referencing {} (~{} tokens)",
         &source_thread_id[..8.min(source_thread_id.len())],
         approx_tokens

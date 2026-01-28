@@ -810,7 +810,7 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
     lines.push(Line::from(vec![
         Span::styled("  Time filter: ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(
-            app.time_filter.as_ref().map(|tf| tf.label()).unwrap_or("None"),
+            app.home.time_filter.as_ref().map(|tf| tf.label()).unwrap_or("None"),
             Style::default().fg(theme::TEXT_PRIMARY),
         ),
     ]));

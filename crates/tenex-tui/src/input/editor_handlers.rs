@@ -64,7 +64,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             app.input_mode = InputMode::Normal;
             // Set selection to last item so Up arrow works intuitively
             let count = app.display_item_count();
-            app.selected_message_index = count.saturating_sub(1);
+            app.set_selected_message_index(count.saturating_sub(1));
         }
         // Tab = cycle focus between input and attachments
         KeyCode::Tab if app.chat_editor().has_attachments() => {
@@ -330,7 +330,7 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                 }
                 InputContextFocus::Model => {
                     // Open agent settings for the current agent to change the model
-                    if let Some(agent) = &app.selected_agent {
+                    if let Some(agent) = app.selected_agent() {
                         if let Some(project) = &app.selected_project {
                             let (all_tools, all_models) = app
                                 .data_store
@@ -469,7 +469,7 @@ fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
             app.input_mode = InputMode::Normal;
             // Set selection to last item so Up arrow works intuitively
             let count = app.display_item_count();
-            app.selected_message_index = count.saturating_sub(1);
+            app.set_selected_message_index(count.saturating_sub(1));
         }
 
         // Shift+Enter or Alt+Enter = newline (even in normal mode)
@@ -500,15 +500,15 @@ fn handle_send_message(app: &mut App) {
             (&app.core_handle, &app.selected_project)
         {
             let project_a_tag = project.a_tag();
-            let agent_pubkey = app.selected_agent.as_ref().map(|a| a.pubkey.clone());
+            let agent_pubkey = app.selected_agent().map(|a| a.pubkey.clone());
             let branch = app.selected_branch.clone();
             // Per-tab isolated nudge selection
             let nudge_ids = app.selected_nudge_ids();
 
-            if let Some(ref thread) = app.selected_thread {
+            if let Some(thread) = app.selected_thread() {
                 // Reply to existing thread
                 let thread_id = thread.id.clone();
-                let reply_to = if let Some(ref root_id) = app.subthread_root {
+                let reply_to = if let Some(root_id) = app.subthread_root() {
                     Some(root_id.clone())
                 } else {
                     Some(thread_id.clone())
@@ -519,7 +519,7 @@ fn handle_send_message(app: &mut App) {
                 let publish_id = match app.create_publish_snapshot(&thread_id, content.clone()) {
                     Ok(id) => id,
                     Err(e) => {
-                        app.set_status(&format!("Failed to save publish snapshot: {}", e));
+                        app.set_warning_status(&format!("Failed to save publish snapshot: {}", e));
                         return;
                     }
                 };
@@ -542,7 +542,7 @@ fn handle_send_message(app: &mut App) {
                     if let Err(rollback_err) = app.remove_publish_snapshot(&publish_id) {
                         tlog!("DRAFT", "ERROR: Failed to roll back publish snapshot {}: {} (phantom publish may remain)", publish_id, rollback_err);
                     }
-                    app.set_status(&format!("Failed to publish message: {}", e));
+                    app.set_warning_status(&format!("Failed to publish message: {}", e));
                 } else {
                     // BULLETPROOF: Spawn background task to wait for publish confirmation
                     // Uses the unique publish_id to mark the specific snapshot as confirmed
@@ -579,7 +579,7 @@ fn handle_send_message(app: &mut App) {
                 let publish_id = match app.create_publish_snapshot(&conversation_id, content.clone()) {
                     Ok(id) => id,
                     Err(e) => {
-                        app.set_status(&format!("Failed to save publish snapshot: {}", e));
+                        app.set_warning_status(&format!("Failed to save publish snapshot: {}", e));
                         return;
                     }
                 };
@@ -605,7 +605,7 @@ fn handle_send_message(app: &mut App) {
                     if let Err(rollback_err) = app.remove_publish_snapshot(&publish_id) {
                         tlog!("DRAFT", "ERROR: Failed to roll back publish snapshot {}: {} (phantom publish may remain)", publish_id, rollback_err);
                     }
-                    app.set_status(&format!("Failed to create thread: {}", e));
+                    app.set_warning_status(&format!("Failed to create thread: {}", e));
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
