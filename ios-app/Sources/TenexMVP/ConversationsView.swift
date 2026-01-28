@@ -4,16 +4,22 @@ struct ConversationsView: View {
     let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var conversations: [ConversationInfo] = []
+    @State private var hierarchy: ConversationHierarchy?
     @State private var isLoading = false
     @State private var selectedConversation: ConversationInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
 
+    /// Root conversations from precomputed hierarchy (sorted by effective last activity)
+    private var rootConversations: [ConversationInfo] {
+        hierarchy?.getSortedRoots() ?? []
+    }
+
     var body: some View {
         Group {
             if isLoading {
                 ProgressView("Loading conversations...")
-            } else if conversations.isEmpty {
+            } else if rootConversations.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 60))
@@ -24,13 +30,11 @@ struct ConversationsView: View {
                 }
             } else {
                 List {
-                    // Root conversations (no parent)
-                    let rootConversations = conversations.filter { $0.parentId == nil }
+                    // Root conversations - using precomputed hierarchy for O(1) data access
                     ForEach(rootConversations, id: \.id) { conversation in
-                        ConversationTreeNode(
+                        OptimizedConversationRow(
                             conversation: conversation,
-                            allConversations: conversations,
-                            depth: 0,
+                            aggregatedData: hierarchy?.getData(for: conversation.id) ?? .empty,
                             onSelect: { selected in
                                 selectedConversation = selected
                             }
@@ -95,121 +99,110 @@ struct ConversationsView: View {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
             let fetched = coreManager.core.getConversations(projectId: project.id)
+            // Precompute hierarchy on background thread for O(1) access per row
+            let computedHierarchy = ConversationHierarchy(conversations: fetched)
             DispatchQueue.main.async {
                 self.conversations = fetched
+                self.hierarchy = computedHierarchy
                 self.isLoading = false
             }
         }
     }
 }
 
-// MARK: - Conversation Tree Node (Recursive)
-// Uses separate tap areas to avoid nested Button issues (gestures conflict)
+// MARK: - Optimized Conversation Row (Uses precomputed hierarchy data)
 
-private struct ConversationTreeNode: View {
+/// Conversation row that uses precomputed hierarchy data for O(1) access
+/// instead of recomputing O(n²) BFS on every render
+private struct OptimizedConversationRow: View {
     let conversation: ConversationInfo
-    let allConversations: [ConversationInfo]
-    let depth: Int
+    let aggregatedData: AggregatedConversationData
     let onSelect: (ConversationInfo) -> Void
 
-    @State private var isExpanded = true
-
-    private var children: [ConversationInfo] {
-        allConversations.filter { $0.parentId == conversation.id }
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Conversation row - use HStack with separate tap targets
-            HStack(spacing: 12) {
-                // Expand/collapse button (separate from main content)
-                if !children.isEmpty {
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        HStack(spacing: 12) {
+            // Status indicator
+            Circle()
+                .fill(conversationStatusColor(for: conversation.status))
+                .frame(width: 10, height: 10)
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Row 1: Title and effective last active time
+                HStack(alignment: .top) {
+                    Text(conversation.title)
+                        .font(.headline)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    Text(ConversationFormatters.formatRelativeTime(aggregatedData.effectiveLastActivity))
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                        .frame(width: 20, height: 44) // Make tap target larger
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                isExpanded.toggle()
-                            }
-                        }
-                } else {
-                    Spacer().frame(width: 20)
                 }
 
-                // Main conversation content - tappable to view details
-                HStack(spacing: 12) {
-                    // Status indicator
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 10, height: 10)
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text(conversation.title)
-                                .font(.headline)
-                                .lineLimit(1)
-
-                            Spacer()
-
-                            Text("\(conversation.messageCount)")
-                                .font(.caption)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color(.systemGray5))
-                                .clipShape(Capsule())
-                        }
-
-                        HStack {
-                            Text(conversation.author)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            if let summary = conversation.summary {
-                                Text("• \(summary)")
-                                    .font(.caption)
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                            }
-                        }
+                // Row 2: Summary and activity span (renamed from "total running time")
+                HStack(alignment: .top) {
+                    if let summary = conversation.summary {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text("No summary")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .italic()
                     }
 
-                    Image(systemName: "chevron.right")
+                    Spacer()
+
+                    // Show activity span (time from earliest to latest activity)
+                    if aggregatedData.activitySpan > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                            Text(ConversationFormatters.formatDuration(aggregatedData.activitySpan))
+                        }
                         .font(.caption)
                         .foregroundStyle(.tertiary)
+                    }
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelect(conversation)
-                }
-            }
-            .padding(.vertical, 10)
-            .padding(.leading, CGFloat(depth * 16))
 
-            // Children (nested conversations)
-            if isExpanded {
-                ForEach(children, id: \.id) { child in
-                    ConversationTreeNode(
-                        conversation: child,
-                        allConversations: allConversations,
-                        depth: depth + 1,
-                        onSelect: onSelect
-                    )
+                // Row 3: Participating agent avatars
+                HStack(spacing: -8) {
+                    ForEach(aggregatedData.participatingAgents.prefix(6), id: \.self) { agent in
+                        SharedAgentAvatar(agentName: agent)
+                    }
+
+                    if aggregatedData.participatingAgents.count > 6 {
+                        Circle()
+                            .fill(Color(.systemGray4))
+                            .frame(width: 24, height: 24)
+                            .overlay {
+                                Text("+\(aggregatedData.participatingAgents.count - 6)")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
+
+                    Spacer()
                 }
             }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
         }
-    }
-
-    private var statusColor: Color {
-        switch conversation.status {
-        case "active": return .green
-        case "waiting": return .orange
-        case "completed": return .gray
-        default: return .blue
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(conversation)
         }
     }
 }
+
+// Note: AgentAvatarView removed - use SharedAgentAvatar from ConversationHierarchy.swift
 
 // MARK: - Messages View
 
@@ -332,7 +325,7 @@ struct MessageBubble: View {
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    Text(formatTimestamp(message.createdAt))
+                    Text(ConversationFormatters.formatRelativeTime(message.createdAt))
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
 
@@ -363,13 +356,6 @@ struct MessageBubble: View {
 
             if !isUser { Spacer(minLength: 50) }
         }
-    }
-
-    private func formatTimestamp(_ timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
 
