@@ -4,17 +4,24 @@ use nostrdb::Note;
 /// Published by the backend to indicate which agents are working on which events.
 ///
 /// Structure:
-/// - e-tag: event ID being processed
+/// - e-tag: event ID being processed (conversation/message reference)
 /// - p-tags (lowercase): agent pubkeys currently working
 /// - a-tag: project coordinate
+/// - id: the nostr event ID of this 24133 event itself
 #[derive(Debug, Clone)]
 pub struct OperationsStatus {
+    /// The nostr event ID of this 24133 event itself.
+    /// Used for deduplication and same-second ordering.
+    pub nostr_event_id: String,
+    /// The event being processed (from e-tag)
     pub event_id: String,
     pub agent_pubkeys: Vec<String>,
     pub project_coordinate: String,
     pub created_at: u64,
     /// Thread ID (conversation root) - extracted from q-tag or e-tag with "root" marker
     pub thread_id: Option<String>,
+    /// LLM runtime in seconds - extracted from llm-runtime tag when agent completes
+    pub llm_runtime_secs: Option<u64>,
 }
 
 impl OperationsStatus {
@@ -33,6 +40,7 @@ impl OperationsStatus {
     /// Create from pre-parsed serde_json::Value (avoids double parsing)
     ///
     /// Kind:24133 event structure:
+    /// - id: the nostr event ID of this event
     /// - e-tag: conversation_id (event being processed)
     /// - p-tags (lowercase): agent pubkeys currently working
     /// - P-tag (uppercase): user pubkey (ignored for now)
@@ -43,6 +51,8 @@ impl OperationsStatus {
             return None;
         }
 
+        // Extract the nostr event ID (used for deduplication/ordering)
+        let nostr_event_id = event.get("id")?.as_str()?.to_string();
         let created_at = event.get("created_at")?.as_u64()?;
 
         let tags_value = event.get("tags")?.as_array()?;
@@ -54,6 +64,7 @@ impl OperationsStatus {
         let mut agent_pubkeys: Vec<String> = Vec::new();
         let mut project_coordinate: Option<String> = None;
         let mut thread_id: Option<String> = None;
+        let mut llm_runtime_secs: Option<u64> = None;
 
         for tag_value in tags_value {
             // Skip malformed tags gracefully (tolerant parsing like ProjectStatus)
@@ -99,6 +110,16 @@ impl OperationsStatus {
                         }
                     }
                 }
+                "llm-runtime" => {
+                    // LLM runtime in seconds: ["llm-runtime", "<seconds>"]
+                    if llm_runtime_secs.is_none() {
+                        if let Some(s) = tag_arr.get(1).and_then(|v| v.as_str()) {
+                            llm_runtime_secs = s.parse::<u64>().ok();
+                        } else if let Some(n) = tag_arr.get(1).and_then(|v| v.as_u64()) {
+                            llm_runtime_secs = Some(n);
+                        }
+                    }
+                }
                 // "P" (uppercase) is user pubkey - ignored for OperationsStatus
                 _ => {}
             }
@@ -114,11 +135,13 @@ impl OperationsStatus {
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 
         Some(OperationsStatus {
+            nostr_event_id,
             event_id,
             agent_pubkeys,
             project_coordinate,
             created_at,
             thread_id,
+            llm_runtime_secs,
         })
     }
 
@@ -128,6 +151,9 @@ impl OperationsStatus {
             return None;
         }
 
+        // Extract the nostr event ID (used for deduplication/ordering)
+        let nostr_event_id = hex::encode(note.id());
+
         // Collect all e-tags, tracking root vs non-root separately
         // Tolerant parsing - skip malformed tags gracefully
         let mut non_root_e_tags: Vec<String> = Vec::new();
@@ -135,6 +161,7 @@ impl OperationsStatus {
         let mut agent_pubkeys: Vec<String> = Vec::new();
         let mut project_coordinate: Option<String> = None;
         let mut thread_id: Option<String> = None;
+        let mut llm_runtime_secs: Option<u64> = None;
 
         for tag in note.tags() {
             // Skip malformed tags gracefully
@@ -188,6 +215,14 @@ impl OperationsStatus {
                         }
                     }
                 }
+                "llm-runtime" => {
+                    // LLM runtime in seconds: ["llm-runtime", "<seconds>"]
+                    if llm_runtime_secs.is_none() {
+                        if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
+                            llm_runtime_secs = s.parse::<u64>().ok();
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -202,11 +237,13 @@ impl OperationsStatus {
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 
         Some(OperationsStatus {
+            nostr_event_id,
             event_id,
             agent_pubkeys,
             project_coordinate,
             created_at: note.created_at(),
             thread_id,
+            llm_runtime_secs,
         })
     }
 

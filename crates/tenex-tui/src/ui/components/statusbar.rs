@@ -28,21 +28,22 @@ fn format_runtime(total_ms: u64) -> String {
     }
 }
 
-/// Label prefix for the runtime display
-const TODAY_LABEL: &str = "Today: ";
+/// Label prefix for the runtime display.
+/// "Session" because this is in-memory runtime that resets on application restart.
+const SESSION_LABEL: &str = "Session: ";
 
 /// Minimum width for the runtime column.
-/// Ensures column doesn't collapse below "Today: MM:SS " (13 chars) + 1 left padding + 2 buffer = 16
-const RUNTIME_COLUMN_MIN_WIDTH: u16 = 16;
+/// Ensures column doesn't collapse below "Session: MM:SS " (15 chars) + 1 left padding + 2 buffer = 18
+const RUNTIME_COLUMN_MIN_WIDTH: u16 = 18;
 
-/// Format the full runtime label string (e.g., "Today: 05:32 ")
-fn format_today_label(cumulative_runtime_ms: u64) -> String {
-    format!("{}{} ", TODAY_LABEL, format_runtime(cumulative_runtime_ms))
+/// Format the full runtime label string (e.g., "Session: 05:32 ")
+fn format_session_label(cumulative_runtime_ms: u64) -> String {
+    format!("{}{} ", SESSION_LABEL, format_runtime(cumulative_runtime_ms))
 }
 
 /// Calculate the width needed for the runtime string
 fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
-    let runtime_str = format_today_label(cumulative_runtime_ms);
+    let runtime_str = format_session_label(cumulative_runtime_ms);
     // Add 1 for left padding, ensure minimum width
     (runtime_str.width() + 1).max(RUNTIME_COLUMN_MIN_WIDTH as usize) as u16
 }
@@ -50,11 +51,16 @@ fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
 /// Render the status bar at the bottom of the screen
 /// Shows notification (left/center) and cumulative runtime (right)
 /// Uses fixed-width columns to prevent layout breakage from long notifications
+///
+/// ## Color Logic
+/// - `has_active_agents = true`: "Session:" label shown in GREEN (agents working)
+/// - `has_active_agents = false`: "Session:" label shown in RED (no agents working)
 pub fn render_statusbar(
     f: &mut Frame,
     area: Rect,
     current_notification: Option<&Notification>,
     cumulative_runtime_ms: u64,
+    has_active_agents: bool,
 ) {
     // Calculate dynamic width for runtime column based on actual content
     let runtime_column_width = calculate_runtime_width(cumulative_runtime_ms);
@@ -97,13 +103,20 @@ pub fn render_statusbar(
     f.render_widget(notification_paragraph, notification_area);
 
     // Render runtime (right side) - right-aligned within its fixed column
-    let runtime_str = format_today_label(cumulative_runtime_ms);
+    // Color indicates agent activity: GREEN = agents working, RED = no agents working
+    let runtime_color = if has_active_agents {
+        theme::ACCENT_SUCCESS // Green - agents are actively working
+    } else {
+        theme::ACCENT_ERROR   // Red - no agents working
+    };
+
+    let runtime_str = format_session_label(cumulative_runtime_ms);
     let runtime_width = runtime_str.width();
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
     let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
 
     let runtime_paragraph = Paragraph::new(padded_runtime)
-        .style(Style::default().fg(theme::TEXT_MUTED).bg(theme::BG_SIDEBAR));
+        .style(Style::default().fg(runtime_color).bg(theme::BG_SIDEBAR));
 
     f.render_widget(runtime_paragraph, runtime_area);
 }
