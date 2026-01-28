@@ -25,11 +25,16 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
 
     match code {
-        // Shift+Enter or Alt+Enter = newline
+        // Shift+Enter = newline
         // Also handle Ctrl+J which is what iTerm2/macOS sends for Shift+Enter
-        KeyCode::Enter if has_shift || has_alt => {
+        KeyCode::Enter if has_shift => {
             app.chat_editor_mut().insert_newline();
             app.save_chat_draft();
+        }
+        // Alt+Enter = send message AND close tab
+        KeyCode::Enter if has_alt => {
+            handle_send_message(app);
+            app.close_current_tab();
         }
         KeyCode::Char('j') | KeyCode::Char('J') if has_ctrl => {
             app.chat_editor_mut().insert_newline();
