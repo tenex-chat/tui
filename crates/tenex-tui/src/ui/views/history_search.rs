@@ -127,6 +127,20 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
                     spans.push(Span::styled("  ", Style::default()));
                 }
 
+                // Draft indicator - show [DRAFT] prefix for unsent messages
+                const DRAFT_PREFIX: &str = "[DRAFT] ";
+                let draft_prefix_len = if entry.is_draft() {
+                    spans.push(Span::styled(
+                        DRAFT_PREFIX,
+                        Style::default()
+                            .fg(theme::ACCENT_WARNING)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                    DRAFT_PREFIX.len()
+                } else {
+                    0
+                };
+
                 // Content preview (first line, truncated for list view)
                 let content_preview: String = entry
                     .content
@@ -134,13 +148,16 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
                     .next()
                     .unwrap_or("")
                     .chars()
-                    .take((content_area.width as usize).saturating_sub(18))
+                    .take((content_area.width as usize).saturating_sub(18 + draft_prefix_len))
                     .collect();
 
                 let content_style = if is_selected {
                     Style::default()
                         .fg(theme::ACCENT_PRIMARY)
                         .add_modifier(Modifier::BOLD)
+                } else if entry.is_draft() {
+                    // Slightly dimmer styling for draft content to distinguish from sent
+                    Style::default().fg(theme::TEXT_MUTED)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };

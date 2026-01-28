@@ -3470,52 +3470,222 @@ impl App {
     }
 
     /// Update history search results based on current query
+    /// Searches both sent messages (from Nostr) AND unsent drafts
     pub fn update_history_search(&mut self) {
-        use crate::ui::modal::HistorySearchEntry;
+        use crate::ui::modal::{HistorySearchEntry, HistorySearchEntryKind};
+        use crate::ui::search::parse_search_terms;
+        use tenex_core::search::text_contains_term;
 
-        // Get user pubkey
-        let user_pubkey = match self.data_store.borrow().user_pubkey.clone() {
-            Some(pk) => pk,
-            None => return,
-        };
+        // Helper: Check if draft matches project filter using exact matching
+        fn draft_matches_project(
+            draft_project_a_tag: Option<&str>,
+            filter_project: &str,
+        ) -> bool {
+            draft_project_a_tag
+                .map(|p| p == filter_project)
+                .unwrap_or(false)
+        }
+
+        // Helper: Check if text matches all search terms
+        fn text_matches_terms(text: &str, terms: &[String]) -> bool {
+            if terms.is_empty() {
+                return true; // Empty query matches everything
+            }
+            terms.iter().all(|term| text_contains_term(text, term))
+        }
 
         // Get query and filter settings from modal state
-        let (query, _all_projects, project_a_tag) = match &self.modal_state {
+        let (query, filter_project) = match &self.modal_state {
             ModalState::HistorySearch(state) => {
-                let filter_project = if state.all_projects {
+                let filter = if state.all_projects {
                     None
                 } else {
-                    state.current_project_a_tag.as_deref()
+                    state.current_project_a_tag.clone()
                 };
-                (state.query.clone(), state.all_projects, filter_project.map(String::from))
+                (state.query.clone(), filter)
             }
-            _ => return,
+            _ => {
+                // Early return: clear stale results when modal not active
+                return;
+            }
         };
 
-        // Search for messages
-        let results = self.data_store.borrow().search_user_messages(
+        // Get user pubkey - clear results on early return
+        let user_pubkey = match self.data_store.borrow().user_pubkey.clone() {
+            Some(pk) => pk,
+            None => {
+                // Clear stale results when no user pubkey
+                if let ModalState::HistorySearch(ref mut state) = self.modal_state {
+                    state.results.clear();
+                    state.selected_index = 0;
+                }
+                return;
+            }
+        };
+
+        // Parse search terms for unified search semantics
+        let terms = parse_search_terms(&query);
+
+        // Collect sent messages from Nostr
+        let sent_results = self.data_store.borrow().search_user_messages(
             &user_pubkey,
             &query,
-            project_a_tag.as_deref(),
+            filter_project.as_deref(),
             50, // limit
         );
 
-        // Convert to HistorySearchEntry
-        let entries: Vec<HistorySearchEntry> = results
+        let mut entries: Vec<HistorySearchEntry> = sent_results
             .into_iter()
             .map(|(event_id, content, created_at, project_a_tag)| HistorySearchEntry {
-                event_id,
+                kind: HistorySearchEntryKind::Message {
+                    event_id,
+                    project_a_tag,
+                },
                 content,
                 created_at,
-                project_a_tag,
             })
             .collect();
+
+        // Collect draft entries - single pass through all drafts
+        let all_drafts = self.draft_service.get_all_searchable_drafts();
+        let mut seen_draft_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // Process all chat drafts in a single pass
+        for draft in &all_drafts.chat_drafts {
+            // Skip empty drafts
+            if draft.text.trim().is_empty() {
+                continue;
+            }
+
+            // Skip duplicates
+            if seen_draft_ids.contains(&draft.conversation_id) {
+                continue;
+            }
+
+            // Apply project filter with exact matching
+            if let Some(ref filter) = filter_project {
+                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
+                    continue;
+                }
+            }
+
+            // Apply search term filter with unified semantics
+            if !text_matches_terms(&draft.text, &terms) {
+                continue;
+            }
+
+            seen_draft_ids.insert(draft.conversation_id.clone());
+            entries.push(HistorySearchEntry {
+                kind: HistorySearchEntryKind::Draft {
+                    draft_id: draft.conversation_id.clone(),
+                    conversation_id: draft.conversation_id.clone(),
+                    project_a_tag: draft.project_a_tag.clone(),
+                },
+                content: draft.text.clone(),
+                created_at: draft.last_modified,
+            });
+        }
+
+        // Process versioned drafts
+        for draft in &all_drafts.versioned_drafts {
+            if draft.text.trim().is_empty() {
+                continue;
+            }
+            if seen_draft_ids.contains(&draft.conversation_id) {
+                continue;
+            }
+            if let Some(ref filter) = filter_project {
+                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
+                    continue;
+                }
+            }
+            if !text_matches_terms(&draft.text, &terms) {
+                continue;
+            }
+
+            seen_draft_ids.insert(draft.conversation_id.clone());
+            entries.push(HistorySearchEntry {
+                kind: HistorySearchEntryKind::Draft {
+                    draft_id: draft.conversation_id.clone(),
+                    conversation_id: draft.conversation_id.clone(),
+                    project_a_tag: draft.project_a_tag.clone(),
+                },
+                content: draft.text.clone(),
+                created_at: draft.last_modified,
+            });
+        }
+
+        // Process archived drafts
+        for draft in &all_drafts.archived_drafts {
+            if draft.text.trim().is_empty() {
+                continue;
+            }
+            if seen_draft_ids.contains(&draft.conversation_id) {
+                continue;
+            }
+            if let Some(ref filter) = filter_project {
+                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
+                    continue;
+                }
+            }
+            if !text_matches_terms(&draft.text, &terms) {
+                continue;
+            }
+
+            seen_draft_ids.insert(draft.conversation_id.clone());
+            entries.push(HistorySearchEntry {
+                kind: HistorySearchEntryKind::Draft {
+                    draft_id: draft.conversation_id.clone(),
+                    conversation_id: draft.conversation_id.clone(),
+                    project_a_tag: draft.project_a_tag.clone(),
+                },
+                content: draft.text.clone(),
+                created_at: draft.last_modified,
+            });
+        }
+
+        // Process named drafts
+        for draft in &all_drafts.named_drafts {
+            if draft.text.trim().is_empty() {
+                continue;
+            }
+            if seen_draft_ids.contains(&draft.id) {
+                continue;
+            }
+            if let Some(ref filter) = filter_project {
+                if draft.project_a_tag != *filter {
+                    continue;
+                }
+            }
+            if !text_matches_terms(&draft.text, &terms) && !text_matches_terms(&draft.name, &terms) {
+                continue;
+            }
+
+            seen_draft_ids.insert(draft.id.clone());
+            entries.push(HistorySearchEntry {
+                kind: HistorySearchEntryKind::Draft {
+                    draft_id: draft.id.clone(),
+                    conversation_id: draft.project_a_tag.clone(), // Named drafts navigate to project
+                    project_a_tag: Some(draft.project_a_tag.clone()),
+                },
+                content: draft.text.clone(),
+                created_at: draft.last_modified,
+            });
+        }
+
+        // Sort by created_at/last_modified (most recent first)
+        entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        // Limit total results
+        entries.truncate(50);
 
         // Update modal state with results
         if let ModalState::HistorySearch(ref mut state) = self.modal_state {
             state.results = entries;
             // Clamp selected index
-            if !state.results.is_empty() && state.selected_index >= state.results.len() {
+            if state.results.is_empty() {
+                state.selected_index = 0;
+            } else if state.selected_index >= state.results.len() {
                 state.selected_index = state.results.len() - 1;
             }
         }

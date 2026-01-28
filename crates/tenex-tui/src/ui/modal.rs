@@ -1214,17 +1214,68 @@ impl AgentSettingsState {
     }
 }
 
+/// Discriminated union for history search entry types
+/// Makes field semantics explicit and prevents misuse of overloaded fields
+#[derive(Debug, Clone)]
+pub enum HistorySearchEntryKind {
+    /// A sent message from Nostr
+    Message {
+        /// Event ID of the published message
+        event_id: String,
+        /// Project a-tag the message belongs to
+        project_a_tag: Option<String>,
+    },
+    /// An unsent draft (not yet published)
+    Draft {
+        /// Draft identifier (conversation_id for chat drafts)
+        draft_id: String,
+        /// Conversation ID the draft belongs to
+        conversation_id: String,
+        /// Project a-tag the draft belongs to
+        project_a_tag: Option<String>,
+    },
+}
+
 /// A history search result entry
 #[derive(Debug, Clone)]
 pub struct HistorySearchEntry {
-    /// Event ID of the message
-    pub event_id: String,
-    /// Message content
+    /// The kind of entry (message or draft) with type-specific IDs
+    pub kind: HistorySearchEntryKind,
+    /// Message/draft content
     pub content: String,
-    /// Created at timestamp
+    /// Created at timestamp (or last_modified for drafts)
     pub created_at: u64,
-    /// Project a-tag (if available)
-    pub project_a_tag: Option<String>,
+}
+
+impl HistorySearchEntry {
+    /// Check if this entry is an unsent draft
+    pub fn is_draft(&self) -> bool {
+        matches!(self.kind, HistorySearchEntryKind::Draft { .. })
+    }
+
+    /// Get the project a-tag for this entry
+    pub fn project_a_tag(&self) -> Option<&str> {
+        match &self.kind {
+            HistorySearchEntryKind::Message { project_a_tag, .. } => project_a_tag.as_deref(),
+            HistorySearchEntryKind::Draft { project_a_tag, .. } => project_a_tag.as_deref(),
+        }
+    }
+
+    /// Get a unique identifier for this entry (for deduplication)
+    pub fn unique_id(&self) -> &str {
+        match &self.kind {
+            HistorySearchEntryKind::Message { event_id, .. } => event_id,
+            HistorySearchEntryKind::Draft { draft_id, .. } => draft_id,
+        }
+    }
+
+    /// Get the navigation target ID (conversation_id for drafts, event_id for messages)
+    pub fn navigation_id(&self) -> &str {
+        match &self.kind {
+            HistorySearchEntryKind::Message { event_id, .. } => event_id,
+            HistorySearchEntryKind::Draft { conversation_id, .. } => conversation_id,
+        }
+    }
 }
 
 /// State for the history search modal (Ctrl+R to search previous messages)
