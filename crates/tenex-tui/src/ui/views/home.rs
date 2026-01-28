@@ -86,8 +86,8 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
     // Status bar at the very bottom (always visible)
     let statusbar_area = if has_tabs { chunks[4] } else { chunks[3] };
-    let (cumulative_runtime_ms, has_active_agents) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
-    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime_ms, has_active_agents, app.wave_offset());
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    render_statusbar(f, statusbar_area, app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset());
 
     // Projects modal overlay
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
