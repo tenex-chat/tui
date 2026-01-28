@@ -158,6 +158,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('f') => {
             app.cycle_time_filter();
         }
+        // These are now global commands - available everywhere via Shift+key
+        // They are also in the command palette (Ctrl+T) for discoverability
         KeyCode::Char('B') if has_shift => {
             app.open_agent_browser();
         }
@@ -166,19 +168,12 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
         }
         KeyCode::Char('N') if has_shift => {
-            // New conversation in current project (no picker)
-            if !app.sidebar_focused && app.home_panel_focus == HomeTab::Conversations {
-                new_conversation_current_project(app);
-            }
+            new_conversation_current_project(app);
         }
         KeyCode::Char('P') if has_shift => {
-            // New conversation with project picker
-            if !app.sidebar_focused && app.home_panel_focus == HomeTab::Conversations {
-                app.open_projects_modal(true);
-            }
+            app.open_projects_modal(true);
         }
         KeyCode::Char('A') if has_shift => {
-            // Show/hide archived items (unified toggle)
             app.toggle_show_archived();
         }
         // Vim-style h/l navigation for Stats subtabs

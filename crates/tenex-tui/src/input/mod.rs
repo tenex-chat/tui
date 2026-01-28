@@ -171,9 +171,14 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
     let modifiers = key.modifiers;
     let has_alt = modifiers.contains(KeyModifiers::ALT);
 
-    // macOS Option+Number produces special characters instead of Alt+Number
-    // Handle these characters for tab switching
+    // macOS Option key produces special characters instead of Alt+key
+    // Handle these characters for various shortcuts
     match code {
+        // Option+M on macOS produces 'µ' - jump to notification
+        KeyCode::Char('µ') => {
+            app.jump_to_notification_thread();
+            return Ok(true);
+        }
         // Option+1 on macOS produces '¡' - go to dashboard
         KeyCode::Char('¡') => {
             app.go_home();
