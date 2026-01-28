@@ -874,22 +874,25 @@ impl AppDataStore {
 
     /// Handle a status event from JSON (ephemeral events via DataChange channel)
     /// Routes to appropriate handler based on event kind (24010 or 24133)
+    /// Parses JSON once and passes the value to handlers to avoid double parsing
     pub fn handle_status_event_json(&mut self, json: &str) {
-        // Parse just enough to get the kind
-        if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
-            if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
-                match kind {
-                    24010 => self.handle_project_status_event_json(json),
-                    24133 => self.handle_operations_status_event_json(json),
-                    _ => {} // Ignore unknown kinds
-                }
+        // Parse JSON once upfront
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else {
+            return;
+        };
+
+        if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
+            match kind {
+                24010 => self.handle_project_status_event_value(&event),
+                24133 => self.handle_operations_status_event_value(&event),
+                _ => {} // Ignore unknown kinds
             }
         }
     }
 
-    /// Handle a project status event from JSON (kind:24010)
-    fn handle_project_status_event_json(&mut self, json: &str) {
-        if let Some(status) = ProjectStatus::from_json(json) {
+    /// Handle a project status event from pre-parsed Value (kind:24010)
+    fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
+        if let Some(status) = ProjectStatus::from_value(event) {
             let backend_pubkey = &status.backend_pubkey;
 
             // Check trust status
@@ -924,12 +927,10 @@ impl AppDataStore {
         }
     }
 
-    /// Handle an operations status event from JSON (kind:24133)
+    /// Handle an operations status event from pre-parsed Value (kind:24133)
     /// Updates in-memory operations_by_event storage
-    fn handle_operations_status_event_json(&mut self, json: &str) {
-        let status_opt = OperationsStatus::from_json(json);
-
-        if let Some(status) = status_opt {
+    fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
+        if let Some(status) = OperationsStatus::from_value(event) {
             self.upsert_operations_status(status);
         }
     }

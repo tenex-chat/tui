@@ -27,7 +27,17 @@ impl OperationsStatus {
     /// - a-tag: project coordinate
     pub fn from_json(json: &str) -> Option<Self> {
         let event: serde_json::Value = serde_json::from_str(json).ok()?;
+        Self::from_value(&event)
+    }
 
+    /// Create from pre-parsed serde_json::Value (avoids double parsing)
+    ///
+    /// Kind:24133 event structure:
+    /// - e-tag: conversation_id (event being processed)
+    /// - p-tags (lowercase): agent pubkeys currently working
+    /// - P-tag (uppercase): user pubkey (ignored for now)
+    /// - a-tag: project coordinate
+    pub fn from_value(event: &serde_json::Value) -> Option<Self> {
         let kind = event.get("kind")?.as_u64()?;
         if kind != 24133 {
             return None;
@@ -98,7 +108,8 @@ impl OperationsStatus {
         let event_id = non_root_e_tags.first()
             .or(root_e_tags.first())
             .cloned()?;
-        let project_coordinate = project_coordinate.unwrap_or_default();
+        // a-tag (project_coordinate) is mandatory - reject malformed events without it
+        let project_coordinate = project_coordinate?;
         // Use q-tag for thread_id if available, otherwise fall back to first root e-tag
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 
@@ -185,7 +196,8 @@ impl OperationsStatus {
         let event_id = non_root_e_tags.first()
             .or(root_e_tags.first())
             .cloned()?;
-        let project_coordinate = project_coordinate.unwrap_or_default();
+        // a-tag (project_coordinate) is mandatory - reject malformed events without it
+        let project_coordinate = project_coordinate?;
         // Use q-tag for thread_id if available, otherwise fall back to first root e-tag
         let thread_id = thread_id.or_else(|| root_e_tags.first().cloned());
 

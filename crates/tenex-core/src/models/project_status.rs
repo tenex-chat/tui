@@ -34,7 +34,11 @@ impl ProjectStatus {
     /// Create from JSON string (for ephemeral events received via DataChange channel)
     pub fn from_json(json: &str) -> Option<Self> {
         let event: serde_json::Value = serde_json::from_str(json).ok()?;
+        Self::from_value(&event)
+    }
 
+    /// Create from pre-parsed serde_json::Value (avoids double parsing)
+    pub fn from_value(event: &serde_json::Value) -> Option<Self> {
         let kind = event.get("kind")?.as_u64()?;
         if kind != 24010 {
             return None;
