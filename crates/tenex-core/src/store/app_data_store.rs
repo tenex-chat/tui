@@ -2048,9 +2048,14 @@ impl AppDataStore {
         // Search using the first term to get candidate notes
         // (text_search returns notes directly, which is more efficient)
         let db_limit = (limit * 10).min(1000) as i32;
-        let Ok(notes) = self.ndb.text_search(&txn, &terms[0], None, db_limit) else {
-            // Fall back to in-memory if DB search fails
-            return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+        let notes = match self.ndb.text_search(&txn, &terms[0], None, db_limit) {
+            Ok(notes) if !notes.is_empty() => notes,
+            // Fall back to in-memory if DB search fails OR returns empty results
+            // NostrDB fulltext index may not be fully populated, so use in-memory
+            // as a reliable fallback that searches already-loaded messages
+            _ => {
+                return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+            }
         };
 
         // Filter and process candidates directly from the search results
