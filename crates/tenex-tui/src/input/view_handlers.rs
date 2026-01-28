@@ -5,6 +5,8 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use tenex_core::models::OperationsStatus;
+
 use crate::models::Message;
 use crate::nostr::NostrCommand;
 use crate::ui;
@@ -13,12 +15,38 @@ use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;
 use crate::ui::{App, HomeTab, InputMode, ModalState, View};
 
+/// Cached ActiveWork operations to avoid snapshot drift during key event handling.
+/// This ensures consistent state when navigating, selecting, or opening items.
+struct ActiveWorkCache {
+    operations: Vec<OperationsStatus>,
+}
+
+impl ActiveWorkCache {
+    fn new(app: &App) -> Self {
+        let operations = app.data_store.borrow()
+            .get_all_active_operations()
+            .into_iter()
+            .cloned()
+            .collect();
+        Self { operations }
+    }
+
+    fn len(&self) -> usize {
+        self.operations.len()
+    }
+
+    fn get(&self, index: usize) -> Option<&OperationsStatus> {
+        self.operations.get(index)
+    }
+}
+
 // =============================================================================
 // HOME VIEW
 // =============================================================================
 
-/// Get thread ID at a given index for the current home tab
-fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
+/// Get thread ID at a given index for the current home tab.
+/// For ActiveWork tab, uses the provided cache to avoid snapshot drift.
+fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&ActiveWorkCache>) -> Option<String> {
     match app.home_panel_focus {
         HomeTab::Conversations => {
             let threads = get_hierarchical_threads(app);
@@ -36,8 +64,36 @@ fn get_thread_id_at_index(app: &App, index: usize) -> Option<String> {
             let items = app.feed_items();
             items.get(index).map(|item| item.thread_id.clone())
         }
+        HomeTab::ActiveWork => {
+            // Use provided cache to avoid snapshot drift, or fetch fresh if not provided
+            if let Some(cache) = active_work_cache {
+                if let Some(op) = cache.get(index) {
+                    // First try thread_id if present
+                    if let Some(ref thread_id) = op.thread_id {
+                        return Some(thread_id.clone());
+                    }
+                    // Fall back to looking up thread from event_id (like renderer does)
+                    let data_store = app.data_store.borrow();
+                    if let Some((thread_id, _title)) = data_store.get_thread_info_for_event(&op.event_id) {
+                        return Some(thread_id);
+                    }
+                }
+            } else {
+                // Fallback: fetch fresh (should not happen if caller provides cache)
+                let data_store = app.data_store.borrow();
+                let operations = data_store.get_all_active_operations();
+                if let Some(op) = operations.get(index) {
+                    if let Some(ref thread_id) = op.thread_id {
+                        return Some(thread_id.clone());
+                    }
+                    if let Some((thread_id, _title)) = data_store.get_thread_info_for_event(&op.event_id) {
+                        return Some(thread_id);
+                    }
+                }
+            }
+            None
+        }
         HomeTab::Reports => None,      // Reports are not threads
-        HomeTab::ActiveWork => None,   // Active Work shows operations, not threads
         HomeTab::Stats => None,        // Stats are not threads
     }
 }
@@ -46,6 +102,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let code = key.code;
     let modifiers = key.modifiers;
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
+
+    // Cache ActiveWork operations once per key event to avoid snapshot drift
+    // during navigation, selection, and opening operations
+    let active_work_cache = if app.home_panel_focus == HomeTab::ActiveWork {
+        Some(ActiveWorkCache::new(app))
+    } else {
+        None
+    };
 
     // Handle Reports search input mode
     if app.input_mode == InputMode::Editing && app.home_panel_focus == HomeTab::Reports {
@@ -168,7 +232,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let current = app.current_selection();
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 } else {
@@ -179,7 +243,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.set_current_selection(current - 1);
                     // Also add the new position to selection when Shift is held
                     if has_shift {
-                        if let Some(thread_id) = get_thread_id_at_index(app, current - 1) {
+                        if let Some(thread_id) = get_thread_id_at_index(app, current - 1, active_work_cache.as_ref()) {
                             app.add_thread_to_multi_select(&thread_id);
                         }
                     }
@@ -201,12 +265,12 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
-                    HomeTab::ActiveWork => 0, // Active Work tab has no list selection
+                    HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 } else {
@@ -217,7 +281,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.set_current_selection(current + 1);
                     // Also add the new position to selection when Shift is held
                     if has_shift {
-                        if let Some(thread_id) = get_thread_id_at_index(app, current + 1) {
+                        if let Some(thread_id) = get_thread_id_at_index(app, current + 1, active_work_cache.as_ref()) {
                             app.add_thread_to_multi_select(&thread_id);
                         }
                     }
@@ -244,7 +308,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
                     HomeTab::Status => app.status_threads().len().saturating_sub(1),
                     HomeTab::Feed => app.feed_items().len().saturating_sub(1),
-                    HomeTab::ActiveWork => 0, // Active Work tab has no list selection
+                    HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 if current > max {
@@ -399,7 +463,38 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }
                     }
                     HomeTab::ActiveWork => {
-                        // Active Work tab has no selectable items to open
+                        // Open conversation from Active Work tab using cached operations
+                        let (event_id, thread_id_opt, project_a_tag): (String, Option<String>, String) = active_work_cache.as_ref()
+                            .and_then(|cache| cache.get(idx))
+                            .map(|op| (op.event_id.clone(), op.thread_id.clone(), op.project_coordinate.clone()))
+                            .unwrap_or_default();
+
+                        if project_a_tag.is_empty() {
+                            return Ok(());
+                        }
+
+                        // Try thread_id first, then fall back to event lookup (like renderer does)
+                        let resolved_thread_id: Option<String> = thread_id_opt.or_else(|| {
+                            app.data_store.borrow()
+                                .get_thread_info_for_event(&event_id)
+                                .map(|(thread_id, _)| thread_id)
+                        });
+
+                        if let Some(thread_id) = resolved_thread_id {
+                            let thread = app.data_store.borrow()
+                                .get_threads(&project_a_tag)
+                                .iter()
+                                .find(|t| t.id == thread_id)
+                                .cloned();
+
+                            if let Some(thread) = thread {
+                                app.open_thread_from_home(&thread, &project_a_tag);
+                            } else {
+                                app.set_status("Could not find conversation thread");
+                            }
+                        } else {
+                            app.set_status("No conversation linked to this operation");
+                        }
                     }
                     HomeTab::Stats => {
                         // Stats tab has no selectable items to open
@@ -435,7 +530,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('k') | KeyCode::Char('K') if !app.sidebar_focused => {
             let current = app.current_selection();
             if has_shift {
-                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
                     app.add_thread_to_multi_select(&thread_id);
                 }
             } else {
@@ -444,7 +539,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if current > 0 {
                 app.set_current_selection(current - 1);
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current - 1) {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current - 1, active_work_cache.as_ref()) {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 }
@@ -458,11 +553,11 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
                 HomeTab::Status => app.status_threads().len().saturating_sub(1),
                 HomeTab::Feed => app.feed_items().len().saturating_sub(1),
-                HomeTab::ActiveWork => 0, // Active Work tab has no list selection
+                HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                 HomeTab::Stats => 0, // Stats tab has no list selection
             };
             if has_shift {
-                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
                     app.add_thread_to_multi_select(&thread_id);
                 }
             } else {
@@ -471,7 +566,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if current < max {
                 app.set_current_selection(current + 1);
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current + 1) {
+                    if let Some(thread_id) = get_thread_id_at_index(app, current + 1, active_work_cache.as_ref()) {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 }
@@ -485,7 +580,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             } else {
                 // Archive just the current selection
                 let current = app.current_selection();
-                if let Some(thread_id) = get_thread_id_at_index(app, current) {
+                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
                     let is_archived = app.toggle_thread_archived(&thread_id);
                     if is_archived {
                         app.set_status("Archived conversation");
