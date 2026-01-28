@@ -41,7 +41,7 @@ impl AnimationClock {
     /// Get the wave offset for character-by-character color animation
     /// Returns a value that changes over time, suitable for creating a wave effect
     pub fn wave_offset(&self) -> usize {
-        // Divide by 2 for a faster animation (every 2 frames = ~200ms at 10fps)
+        // Divide by 2 to slow down the animation (every 2 frames = ~200ms at 10fps)
         (self.frame_counter / 2) as usize
     }
 }
@@ -120,5 +120,53 @@ mod tests {
         assert_eq!(clock.wave_offset(), 2); // Still 2
         clock.tick(); // Frame 6
         assert_eq!(clock.wave_offset(), 3); // Now 3
+    }
+
+    #[test]
+    fn test_wave_offset_wrap_behavior() {
+        let mut clock = AnimationClock::new();
+
+        // Test wrapping at u64::MAX
+        // Set frame_counter to near maximum to test wrap behavior
+        clock.frame_counter = u64::MAX;
+        let offset_before = clock.wave_offset();
+
+        // Tick should wrap from u64::MAX to 0 using wrapping_add
+        clock.tick();
+        assert_eq!(clock.frame_counter, 0); // Wrapped to 0
+        assert_eq!(clock.wave_offset(), 0); // Wave offset should also be 0
+
+        // Verify offset was correct before wrap (u64::MAX / 2 rounds down)
+        assert_eq!(offset_before, (u64::MAX / 2) as usize);
+    }
+
+    #[test]
+    fn test_wave_offset_long_run_stability() {
+        let mut clock = AnimationClock::new();
+
+        // Simulate a long-running session (10,000 frames)
+        // At 10fps, this is ~16.6 minutes of runtime
+        for _ in 0..10_000 {
+            clock.tick();
+        }
+
+        // Verify wave_offset is still producing reasonable values
+        let offset = clock.wave_offset();
+        assert_eq!(offset, 5_000); // 10,000 / 2 = 5,000
+
+        // Verify it continues to increment properly
+        clock.tick();
+        clock.tick();
+        assert_eq!(clock.wave_offset(), 5_001);
+
+        // Test even longer run (simulate 24 hours at 10fps = 864,000 frames)
+        clock.frame_counter = 864_000;
+        assert_eq!(clock.wave_offset(), 432_000);
+
+        // Verify no precision loss or unexpected behavior
+        clock.tick();
+        assert_eq!(clock.wave_offset(), 432_000); // Still same (864,001 / 2 = 432,000)
+        clock.tick();
+        assert_eq!(clock.wave_offset(), 432_001); // Now increments (864,002 / 2 = 432,001)
     }
 }
