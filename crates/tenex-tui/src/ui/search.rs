@@ -79,10 +79,16 @@ impl SidebarSearchState {
     /// Delete character before cursor (cursor is char index, not byte index)
     pub fn delete_char(&mut self) {
         if self.cursor > 0 {
+            // Convert cursor (char index) to byte index
+            let cursor_byte_idx = self.char_to_byte_index(self.cursor);
+            // Find the previous character boundary by looking at the slice before cursor
+            let prev_boundary = self.query[..cursor_byte_idx]
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
+            self.query.remove(prev_boundary);
             self.cursor -= 1;
-            // Convert char index to byte index for remove
-            let byte_idx = self.char_to_byte_index(self.cursor);
-            self.query.remove(byte_idx);
         }
     }
 
@@ -1441,5 +1447,36 @@ mod tests {
         assert!(result.all_terms_matched, "Single term in content should match");
         assert!(result.content_matched());
         assert!(!result.title_matched());
+    }
+
+    #[test]
+    fn test_delete_char_at_end() {
+        let mut state = SidebarSearchState::new();
+        state.query = "test".to_string();
+        state.cursor = 4;
+        state.delete_char();
+        assert_eq!(state.query, "tes");
+        assert_eq!(state.cursor, 3);
+    }
+
+    #[test]
+    fn test_delete_char_multibyte() {
+        let mut state = SidebarSearchState::new();
+        state.query = "hello🔥".to_string();
+        state.cursor = 6;
+        state.delete_char();
+        assert_eq!(state.query, "hello");
+        assert_eq!(state.cursor, 5);
+    }
+
+    #[test]
+    fn test_delete_char_with_misaligned_cursor() {
+        // Reproduces the panic scenario: cursor beyond string length
+        let mut state = SidebarSearchState::new();
+        state.query = "test".to_string();
+        state.cursor = 5; // Beyond actual length
+        state.delete_char();
+        assert_eq!(state.query, "tes");
+        assert_eq!(state.cursor, 4);
     }
 }
