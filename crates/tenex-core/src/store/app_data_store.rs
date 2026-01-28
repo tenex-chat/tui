@@ -872,9 +872,27 @@ impl AppDataStore {
         }
     }
 
-    /// Handle a project status event from JSON (ephemeral events via DataChange channel)
+    /// Handle a status event from JSON (ephemeral events via DataChange channel)
+    /// Routes to appropriate handler based on event kind (24010 or 24133)
+    /// Parses JSON once and passes the value to handlers to avoid double parsing
     pub fn handle_status_event_json(&mut self, json: &str) {
-        if let Some(status) = ProjectStatus::from_json(json) {
+        // Parse JSON once upfront
+        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else {
+            return;
+        };
+
+        if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
+            match kind {
+                24010 => self.handle_project_status_event_value(&event),
+                24133 => self.handle_operations_status_event_value(&event),
+                _ => {} // Ignore unknown kinds
+            }
+        }
+    }
+
+    /// Handle a project status event from pre-parsed Value (kind:24010)
+    fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
+        if let Some(status) = ProjectStatus::from_value(event) {
             let backend_pubkey = &status.backend_pubkey;
 
             // Check trust status
@@ -906,6 +924,14 @@ impl AppDataStore {
 
                 self.pending_backend_approvals.push(pending);
             }
+        }
+    }
+
+    /// Handle an operations status event from pre-parsed Value (kind:24133)
+    /// Updates in-memory operations_by_event storage
+    fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
+        if let Some(status) = OperationsStatus::from_value(event) {
+            self.upsert_operations_status(status);
         }
     }
 
@@ -1771,20 +1797,26 @@ impl AppDataStore {
 
     fn handle_operations_status_event(&mut self, note: &Note) {
         if let Some(status) = OperationsStatus::from_note(note) {
-            let event_id = status.event_id.clone();
+            self.upsert_operations_status(status);
+        }
+    }
 
-            // If no agents are working, remove the entry (event is no longer being processed)
-            if status.agent_pubkeys.is_empty() {
-                self.operations_by_event.remove(&event_id);
-            } else {
-                // Only update if this event is newer than what we have
-                if let Some(existing) = self.operations_by_event.get(&event_id) {
-                    if existing.created_at > status.created_at {
-                        return; // Keep the newer one
-                    }
+    /// Shared helper to upsert an OperationsStatus into the store.
+    /// Handles both JSON and Note-based event paths to eliminate duplication.
+    fn upsert_operations_status(&mut self, status: OperationsStatus) {
+        let event_id = status.event_id.clone();
+
+        // If no agents are working, remove the entry (event is no longer being processed)
+        if status.agent_pubkeys.is_empty() {
+            self.operations_by_event.remove(&event_id);
+        } else {
+            // Only update if this event is newer than what we have
+            if let Some(existing) = self.operations_by_event.get(&event_id) {
+                if existing.created_at > status.created_at {
+                    return; // Keep the newer one
                 }
-                self.operations_by_event.insert(event_id, status);
             }
+            self.operations_by_event.insert(event_id, status);
         }
     }
 
