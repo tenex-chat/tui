@@ -147,10 +147,13 @@ pub enum NostrCommand {
         description: String,
         content: String,
         hashtags: Vec<String>,
-        /// Tools to allow (allow-tool tags)
+        /// Tools to allow (allow-tool tags) - Additive mode
         allow_tools: Vec<String>,
-        /// Tools to deny (deny-tool tags)
+        /// Tools to deny (deny-tool tags) - Additive mode
         deny_tools: Vec<String>,
+        /// Exclusive tool list (only-tool tags) - Exclusive mode
+        /// When present, overrides all other tool permissions
+        only_tools: Vec<String>,
     },
     /// Update an existing nudge (republish kind:4201 with same d-tag for replaceable events)
     /// Note: kind:4201 is NOT a replaceable event in NIP-33, so we create a new event
@@ -163,6 +166,8 @@ pub enum NostrCommand {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        /// Exclusive tool list (only-tool tags)
+        only_tools: Vec<String>,
     },
     /// Delete a nudge (kind:5 deletion event referencing the nudge)
     DeleteNudge {
@@ -358,15 +363,15 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to subscribe to project metadata: {}", e);
                         }
                     }
-                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools } => {
+                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
                         debug_log(&format!("Worker: Creating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
                             tlog!("ERROR", "Failed to create nudge: {}", e);
                         }
                     }
-                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools } => {
+                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
                         debug_log(&format!("Worker: Updating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
                             tlog!("ERROR", "Failed to update nudge: {}", e);
                         }
                     }
@@ -1384,6 +1389,7 @@ impl NostrWorker {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        only_tools: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
@@ -1416,20 +1422,30 @@ impl NostrWorker {
             ));
         }
 
-        // Add allow-tool tags
-        for tool in &allow_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
-                vec![tool.clone()],
-            ));
-        }
+        // Tool permissions: only-tool takes priority (XOR with allow/deny)
+        if !only_tools.is_empty() {
+            // Exclusive mode: only-tool tags
+            for tool in &only_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("only-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        } else {
+            // Additive mode: allow-tool and deny-tool tags
+            for tool in &allow_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                    vec![tool.clone()],
+                ));
+            }
 
-        // Add deny-tool tags
-        for tool in &deny_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
-                vec![tool.clone()],
-            ));
+            for tool in &deny_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                    vec![tool.clone()],
+                ));
+            }
         }
 
         let signed_event = event.sign_with_keys(keys)?;
@@ -1462,6 +1478,7 @@ impl NostrWorker {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        only_tools: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
@@ -1499,20 +1516,30 @@ impl NostrWorker {
             ));
         }
 
-        // Add allow-tool tags
-        for tool in &allow_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
-                vec![tool.clone()],
-            ));
-        }
+        // Tool permissions: only-tool takes priority (XOR with allow/deny)
+        if !only_tools.is_empty() {
+            // Exclusive mode: only-tool tags
+            for tool in &only_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("only-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        } else {
+            // Additive mode: allow-tool and deny-tool tags
+            for tool in &allow_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                    vec![tool.clone()],
+                ));
+            }
 
-        // Add deny-tool tags
-        for tool in &deny_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
-                vec![tool.clone()],
-            ));
+            for tool in &deny_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                    vec![tool.clone()],
+                ));
+            }
         }
 
         let signed_event = event.sign_with_keys(keys)?;
