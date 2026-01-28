@@ -1341,6 +1341,9 @@ impl App {
                 DataChange::ProjectStatus { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
                 }
+                DataChange::MCPToolsChanged => {
+                    // MCP tools are already updated in the store by the worker
+                }
             }
         }
         Ok(())
