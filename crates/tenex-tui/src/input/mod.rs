@@ -16,6 +16,7 @@ use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::ui::hotkeys::{resolve_hotkey, HotkeyId};
+use crate::ui::modal::WorkspaceManagerState;
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, View};
 
@@ -96,6 +97,13 @@ pub(crate) fn handle_key(
                 HotkeyId::JumpToNotification => {
                     // Let jump_to_notification_thread() handle all validation and error feedback
                     app.jump_to_notification_thread();
+                    return Ok(());
+                }
+                // Ctrl+Shift+T: Open workspace manager
+                HotkeyId::WorkspaceManager => {
+                    if !matches!(app.modal_state, ModalState::WorkspaceManager(_)) {
+                        app.modal_state = ModalState::WorkspaceManager(WorkspaceManagerState::new());
+                    }
                     return Ok(());
                 }
                 // Other global hotkeys are handled later in their respective sections

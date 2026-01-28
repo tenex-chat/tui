@@ -1159,8 +1159,6 @@ mod conversation_state_tests {
 pub struct HomeViewState {
     /// Filter by time since last activity
     pub time_filter: Option<TimeFilter>,
-    /// Whether to show archived conversations in Recent/Inbox
-    pub show_archived: bool,
     /// Selected index in agent browser list
     pub agent_browser_index: usize,
     /// Search filter for agent browser
@@ -1177,11 +1175,6 @@ impl HomeViewState {
     /// Cycle through time filter options
     pub fn cycle_time_filter(&mut self) {
         self.time_filter = TimeFilter::cycle_next(self.time_filter);
-    }
-
-    /// Toggle showing archived conversations
-    pub fn toggle_archived(&mut self) {
-        self.show_archived = !self.show_archived;
     }
 
     /// Check if currently viewing agent detail (derived from viewing_agent_id)
@@ -1256,7 +1249,6 @@ mod home_view_state_tests {
     fn test_home_view_state_new() {
         let state = HomeViewState::new();
         assert!(state.time_filter.is_none());
-        assert!(!state.show_archived);
         assert_eq!(state.agent_browser_index, 0);
         assert!(state.agent_browser_filter.is_empty());
         assert!(state.viewing_agent_id.is_none());
@@ -1291,18 +1283,6 @@ mod home_view_state_tests {
         // SevenDays -> None
         state.cycle_time_filter();
         assert!(state.time_filter.is_none());
-    }
-
-    #[test]
-    fn test_toggle_archived() {
-        let mut state = HomeViewState::new();
-        assert!(!state.show_archived);
-
-        state.toggle_archived();
-        assert!(state.show_archived);
-
-        state.toggle_archived();
-        assert!(!state.show_archived);
     }
 
     #[test]

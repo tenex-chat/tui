@@ -183,29 +183,19 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
-        key: 'H',
-        label: "Show archived",
+        key: 'A',
+        label: "Show archived items",
         section: "Filter",
-        available: |app| {
-            app.view == View::Home
-                && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && !app.home.show_archived
-        },
+        available: |app| !app.show_archived,
         execute: |app| {
             app.toggle_show_archived();
         },
     },
     Command {
-        key: 'H',
-        label: "Hide archived",
+        key: 'A',
+        label: "Hide archived items",
         section: "Filter",
-        available: |app| {
-            app.view == View::Home
-                && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Inbox)
-                && app.home.show_archived
-        },
+        available: |app| app.show_archived,
         execute: |app| {
             app.toggle_show_archived();
         },
@@ -256,7 +246,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'B',
         label: "Agent Browser",
         section: "Other",
-        available: |app| app.view == View::Home && !app.sidebar_focused,
+        available: |_| true,
         execute: |app| {
             app.open_agent_browser();
         },
@@ -265,7 +255,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'U',
         label: "Nudge Manager",
         section: "Other",
-        available: |app| app.view == View::Home && !app.sidebar_focused,
+        available: |_| true,
         execute: |app| {
             app.modal_state = ModalState::NudgeList(modal::NudgeListState::new());
         },
@@ -274,7 +264,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'C',
         label: "Create project",
         section: "Other",
-        available: |app| app.view == View::Home && !app.sidebar_focused,
+        available: |_| true,
         execute: |app| {
             app.modal_state = ModalState::CreateProject(modal::CreateProjectState::new());
         },
@@ -292,14 +282,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'N',
         label: "New conversation (current project)",
         section: "Conversation",
-        available: |app| {
-            // Available in Home view (Conversations tab, not sidebar focused)
-            (app.view == View::Home
-                && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Conversations)
-            // Also available in Chat view
-            || app.view == View::Chat
-        },
+        available: |_| true,
         execute: |app| {
             if app.view == View::Chat {
                 // Chat view: new conversation with same project/agent/branch
@@ -328,14 +311,7 @@ pub static COMMANDS: &[Command] = &[
         key: 'P',
         label: "New conversation on project...",
         section: "Conversation",
-        available: |app| {
-            // Available in Home view (Conversations tab, not sidebar focused)
-            (app.view == View::Home
-                && !app.sidebar_focused
-                && app.home_panel_focus == HomeTab::Conversations)
-            // Also available in Chat view
-            || app.view == View::Chat
-        },
+        available: |_| true,
         execute: |app| {
             app.open_projects_modal(true);
         },
@@ -442,24 +418,6 @@ pub static COMMANDS: &[Command] = &[
             }
         },
         execute: archive_toggle,
-    },
-    Command {
-        key: 'H',
-        label: "Show archived",
-        section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && !app.show_archived_projects,
-        execute: |app| {
-            app.toggle_show_archived();
-        },
-    },
-    Command {
-        key: 'H',
-        label: "Hide archived",
-        section: "Filter",
-        available: |app| app.view == View::Home && app.sidebar_focused && app.show_archived_projects,
-        execute: |app| {
-            app.toggle_show_archived();
-        },
     },
     // =========================================================================
     // CHAT VIEW - Available in both Normal and Editing modes
