@@ -1,5 +1,5 @@
 use crate::events::PendingBackendApproval;
-use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
+use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use crate::store::RuntimeHierarchy;
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -33,6 +33,9 @@ pub struct AppDataStore {
 
     // Nudges - kind:4201 events
     pub nudges: HashMap<String, Nudge>,  // keyed by id
+
+    // MCP Tools - kind:4200 events
+    pub mcp_tools: HashMap<String, MCPTool>,  // keyed by id
 
     // Reports - kind:30023 events (articles/documents)
     // Key: report slug (d-tag) -> latest version
@@ -79,6 +82,7 @@ impl AppDataStore {
             lessons: HashMap::new(),
             agent_definitions: HashMap::new(),
             nudges: HashMap::new(),
+            mcp_tools: HashMap::new(),
             reports: HashMap::new(),
             reports_all_versions: HashMap::new(),
             document_threads: HashMap::new(),
@@ -1662,6 +1666,25 @@ impl AppDataStore {
 
     pub fn get_nudge(&self, id: &str) -> Option<&Nudge> {
         self.nudges.get(id)
+    }
+
+    // ===== MCP Tool Methods (kind:4200) =====
+
+    pub fn insert_mcp_tool(&mut self, note: &Note) {
+        if let Some(tool) = MCPTool::from_note(note) {
+            self.mcp_tools.insert(tool.id.clone(), tool);
+        }
+    }
+
+    /// Get all MCP tools, sorted by created_at descending (most recent first)
+    pub fn get_mcp_tools(&self) -> Vec<&MCPTool> {
+        let mut tools: Vec<_> = self.mcp_tools.values().collect();
+        tools.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        tools
+    }
+
+    pub fn get_mcp_tool(&self, id: &str) -> Option<&MCPTool> {
+        self.mcp_tools.get(id)
     }
 
     // ===== Report Methods (kind:30023) =====
