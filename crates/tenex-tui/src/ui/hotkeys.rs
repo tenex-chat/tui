@@ -32,8 +32,7 @@ pub enum HotkeyId {
     // === Navigation ===
     NavigateUp,
     NavigateDown,
-    NavigateLeft,
-    NavigateRight,
+    // NavigateLeft and NavigateRight removed - conflicted with UnfocusSidebar/FocusSidebar
     PageUp,
     PageDown,
     GoToTop,
@@ -477,20 +476,9 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Navigation",
         &[HotkeyContext::Global],
     ),
-    HotkeyBinding::new(
-        HotkeyId::NavigateLeft,
-        KeyCode::Left,
-        "Navigate Left",
-        "Navigation",
-        &[HotkeyContext::HomeSidebar],
-    ),
-    HotkeyBinding::new(
-        HotkeyId::NavigateRight,
-        KeyCode::Right,
-        "Navigate Right",
-        "Navigation",
-        &[HotkeyContext::HomeSidebar],
-    ),
+    // NOTE: NavigateLeft and NavigateRight for HomeSidebar were removed
+    // because they conflicted with UnfocusSidebar (Left) which is the
+    // correct binding for unfocusing the sidebar.
     HotkeyBinding::new(
         HotkeyId::PageUp,
         KeyCode::PageUp,
