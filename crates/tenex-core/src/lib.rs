@@ -8,6 +8,7 @@ pub mod ffi;
 pub mod models;
 pub mod nostr;
 pub mod runtime;
+pub mod search;
 pub mod stats;
 pub mod store;
 pub mod streaming;
