@@ -132,6 +132,7 @@ pub struct ProjectSettingsState {
 pub enum CreateProjectStep {
     Details,      // name + description
     SelectAgents, // agent picker
+    SelectTools,  // MCP tool picker
 }
 
 /// Which field is focused in the details step
@@ -150,6 +151,9 @@ pub struct CreateProjectState {
     pub description: String,
     pub agent_ids: Vec<String>,
     pub agent_selector: SelectorState,
+    pub selected_mcp_tool_ids: Vec<String>,
+    pub mcp_tool_filter: String,
+    pub mcp_tool_selector_index: usize,
 }
 
 impl CreateProjectState {
@@ -161,13 +165,17 @@ impl CreateProjectState {
             description: String::new(),
             agent_ids: Vec::new(),
             agent_selector: SelectorState::default(),
+            selected_mcp_tool_ids: Vec::new(),
+            mcp_tool_filter: String::new(),
+            mcp_tool_selector_index: 0,
         }
     }
 
     pub fn can_proceed(&self) -> bool {
         match self.step {
             CreateProjectStep::Details => !self.name.trim().is_empty(),
-            CreateProjectStep::SelectAgents => true, // Can always finish from agent selection
+            CreateProjectStep::SelectAgents => true,
+            CreateProjectStep::SelectTools => true,
         }
     }
 
@@ -177,6 +185,47 @@ impl CreateProjectState {
         } else {
             self.agent_ids.push(agent_id);
         }
+    }
+
+    pub fn toggle_mcp_tool_selection(&mut self, tool_id: String) {
+        if let Some(pos) = self.selected_mcp_tool_ids.iter().position(|id| id == &tool_id) {
+            self.selected_mcp_tool_ids.remove(pos);
+        } else {
+            self.selected_mcp_tool_ids.push(tool_id);
+        }
+    }
+
+    pub fn clear_mcp_tool_filter(&mut self) {
+        self.mcp_tool_filter.clear();
+        self.mcp_tool_selector_index = 0;
+    }
+
+    pub fn reset_mcp_tool_selection(&mut self) {
+        self.selected_mcp_tool_ids.clear();
+        self.mcp_tool_filter.clear();
+        self.mcp_tool_selector_index = 0;
+    }
+
+    pub fn all_mcp_tool_ids(&self, app: &crate::ui::app::App) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let mut tool_ids = HashSet::new();
+
+        // Add manually selected tools
+        for id in &self.selected_mcp_tool_ids {
+            tool_ids.insert(id.clone());
+        }
+
+        // Add tools from selected agents
+        for agent_id in &self.agent_ids {
+            if let Some(agent) = app.get_agent_definition(agent_id) {
+                for mcp_id in &agent.mcp_servers {
+                    tool_ids.insert(mcp_id.clone());
+                }
+            }
+        }
+
+        tool_ids.into_iter().collect()
     }
 }
 
