@@ -8,6 +8,9 @@ pub struct MCPTool {
     pub d_tag: String,
     pub name: String,
     pub description: String,
+    pub command: String,
+    pub parameters: Option<String>,
+    pub capabilities: Vec<String>,
     pub server_url: Option<String>,
     pub version: Option<String>,
     pub created_at: u64,
@@ -27,6 +30,9 @@ impl MCPTool {
 
         let mut d_tag = None;
         let mut name = None;
+        let mut command = None;
+        let mut parameters = None;
+        let mut capabilities = Vec::new();
         let mut server_url = None;
         let mut version = None;
 
@@ -38,7 +44,10 @@ impl MCPTool {
                 ) {
                     match tag_name {
                         "d" => d_tag = Some(value.to_string()),
-                        "title" | "name" => name = Some(value.to_string()),
+                        "name" => name = Some(value.to_string()),
+                        "command" => command = Some(value.to_string()),
+                        "params" => parameters = Some(value.to_string()),
+                        "capability" => capabilities.push(value.to_string()),
                         "server" | "url" => server_url = Some(value.to_string()),
                         "version" => version = Some(value.to_string()),
                         _ => {}
@@ -53,6 +62,9 @@ impl MCPTool {
             d_tag: d_tag.unwrap_or_default(),
             name: name.unwrap_or_else(|| "Unnamed Tool".to_string()),
             description,
+            command: command.unwrap_or_default(),
+            parameters,
+            capabilities,
             server_url,
             version,
             created_at,
@@ -60,10 +72,15 @@ impl MCPTool {
     }
 
     pub fn description_preview(&self, max_chars: usize) -> String {
-        if self.description.len() <= max_chars {
+        let char_count = self.description.chars().count();
+        if char_count <= max_chars {
             self.description.clone()
         } else {
-            format!("{}...", &self.description[..max_chars.saturating_sub(3)])
+            let truncated: String = self.description
+                .chars()
+                .take(max_chars.saturating_sub(3))
+                .collect();
+            format!("{}...", truncated)
         }
     }
 }
