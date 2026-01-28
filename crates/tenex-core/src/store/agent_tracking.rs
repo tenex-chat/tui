@@ -23,8 +23,31 @@
 //!
 //! ### Ordering Guarantees:
 //! - Events are processed in timestamp order (created_at) per conversation
-//! - Same-second events use event_id as a tiebreaker for deterministic ordering
+//! - Same-second events use event_id as a **lexicographic tiebreaker** for deterministic ordering
 //! - Out-of-order/stale events are rejected to maintain consistency
+//!
+//! ### Same-Second Ordering Semantics:
+//!
+//! When multiple events have identical `created_at` timestamps for the same conversation,
+//! we use the event_id (hex string) for **lexicographic comparison** to determine order:
+//!
+//! - Event "aaa..." is considered OLDER than event "bbb..." at the same timestamp
+//! - Only the lexicographically LARGEST event_id is accepted for a given timestamp
+//! - Earlier events (smaller event_ids) are silently rejected as "stale"
+//!
+//! **Important Implications:**
+//! - This creates a deterministic ordering but may not reflect actual event creation order
+//! - If two events are published in the same second with "bbb..." first and "aaa..." second,
+//!   the "aaa..." event will be rejected because lexicographically "aaa" < "bbb"
+//! - This is an acceptable trade-off for determinism: in practice, same-second events
+//!   from the same agent for the same conversation are rare edge cases
+//! - The semantic meaning (authoritative replacement) ensures correctness regardless
+//!   of which same-second event "wins" - the most recent state is what matters
+//!
+//! **Alternative Design Considered:**
+//! We could track `(created_at, HashSet<event_id>)` to accept all unique events per timestamp,
+//! but this adds complexity without significant benefit. The authoritative replacement
+//! semantics mean the "winning" event's agent list is correct regardless.
 //!
 //! ### Runtime Tracking:
 //! - `llm-runtime` tags provide confirmed runtime in seconds

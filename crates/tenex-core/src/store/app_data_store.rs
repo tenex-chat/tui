@@ -1969,6 +1969,18 @@ impl AppDataStore {
         self.agent_tracking.confirmed_runtime_secs()
     }
 
+    /// Get active agents for a specific conversation.
+    /// Returns agent pubkeys currently working on the conversation.
+    /// Used for integration testing authoritative replacement semantics.
+    #[cfg(test)]
+    pub fn get_active_agents_for_conversation(&self, conversation_id: &str) -> Vec<String> {
+        self.agent_tracking
+            .get_active_agents_for_conversation(conversation_id)
+            .into_iter()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
     /// Get thread info for an event ID (could be thread root or message within thread).
     /// Returns (thread_id, thread_title) if found.
     pub fn get_thread_info_for_event(&self, event_id: &str) -> Option<(String, String)> {
@@ -2723,5 +2735,103 @@ mod tests {
 
         store.handle_status_event_json(json2);
         assert!(!store.has_active_agents());
+    }
+
+    /// Integration test for authoritative replacement semantics.
+    ///
+    /// This test verifies that when two 24133 events are sent for the SAME conversation
+    /// with DIFFERENT agent lists, the second event's agents completely REPLACE the first.
+    /// This is the critical "authoritative per-conversation contract" described in the
+    /// agent_tracking.rs documentation.
+    ///
+    /// The test checks actual agent identities (not just counts) to ensure proper replacement.
+    #[test]
+    fn test_authoritative_replacement_integration() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // PHASE 1: Initial event with agents [alpha, beta, gamma]
+        let json1 = r#"{
+            "kind": 24133,
+            "id": "event001",
+            "created_at": 1000,
+            "tags": [
+                ["e", "conversation_xyz"],
+                ["p", "agent_alpha"],
+                ["p", "agent_beta"],
+                ["p", "agent_gamma"],
+                ["a", "31933:owner:test-project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json1);
+
+        // Verify initial state: 3 agents
+        assert_eq!(store.active_agent_count(), 3);
+        let agents1 = store.get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(agents1.len(), 3);
+        assert!(agents1.contains(&"agent_alpha".to_string()));
+        assert!(agents1.contains(&"agent_beta".to_string()));
+        assert!(agents1.contains(&"agent_gamma".to_string()));
+
+        // PHASE 2: Second event for SAME conversation with DIFFERENT agents [delta, epsilon]
+        // This should COMPLETELY REPLACE the previous agent list (authoritative semantics)
+        let json2 = r#"{
+            "kind": 24133,
+            "id": "event002",
+            "created_at": 1001,
+            "tags": [
+                ["e", "conversation_xyz"],
+                ["p", "agent_delta"],
+                ["p", "agent_epsilon"],
+                ["a", "31933:owner:test-project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json2);
+
+        // Verify replacement: now only 2 agents (delta, epsilon)
+        assert_eq!(store.active_agent_count(), 2);
+        let agents2 = store.get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(agents2.len(), 2, "Expected 2 agents after replacement, got {}", agents2.len());
+
+        // CRITICAL: Original agents should be GONE
+        assert!(!agents2.contains(&"agent_alpha".to_string()), "agent_alpha should have been replaced");
+        assert!(!agents2.contains(&"agent_beta".to_string()), "agent_beta should have been replaced");
+        assert!(!agents2.contains(&"agent_gamma".to_string()), "agent_gamma should have been replaced");
+
+        // CRITICAL: New agents should be present
+        assert!(agents2.contains(&"agent_delta".to_string()), "agent_delta should be active");
+        assert!(agents2.contains(&"agent_epsilon".to_string()), "agent_epsilon should be active");
+
+        // PHASE 3: Verify other conversations are NOT affected
+        // Add agents to a different conversation
+        let json3 = r#"{
+            "kind": 24133,
+            "id": "event003",
+            "created_at": 1002,
+            "tags": [
+                ["e", "conversation_other"],
+                ["p", "agent_omega"],
+                ["a", "31933:owner:test-project"]
+            ]
+        }"#;
+
+        store.handle_status_event_json(json3);
+
+        // conversation_xyz should still have delta, epsilon
+        let agents_xyz = store.get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(agents_xyz.len(), 2);
+        assert!(agents_xyz.contains(&"agent_delta".to_string()));
+        assert!(agents_xyz.contains(&"agent_epsilon".to_string()));
+
+        // conversation_other should have omega
+        let agents_other = store.get_active_agents_for_conversation("conversation_other");
+        assert_eq!(agents_other.len(), 1);
+        assert!(agents_other.contains(&"agent_omega".to_string()));
+
+        // Total count should be 3 (2 from xyz + 1 from other)
+        assert_eq!(store.active_agent_count(), 3);
     }
 }
