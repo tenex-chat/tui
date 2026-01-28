@@ -23,8 +23,9 @@ pub struct ProjectStatus {
     pub branches: Vec<String>,
     /// All available models from model tags (including unassigned ones)
     pub all_models: Vec<String>,
-    /// All available tools from tool tags (including unassigned ones)
-    pub all_tools: Vec<String>,
+    /// All available tools from tool tags (including unassigned ones).
+    /// Use `all_tools()` or `agent_assigned_tools()` methods instead of direct access.
+    pub(crate) all_tools: Vec<String>,
     pub created_at: u64,
     /// The pubkey of the backend that published this status event
     pub backend_pubkey: String,
@@ -209,8 +210,18 @@ impl ProjectStatus {
         self.branches.first().map(|s| s.as_str())
     }
 
-    /// All unique tools used by agents
+    /// Returns all available tools (including unassigned tools).
+    ///
+    /// **⚠️ DEPRECATED**: Use `all_tools()` or `agent_assigned_tools()` directly.
+    #[deprecated(since = "0.1.0", note = "Use `all_tools()` or `agent_assigned_tools()` instead")]
     pub fn tools(&self) -> Vec<&str> {
+        self.all_tools()
+    }
+
+    /// Returns tools assigned to at least one agent (excludes unassigned tools).
+    ///
+    /// **Warning**: For UI display, use `all_tools()` instead to show all available tools.
+    pub fn agent_assigned_tools(&self) -> Vec<&str> {
         let mut tools: Vec<&str> = self
             .agents
             .iter()
@@ -219,6 +230,13 @@ impl ProjectStatus {
         tools.sort();
         tools.dedup();
         tools
+    }
+
+    /// Returns all available tools (including both assigned and unassigned tools).
+    ///
+    /// **Recommended for UI display** to show all available tools to users.
+    pub fn all_tools(&self) -> Vec<&str> {
+        self.all_tools.iter().map(|s| s.as_str()).collect()
     }
 
     /// All available models from the project (including unassigned ones)
@@ -302,16 +320,12 @@ mod tests {
         let backend_pubkey = "backend123".to_string();
         let status = ProjectStatus::from_tags(1234567890, tags, backend_pubkey).unwrap();
 
-        // Verify all tools are extracted
-        println!("Extracted tools: {:?}", status.all_tools);
-        println!("Tool count: {}", status.all_tools.len());
-
         // Use helpers to assert must-have tools
         assert_must_have_unassigned_tools(&status.all_tools);
         assert_assigned_tools(&status.all_tools);
 
-        // Verify total count (should have all 18 tools)
-        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools, got {}", status.all_tools.len());
+        // Verify we have all tools from fixtures
+        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools");
     }
 
     #[test]
@@ -347,16 +361,12 @@ mod tests {
 
         let status = ProjectStatus::from_json(json).unwrap();
 
-        // Verify all tools are extracted
-        println!("Extracted tools from JSON: {:?}", status.all_tools);
-        println!("Tool count from JSON: {}", status.all_tools.len());
-
         // Use helpers to assert must-have tools
         assert_must_have_unassigned_tools(&status.all_tools);
         assert_assigned_tools(&status.all_tools);
 
         // Verify total count
-        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools from JSON, got {}", status.all_tools.len());
+        assert_eq!(status.all_tools.len(), 18, "Expected 18 tools from JSON");
     }
 
     /// This test simulates the exact scenario the user reported:
@@ -417,7 +427,7 @@ mod tests {
         for tool in &unassigned_tools {
             assert!(
                 status.all_tools.contains(&tool.to_string()),
-                "Tool '{}' is missing from all_tools! This is the bug we're fixing.",
+                "Tool '{}' missing from all_tools",
                 tool
             );
         }
@@ -426,36 +436,163 @@ mod tests {
         assert!(status.all_tools.contains(&"Read".to_string()));
         assert!(status.all_tools.contains(&"Write".to_string()));
         assert!(status.all_tools.contains(&"Bash".to_string()));
-
-        println!("✓ All {} tools correctly extracted from kind:24010 event", status.all_tools.len());
-        println!("✓ Tools: {:?}", status.all_tools);
     }
 
     #[test]
     fn test_real_user_event_parsing() {
         // This is the EXACT event from the user's bug report
         // It contains 128 tool tags total (verified with jq)
-        // Now using a fixture file to avoid massive inline JSON
         let json = include_str!("../../tests/fixtures/real_status_event_128_tools.json");
 
         let status = ProjectStatus::from_json(json).expect("Failed to parse real event");
-
-        println!("\n=== Real Event Parsing Test ===");
-        println!("Extracted {} tools", status.all_tools.len());
 
         // Use helper to assert must-have unassigned tools (the ones that were missing in the bug)
         assert_must_have_unassigned_tools(&status.all_tools);
 
         // Assert we have a good number of tools (at least the must-haves)
-        // We use >= instead of exact count to make test more resilient
         assert!(
             status.all_tools.len() >= 100,
-            "Expected at least 100 tools from real event, got {}",
-            status.all_tools.len()
+            "Expected at least 100 tools from real event"
         );
+    }
 
-        println!("✓ Successfully extracted {} tools from real user event", status.all_tools.len());
-        println!("✓ All previously reported missing tools are present");
+    /// Test that verifies the difference between agent_assigned_tools() and all_tools()
+    /// This is the core test to prevent the tool visibility bug from recurring
+    #[test]
+    fn test_agent_assigned_tools_vs_all_tools() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "agent1_pk", "agent1"],
+                ["tool", "Read", "agent1"],
+                ["tool", "Write", "agent1"],
+                ["tool", "Bash", "agent1"],
+                ["tool", "rag_create_collection"],
+                ["tool", "rag_query"],
+                ["tool", "schedule_task"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // agent_assigned_tools() should only return tools assigned to agents
+        let assigned = status.agent_assigned_tools();
+        assert_eq!(assigned.len(), 3, "Should have 3 assigned tools");
+        assert!(assigned.contains(&"Read"));
+        assert!(assigned.contains(&"Write"));
+        assert!(assigned.contains(&"Bash"));
+
+        // all_tools() should return ALL tools (assigned + unassigned)
+        let all = status.all_tools();
+        assert_eq!(all.len(), 6, "Should have 6 total tools");
+        assert!(all.contains(&"Read"));
+        assert!(all.contains(&"Write"));
+        assert!(all.contains(&"Bash"));
+        assert!(all.contains(&"rag_create_collection"));
+        assert!(all.contains(&"rag_query"));
+        assert!(all.contains(&"schedule_task"));
+
+        // Critical assertion: all_tools() MUST contain more than agent_assigned_tools()
+        assert!(
+            all.len() > assigned.len(),
+            "all_tools() must include unassigned tools"
+        );
+    }
+
+    /// Integration test simulating UI layer usage
+    /// This ensures UI components use the correct method to display all tools
+    #[test]
+    fn test_ui_layer_displays_all_tools() {
+        // Simulate a realistic project status event
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "claude_pk", "claude-code"],
+                ["agent", "architect_pk", "architect"],
+                ["tool", "Read", "claude-code"],
+                ["tool", "Write", "claude-code"],
+                ["tool", "Bash", "claude-code", "architect"],
+                ["tool", "rag_create_collection"],
+                ["tool", "rag_add_documents"],
+                ["tool", "rag_query"],
+                ["tool", "rag_delete_collection"],
+                ["tool", "schedule_task"],
+                ["tool", "kill_shell"],
+                ["tool", "conversation_index"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // ✅ CORRECT: UI should use all_tools() to display all available tools
+        let ui_tools = status.all_tools();
+
+        // Verify UI sees ALL tools (both assigned and unassigned)
+        assert!(ui_tools.contains(&"Read"), "UI must show Read");
+        assert!(ui_tools.contains(&"Write"), "UI must show Write");
+        assert!(ui_tools.contains(&"Bash"), "UI must show Bash");
+        assert!(ui_tools.contains(&"rag_create_collection"), "UI must show rag_create_collection");
+        assert!(ui_tools.contains(&"rag_add_documents"), "UI must show rag_add_documents");
+        assert!(ui_tools.contains(&"rag_query"), "UI must show rag_query");
+        assert!(ui_tools.contains(&"rag_delete_collection"), "UI must show rag_delete_collection");
+        assert!(ui_tools.contains(&"schedule_task"), "UI must show schedule_task");
+        assert!(ui_tools.contains(&"kill_shell"), "UI must show kill_shell");
+        assert!(ui_tools.contains(&"conversation_index"), "UI must show conversation_index");
+
+        assert_eq!(ui_tools.len(), 10, "UI should display all 10 tools");
+
+        // Demonstrate what happens if UI mistakenly uses agent_assigned_tools()
+        let wrong_ui_tools = status.agent_assigned_tools();
+        assert_eq!(wrong_ui_tools.len(), 3);
+        assert!(!wrong_ui_tools.contains(&"rag_create_collection"));
+    }
+
+    /// Test that verifies both assigned and unassigned tools are handled correctly
+    #[test]
+    fn test_mixed_assigned_and_unassigned_tools() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pk",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pk:project_id"],
+                ["agent", "agent1_pk", "agent1"],
+                ["agent", "agent2_pk", "agent2"],
+                ["tool", "Read", "agent1"],
+                ["tool", "Write", "agent1", "agent2"],
+                ["tool", "Bash", "agent2"],
+                ["tool", "unassigned_tool_1"],
+                ["tool", "unassigned_tool_2"],
+                ["tool", "unassigned_tool_3"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // Test all_tools() returns everything
+        let all = status.all_tools();
+        assert_eq!(all.len(), 6, "Should have 6 total tools");
+
+        // Test agent_assigned_tools() only returns assigned ones
+        let assigned = status.agent_assigned_tools();
+        assert_eq!(assigned.len(), 3, "Should have 3 assigned tools");
+        assert!(assigned.contains(&"Read"));
+        assert!(assigned.contains(&"Write"));
+        assert!(assigned.contains(&"Bash"));
+
+        // Verify unassigned tools are in all_tools but not in agent_assigned_tools
+        assert!(all.contains(&"unassigned_tool_1"));
+        assert!(all.contains(&"unassigned_tool_2"));
+        assert!(all.contains(&"unassigned_tool_3"));
+        assert!(!assigned.contains(&"unassigned_tool_1"));
+        assert!(!assigned.contains(&"unassigned_tool_2"));
+        assert!(!assigned.contains(&"unassigned_tool_3"));
     }
 
     // Note: from_note() coverage
