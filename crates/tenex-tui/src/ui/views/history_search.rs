@@ -15,7 +15,10 @@ use ratatui::{
 /// - Top section: List of matching messages (40% of space)
 /// - Bottom section: Full preview of selected message (60% of space)
 ///
-/// Layout reserves 1 line for help text and 1 line for separator between panes.
+/// Layout reserves space for:
+/// - 1 line for scroll indicator row (at top)
+/// - 1 line for separator between panes (in split mode)
+/// - 1 line for help text (at bottom)
 /// Falls back to single-pane list-only view when terminal is too small.
 pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchState) {
     let results = &state.results;
@@ -40,37 +43,45 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
         .render_frame(f, area);
 
     // Calculate split: 40% for list, 60% for preview
-    // Reserve: 1 line for help text, 1 line for separator between panes
-    let available_height = content_area.height.saturating_sub(2); // 1 help + 1 separator
+    // Reserve space for:
+    // - 1 line for scroll indicator row (top)
+    // - 1 line for separator (between list and preview in split mode)
+    // - 1 line for help text (bottom)
+    // Total reserved: 3 lines in split mode, 2 lines in single-pane mode
+    let reserved_for_split = 3u16; // indicator + separator + help
+    let reserved_for_single = 2u16; // indicator + help
+    let available_height = content_area.height.saturating_sub(reserved_for_split);
 
     // Small terminal fallback: if we can't fit at least 3 lines each for
     // list and preview, use single-pane list-only mode
     let use_single_pane = available_height < 6;
 
     let (list_height, preview_height) = if use_single_pane {
-        // Single pane: all space goes to list (minus help line)
-        let list_h = content_area.height.saturating_sub(1).max(1);
+        // Single pane: all space goes to list (minus indicator + help = 2 lines)
+        let list_h = content_area.height.saturating_sub(reserved_for_single).max(1);
         (list_h, 0u16)
     } else {
-        // Split pane: proper 40/60 split
+        // Split pane: proper 40/60 split of available space (after reservations)
         let list_h = (available_height * 40 / 100).max(3);
         let preview_h = available_height.saturating_sub(list_h);
         (list_h, preview_h)
     };
 
-    // List area at top
+    // Scroll indicator occupies first row (content_area.y)
+    // List area starts after indicator row
     let list_area = Rect::new(
         content_area.x,
-        content_area.y + 1,
+        content_area.y + 1, // +1 for scroll indicator row
         content_area.width,
         list_height,
     );
 
     // Preview area at bottom (below list + 1 line separator) - only used in split mode
+    // Layout: [indicator][list...][separator][preview...][help]
     let preview_area = if !use_single_pane && preview_height > 0 {
         Rect::new(
             content_area.x,
-            content_area.y + 1 + list_height + 1, // +1 for separator
+            content_area.y + 1 + list_height + 1, // +1 indicator, +1 separator
             content_area.width,
             preview_height,
         )
