@@ -172,7 +172,7 @@ private struct ConversationTreeNode: View {
         VStack(alignment: .leading, spacing: 0) {
             // Conversation row
             HStack(spacing: 12) {
-                // Expand/collapse button
+                // Expand/collapse button (only show for items with children or nested items)
                 if !children.isEmpty {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption)
@@ -184,7 +184,8 @@ private struct ConversationTreeNode: View {
                                 isExpanded.toggle()
                             }
                         }
-                } else {
+                } else if depth > 0 {
+                    // Only add spacer for nested items without children
                     Spacer().frame(width: 20)
                 }
 
