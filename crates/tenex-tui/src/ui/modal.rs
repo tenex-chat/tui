@@ -5,6 +5,39 @@ use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use tenex_core::models::NamedDraft;
 
+/// State for app settings modal (global settings accessible via comma key)
+#[derive(Debug, Clone)]
+pub struct AppSettingsState {
+    /// Which setting row is selected
+    pub selected_index: usize,
+    /// Whether the jaeger endpoint field is being edited
+    pub editing_jaeger_endpoint: bool,
+    /// The current value being edited for jaeger endpoint
+    pub jaeger_endpoint_input: String,
+}
+
+impl AppSettingsState {
+    pub fn new(current_jaeger_endpoint: &str) -> Self {
+        Self {
+            selected_index: 0,
+            editing_jaeger_endpoint: false,
+            jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+}
+
 /// State for the ask modal (answering multi-question ask events)
 #[derive(Debug, Clone)]
 pub struct AskModalState {
@@ -1486,6 +1519,8 @@ pub enum ModalState {
     NudgeDeleteConfirm(NudgeDeleteConfirmState),
     /// Workspace manager modal - create, edit, delete, switch workspaces
     WorkspaceManager(WorkspaceManagerState),
+    /// Global app settings modal (accessible via comma key from anywhere)
+    AppSettings(AppSettingsState),
 }
 
 impl Default for ModalState {

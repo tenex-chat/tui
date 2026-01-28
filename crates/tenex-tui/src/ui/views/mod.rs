@@ -1,4 +1,5 @@
 pub mod agent_browser;
+pub mod app_settings;
 pub mod ask_modal;
 pub mod chat;
 pub mod command_palette;
