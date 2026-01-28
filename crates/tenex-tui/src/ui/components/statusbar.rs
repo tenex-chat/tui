@@ -36,9 +36,70 @@ const TODAY_LABEL: &str = "Today: ";
 /// Ensures column doesn't collapse below "Today: MM:SS " (13 chars) + 1 left padding + 3 buffer = 17
 const RUNTIME_COLUMN_MIN_WIDTH: u16 = 17;
 
+// Wave animation constants for active agent runtime display
+/// Base green color (RGB) for the "Today:" runtime display when agents are active
+const WAVE_BASE_COLOR_R: u8 = 106;
+const WAVE_BASE_COLOR_G: u8 = 153;
+const WAVE_BASE_COLOR_B: u8 = 85;
+
+/// Phase speed multiplier - controls how fast the wave travels across the text
+const WAVE_PHASE_SPEED: f32 = 0.3;
+
+/// Wavelength - controls how many characters are in one wave cycle
+/// Higher values = longer wavelength (smoother gradient)
+const WAVE_WAVELENGTH: f32 = 0.8;
+
+/// Wave period - used in the sine wave calculation
+const WAVE_PERIOD: f32 = 12.0;
+
+/// Brightness amplitude - the wave oscillates from (1.0 - amplitude) to (1.0 + amplitude)
+/// A value of 0.3 means brightness ranges from 0.7 to 1.3 (darker to brighter)
+const WAVE_BRIGHTNESS_AMPLITUDE: f32 = 0.3;
+
 /// Format the full runtime label string (e.g., "Today: 05:32 ")
 fn format_today_label(cumulative_runtime_ms: u64) -> String {
     format!("{}{} ", TODAY_LABEL, format_runtime(cumulative_runtime_ms))
+}
+
+/// Build a wave-animated runtime line with character-by-character color animation
+///
+/// Creates a traveling brightness wave effect across the runtime text by calculating
+/// a sine wave for each character position. The wave creates a smooth gradient that
+/// travels from left to right, making it clear that agents are actively working.
+///
+/// # Arguments
+/// * `runtime_str` - The formatted runtime string to animate (e.g., "Today: 05:32 ")
+/// * `padding` - Number of spaces to prepend for right-alignment
+/// * `wave_offset` - Current animation frame offset (advances each frame)
+///
+/// # Returns
+/// A Line containing spans with dynamically calculated colors for the wave effect
+fn build_wave_runtime_line(runtime_str: &str, padding: usize, wave_offset: usize) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ".repeat(padding))];
+
+    // Create a smooth brightness wave that travels across the text
+    for (i, ch) in runtime_str.chars().enumerate() {
+        // Create a traveling sine wave
+        // wave_offset moves the wave, i determines position along the string
+        let phase = ((wave_offset as f32 * WAVE_PHASE_SPEED) + (i as f32 * WAVE_WAVELENGTH))
+            * std::f32::consts::PI * 2.0 / WAVE_PERIOD;
+
+        // Sine wave gives us a value between -1 and 1
+        let wave_value = phase.sin();
+
+        // Map sine wave to brightness multiplier based on amplitude
+        let brightness = 1.0 + (wave_value * WAVE_BRIGHTNESS_AMPLITUDE);
+
+        // Apply brightness to base green color
+        let r = ((WAVE_BASE_COLOR_R as f32 * brightness).min(255.0).max(0.0)) as u8;
+        let g = ((WAVE_BASE_COLOR_G as f32 * brightness).min(255.0).max(0.0)) as u8;
+        let b = ((WAVE_BASE_COLOR_B as f32 * brightness).min(255.0).max(0.0)) as u8;
+
+        let color = Color::Rgb(r, g, b);
+        spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
+    }
+
+    Line::from(spans)
 }
 
 /// Calculate the width needed for the runtime string
@@ -111,33 +172,8 @@ pub fn render_statusbar(
     let padding = (runtime_area.width as usize).saturating_sub(runtime_width);
 
     let runtime_line = if has_active_agents {
-        // GREEN mode with wave animation - apply to entire string
-        let mut spans = vec![Span::raw(" ".repeat(padding))];
-
-        // Create a smooth brightness wave that travels across the text
-        // Base green color: RGB(106, 153, 85)
-
-        for (i, ch) in runtime_str.chars().enumerate() {
-            // Create a traveling sine wave
-            // wave_offset moves the wave, i determines position along the string
-            let phase = ((wave_offset as f32 * 0.3) + (i as f32 * 0.8)) * std::f32::consts::PI * 2.0 / 12.0;
-
-            // Sine wave gives us a value between -1 and 1
-            let wave_value = phase.sin();
-
-            // Map sine wave to brightness multiplier: 0.7 to 1.3 (darker to brighter)
-            let brightness = 1.0 + (wave_value * 0.3);
-
-            // Apply brightness to base green color (106, 153, 85)
-            let r = ((106.0 * brightness).min(255.0).max(0.0)) as u8;
-            let g = ((153.0 * brightness).min(255.0).max(0.0)) as u8;
-            let b = ((85.0 * brightness).min(255.0).max(0.0)) as u8;
-
-            let color = Color::Rgb(r, g, b);
-            spans.push(Span::styled(ch.to_string(), Style::default().fg(color)));
-        }
-
-        Line::from(spans)
+        // GREEN mode with wave animation
+        build_wave_runtime_line(&runtime_str, padding, wave_offset)
     } else {
         // RED mode - no animation
         let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
