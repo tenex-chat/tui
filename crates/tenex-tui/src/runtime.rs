@@ -140,16 +140,6 @@ pub(crate) async fn run_app(
                                         handle_clipboard_paste(app, &keys, upload_tx.clone());
                                     }
                                 }
-                            } else if key.code == KeyCode::Char('t') && key.modifiers == KeyModifiers::CONTROL {
-                                // Ctrl+T - open command palette (exact match, not Ctrl+Shift+T)
-                                app.pending_quit = false;
-                                app.open_command_palette();
-                            } else if key.code == KeyCode::Char('T') && key.modifiers == KeyModifiers::CONTROL.union(KeyModifiers::SHIFT) {
-                                // Ctrl+Shift+T - open workspace manager
-                                app.pending_quit = false;
-                                if !matches!(app.modal_state, ModalState::WorkspaceManager(_)) {
-                                    app.modal_state = ModalState::WorkspaceManager(crate::ui::modal::WorkspaceManagerState::new());
-                                }
                             } else {
                                 // Any other key clears pending quit state
                                 app.pending_quit = false;

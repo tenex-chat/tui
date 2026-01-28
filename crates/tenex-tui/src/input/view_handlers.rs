@@ -10,6 +10,7 @@ use tenex_core::models::OperationsStatus;
 use crate::models::Message;
 use crate::nostr::NostrCommand;
 use crate::ui;
+use crate::ui::hotkeys::{resolve_hotkey, HotkeyContext, HotkeyId};
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;
@@ -144,38 +145,101 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         return Ok(());
     }
 
-    // Normal Home view navigation
-    match code {
-        KeyCode::Char('q') => app.quit(),
-        KeyCode::Char('/') => {
-            if app.home_panel_focus == HomeTab::Reports {
-                app.input_mode = InputMode::Editing;
+    // Resolve hotkey using centralized registry
+    let context = HotkeyContext::from_app_state(
+        &app.view,
+        &app.input_mode,
+        &app.modal_state,
+        &app.home_panel_focus,
+        app.sidebar_focused,
+    );
+
+    // Try hotkey resolution first for standard actions
+    if let Some(hotkey_id) = resolve_hotkey(code, modifiers, context) {
+        match hotkey_id {
+            HotkeyId::Quit => {
+                app.quit();
+                return Ok(());
             }
+            HotkeyId::SearchReports => {
+                app.input_mode = InputMode::Editing;
+                return Ok(());
+            }
+            HotkeyId::SwitchProject => {
+                app.open_projects_modal(false);
+                return Ok(());
+            }
+            HotkeyId::TimeFilter => {
+                app.cycle_time_filter();
+                return Ok(());
+            }
+            HotkeyId::AgentBrowser => {
+                app.open_agent_browser();
+                return Ok(());
+            }
+            HotkeyId::CreateProject => {
+                app.modal_state =
+                    ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
+                return Ok(());
+            }
+            HotkeyId::NewConversation => {
+                new_conversation_current_project(app);
+                return Ok(());
+            }
+            HotkeyId::NewConversationWithPicker => {
+                app.open_projects_modal(true);
+                return Ok(());
+            }
+            HotkeyId::ShowHideArchived => {
+                app.toggle_show_archived();
+                return Ok(());
+            }
+            HotkeyId::ToggleHideScheduled if !app.sidebar_focused => {
+                app.toggle_hide_scheduled();
+                return Ok(());
+            }
+            HotkeyId::NextHomeTab => {
+                app.home_panel_focus = match app.home_panel_focus {
+                    HomeTab::Conversations => HomeTab::Inbox,
+                    HomeTab::Inbox => HomeTab::Reports,
+                    HomeTab::Reports => HomeTab::Feed,
+                    HomeTab::Feed => HomeTab::ActiveWork,
+                    HomeTab::ActiveWork => HomeTab::Stats,
+                    HomeTab::Stats => HomeTab::Conversations,
+                };
+                return Ok(());
+            }
+            HotkeyId::PrevHomeTab => {
+                app.home_panel_focus = match app.home_panel_focus {
+                    HomeTab::Conversations => HomeTab::Stats,
+                    HomeTab::Inbox => HomeTab::Conversations,
+                    HomeTab::Reports => HomeTab::Inbox,
+                    HomeTab::Feed => HomeTab::Reports,
+                    HomeTab::ActiveWork => HomeTab::Feed,
+                    HomeTab::Stats => HomeTab::ActiveWork,
+                };
+                return Ok(());
+            }
+            HotkeyId::FocusSidebar => {
+                // On Stats tab, Right switches subtabs; otherwise focuses sidebar
+                if app.home_panel_focus == HomeTab::Stats {
+                    app.stats_subtab = app.stats_subtab.next();
+                } else {
+                    app.sidebar_focused = true;
+                }
+                return Ok(());
+            }
+            HotkeyId::UnfocusSidebar => {
+                app.sidebar_focused = false;
+                return Ok(());
+            }
+            // Other hotkeys handled below or not applicable to Home view
+            _ => {}
         }
-        KeyCode::Char('p') => {
-            app.open_projects_modal(false);
-        }
-        KeyCode::Char('f') => {
-            app.cycle_time_filter();
-        }
-        // These are now global commands - available everywhere via Shift+key
-        // They are also in the command palette (Ctrl+T) for discoverability
-        KeyCode::Char('B') if has_shift => {
-            app.open_agent_browser();
-        }
-        KeyCode::Char('C') if has_shift => {
-            app.modal_state =
-                ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
-        }
-        KeyCode::Char('N') if has_shift => {
-            new_conversation_current_project(app);
-        }
-        KeyCode::Char('P') if has_shift => {
-            app.open_projects_modal(true);
-        }
-        KeyCode::Char('A') if has_shift => {
-            app.toggle_show_archived();
-        }
+    }
+
+    // Handle special cases not covered by hotkey registry
+    match code {
         // Vim-style h/l navigation for Stats subtabs
         KeyCode::Char('h') if app.home_panel_focus == HomeTab::Stats => {
             app.stats_subtab = app.stats_subtab.prev();
@@ -183,47 +247,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('l') if app.home_panel_focus == HomeTab::Stats => {
             app.stats_subtab = app.stats_subtab.next();
         }
-        KeyCode::Char('S') if has_shift && !app.sidebar_focused => {
-            // Toggle scheduled events filter from main panel
-            app.toggle_hide_scheduled();
-        }
-        KeyCode::Tab => {
-            // Tab switches between home tabs
-            app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Inbox,
-                HomeTab::Inbox => HomeTab::Reports,
-                HomeTab::Reports => HomeTab::Feed,
-                HomeTab::Feed => HomeTab::ActiveWork,
-                HomeTab::ActiveWork => HomeTab::Stats,
-                HomeTab::Stats => HomeTab::Conversations,
-            };
-        }
-        KeyCode::BackTab if has_shift => {
-            // Shift+Tab switches between home tabs in reverse
-            app.home_panel_focus = match app.home_panel_focus {
-                HomeTab::Conversations => HomeTab::Stats,
-                HomeTab::Inbox => HomeTab::Conversations,
-                HomeTab::Reports => HomeTab::Inbox,
-                HomeTab::Feed => HomeTab::Reports,
-                HomeTab::ActiveWork => HomeTab::Feed,
-                HomeTab::Stats => HomeTab::ActiveWork,
-            };
-        }
-        KeyCode::Right => {
-            // On Stats tab, Right switches subtabs; otherwise focuses sidebar
-            if app.home_panel_focus == HomeTab::Stats {
-                app.stats_subtab = app.stats_subtab.next();
-            } else {
-                app.sidebar_focused = true;
-            }
-        }
-        KeyCode::Left => {
-            // On Stats tab, Left switches subtabs; otherwise unfocuses sidebar
-            if app.home_panel_focus == HomeTab::Stats {
-                app.stats_subtab = app.stats_subtab.prev();
-            } else {
-                app.sidebar_focused = false;
-            }
+        // Left arrow on Stats tab switches subtabs (not sidebar focus)
+        KeyCode::Left if app.home_panel_focus == HomeTab::Stats => {
+            app.stats_subtab = app.stats_subtab.prev();
         }
         KeyCode::Up => {
             if app.sidebar_focused {
@@ -944,7 +970,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
     let code = key.code;
     let modifiers = key.modifiers;
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
-    let has_alt = modifiers.contains(KeyModifiers::ALT);
 
     // Handle sidebar-focused state first
     if app.is_sidebar_focused() {
@@ -998,17 +1023,78 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
         }
     }
 
+    // Resolve hotkey using centralized registry
+    let context = HotkeyContext::from_app_state(
+        &app.view,
+        &app.input_mode,
+        &app.modal_state,
+        &app.home_panel_focus,
+        app.is_sidebar_focused(),
+    );
+
+    // Try hotkey resolution for standard actions
+    if let Some(hotkey_id) = resolve_hotkey(code, modifiers, context) {
+        match hotkey_id {
+            HotkeyId::AgentBrowser => {
+                app.open_agent_browser();
+                return Ok(true);
+            }
+            HotkeyId::CreateProject => {
+                app.modal_state =
+                    ui::modal::ModalState::CreateProject(ui::modal::CreateProjectState::new());
+                return Ok(true);
+            }
+            HotkeyId::NewConversation => {
+                // New conversation with same project/agent/branch
+                if let Some(ref project) = app.selected_project {
+                    let project_a_tag = project.a_tag();
+                    let project_name = project.name.clone();
+                    let inherited_agent = app.selected_agent().cloned();
+                    let inherited_branch = app.selected_branch.clone();
+
+                    app.save_chat_draft();
+                    let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
+                    app.switch_to_tab(tab_idx);
+
+                    app.set_selected_agent(inherited_agent);
+                    app.selected_branch = inherited_branch;
+                    app.chat_editor_mut().clear();
+                    app.set_warning_status("New conversation (same project, agent, and branch)");
+                }
+                return Ok(true);
+            }
+            HotkeyId::NewConversationWithPicker => {
+                app.open_projects_modal(true);
+                return Ok(true);
+            }
+            HotkeyId::ShowHideArchived => {
+                app.toggle_show_archived();
+                return Ok(true);
+            }
+            HotkeyId::SelectBranchAlt => {
+                app.open_branch_selector();
+                return Ok(true);
+            }
+            HotkeyId::GoToHome => {
+                app.go_home();
+                return Ok(true);
+            }
+            HotkeyId::CloseTab => {
+                app.close_current_tab();
+                return Ok(true);
+            }
+            HotkeyId::InConversationSearch => {
+                app.enter_chat_search();
+                return Ok(true);
+            }
+            // Other hotkeys not handled here
+            _ => {}
+        }
+    }
+
+    // Handle special cases not covered by hotkey registry
     match code {
-        // Alt+B = open branch selector
-        KeyCode::Char('b') if has_alt => {
-            app.open_branch_selector();
-            return Ok(true);
-        }
-        // Number keys 1-9 to navigate (1 = Home, 2-9 = tabs) in Normal mode
-        KeyCode::Char('1') => {
-            app.go_home();
-            return Ok(true);
-        }
+        // Number keys 2-9 for tab navigation
         KeyCode::Char(c) if c >= '2' && c <= '9' => {
             let tab_index = (c as usize) - ('2' as usize);
             if tab_index < app.open_tabs().len() {
@@ -1030,16 +1116,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
         // 'l' = focus sidebar (vim-style right motion)
         KeyCode::Char('l') if app.sidebar_state.has_items() && app.todo_sidebar_visible => {
             app.set_sidebar_focused(true);
-            return Ok(true);
-        }
-        // x closes current tab
-        KeyCode::Char('x') => {
-            app.close_current_tab();
-            return Ok(true);
-        }
-        // Ctrl+F = enter in-conversation search
-        KeyCode::Char('f') if modifiers.contains(KeyModifiers::CONTROL) => {
-            app.enter_chat_search();
             return Ok(true);
         }
         _ => {}

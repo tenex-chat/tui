@@ -46,6 +46,8 @@ pub enum HotkeyId {
     PrevTab,
     CloseTab,
     TabModal,
+    NextHomeTab,      // Tab key in Home view
+    PrevHomeTab,      // Shift+Tab in Home view
 
     // === Home View - Recent Tab ===
     NewConversation,
@@ -58,6 +60,8 @@ pub enum HotkeyId {
     TimeFilter,
     AgentBrowser,
     CreateProject,
+    SearchReports,         // '/' in Reports tab
+    ToggleHideScheduled,   // Shift+S to toggle scheduled events filter
 
     // === Home View - Inbox Tab ===
     MarkAsRead,
@@ -68,10 +72,13 @@ pub enum HotkeyId {
     ProjectSettings,
     BootProject,
     StopAllAgents,
+    FocusSidebar,          // Right arrow to focus sidebar
+    UnfocusSidebar,        // Left arrow to unfocus sidebar
 
     // === Chat View - Normal Mode ===
     MentionAgent,
     SelectBranch,
+    SelectBranchAlt,       // Alt+B branch selector
     CopyMessage,
     ViewRawEvent,
     OpenTrace,
@@ -618,6 +625,50 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         &[HotkeyContext::Global],
     ),
 
+    // === Home View Tab Navigation ===
+    HotkeyBinding::new(
+        HotkeyId::NextHomeTab,
+        KeyCode::Tab,
+        "Next Tab",
+        "Navigation",
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::PrevHomeTab,
+        KeyCode::BackTab,
+        "Previous Tab",
+        "Navigation",
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+    ),
+    HotkeyBinding::new(
+        HotkeyId::SearchReports,
+        KeyCode::Char('/'),
+        "Search Reports",
+        "Filter",
+        &[HotkeyContext::HomeReports],
+    ),
+    HotkeyBinding::shift(
+        HotkeyId::ToggleHideScheduled,
+        KeyCode::Char('S'),
+        "Toggle Scheduled Events",
+        "Filter",
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork],
+    ),
+    HotkeyBinding::new(
+        HotkeyId::FocusSidebar,
+        KeyCode::Right,
+        "Focus Sidebar",
+        "Navigation",
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork],
+    ),
+    HotkeyBinding::new(
+        HotkeyId::UnfocusSidebar,
+        KeyCode::Left,
+        "Unfocus Sidebar",
+        "Navigation",
+        &[HotkeyContext::HomeSidebar],
+    ),
+
     // === Home View - Inbox Tab ===
     HotkeyBinding::shift(
         HotkeyId::MarkAsRead,
@@ -678,6 +729,13 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Select Branch",
         "Input",
         &[HotkeyContext::ChatNormal, HotkeyContext::ChatEditing],
+    ),
+    HotkeyBinding::alt(
+        HotkeyId::SelectBranchAlt,
+        KeyCode::Char('b'),
+        "Select Branch",
+        "Input",
+        &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::CopyMessage,
