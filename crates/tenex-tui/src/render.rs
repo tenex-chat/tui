@@ -8,6 +8,7 @@ use ratatui::{
 use crate::ui;
 use crate::ui::components::render_statusbar;
 use crate::ui::layout;
+use crate::ui::modal::ModalState;
 use crate::ui::views::login::{render_login, LoginStep};
 use crate::ui::{App, InputMode, View};
 
@@ -115,4 +116,12 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     // Uses today-only runtime filtering for the status bar display
     let cumulative_runtime = app.data_store.borrow_mut().get_today_unique_runtime();
     render_statusbar(f, chunks[3], app.current_notification(), cumulative_runtime);
+
+    // Global modal overlays - render AppSettings modal for views that don't handle it themselves
+    // (Home, Chat, and AgentBrowser handle modals in their own render functions)
+    if matches!(app.view, View::Login | View::LessonViewer) {
+        if let ModalState::AppSettings(ref state) = app.modal_state {
+            ui::views::render_app_settings(f, app, f.area(), state);
+        }
+    }
 }

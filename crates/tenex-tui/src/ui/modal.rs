@@ -5,6 +5,84 @@ use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use tenex_core::models::NamedDraft;
 
+/// Available settings in the app settings modal
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppSetting {
+    JaegerEndpoint,
+    // Add new settings here as needed
+}
+
+impl AppSetting {
+    /// All settings in order
+    pub const ALL: &'static [AppSetting] = &[
+        AppSetting::JaegerEndpoint,
+        // Add new settings here as needed
+    ];
+
+    /// Total number of settings
+    pub const fn count() -> usize {
+        Self::ALL.len()
+    }
+
+    /// Get setting at index
+    pub fn from_index(index: usize) -> Option<AppSetting> {
+        Self::ALL.get(index).copied()
+    }
+}
+
+/// State for app settings modal (global settings accessible via comma key)
+#[derive(Debug, Clone)]
+pub struct AppSettingsState {
+    /// Which setting row is selected
+    pub selected_index: usize,
+    /// Whether a field is currently being edited
+    pub editing: bool,
+    /// The current value being edited for jaeger endpoint
+    pub jaeger_endpoint_input: String,
+}
+
+impl AppSettingsState {
+    pub fn new(current_jaeger_endpoint: &str) -> Self {
+        Self {
+            selected_index: 0,
+            editing: false,
+            jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
+        }
+    }
+
+    /// Get the currently selected setting
+    pub fn selected_setting(&self) -> Option<AppSetting> {
+        AppSetting::from_index(self.selected_index)
+    }
+
+    /// Check if the jaeger endpoint field is being edited
+    pub fn editing_jaeger_endpoint(&self) -> bool {
+        self.editing && self.selected_setting() == Some(AppSetting::JaegerEndpoint)
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+        }
+    }
+
+    pub fn move_down(&mut self) {
+        if self.selected_index + 1 < AppSetting::count() {
+            self.selected_index += 1;
+        }
+    }
+
+    /// Start editing the currently selected setting
+    pub fn start_editing(&mut self) {
+        self.editing = true;
+    }
+
+    /// Stop editing
+    pub fn stop_editing(&mut self) {
+        self.editing = false;
+    }
+}
+
 /// State for the ask modal (answering multi-question ask events)
 #[derive(Debug, Clone)]
 pub struct AskModalState {
@@ -1486,6 +1564,8 @@ pub enum ModalState {
     NudgeDeleteConfirm(NudgeDeleteConfirmState),
     /// Workspace manager modal - create, edit, delete, switch workspaces
     WorkspaceManager(WorkspaceManagerState),
+    /// Global app settings modal (accessible via comma key from anywhere)
+    AppSettings(AppSettingsState),
 }
 
 impl Default for ModalState {

@@ -171,6 +171,11 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         let active_id = app.preferences.borrow().active_workspace_id().map(String::from);
         super::render_workspace_manager(f, area, state, &workspaces, &projects, active_id.as_deref());
     }
+
+    // App settings modal
+    if let ModalState::AppSettings(ref state) = app.modal_state {
+        super::render_app_settings(f, app, area, state);
+    }
 }
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
