@@ -92,6 +92,12 @@ pub(crate) fn handle_key(
                     }
                     return Ok(());
                 }
+                // Alt+M: Jump to notification thread (works from anywhere when notification has thread_id)
+                HotkeyId::JumpToNotification => {
+                    // Let jump_to_notification_thread() handle all validation and error feedback
+                    app.jump_to_notification_thread();
+                    return Ok(());
+                }
                 // Other global hotkeys are handled later in their respective sections
                 _ => {}
             }

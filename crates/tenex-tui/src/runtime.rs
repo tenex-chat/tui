@@ -307,8 +307,10 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                                 .map(|t| t.title.clone())
                                 .unwrap_or_else(|| "conversation".to_string());
 
-                            let notification_msg = format!("@ Message for you in {}", thread_title);
-                            app.notify(Notification::warning(notification_msg));
+                            // Use message_for_user notification with thread_id for jump-to support
+                            // Duration is 30 seconds and includes hint about Alt+M hotkey
+                            let notification_msg = format!("@ Message for you in {} · Alt+M to open", thread_title);
+                            app.notify(Notification::message_for_user(notification_msg, thread_id.clone()));
                         }
                     }
                 }
