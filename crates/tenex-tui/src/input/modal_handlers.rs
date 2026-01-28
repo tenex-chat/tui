@@ -2753,7 +2753,15 @@ fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
 
     match state.mode {
         WorkspaceMode::List => {
-            let workspaces = app.preferences.borrow().workspaces().to_vec();
+            // Sort workspaces same as renderer: pinned first, then by name
+            let mut workspaces = app.preferences.borrow().workspaces().to_vec();
+            workspaces.sort_by(|a, b| {
+                match (a.pinned, b.pinned) {
+                    (true, false) => std::cmp::Ordering::Less,
+                    (false, true) => std::cmp::Ordering::Greater,
+                    _ => a.name.cmp(&b.name),
+                }
+            });
             let workspace_count = workspaces.len();
 
             match key.code {

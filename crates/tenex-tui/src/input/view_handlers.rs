@@ -13,7 +13,7 @@ use crate::ui;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;
-use crate::ui::{App, HomeTab, InputMode, ModalState, StatsSubtab, View};
+use crate::ui::{App, HomeTab, InputMode, ModalState, View};
 
 /// Cached ActiveWork operations to avoid snapshot drift during key event handling.
 /// This ensures consistent state when navigating, selecting, or opening items.
@@ -177,14 +177,8 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.open_projects_modal(true);
             }
         }
-        KeyCode::Char('H') if has_shift => {
-            // Show/hide archived conversations
-            if !app.sidebar_focused {
-                app.toggle_show_archived();
-            }
-        }
         KeyCode::Char('A') if has_shift => {
-            // Show/hide archived (unified toggle for both projects and conversations)
+            // Show/hide archived items (unified toggle)
             app.toggle_show_archived();
         }
         // Vim-style h/l navigation for Stats subtabs

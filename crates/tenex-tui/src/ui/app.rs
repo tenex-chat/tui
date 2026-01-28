@@ -1251,7 +1251,7 @@ impl App {
             .iter()
             .filter(|p| {
                 // Filter out archived projects unless showing archived
-                self.show_archived_projects || !prefs.is_project_archived(&p.a_tag())
+                self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
             .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
             .collect();
@@ -2162,7 +2162,7 @@ impl App {
         threads.into_iter()
             .filter(|(thread, _)| {
                 // Archive filter
-                let archive_ok = self.home.show_archived || !prefs.is_thread_archived(&thread.id);
+                let archive_ok = self.show_archived || !prefs.is_thread_archived(&thread.id);
                 // Scheduled filter - hide scheduled if hide_scheduled is true
                 let scheduled_ok = !self.hide_scheduled || !thread.is_scheduled;
                 archive_ok && scheduled_ok
@@ -2190,7 +2190,7 @@ impl App {
             // Archive filter - hide items from archived threads unless show_archived is true
             .filter(|item| {
                 if let Some(ref thread_id) = item.thread_id {
-                    self.home.show_archived || !prefs.is_thread_archived(thread_id)
+                    self.show_archived || !prefs.is_thread_archived(thread_id)
                 } else {
                     true  // Keep items without thread_id
                 }
@@ -2259,7 +2259,7 @@ impl App {
 
             for thread in threads {
                 // Apply archive filter
-                if !self.home.show_archived && prefs.is_thread_archived(&thread.id) {
+                if !self.show_archived && prefs.is_thread_archived(&thread.id) {
                     continue;
                 }
 
@@ -3472,42 +3472,15 @@ impl App {
         }
     }
 
-    /// Toggle vim mode on/off
-    pub fn toggle_vim_mode(&mut self) {
-        self.vim_enabled = !self.vim_enabled;
-        if self.vim_enabled {
-            self.vim_mode = VimMode::Normal;
-            self.notify(Notification::info("Vim mode enabled (Esc=normal, i/a=insert)"));
-        } else {
-            self.notify(Notification::info("Vim mode disabled"));
-        }
-    }
-
-    /// Enter vim insert mode
-    pub fn vim_enter_insert(&mut self) {
-        self.vim_mode = VimMode::Insert;
-    }
-
-    /// Enter vim insert mode after cursor (append)
-    pub fn vim_enter_append(&mut self) {
-        self.vim_mode = VimMode::Insert;
-        self.chat_editor_mut().move_right();
-    }
-
-    /// Enter vim normal mode
-    pub fn vim_enter_normal(&mut self) {
-        self.vim_mode = VimMode::Normal;
-    }
-
     // ===== Archive Methods =====
 
     /// Toggle visibility of archived items (conversations and projects)
     pub fn toggle_show_archived(&mut self) {
-        self.home.show_archived = !self.home.show_archived;
-        if self.home.show_archived {
-            self.notify(Notification::info("Showing archived conversations"));
+        self.show_archived = !self.show_archived;
+        if self.show_archived {
+            self.notify(Notification::info("Showing archived items"));
         } else {
-            self.notify(Notification::info("Hiding archived"));
+            self.notify(Notification::info("Hiding archived items"));
         }
     }
 

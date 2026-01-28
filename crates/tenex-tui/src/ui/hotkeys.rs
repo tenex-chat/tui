@@ -27,6 +27,7 @@ pub enum HotkeyId {
     GoToHome,
     Help,
     JumpToNotification,
+    WorkspaceManager,
 
     // === Navigation ===
     NavigateUp,
@@ -51,8 +52,7 @@ pub enum HotkeyId {
     NewConversationWithPicker,
     OpenSelected,
     ArchiveToggle,
-    ShowHideArchived,      // Toggle visibility of archived conversations
-    ShowHideArchivedProjects, // Toggle visibility of archived projects
+    ShowHideArchived,      // Toggle visibility of all archived items
     ExportJsonl,
     SwitchProject,
     TimeFilter,
@@ -94,26 +94,6 @@ pub enum HotkeyId {
     ForkAgent,
     CloneAgent,
 
-    // === Text Editing (Vim-style) ===
-    VimUp,
-    VimDown,
-    VimLeft,
-    VimRight,
-    VimWordForward,
-    VimWordBackward,
-    VimLineStart,
-    VimLineEnd,
-    VimDelete,
-    VimDeleteLine,
-    VimYank,
-    VimPaste,
-    VimUndo,
-    VimInsertMode,
-    VimInsertAfter,
-    VimInsertLineEnd,
-    VimInsertLineStart,
-    VimNormalMode,
-
     // === Modal Actions ===
     ModalClose,
     ModalConfirm,
@@ -145,7 +125,6 @@ pub enum HotkeyContext {
     /// Chat view contexts
     ChatNormal,
     ChatEditing,
-    ChatVimNormal,
 
     /// Modal contexts
     AnyModal,
@@ -468,6 +447,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Global",
         &[HotkeyContext::Global],
     ).with_priority(90), // High priority - works almost everywhere
+    HotkeyBinding::with_modifiers(
+        HotkeyId::WorkspaceManager,
+        KeyCode::Char('T'),
+        KeyModifiers::CONTROL.union(KeyModifiers::SHIFT),
+        "Workspaces",
+        "Global",
+        &[HotkeyContext::Global],
+    ).with_priority(95), // High priority - opens workspace manager
 
     // === Navigation (Universal) ===
     HotkeyBinding::new(
@@ -625,24 +612,10 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
     ),
     HotkeyBinding::shift(
         HotkeyId::ShowHideArchived,
-        KeyCode::Char('H'),
-        "Show/Hide Archived Conversations",
-        "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeFeed],
-    ),
-    HotkeyBinding::shift(
-        HotkeyId::ShowHideArchivedProjects,
         KeyCode::Char('A'),
-        "Show/Hide Archived Projects",
+        "Show/Hide Archived Items",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed],
-    ),
-    HotkeyBinding::shift(
-        HotkeyId::ShowHideArchivedProjects,
-        KeyCode::Char('A'),
-        "Show/Hide Archived Projects",
-        "Filter",
-        &[HotkeyContext::HomeSidebar],
+        &[HotkeyContext::Global],
     ),
 
     // === Home View - Inbox Tab ===

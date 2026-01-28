@@ -1,13 +1,13 @@
 //! Text editor keyboard event handlers.
 //!
-//! Handles input for the chat editor including vim mode support.
+//! Handles input for the chat editor.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tenex_core::tlog;
 
 use crate::input::input_prefix;
 use crate::nostr::NostrCommand;
-use crate::ui::app::{InputContextFocus, VimMode};
+use crate::ui::app::InputContextFocus;
 use crate::ui::{App, InputMode};
 
 /// Handle key events for the chat editor (rich text editing)
@@ -16,25 +16,6 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     if app.input_context_focus.is_some() {
         handle_context_focus_key(app, key);
         return;
-    }
-
-    // If vim mode is enabled, dispatch based on mode
-    if app.vim_enabled {
-        match app.vim_mode {
-            VimMode::Normal => {
-                handle_vim_normal_mode(app, key);
-                return;
-            }
-            VimMode::Insert => {
-                // Esc exits insert mode
-                if key.code == KeyCode::Esc {
-                    app.vim_enter_normal();
-                    app.save_chat_draft();
-                    return;
-                }
-                // Otherwise fall through to normal editing
-            }
-        }
     }
 
     let code = key.code;
@@ -367,120 +348,6 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        _ => {}
-    }
-}
-
-/// Handle key events for vim normal mode in chat editor
-fn handle_vim_normal_mode(app: &mut App, key: KeyEvent) {
-    let code = key.code;
-
-    match code {
-        // Ctrl+J is Line Feed (ASCII 10), same as Shift+Enter on iTerm2/macOS
-        KeyCode::Char('j') | KeyCode::Char('J')
-            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-        {
-            app.chat_editor_mut().insert_newline();
-            app.save_chat_draft();
-        }
-
-        // Mode switching
-        KeyCode::Char('i') => {
-            app.vim_enter_insert();
-        }
-        KeyCode::Char('a') => {
-            app.vim_enter_append();
-        }
-        KeyCode::Char('A') => {
-            app.chat_editor_mut().move_to_line_end();
-            app.vim_enter_insert();
-        }
-        KeyCode::Char('I') => {
-            app.chat_editor_mut().move_to_line_start();
-            app.vim_enter_insert();
-        }
-        KeyCode::Char('o') => {
-            app.chat_editor_mut().move_to_line_end();
-            app.chat_editor_mut().insert_newline();
-            app.vim_enter_insert();
-            app.save_chat_draft();
-        }
-        KeyCode::Char('O') => {
-            app.chat_editor_mut().move_to_line_start();
-            app.chat_editor_mut().insert_newline();
-            app.chat_editor_mut().move_up();
-            app.vim_enter_insert();
-            app.save_chat_draft();
-        }
-
-        // Movement
-        KeyCode::Char('h') | KeyCode::Left => {
-            app.chat_editor_mut().move_left();
-        }
-        KeyCode::Char('l') | KeyCode::Right => {
-            app.chat_editor_mut().move_right();
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            let wrap_width = app.chat_input_wrap_width;
-            app.chat_editor_mut().move_down_visual(wrap_width);
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            let wrap_width = app.chat_input_wrap_width;
-            app.chat_editor_mut().move_up_visual(wrap_width);
-        }
-        KeyCode::Char('w') => {
-            app.chat_editor_mut().move_word_right();
-        }
-        KeyCode::Char('b') => {
-            app.chat_editor_mut().move_word_left();
-        }
-        KeyCode::Char('0') => {
-            app.chat_editor_mut().move_to_line_start();
-        }
-        KeyCode::Char('$') => {
-            app.chat_editor_mut().move_to_line_end();
-        }
-
-        // Editing
-        KeyCode::Char('x') => {
-            app.chat_editor_mut().delete_char_at();
-            app.save_chat_draft();
-        }
-        KeyCode::Char('X') => {
-            app.chat_editor_mut().delete_char_before();
-            app.save_chat_draft();
-        }
-        KeyCode::Char('u') => {
-            app.chat_editor_mut().undo();
-            app.save_chat_draft();
-        }
-        KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.chat_editor_mut().redo();
-            app.save_chat_draft();
-        }
-        KeyCode::Char('D') => {
-            app.chat_editor_mut().kill_to_line_end();
-            app.save_chat_draft();
-        }
-
-        // Esc in normal mode exits editing mode
-        KeyCode::Esc => {
-            app.save_chat_draft();
-            app.input_mode = InputMode::Normal;
-            // Set selection to last item so Up arrow works intuitively
-            let count = app.display_item_count();
-            app.set_selected_message_index(count.saturating_sub(1));
-        }
-
-        // Shift+Enter or Alt+Enter = newline (even in normal mode)
-        KeyCode::Enter
-            if key.modifiers.contains(KeyModifiers::SHIFT)
-                || key.modifiers.contains(KeyModifiers::ALT) =>
-        {
-            app.chat_editor_mut().insert_newline();
-            app.save_chat_draft();
-        }
-
         _ => {}
     }
 }
