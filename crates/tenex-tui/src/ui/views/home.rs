@@ -67,7 +67,6 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
             HomeTab::Conversations => render_conversations_with_feed(f, app, padded_content),
             HomeTab::Inbox => render_inbox_cards(f, app, padded_content),
             HomeTab::Reports => render_reports_list(f, app, padded_content),
-            HomeTab::Status => render_status_list(f, app, padded_content),
             HomeTab::Feed => render_feed_cards(f, app, padded_content),
             HomeTab::ActiveWork => render_active_work(f, app, padded_content),
             HomeTab::Stats => super::render_stats(f, app, padded_content),
@@ -168,7 +167,6 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let inbox_count = app.inbox_items().iter().filter(|i| !i.is_read).count();
-    let status_count = app.status_threads().iter().filter(|(t, _)| t.status_current_activity.is_some()).count();
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
@@ -197,33 +195,11 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Reports", tab_style(HomeTab::Reports)));
     spans.push(Span::styled("   ", Style::default()));
-    spans.push(Span::styled("Status", tab_style(HomeTab::Status)));
-
-    if status_count > 0 {
-        spans.push(Span::styled(
-            format!(" ({})", status_count),
-            Style::default().fg(theme::ACCENT_SUCCESS),
-        ));
-    }
-
-    spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Feed", tab_style(HomeTab::Feed)));
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Active", tab_style(HomeTab::ActiveWork)));
     spans.push(Span::styled("   ", Style::default()));
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
-
-    // Show archived mode indicator
-    if app.home.show_archived {
-        spans.push(Span::styled("   ", Style::default()));
-        spans.push(Span::styled("[showing archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
-    }
-
-    // Show scheduled filter indicator
-    if app.hide_scheduled {
-        spans.push(Span::styled("   ", Style::default()));
-        spans.push(Span::styled("[hiding scheduled]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
-    }
 
     let header_line = Line::from(spans);
 
@@ -243,12 +219,11 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
             if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),
         Span::styled("   ", blank),
-        Span::styled(if app.home_panel_focus == HomeTab::Status { "──────" } else { "      " },
-            if app.home_panel_focus == HomeTab::Status { accent } else { blank }),
-        Span::styled(if status_count > 0 { "    " } else { "" }, blank),
-        Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Feed { "────" } else { "    " },
             if app.home_panel_focus == HomeTab::Feed { accent } else { blank }),
+        Span::styled("   ", blank),
+        Span::styled(if app.home_panel_focus == HomeTab::ActiveWork { "──────" } else { "      " },
+            if app.home_panel_focus == HomeTab::ActiveWork { accent } else { blank }),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Stats { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Stats { accent } else { blank }),
@@ -1007,189 +982,6 @@ fn render_report_card(
     }
 }
 
-/// Render the Status tab - conversations with status metadata
-fn render_status_list(f: &mut Frame, app: &App, area: Rect) {
-    let status_threads = app.status_threads();
-
-    if status_threads.is_empty() {
-        let empty = Paragraph::new("No conversations with status updates")
-            .style(Style::default().fg(theme::TEXT_MUTED));
-        f.render_widget(empty, area);
-        return;
-    }
-
-    let selected_idx = app.current_selection();
-    let mut y_offset = 0u16;
-
-    for (i, (thread, a_tag)) in status_threads.iter().enumerate() {
-        let is_selected = i == selected_idx;
-        let is_multi_selected = app.is_thread_multi_selected(&thread.id);
-        let card_height = 4u16; // title, summary, activity, spacing
-
-        if y_offset + card_height > area.height {
-            break;
-        }
-
-        let card_area = Rect::new(
-            area.x,
-            area.y + y_offset,
-            area.width,
-            card_height,
-        );
-
-        render_status_card(f, app, thread, a_tag, is_selected, is_multi_selected, card_area);
-        y_offset += card_height;
-    }
-}
-
-/// Render a single status card with table-aligned columns
-/// Layout matches Conversations tab:
-/// [bullet] [title]                    [project]       [status]
-///          [summary/activity]         [author]        [time]
-fn render_status_card(
-    f: &mut Frame,
-    app: &App,
-    thread: &Thread,
-    a_tag: &str,
-    is_selected: bool,
-    is_multi_selected: bool,
-    area: Rect,
-) {
-    let store = app.data_store.borrow();
-    let project_name = store.get_project_name(a_tag);
-    let author_name = store.get_profile_name(&thread.pubkey);
-    drop(store);
-
-    let time_str = crate::ui::format::format_relative_time(thread.last_activity);
-
-    let title_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-    } else {
-        Style::default().fg(theme::TEXT_PRIMARY)
-    };
-
-    let has_activity = thread.status_current_activity.is_some();
-
-    // Column widths for table layout (matching Conversations tab)
-    // Calculate flexible middle column width based on content
-    let author_display = format!("@{}", author_name);
-    let author_actual_len = author_display.chars().count();
-    let project_display_len = project_name.chars().count() + 1; // +1 for bullet glyph
-
-    // Middle column should fit the larger of author or project, with min 22 and max 30
-    let middle_col_content_width = author_actual_len.max(project_display_len);
-    let middle_col_width = middle_col_content_width.clamp(22, 30);
-
-    let right_col_width = 14;
-    let total_width = area.width as usize;
-    let fixed_cols_width = middle_col_width + right_col_width + 2; // +2 for spacing
-    let bullet_width = 2; // "● " or "  "
-    let main_col_width = total_width.saturating_sub(fixed_cols_width + bullet_width);
-
-    // Status text for right column
-    let status_text = thread.status_label.as_ref()
-        .map(|s| format!("{} {}", status_label_to_symbol(s), s))
-        .unwrap_or_default();
-
-    let mut lines: Vec<Line> = Vec::new();
-
-    // LINE 1: [bullet] [title]          [project]       [status]
-    let bullet = if is_selected || has_activity { card::BULLET } else { card::SPACER };
-    let bullet_color = if has_activity { theme::ACCENT_SUCCESS } else { theme::ACCENT_PRIMARY };
-
-    let title_max = main_col_width;
-    let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
-    let title_len = title_truncated.chars().count();
-    let title_padding = main_col_width.saturating_sub(title_len);
-
-    // Project (middle column)
-    let project_truncated = truncate_with_ellipsis(&project_name, middle_col_width.saturating_sub(2));
-    let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
-    let project_len = project_display.chars().count();
-    let project_padding = middle_col_width.saturating_sub(project_len);
-
-    // Status (right column, right-aligned)
-    let status_truncated = truncate_with_ellipsis(&status_text, right_col_width);
-    let status_len = status_truncated.chars().count();
-    let status_padding = right_col_width.saturating_sub(status_len);
-
-    let line1 = Line::from(vec![
-        Span::styled(bullet, Style::default().fg(bullet_color)),
-        Span::styled(title_truncated, title_style),
-        Span::styled(" ".repeat(title_padding), Style::default()),
-        Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))),
-        Span::styled(" ".repeat(project_padding), Style::default()),
-        Span::styled(" ".repeat(status_padding), Style::default()),
-        Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)),
-    ]);
-    lines.push(line1);
-
-    // LINE 2: Summary or activity indicator  [author]        [time]
-    let line2_content = if let Some(ref activity) = thread.status_current_activity {
-        // Show activity with pulsing indicator
-        let indicator = app.activity_indicator();
-        let activity_max = main_col_width.saturating_sub(3); // Space for indicator
-        let activity_text = truncate_with_ellipsis(activity, activity_max);
-        format!("{} {}", indicator, activity_text)
-    } else if let Some(ref summary) = thread.summary {
-        truncate_with_ellipsis(summary, main_col_width)
-    } else {
-        String::new()
-    };
-
-    let line2_style = if thread.status_current_activity.is_some() {
-        Style::default().fg(theme::ACCENT_SUCCESS)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-
-    let line2_len = line2_content.chars().count();
-    let line2_padding = main_col_width.saturating_sub(line2_len);
-
-    // Author (middle column) - author_display already calculated above
-    let author_truncated = truncate_with_ellipsis(&author_display, middle_col_width);
-    let author_len = author_truncated.chars().count();
-    let author_padding = middle_col_width.saturating_sub(author_len);
-
-    // Time (right column, right-aligned)
-    let time_len = time_str.chars().count();
-    let time_padding = right_col_width.saturating_sub(time_len);
-
-    let line2 = Line::from(vec![
-        Span::styled("  ", Style::default()), // Align with title (after bullet)
-        Span::styled(line2_content, line2_style),
-        Span::styled(" ".repeat(line2_padding), Style::default()),
-        Span::styled(author_truncated, Style::default().fg(theme::ACCENT_SPECIAL)),
-        Span::styled(" ".repeat(author_padding), Style::default()),
-        Span::styled(" ".repeat(time_padding), Style::default()),
-        Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)),
-    ]);
-    lines.push(line2);
-
-    // LINE 3: Additional activity line if we have both summary and activity
-    if thread.status_current_activity.is_some() && thread.summary.is_some() {
-        if let Some(ref summary) = thread.summary {
-            let summary_max = main_col_width + middle_col_width + right_col_width;
-            let summary_text = truncate_with_ellipsis(summary, summary_max);
-            let line3 = Line::from(vec![
-                Span::styled("  ", Style::default()),
-                Span::styled(summary_text, Style::default().fg(theme::TEXT_MUTED)),
-            ]);
-            lines.push(line3);
-        }
-    }
-
-    // LINE 4: Spacing
-    lines.push(Line::from(""));
-
-    let content = Paragraph::new(lines);
-
-    if is_selected || is_multi_selected {
-        f.render_widget(content.style(Style::default().bg(theme::BG_SELECTED)), area);
-    } else {
-        f.render_widget(content, area);
-    }
-}
 
 /// Render the Feed tab - kind:1 events (text notes) from visible projects
 fn render_feed_cards(f: &mut Frame, app: &App, area: Rect) {
