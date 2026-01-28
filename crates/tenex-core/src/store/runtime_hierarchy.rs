@@ -1323,4 +1323,266 @@ mod tests {
         assert_eq!(hierarchy.get_effective_last_activity("conv1"), 0);
         assert!(hierarchy.get_individual_last_activity("conv1").is_none());
     }
+
+    // ===== Runtime Cutoff Filtering Tests =====
+
+    #[test]
+    fn test_get_total_runtime_filtered_excludes_pre_cutoff() {
+        // Test that get_total_runtime_filtered excludes conversations created before cutoff
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 86400;  // 1 day before
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400; // 1 day after
+
+        // Parent created before cutoff (should be excluded)
+        hierarchy.set_individual_runtime("parent", 100_000);
+        hierarchy.set_conversation_created_at("parent", pre_cutoff);
+
+        // Child created after cutoff (should be included)
+        hierarchy.set_individual_runtime("child", 50_000);
+        hierarchy.set_conversation_created_at("child", post_cutoff);
+
+        hierarchy.set_parent("child", "parent");
+
+        // Unfiltered total should include both
+        assert_eq!(hierarchy.get_total_runtime("parent"), 150_000);
+
+        // Filtered total should only include child
+        assert_eq!(hierarchy.get_total_runtime_filtered("parent"), 50_000);
+    }
+
+    #[test]
+    fn test_get_total_runtime_filtered_at_cutoff_boundary() {
+        // Test that conversations exactly at cutoff are included
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let before_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
+        let at_cutoff = RUNTIME_CUTOFF_TIMESTAMP;
+
+        hierarchy.set_individual_runtime("before", 100_000);
+        hierarchy.set_conversation_created_at("before", before_cutoff);
+
+        hierarchy.set_individual_runtime("at", 50_000);
+        hierarchy.set_conversation_created_at("at", at_cutoff);
+
+        hierarchy.set_parent("at", "before");
+
+        // Filtered should only include "at" (created exactly at cutoff)
+        assert_eq!(hierarchy.get_total_runtime_filtered("before"), 50_000);
+    }
+
+    #[test]
+    fn test_get_total_runtime_filtered_deep_hierarchy() {
+        // Test filtering with a deep parent-child-grandchild hierarchy
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        // grandparent -> parent -> child
+        hierarchy.set_individual_runtime("grandparent", 10_000);
+        hierarchy.set_conversation_created_at("grandparent", pre_cutoff); // Excluded
+
+        hierarchy.set_individual_runtime("parent", 20_000);
+        hierarchy.set_conversation_created_at("parent", post_cutoff); // Included
+
+        hierarchy.set_individual_runtime("child", 30_000);
+        hierarchy.set_conversation_created_at("child", post_cutoff); // Included
+
+        hierarchy.set_parent("parent", "grandparent");
+        hierarchy.set_parent("child", "parent");
+
+        // Unfiltered: 10k + 20k + 30k = 60k
+        assert_eq!(hierarchy.get_total_runtime("grandparent"), 60_000);
+
+        // Filtered: only parent (20k) + child (30k) = 50k
+        assert_eq!(hierarchy.get_total_runtime_filtered("grandparent"), 50_000);
+    }
+
+    #[test]
+    fn test_get_total_runtime_filtered_multiple_children() {
+        // Test filtering with multiple children, some pre/post cutoff
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        hierarchy.set_individual_runtime("parent", 10_000);
+        hierarchy.set_conversation_created_at("parent", post_cutoff);
+
+        hierarchy.set_individual_runtime("child1", 20_000);
+        hierarchy.set_conversation_created_at("child1", pre_cutoff); // Excluded
+
+        hierarchy.set_individual_runtime("child2", 30_000);
+        hierarchy.set_conversation_created_at("child2", post_cutoff); // Included
+
+        hierarchy.set_individual_runtime("child3", 40_000);
+        hierarchy.set_conversation_created_at("child3", post_cutoff); // Included
+
+        hierarchy.set_parent("child1", "parent");
+        hierarchy.set_parent("child2", "parent");
+        hierarchy.set_parent("child3", "parent");
+
+        // Unfiltered: 10k + 20k + 30k + 40k = 100k
+        assert_eq!(hierarchy.get_total_runtime("parent"), 100_000);
+
+        // Filtered: parent (10k) + child2 (30k) + child3 (40k) = 80k
+        assert_eq!(hierarchy.get_total_runtime_filtered("parent"), 80_000);
+    }
+
+    #[test]
+    fn test_get_total_runtime_filtered_without_created_at() {
+        // Test that conversations without created_at timestamps are excluded
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        // Conversation with created_at
+        hierarchy.set_individual_runtime("with_date", 50_000);
+        hierarchy.set_conversation_created_at("with_date", post_cutoff);
+
+        // Conversation without created_at (not set)
+        hierarchy.set_individual_runtime("without_date", 100_000);
+
+        hierarchy.set_parent("without_date", "with_date");
+
+        // Unfiltered: 50k + 100k = 150k
+        assert_eq!(hierarchy.get_total_runtime("with_date"), 150_000);
+
+        // Filtered: only with_date (50k) because without_date has no created_at
+        assert_eq!(hierarchy.get_total_runtime_filtered("with_date"), 50_000);
+    }
+
+    #[test]
+    fn test_get_top_conversations_by_runtime_filters_cutoff() {
+        // Test that get_top_conversations_by_runtime correctly filters by cutoff
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        // Root 1: created before cutoff (should be excluded from ranking)
+        hierarchy.set_individual_runtime("root1", 200_000);
+        hierarchy.set_conversation_created_at("root1", pre_cutoff);
+
+        // Root 2: created after cutoff
+        hierarchy.set_individual_runtime("root2", 100_000);
+        hierarchy.set_conversation_created_at("root2", post_cutoff);
+
+        // Root 3: created after cutoff with child
+        hierarchy.set_individual_runtime("root3", 50_000);
+        hierarchy.set_conversation_created_at("root3", post_cutoff);
+        hierarchy.set_individual_runtime("child3", 75_000);
+        hierarchy.set_conversation_created_at("child3", post_cutoff);
+        hierarchy.set_parent("child3", "root3");
+
+        let top = hierarchy.get_top_conversations_by_runtime(10);
+
+        // Should return 2 conversations (root1 excluded because it's before cutoff)
+        assert_eq!(top.len(), 2, "Should exclude pre-cutoff conversations");
+
+        // root3 should be first (50k + 75k = 125k)
+        assert_eq!(top[0].0, "root3");
+        assert_eq!(top[0].1, 125_000);
+
+        // root2 should be second (100k)
+        assert_eq!(top[1].0, "root2");
+        assert_eq!(top[1].1, 100_000);
+    }
+
+    #[test]
+    fn test_get_top_conversations_by_runtime_mixed_children() {
+        // Test top conversations with children that span the cutoff
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 1;
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        // Root created after cutoff
+        hierarchy.set_individual_runtime("root", 10_000);
+        hierarchy.set_conversation_created_at("root", post_cutoff);
+
+        // Child 1: before cutoff (should be excluded)
+        hierarchy.set_individual_runtime("child1", 50_000);
+        hierarchy.set_conversation_created_at("child1", pre_cutoff);
+        hierarchy.set_parent("child1", "root");
+
+        // Child 2: after cutoff (should be included)
+        hierarchy.set_individual_runtime("child2", 30_000);
+        hierarchy.set_conversation_created_at("child2", post_cutoff);
+        hierarchy.set_parent("child2", "root");
+
+        let top = hierarchy.get_top_conversations_by_runtime(10);
+
+        assert_eq!(top.len(), 1);
+        assert_eq!(top[0].0, "root");
+        // Should only count root (10k) + child2 (30k) = 40k, excluding child1
+        assert_eq!(top[0].1, 40_000);
+    }
+
+    #[test]
+    fn test_get_top_conversations_by_runtime_limit() {
+        // Test that limit parameter works correctly
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
+
+        for i in 1..=20 {
+            let conv_id = format!("conv{}", i);
+            hierarchy.set_individual_runtime(&conv_id, i * 1000);
+            hierarchy.set_conversation_created_at(&conv_id, post_cutoff);
+        }
+
+        let top_5 = hierarchy.get_top_conversations_by_runtime(5);
+        assert_eq!(top_5.len(), 5, "Should respect limit parameter");
+
+        // Should be sorted by runtime descending
+        assert_eq!(top_5[0].0, "conv20");
+        assert_eq!(top_5[0].1, 20_000);
+        assert_eq!(top_5[4].0, "conv16");
+        assert_eq!(top_5[4].1, 16_000);
+    }
+
+    #[test]
+    fn test_get_runtime_by_day_filters_cutoff() {
+        // Test that get_runtime_by_day excludes data before cutoff
+        let mut hierarchy = RuntimeHierarchy::new();
+
+        // Use current time to ensure data is within the time window
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+
+        // Create timestamps relative to today but respecting the cutoff
+        let yesterday = today_start - seconds_per_day;
+        let two_days_ago = today_start - (2 * seconds_per_day);
+
+        // Use the cutoff timestamp if it's more recent than our test data
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 86400;
+
+        // Conversation before cutoff (should be excluded)
+        hierarchy.set_individual_runtime("conv1", 100_000);
+        hierarchy.set_conversation_created_at("conv1", pre_cutoff);
+
+        // Conversation from 2 days ago (after cutoff, within window)
+        hierarchy.set_individual_runtime("conv2", 50_000);
+        hierarchy.set_conversation_created_at("conv2", two_days_ago.max(RUNTIME_CUTOFF_TIMESTAMP));
+
+        // Conversation from yesterday (after cutoff, within window)
+        hierarchy.set_individual_runtime("conv3", 75_000);
+        hierarchy.set_conversation_created_at("conv3", yesterday.max(RUNTIME_CUTOFF_TIMESTAMP + 86400));
+
+        let by_day = hierarchy.get_runtime_by_day(365);
+
+        // Should have 2 days (two_days_ago and yesterday), excluding pre-cutoff
+        assert_eq!(by_day.len(), 2, "Should have 2 days of runtime data");
+
+        // Verify total runtime across both days
+        let total_runtime: u64 = by_day.iter().map(|(_, runtime)| runtime).sum();
+        assert_eq!(total_runtime, 125_000, "Total should be conv2 + conv3");
+    }
 }
