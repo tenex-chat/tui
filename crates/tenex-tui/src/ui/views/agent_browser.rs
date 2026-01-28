@@ -37,6 +37,11 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::CommandPalette(ref state) = app.modal_state {
         super::render_command_palette(f, area, app, state.selected_index);
     }
+
+    // App settings modal overlay (comma key - globally available)
+    if let ModalState::AppSettings(ref state) = app.modal_state {
+        super::render_app_settings(f, app, area, state);
+    }
 }
 
 /// Render the agent list with search filter
