@@ -21,6 +21,7 @@ pub mod stats;
 pub mod workspace_modal;
 
 pub use agent_browser::render_agent_browser;
+pub use app_settings::render_app_settings;
 pub use ask_modal::render_ask_modal;
 pub use chat::render_chat;
 pub use command_palette::render_command_palette;
