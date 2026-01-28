@@ -3505,7 +3505,7 @@ impl App {
                 (state.query.clone(), filter)
             }
             _ => {
-                // Early return: clear stale results when modal not active
+                // Early return: modal not active, nothing to update
                 return;
             }
         };
@@ -3546,110 +3546,120 @@ impl App {
             })
             .collect();
 
-        // Collect draft entries - single pass through all drafts
+        // Collect draft entries with proper deduplication (keep most recent by last_modified)
         let all_drafts = self.draft_service.get_all_searchable_drafts();
-        let mut seen_draft_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        // Process all chat drafts in a single pass
-        for draft in &all_drafts.chat_drafts {
+        // Helper: Try to add a chat-style draft, keeping the most recent version if duplicate
+        // Returns true if added/updated, false if filtered out
+        fn try_add_chat_draft(
+            drafts_by_id: &mut std::collections::HashMap<String, (String, Option<String>, u64)>,
+            conversation_id: &str,
+            text: &str,
+            project_a_tag: Option<&str>,
+            last_modified: u64,
+            filter_project: Option<&str>,
+            terms: &[String],
+            draft_matches_project_fn: fn(Option<&str>, &str) -> bool,
+            text_matches_terms_fn: fn(&str, &[String]) -> bool,
+        ) -> bool {
             // Skip empty drafts
-            if draft.text.trim().is_empty() {
-                continue;
+            if text.trim().is_empty() {
+                return false;
             }
-
-            // Skip duplicates
-            if seen_draft_ids.contains(&draft.conversation_id) {
-                continue;
-            }
-
-            // Apply project filter with exact matching
-            if let Some(ref filter) = filter_project {
-                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
-                    continue;
+            // Apply project filter
+            if let Some(filter) = filter_project {
+                if !draft_matches_project_fn(project_a_tag, filter) {
+                    return false;
                 }
             }
-
-            // Apply search term filter with unified semantics
-            if !text_matches_terms(&draft.text, &terms) {
-                continue;
+            // Apply search term filter
+            if !text_matches_terms_fn(text, terms) {
+                return false;
             }
+            // Keep most recent by last_modified (not first-seen)
+            let should_insert = drafts_by_id
+                .get(conversation_id)
+                .map(|(_, _, existing_ts)| last_modified > *existing_ts)
+                .unwrap_or(true);
+            if should_insert {
+                drafts_by_id.insert(
+                    conversation_id.to_string(),
+                    (text.to_string(), project_a_tag.map(|s| s.to_string()), last_modified),
+                );
+            }
+            true
+        }
 
-            seen_draft_ids.insert(draft.conversation_id.clone());
-            entries.push(HistorySearchEntry {
-                kind: HistorySearchEntryKind::Draft {
-                    draft_id: draft.conversation_id.clone(),
-                    conversation_id: draft.conversation_id.clone(),
-                    project_a_tag: draft.project_a_tag.clone(),
-                },
-                content: draft.text.clone(),
-                created_at: draft.last_modified,
-            });
+        // Merge all chat/versioned/archived drafts, keeping most recent per conversation_id
+        let mut drafts_by_id: std::collections::HashMap<String, (String, Option<String>, u64)> =
+            std::collections::HashMap::new();
+
+        // Process chat drafts
+        for draft in &all_drafts.chat_drafts {
+            try_add_chat_draft(
+                &mut drafts_by_id,
+                &draft.conversation_id,
+                &draft.text,
+                draft.project_a_tag.as_deref(),
+                draft.last_modified,
+                filter_project.as_deref(),
+                &terms,
+                draft_matches_project,
+                text_matches_terms,
+            );
         }
 
         // Process versioned drafts
         for draft in &all_drafts.versioned_drafts {
-            if draft.text.trim().is_empty() {
-                continue;
-            }
-            if seen_draft_ids.contains(&draft.conversation_id) {
-                continue;
-            }
-            if let Some(ref filter) = filter_project {
-                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
-                    continue;
-                }
-            }
-            if !text_matches_terms(&draft.text, &terms) {
-                continue;
-            }
-
-            seen_draft_ids.insert(draft.conversation_id.clone());
-            entries.push(HistorySearchEntry {
-                kind: HistorySearchEntryKind::Draft {
-                    draft_id: draft.conversation_id.clone(),
-                    conversation_id: draft.conversation_id.clone(),
-                    project_a_tag: draft.project_a_tag.clone(),
-                },
-                content: draft.text.clone(),
-                created_at: draft.last_modified,
-            });
+            try_add_chat_draft(
+                &mut drafts_by_id,
+                &draft.conversation_id,
+                &draft.text,
+                draft.project_a_tag.as_deref(),
+                draft.last_modified,
+                filter_project.as_deref(),
+                &terms,
+                draft_matches_project,
+                text_matches_terms,
+            );
         }
 
         // Process archived drafts
         for draft in &all_drafts.archived_drafts {
-            if draft.text.trim().is_empty() {
-                continue;
-            }
-            if seen_draft_ids.contains(&draft.conversation_id) {
-                continue;
-            }
-            if let Some(ref filter) = filter_project {
-                if !draft_matches_project(draft.project_a_tag.as_deref(), filter) {
-                    continue;
-                }
-            }
-            if !text_matches_terms(&draft.text, &terms) {
-                continue;
-            }
+            try_add_chat_draft(
+                &mut drafts_by_id,
+                &draft.conversation_id,
+                &draft.text,
+                draft.project_a_tag.as_deref(),
+                draft.last_modified,
+                filter_project.as_deref(),
+                &terms,
+                draft_matches_project,
+                text_matches_terms,
+            );
+        }
 
-            seen_draft_ids.insert(draft.conversation_id.clone());
+        // Convert merged drafts to entries
+        for (conversation_id, (text, project_a_tag, last_modified)) in drafts_by_id {
             entries.push(HistorySearchEntry {
                 kind: HistorySearchEntryKind::Draft {
-                    draft_id: draft.conversation_id.clone(),
-                    conversation_id: draft.conversation_id.clone(),
-                    project_a_tag: draft.project_a_tag.clone(),
+                    draft_id: conversation_id.clone(),
+                    conversation_id,
+                    project_a_tag,
                 },
-                content: draft.text.clone(),
-                created_at: draft.last_modified,
+                content: text,
+                created_at: last_modified,
             });
         }
 
-        // Process named drafts
+        // Process named drafts (use explicit NamedDraft variant - no conversation_id overloading)
+        // Named drafts have their own ID namespace, so track separately
+        let mut seen_named_draft_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for draft in &all_drafts.named_drafts {
             if draft.text.trim().is_empty() {
                 continue;
             }
-            if seen_draft_ids.contains(&draft.id) {
+            if seen_named_draft_ids.contains(&draft.id) {
                 continue;
             }
             if let Some(ref filter) = filter_project {
@@ -3661,12 +3671,12 @@ impl App {
                 continue;
             }
 
-            seen_draft_ids.insert(draft.id.clone());
+            seen_named_draft_ids.insert(draft.id.clone());
             entries.push(HistorySearchEntry {
-                kind: HistorySearchEntryKind::Draft {
+                kind: HistorySearchEntryKind::NamedDraft {
                     draft_id: draft.id.clone(),
-                    conversation_id: draft.project_a_tag.clone(), // Named drafts navigate to project
-                    project_a_tag: Some(draft.project_a_tag.clone()),
+                    name: draft.name.clone(),
+                    project_a_tag: draft.project_a_tag.clone(),
                 },
                 content: draft.text.clone(),
                 created_at: draft.last_modified,
