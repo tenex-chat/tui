@@ -55,10 +55,9 @@ struct ConversationsTabView: View {
                 } else {
                     List {
                         ForEach(rootConversations, id: \.id) { conversation in
-                            ConversationTreeNode(
+                            HierarchyConversationRow(
                                 conversation: conversation,
                                 allConversations: allConversations,
-                                depth: 0,
                                 projectTitle: projectTitle(for: conversation),
                                 onSelect: { selected in
                                     selectedConversation = selected
@@ -153,7 +152,222 @@ struct ConversationsTabView: View {
     }
 }
 
-// MARK: - Conversation Tree Node (Recursive)
+// MARK: - Hierarchy Conversation Row (Shows aggregated info from nested conversations)
+
+private struct HierarchyConversationRow: View {
+    let conversation: ConversationInfo
+    let allConversations: [ConversationInfo]
+    let projectTitle: String?
+    let onSelect: (ConversationInfo) -> Void
+
+    /// All descendants of this conversation (children, grandchildren, etc.)
+    private var allDescendants: [ConversationInfo] {
+        var descendants: [ConversationInfo] = []
+        var queue = allConversations.filter { $0.parentId == conversation.id }
+
+        while !queue.isEmpty {
+            let current = queue.removeFirst()
+            descendants.append(current)
+            let children = allConversations.filter { $0.parentId == current.id }
+            queue.append(contentsOf: children)
+        }
+
+        return descendants
+    }
+
+    /// Effective last activity (max across all nested conversations)
+    private var effectiveLastActivity: UInt64 {
+        let allActivities = [conversation.lastActivity] + allDescendants.map { $0.lastActivity }
+        return allActivities.max() ?? conversation.lastActivity
+    }
+
+    /// Total running time across all nested conversations
+    /// Calculated as (last activity - first activity) for the entire hierarchy
+    private var totalRunningTime: TimeInterval {
+        let allTimestamps = [conversation.lastActivity] + allDescendants.map { $0.lastActivity }
+        guard let earliest = allTimestamps.min(),
+              let latest = allTimestamps.max() else {
+            return 0
+        }
+        return TimeInterval(latest - earliest)
+    }
+
+    /// All unique participating agents (including from nested conversations)
+    private var participatingAgents: [String] {
+        var agents = Set<String>()
+        agents.insert(conversation.author)
+        for descendant in allDescendants {
+            agents.insert(descendant.author)
+        }
+        // Filter out user-looking authors (those that don't contain "agent" or similar patterns)
+        return agents.sorted()
+    }
+
+    /// Status color based on conversation status
+    private var statusColor: Color {
+        switch conversation.status {
+        case "active": return .green
+        case "waiting": return .orange
+        case "completed": return .gray
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Status indicator
+            Circle()
+                .fill(statusColor)
+                .frame(width: 10, height: 10)
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Row 1: Title and effective last active time
+                HStack(alignment: .top) {
+                    Text(conversation.title)
+                        .font(.headline)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    Text(formatRelativeTime(effectiveLastActivity))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Row 2: Summary and total running time
+                HStack(alignment: .top) {
+                    if let summary = conversation.summary {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text("No summary")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .italic()
+                    }
+
+                    Spacer()
+
+                    if totalRunningTime > 0 {
+                        Text(formatDuration(totalRunningTime))
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+
+                // Row 3: Participating agent avatars (without initiator label)
+                HStack(spacing: -8) {
+                    ForEach(participatingAgents.prefix(6), id: \.self) { agent in
+                        AgentAvatar(agentName: agent)
+                    }
+
+                    // Show overflow count if more than 6 agents
+                    if participatingAgents.count > 6 {
+                        Circle()
+                            .fill(Color(.systemGray4))
+                            .frame(width: 24, height: 24)
+                            .overlay {
+                                Text("+\(participatingAgents.count - 6)")
+                                    .font(.caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                            }
+                    }
+
+                    Spacer()
+
+                    // Show project title badge if available
+                    if let projectTitle = projectTitle {
+                        Text(projectTitle)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundStyle(.blue)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(conversation)
+        }
+    }
+
+    // MARK: - Formatting Helpers
+
+    private func formatRelativeTime(_ timestamp: UInt64) -> String {
+        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let hours = Int(seconds) / 3600
+        let minutes = (Int(seconds) % 3600) / 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m"
+        } else {
+            return "<1m"
+        }
+    }
+}
+
+// MARK: - Agent Avatar View
+
+private struct AgentAvatar: View {
+    let agentName: String
+
+    /// Generate a consistent color based on agent name
+    private var avatarColor: Color {
+        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan, .mint]
+        let hash = agentName.hashValue
+        return colors[abs(hash) % colors.count]
+    }
+
+    /// Get initials from agent name
+    private var initials: String {
+        let parts = agentName.split(separator: "-")
+        if parts.count >= 2 {
+            // For names like "claude-code" -> "CC"
+            return String(parts.prefix(2).compactMap { $0.first }.map { String($0).uppercased() }.joined())
+        } else if let first = agentName.first {
+            // Single word -> first two chars
+            let chars = agentName.prefix(2)
+            return String(chars).uppercased()
+        }
+        return "?"
+    }
+
+    var body: some View {
+        Circle()
+            .fill(avatarColor.gradient)
+            .frame(width: 24, height: 24)
+            .overlay {
+                Text(initials)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .overlay {
+                Circle()
+                    .stroke(Color(.systemBackground), lineWidth: 2)
+            }
+    }
+}
+
+// MARK: - Legacy Conversation Tree Node (Recursive) - Kept for reference
 
 private struct ConversationTreeNode: View {
     let conversation: ConversationInfo
