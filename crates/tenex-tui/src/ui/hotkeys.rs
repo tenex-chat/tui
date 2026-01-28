@@ -181,6 +181,9 @@ pub enum HotkeyContext {
 
     /// History search modal (Ctrl+R)
     HistorySearchModal,
+
+    /// Workspace manager modal
+    WorkspaceManagerModal,
 }
 
 impl HotkeyContext {
@@ -219,6 +222,7 @@ impl HotkeyContext {
             ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
             ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
             ModalState::HistorySearch(_) => return HotkeyContext::HistorySearchModal,
+            ModalState::WorkspaceManager(_) => return HotkeyContext::WorkspaceManagerModal,
             ModalState::NudgeList(_) => return HotkeyContext::AnyModal,
             ModalState::NudgeCreate(_) => return HotkeyContext::AnyModal,
             ModalState::NudgeDetail(_) => return HotkeyContext::AnyModal,

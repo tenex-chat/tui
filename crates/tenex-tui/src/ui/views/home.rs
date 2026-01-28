@@ -163,6 +163,14 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     if let ModalState::NudgeDeleteConfirm(ref state) = app.modal_state {
         super::render_nudge_delete_confirm(f, app, area, state);
     }
+
+    // Workspace manager modal
+    if let ModalState::WorkspaceManager(ref state) = app.modal_state {
+        let workspaces = app.preferences.borrow().workspaces().to_vec();
+        let projects = app.data_store.borrow().get_projects().to_vec();
+        let active_id = app.preferences.borrow().active_workspace_id().map(String::from);
+        super::render_workspace_manager(f, area, state, &workspaces, &projects, active_id.as_deref());
+    }
 }
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
@@ -207,6 +215,13 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let accent = Style::default().fg(theme::ACCENT_PRIMARY);
     let blank = Style::default();
 
+    // Calculate dynamic spacing for inbox count
+    let inbox_count_width = if inbox_count > 0 {
+        format!(" ({})", inbox_count).len()
+    } else {
+        0
+    };
+
     let indicator_spans = vec![
         Span::styled("         ", blank), // Padding for "  TENEX  "
         Span::styled(if app.home_panel_focus == HomeTab::Conversations { "─────────────" } else { "             " },
@@ -214,7 +229,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Inbox { "─────" } else { "     " },
             if app.home_panel_focus == HomeTab::Inbox { accent } else { blank }),
-        Span::styled(if inbox_count > 0 { "    " } else { "" }, blank),
+        Span::styled(" ".repeat(inbox_count_width), blank),
         Span::styled("   ", blank),
         Span::styled(if app.home_panel_focus == HomeTab::Reports { "───────" } else { "       " },
             if app.home_panel_focus == HomeTab::Reports { accent } else { blank }),

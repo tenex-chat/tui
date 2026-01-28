@@ -305,12 +305,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let all_projects: Vec<_> = online.iter().chain(offline.iter()).collect();
             if let Some(project) = all_projects.get(app.sidebar_project_index) {
                 let a_tag = project.a_tag();
-                if app.visible_projects.contains(&a_tag) {
-                    app.visible_projects.remove(&a_tag);
-                } else {
-                    app.visible_projects.insert(a_tag);
-                }
-                app.save_selected_projects();
+                app.toggle_project_visibility(&a_tag);
 
                 // Clamp selection to valid range after filtering change
                 let current = app.current_selection();
@@ -718,8 +713,13 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.switch_to_tab(tab_idx);
                     app.chat_editor_mut().clear();
                 } else {
+                    // Clear workspace - we're now in manual mode showing only this project
+                    if app.preferences.borrow().active_workspace_id().is_some() {
+                        app.preferences.borrow_mut().set_active_workspace(None);
+                    }
                     app.visible_projects.clear();
                     app.visible_projects.insert(a_tag);
+                    app.save_selected_projects();
                 }
             }
             SelectorAction::Cancelled => {

@@ -130,14 +130,6 @@ impl StatsSubtab {
 // ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState,
 // LocalStreamBuffer, ConversationState are now in ui::state module
 
-/// Vim mode states
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum VimMode {
-    #[default]
-    Normal,
-    Insert,
-}
-
 /// Focus state for the context line (agent/model/branch bar below input)
 /// None means the text input is focused, Some(X) means item X in context line is selected
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -295,13 +287,8 @@ pub struct App {
     // NOTE: message_history is now per-tab in OpenTab.message_history
     // NOTE: chat_search is now per-tab in OpenTab.chat_search
 
-    /// Whether vim mode is enabled
-    pub vim_enabled: bool,
-    /// Current vim mode (Normal or Insert)
-    pub vim_mode: VimMode,
-    // NOTE: show_archived is now in home: HomeViewState
-    /// Whether to show archived projects in the sidebar
-    pub show_archived_projects: bool,
+    /// Whether to show archived items (conversations, projects, etc.) - unified global state
+    pub show_archived: bool,
     /// Whether to hide scheduled events from conversation list
     pub hide_scheduled: bool,
     /// Whether user explicitly selected an agent in the current conversation
@@ -389,10 +376,7 @@ impl App {
             // NOTE: selected_nudge_ids is now per-tab in OpenTab
             // NOTE: frame_counter is now managed by notification_manager
             // NOTE: message_history is now per-tab in OpenTab
-            // NOTE: show_archived, time_filter, agent_browser_* are now in home: HomeViewState
-            vim_enabled: false,
-            vim_mode: VimMode::Normal,
-            show_archived_projects: false,
+            show_archived: false,
             hide_scheduled: false,
             user_explicitly_selected_agent: false,
             last_undo_action: None,
@@ -2718,7 +2702,14 @@ impl App {
     /// Load filter preferences from storage
     pub fn load_filter_preferences(&mut self) {
         let prefs = self.preferences.borrow();
-        self.visible_projects = prefs.selected_projects().iter().cloned().collect();
+
+        // If there's an active workspace, use its projects; otherwise use manual selection
+        if let Some(workspace) = prefs.active_workspace() {
+            self.visible_projects = workspace.project_ids.iter().cloned().collect();
+        } else {
+            self.visible_projects = prefs.selected_projects().iter().cloned().collect();
+        }
+
         self.home.time_filter = prefs.time_filter();
         self.conversation.show_llm_metadata = prefs.show_llm_metadata();
         self.hide_scheduled = prefs.hide_scheduled();
@@ -2728,6 +2719,48 @@ impl App {
     pub fn save_selected_projects(&self) {
         let projects: Vec<String> = self.visible_projects.iter().cloned().collect();
         self.preferences.borrow_mut().set_selected_projects(projects);
+    }
+
+    /// Apply a workspace - sets visible_projects based on workspace's project list
+    /// Pass None to clear the active workspace (returns to manual project selection mode)
+    pub fn apply_workspace(&mut self, workspace_id: Option<&str>, project_ids: &[String]) {
+        self.preferences.borrow_mut().set_active_workspace(workspace_id);
+
+        if workspace_id.is_some() {
+            // Apply workspace's project list
+            self.visible_projects = project_ids.iter().cloned().collect();
+            // Also save to selected_projects for persistence
+            self.save_selected_projects();
+        }
+        // If None, visible_projects stays as-is (manual selection mode)
+    }
+
+    /// Toggle a project's visibility (manual selection mode)
+    /// Clears the active workspace since we're now in manual mode
+    pub fn toggle_project_visibility(&mut self, a_tag: &str) {
+        // Clear active workspace - we're now in manual mode
+        if self.preferences.borrow().active_workspace_id().is_some() {
+            self.preferences.borrow_mut().set_active_workspace(None);
+        }
+
+        if self.visible_projects.contains(a_tag) {
+            self.visible_projects.remove(a_tag);
+        } else {
+            self.visible_projects.insert(a_tag.to_string());
+        }
+        self.save_selected_projects();
+    }
+
+    /// Add a project to visible projects (manual selection mode)
+    /// Clears the active workspace since we're now in manual mode
+    pub fn add_visible_project(&mut self, a_tag: String) {
+        // Clear active workspace - we're now in manual mode
+        if self.preferences.borrow().active_workspace_id().is_some() {
+            self.preferences.borrow_mut().set_active_workspace(None);
+        }
+
+        self.visible_projects.insert(a_tag);
+        self.save_selected_projects();
     }
 
     /// Cycle through time filter options and persist
@@ -3663,22 +3696,28 @@ impl App {
                 // Look up the thread to get its title
                 let (title, target) = if let Some(thread) = store.get_thread_by_id(thread_id) {
                     // Try to find the target agent name
+                    // Priority: 1) kind:0 profile, 2) agent slug from project status, 3) short pubkey
                     let target_name = thread.p_tags.first()
-                        .and_then(|pk| {
-                            // Find project status and look up agent name
-                            store.find_project_for_thread(thread_id)
-                                .and_then(|a_tag| store.get_project_status(&a_tag))
-                                .and_then(|status| {
-                                    status.agents.iter()
-                                        .find(|a| a.pubkey == *pk)
-                                        .map(|a| a.name.clone())
-                                })
+                        .map(|pk| {
+                            // Primary: Use kind:0 profile name
+                            let profile_name = store.get_profile_name(pk);
+
+                            // If profile name is just short pubkey, try project status as fallback
+                            if profile_name.ends_with("...") {
+                                // Fallback: Try agent slug from project status
+                                store.find_project_for_thread(thread_id)
+                                    .and_then(|a_tag| store.get_project_status(&a_tag))
+                                    .and_then(|status| {
+                                        status.agents.iter()
+                                            .find(|a| a.pubkey == *pk)
+                                            .map(|a| a.name.clone())
+                                    })
+                                    .unwrap_or(profile_name)
+                            } else {
+                                profile_name
+                            }
                         })
-                        .unwrap_or_else(|| {
-                            thread.p_tags.first()
-                                .map(|pk| format!("{}...", &pk[..8.min(pk.len())]))
-                                .unwrap_or_else(|| "Unknown".to_string())
-                        });
+                        .unwrap_or_else(|| "Unknown".to_string());
 
                     (thread.title.clone(), target_name)
                 } else {

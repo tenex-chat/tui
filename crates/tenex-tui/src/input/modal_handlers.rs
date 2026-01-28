@@ -177,6 +177,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle workspace manager modal when open
+    if matches!(app.modal_state, ModalState::WorkspaceManager(_)) {
+        handle_workspace_manager_key(app, key);
+        return Ok(true);
+    }
+
     Ok(false)
 }
 
@@ -2726,4 +2732,173 @@ fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
             app.modal_state = ModalState::NudgeDeleteConfirm(state);
         }
     }
+}
+
+// =============================================================================
+// WORKSPACE MANAGER MODAL
+// =============================================================================
+
+fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::{WorkspaceFocus, WorkspaceMode};
+
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::WorkspaceManager(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    let mut state = state;
+
+    match state.mode {
+        WorkspaceMode::List => {
+            let workspaces = app.preferences.borrow().workspaces().to_vec();
+            let workspace_count = workspaces.len();
+
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.modal_state = ModalState::None;
+                    return;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    state.move_up();
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    state.move_down(workspace_count);
+                }
+                KeyCode::Enter => {
+                    // Switch to selected workspace
+                    if let Some(workspace) = workspaces.get(state.selected_index) {
+                        let workspace_id = workspace.id.clone();
+                        let project_ids = workspace.project_ids.clone();
+                        app.apply_workspace(Some(&workspace_id), &project_ids);
+                        app.set_warning_status(&format!("Switched to workspace: {}", workspace.name));
+                        app.modal_state = ModalState::None;
+                        return;
+                    }
+                }
+                KeyCode::Char('n') => {
+                    // Create new workspace
+                    state.enter_create_mode();
+                }
+                KeyCode::Char('e') => {
+                    // Edit selected workspace
+                    if let Some(workspace) = workspaces.get(state.selected_index) {
+                        state.enter_edit_mode(workspace);
+                    }
+                }
+                KeyCode::Char('d') => {
+                    // Delete selected workspace
+                    if !workspaces.is_empty() {
+                        state.enter_delete_mode();
+                    }
+                }
+                KeyCode::Char('p') => {
+                    // Toggle pin on selected workspace
+                    if let Some(workspace) = workspaces.get(state.selected_index) {
+                        let is_pinned = app.preferences.borrow_mut().toggle_workspace_pinned(&workspace.id);
+                        let msg = if is_pinned { "pinned" } else { "unpinned" };
+                        app.set_warning_status(&format!("Workspace {}", msg));
+                    }
+                }
+                KeyCode::Backspace => {
+                    // Clear active workspace (show all projects)
+                    app.apply_workspace(None, &[]);
+                    app.set_warning_status("Cleared workspace - showing manual project selection");
+                }
+                _ => {}
+            }
+        }
+        WorkspaceMode::Create | WorkspaceMode::Edit => {
+            // Get projects for the selector
+            let projects: Vec<_> = {
+                let store = app.data_store.borrow();
+                store.get_projects().to_vec()
+            };
+            let project_count = projects.len();
+
+            match key.code {
+                KeyCode::Esc => {
+                    state.back_to_list();
+                }
+                KeyCode::Tab => {
+                    // Switch focus between Name and Projects
+                    state.focus = match state.focus {
+                        WorkspaceFocus::Name => WorkspaceFocus::Projects,
+                        WorkspaceFocus::Projects => WorkspaceFocus::Name,
+                    };
+                }
+                KeyCode::Up | KeyCode::Char('k') if state.focus == WorkspaceFocus::Projects => {
+                    if state.project_selector_index > 0 {
+                        state.project_selector_index -= 1;
+                    }
+                }
+                KeyCode::Down | KeyCode::Char('j') if state.focus == WorkspaceFocus::Projects => {
+                    if state.project_selector_index + 1 < project_count {
+                        state.project_selector_index += 1;
+                    }
+                }
+                KeyCode::Char(' ') if state.focus == WorkspaceFocus::Projects => {
+                    // Toggle project selection
+                    if let Some(project) = projects.get(state.project_selector_index) {
+                        state.toggle_project(&project.a_tag());
+                    }
+                }
+                KeyCode::Enter => {
+                    if state.can_save() {
+                        // Save workspace
+                        let name = state.editing_name.clone();
+                        let project_ids: Vec<String> = state.editing_project_ids.iter().cloned().collect();
+
+                        if state.mode == WorkspaceMode::Create {
+                            let ws = app.preferences.borrow_mut().add_workspace(name.clone(), project_ids);
+                            app.set_warning_status(&format!("Created workspace: {}", name));
+                            // Auto-activate the new workspace
+                            let ws_project_ids = ws.project_ids.clone();
+                            app.apply_workspace(Some(&ws.id), &ws_project_ids);
+                        } else if let Some(ref id) = state.editing_workspace_id {
+                            app.preferences.borrow_mut().update_workspace(id, name.clone(), project_ids.clone());
+                            app.set_warning_status(&format!("Updated workspace: {}", name));
+                            // If editing the active workspace, re-apply it
+                            if app.preferences.borrow().active_workspace_id() == Some(id.as_str()) {
+                                app.apply_workspace(Some(id), &project_ids);
+                            }
+                        }
+                        app.modal_state = ModalState::None;
+                        return;
+                    }
+                }
+                KeyCode::Char(c) if state.focus == WorkspaceFocus::Name => {
+                    state.editing_name.push(c);
+                }
+                KeyCode::Backspace if state.focus == WorkspaceFocus::Name => {
+                    state.editing_name.pop();
+                }
+                _ => {}
+            }
+        }
+        WorkspaceMode::Delete => {
+            let workspaces = app.preferences.borrow().workspaces().to_vec();
+
+            match key.code {
+                KeyCode::Esc => {
+                    state.back_to_list();
+                }
+                KeyCode::Enter | KeyCode::Char('d') => {
+                    // Confirm delete
+                    if let Some(workspace) = workspaces.get(state.selected_index) {
+                        let name = workspace.name.clone();
+                        app.preferences.borrow_mut().delete_workspace(&workspace.id);
+                        app.set_warning_status(&format!("Deleted workspace: {}", name));
+                        state.selected_index = state.selected_index.saturating_sub(1);
+                        state.back_to_list();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    app.modal_state = ModalState::WorkspaceManager(state);
 }
