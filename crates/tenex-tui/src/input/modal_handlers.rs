@@ -7,6 +7,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::nostr::NostrCommand;
 use crate::ui;
+use crate::ui::modal::AppSetting;
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::{App, InputMode, ModalState, View};
 use tenex_core::stats::query_events_by_e_tag;
@@ -180,6 +181,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle workspace manager modal when open
     if matches!(app.modal_state, ModalState::WorkspaceManager(_)) {
         handle_workspace_manager_key(app, key);
+        return Ok(true);
+    }
+
+    // Handle app settings modal when open
+    if matches!(app.modal_state, ModalState::AppSettings(_)) {
+        handle_app_settings_key(app, key);
         return Ok(true);
     }
 
@@ -2912,4 +2919,93 @@ fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
     }
 
     app.modal_state = ModalState::WorkspaceManager(state);
+}
+
+// =============================================================================
+// APP SETTINGS MODAL
+// =============================================================================
+
+fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
+    let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::AppSettings(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
+        }
+    };
+
+    let mut state = state;
+
+    match key.code {
+        KeyCode::Esc => {
+            if state.editing {
+                // Cancel editing, restore original value based on which setting was selected
+                state.stop_editing();
+                match state.selected_setting() {
+                    Some(AppSetting::JaegerEndpoint) => {
+                        state.jaeger_endpoint_input =
+                            app.preferences.borrow().jaeger_endpoint().to_string();
+                    }
+                    None => {}
+                }
+                app.modal_state = ModalState::AppSettings(state);
+            } else {
+                // Close the modal
+                app.modal_state = ModalState::None;
+            }
+            return;
+        }
+        KeyCode::Enter => {
+            if state.editing {
+                // Save the value based on which setting is selected
+                match state.selected_setting() {
+                    Some(AppSetting::JaegerEndpoint) => {
+                        let new_endpoint = state.jaeger_endpoint_input.clone();
+                        let save_result =
+                            app.preferences.borrow_mut().set_jaeger_endpoint(new_endpoint);
+                        match save_result {
+                            Ok(()) => {
+                                app.set_warning_status("Jaeger endpoint saved");
+                            }
+                            Err(e) => {
+                                app.set_warning_status(&format!("Failed to save: {}", e));
+                            }
+                        }
+                    }
+                    None => {}
+                }
+                state.stop_editing();
+            } else {
+                // Start editing the currently selected setting
+                state.start_editing();
+            }
+        }
+        KeyCode::Char(c) if state.editing => {
+            // Handle character input based on which setting is being edited
+            match state.selected_setting() {
+                Some(AppSetting::JaegerEndpoint) => {
+                    state.jaeger_endpoint_input.push(c);
+                }
+                None => {}
+            }
+        }
+        KeyCode::Backspace if state.editing => {
+            // Handle backspace based on which setting is being edited
+            match state.selected_setting() {
+                Some(AppSetting::JaegerEndpoint) => {
+                    state.jaeger_endpoint_input.pop();
+                }
+                None => {}
+            }
+        }
+        KeyCode::Up if !state.editing => {
+            state.move_up();
+        }
+        KeyCode::Down if !state.editing => {
+            state.move_down();
+        }
+        _ => {}
+    }
+
+    app.modal_state = ModalState::AppSettings(state);
 }

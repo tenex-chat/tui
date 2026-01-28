@@ -65,7 +65,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     spans.push(Span::styled(" Jaeger Endpoint: ", label_style));
 
     // Value (editable)
-    if state.editing_jaeger_endpoint {
+    if state.editing_jaeger_endpoint() {
         // Show input with cursor
         let input = &state.jaeger_endpoint_input;
         spans.push(Span::styled(
@@ -99,7 +99,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         1,
     );
 
-    let hint_spans = if state.editing_jaeger_endpoint {
+    let hint_spans = if state.editing_jaeger_endpoint() {
         vec![
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" save", Style::default().fg(theme::TEXT_MUTED)),

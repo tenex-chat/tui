@@ -414,8 +414,19 @@ impl PreferencesStorage {
         &self.prefs.jaeger_endpoint
     }
 
-    pub fn set_jaeger_endpoint(&mut self, endpoint: String) {
+    /// Sets the Jaeger endpoint and persists to disk.
+    /// Returns an error if serialization or file writing fails.
+    pub fn set_jaeger_endpoint(&mut self, endpoint: String) -> Result<(), String> {
         self.prefs.jaeger_endpoint = endpoint;
-        self.save_to_file();
+        self.save_to_file_with_result()
+    }
+
+    /// Saves preferences to disk, returning an error if it fails.
+    fn save_to_file_with_result(&self) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.prefs)
+            .map_err(|e| format!("Failed to serialize preferences: {}", e))?;
+        fs::write(&self.path, json)
+            .map_err(|e| format!("Failed to write preferences file: {}", e))?;
+        Ok(())
     }
 }

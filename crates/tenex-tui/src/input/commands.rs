@@ -27,6 +27,16 @@ pub static COMMANDS: &[Command] = &[
     // GLOBAL - Always available
     // =========================================================================
     Command {
+        key: ',',
+        label: "Settings",
+        section: "System",
+        available: |_| true,
+        execute: |app| {
+            let current_endpoint = app.preferences.borrow().jaeger_endpoint().to_string();
+            app.modal_state = ModalState::AppSettings(modal::AppSettingsState::new(&current_endpoint));
+        },
+    },
+    Command {
         key: '1',
         label: "Go to Home",
         section: "Navigation",
