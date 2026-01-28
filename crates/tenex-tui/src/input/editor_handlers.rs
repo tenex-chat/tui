@@ -318,15 +318,13 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                     // Open agent settings for the current agent to change the model
                     if let Some(agent) = app.selected_agent() {
                         if let Some(project) = &app.selected_project {
-                            // Fix: Use status.all_tools instead of status.tools()
-                            // This ensures we show ALL tools (including unassigned ones like RAG, scheduling, etc.)
-                            // Previously only showed agent-assigned tools, missing 100+ unassigned tools
+                            // Use status.all_tools() to show ALL tools (including unassigned ones)
                             let (all_tools, all_models) = app
                                 .data_store
                                 .borrow()
                                 .get_project_status(&project.a_tag())
                                 .map(|status| {
-                                    let tools = status.all_tools.clone();
+                                    let tools = status.all_tools().iter().map(|s| s.to_string()).collect();
                                     let models = status.all_models.clone();
                                     (tools, models)
                                 })
