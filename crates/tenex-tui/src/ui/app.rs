@@ -1241,15 +1241,27 @@ impl App {
     /// Get filtered projects based on current filter (from ModalState)
     /// Results are sorted by match quality (prefix matches first, then by gap count)
     /// Archived projects are hidden unless show_archived is true
+    /// When a workspace is active, only shows projects in that workspace
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
         let filter = self.projects_modal_filter();
         let store = self.data_store.borrow();
         let projects = store.get_projects();
         let prefs = self.preferences.borrow();
 
+        // Get active workspace project IDs (if any)
+        let workspace_project_ids: Option<std::collections::HashSet<&str>> = prefs
+            .active_workspace()
+            .map(|ws| ws.project_ids.iter().map(|s| s.as_str()).collect());
+
         let mut matching: Vec<_> = projects
             .iter()
             .filter(|p| {
+                // Filter by workspace if active
+                if let Some(ref ws_ids) = workspace_project_ids {
+                    if !ws_ids.contains(p.a_tag().as_str()) {
+                        return false;
+                    }
+                }
                 // Filter out archived projects unless showing archived
                 self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
@@ -2723,6 +2735,7 @@ impl App {
 
     /// Apply a workspace - sets visible_projects based on workspace's project list
     /// Pass None to clear the active workspace (returns to manual project selection mode)
+    /// Closes tabs that don't belong to the new workspace's projects
     pub fn apply_workspace(&mut self, workspace_id: Option<&str>, project_ids: &[String]) {
         self.preferences.borrow_mut().set_active_workspace(workspace_id);
 
@@ -2731,8 +2744,28 @@ impl App {
             self.visible_projects = project_ids.iter().cloned().collect();
             // Also save to selected_projects for persistence
             self.save_selected_projects();
+
+            // Close tabs that don't belong to projects in this workspace
+            let workspace_projects: HashSet<String> = project_ids.iter().cloned().collect();
+            self.tabs.tabs_mut().retain(|tab| {
+                workspace_projects.contains(&tab.project_a_tag)
+            });
+
+            // Reset tab index if it's now out of bounds
+            let tab_count = self.tabs.tabs().len();
+            if self.tabs.active_index() >= tab_count {
+                self.tabs.set_active_index(tab_count.saturating_sub(1));
+            }
+
+            // Clear selected project/thread if they don't belong to this workspace
+            if let Some(ref project) = self.selected_project {
+                if !workspace_projects.contains(&project.a_tag()) {
+                    self.selected_project = None;
+                    self.conversation.clear_selection();
+                }
+            }
         }
-        // If None, visible_projects stays as-is (manual selection mode)
+        // If None, visible_projects stays as-is (manual selection mode), tabs preserved
     }
 
     /// Toggle a project's visibility (manual selection mode)
