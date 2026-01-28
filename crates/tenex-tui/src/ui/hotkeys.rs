@@ -26,6 +26,7 @@ pub enum HotkeyId {
     CommandPalette,
     GoToHome,
     Help,
+    JumpToNotification,
 
     // === Navigation ===
     NavigateUp,
@@ -458,6 +459,13 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Global",
         &[HotkeyContext::Global],
     ),
+    HotkeyBinding::alt(
+        HotkeyId::JumpToNotification,
+        KeyCode::Char('m'),
+        "Jump to Message",
+        "Global",
+        &[HotkeyContext::Global],
+    ).with_priority(90), // High priority - works almost everywhere
 
     // === Navigation (Universal) ===
     HotkeyBinding::new(
