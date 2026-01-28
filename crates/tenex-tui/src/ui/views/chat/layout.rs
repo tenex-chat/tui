@@ -167,10 +167,12 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Status bar at the very bottom (always visible)
-    // Uses real-time agent tracking for cumulative runtime (confirmed + unconfirmed)
+    // Uses RuntimeHierarchy for persistent today's runtime + estimated growth from active agents
     // Color reflects agent activity: green = active, red = inactive
-    let data_store = app.data_store.borrow();
-    let cumulative_runtime = data_store.tracked_runtime_secs() * 1000; // Convert to ms
+    let mut data_store = app.data_store.borrow_mut();
+    let today_runtime = data_store.get_today_unique_runtime(); // Persistent Nostr data
+    let unconfirmed_runtime = data_store.unconfirmed_runtime_secs() * 1000; // Estimated from active agents
+    let cumulative_runtime = today_runtime.saturating_add(unconfirmed_runtime);
     let has_active_agents = data_store.has_active_agents();
     drop(data_store); // Release borrow before render
     render_statusbar(f, chunks[idx], app.current_notification(), cumulative_runtime, has_active_agents);

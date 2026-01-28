@@ -2074,6 +2074,13 @@ impl AppDataStore {
         self.agent_tracking.confirmed_runtime_secs()
     }
 
+    /// Get the unconfirmed (estimated) runtime in seconds from currently active agents.
+    /// This is the runtime growth since agents started working (not yet reported via llm-runtime).
+    /// Used to augment RuntimeHierarchy's today runtime with real-time estimates.
+    pub fn unconfirmed_runtime_secs(&self) -> u64 {
+        self.agent_tracking.unconfirmed_runtime_secs()
+    }
+
     /// Get active agents for a specific conversation.
     /// Returns agent pubkeys currently working on the conversation.
     /// Used for integration testing authoritative replacement semantics.
