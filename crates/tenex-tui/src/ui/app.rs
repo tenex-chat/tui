@@ -1,4 +1,4 @@
-use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, Message, NamedDraft, PreferencesStorage, Project, ProjectAgent, ProjectStatus, Thread, TimeFilter};
+use crate::models::{AskEvent, ChatDraft, DraftImageAttachment, DraftPasteAttachment, Message, NamedDraft, PreferencesStorage, Project, ProjectAgent, ProjectStatus, SendState, Thread, TimeFilter};
 use crate::nostr::DataChange;
 use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
@@ -759,6 +759,58 @@ impl App {
         (paste_attachments, image_attachments)
     }
 
+    /// Build a ChatDraft from editor content and metadata.
+    /// This is the SINGLE SOURCE OF TRUTH for draft assembly, eliminating duplicate code.
+    ///
+    /// Arguments:
+    /// - `conversation_id`: The draft key (thread_id or draft_id)
+    /// - `editor`: The text editor with current content
+    /// - `agent_pubkey`: The agent pubkey to save (or None if not explicitly selected)
+    /// - `branch`: The branch to save (or None)
+    /// - `reference_conversation_id`: Reference conversation for context tags
+    /// - `project_a_tag_fallback`: Fallback project if no existing draft
+    /// - `existing_draft`: Optional existing draft to preserve session_id, message_sequence, etc.
+    fn build_chat_draft(
+        conversation_id: String,
+        editor: &crate::ui::text_editor::TextEditor,
+        agent_pubkey: Option<String>,
+        branch: Option<String>,
+        reference_conversation_id: Option<String>,
+        project_a_tag_fallback: Option<String>,
+        existing_draft: Option<&ChatDraft>,
+    ) -> ChatDraft {
+        let (attachments, image_attachments) = Self::convert_attachments_to_draft(editor);
+
+        // BULLETPROOF: Preserve session_id, message_sequence, project_a_tag from existing draft
+        let (session_id, message_sequence, project_a_tag, send_state) = if let Some(d) = existing_draft {
+            (d.session_id.clone(), d.message_sequence, d.project_a_tag.clone(), d.send_state)
+        } else {
+            (None, 0, project_a_tag_fallback, SendState::Typing)
+        };
+
+        ChatDraft {
+            conversation_id,
+            session_id,
+            project_a_tag,
+            message_sequence,
+            send_state,
+            text: editor.text.clone(),
+            attachments,
+            image_attachments,
+            selected_agent_pubkey: agent_pubkey,
+            selected_branch: branch,
+            last_modified: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            reference_conversation_id,
+            // BULLETPROOF: New/updated drafts are unpublished - they stay until relay confirms
+            published_at: None,
+            published_event_id: None,
+            confirmed_at: None,
+        }
+    }
+
     /// Save current chat editor content as draft for the selected thread or draft tab
     pub fn save_chat_draft(&self) {
         // Determine the draft key - use thread id or draft_id from active tab
@@ -770,43 +822,38 @@ impl App {
         };
 
         if let Some(conversation_id) = draft_key {
-            // Only save agent to draft if user explicitly selected it
-            // Otherwise let sync_agent_with_conversation() determine it each time
+            let existing_draft = self.draft_service.load_chat_draft(&conversation_id);
+
+            // Determine agent_pubkey: preserve from existing draft OR use explicit selection
+            // CRITICAL FIX: If existing draft has an agent, preserve it even if user_explicitly_selected_agent is false
             let agent_pubkey = if self.user_explicitly_selected_agent {
                 self.conversation.selected_agent.as_ref().map(|a| a.pubkey.clone())
             } else {
-                None
+                // Preserve existing draft's agent if present (fixes data loss bug)
+                existing_draft.as_ref().and_then(|d| d.selected_agent_pubkey.clone())
             };
+
             tlog!("AGENT", "save_chat_draft: key={}, explicit={}, agent={:?}",
                 conversation_id,
                 self.user_explicitly_selected_agent,
                 agent_pubkey.as_ref().map(|p| &p[..8])
             );
 
-            // Convert attachments using helper
             let editor = self.chat_editor();
-            let (attachments, image_attachments) = Self::convert_attachments_to_draft(editor);
-
-            // Get reference_conversation_id from active tab if it exists
             let reference_conversation_id = self.tabs.active_tab()
                 .and_then(|t| t.reference_conversation_id.clone());
+            let project_a_tag_fallback = self.tabs.active_tab().map(|t| t.project_a_tag.clone());
 
-            let draft = ChatDraft {
-                conversation_id: conversation_id.clone(),
-                text: editor.text.clone(), // Raw text, not build_full_content()
-                attachments,
-                image_attachments,
-                selected_agent_pubkey: agent_pubkey,
-                selected_branch: self.selected_branch.clone(),
-                last_modified: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
+            let draft = Self::build_chat_draft(
+                conversation_id.clone(),
+                editor,
+                agent_pubkey,
+                self.selected_branch.clone(),
                 reference_conversation_id,
-                // BULLETPROOF: New drafts are unpublished - they stay until relay confirms
-                published_at: None,
-                published_event_id: None,
-            };
+                project_a_tag_fallback,
+                existing_draft.as_ref(),
+            );
+
             if let Err(e) = self.draft_service.save_chat_draft(draft) {
                 // BULLETPROOF: Log I/O errors but don't interrupt user - draft may still be in memory
                 tlog!("DRAFT", "ERROR saving draft for {}: {}", conversation_id, e);
@@ -833,8 +880,6 @@ impl App {
             let (agent_pubkey, branch) = if let Some(ref draft) = existing_draft {
                 (draft.selected_agent_pubkey.clone(), draft.selected_branch.clone())
             } else {
-                // No existing draft - this is a new draft, use None for both
-                // (the agent/branch will be set when the user selects them for this tab)
                 (None, None)
             };
 
@@ -844,25 +889,16 @@ impl App {
                 branch
             );
 
-            // Convert attachments using helper
-            let (attachments, image_attachments) = Self::convert_attachments_to_draft(&tab.editor);
+            let draft = Self::build_chat_draft(
+                conversation_id.clone(),
+                &tab.editor,
+                agent_pubkey,
+                branch,
+                tab.reference_conversation_id.clone(),
+                Some(tab.project_a_tag.clone()),
+                existing_draft.as_ref(),
+            );
 
-            let draft = ChatDraft {
-                conversation_id: conversation_id.clone(),
-                text: tab.editor.text.clone(),
-                attachments,
-                image_attachments,
-                selected_agent_pubkey: agent_pubkey,
-                selected_branch: branch,
-                last_modified: std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-                reference_conversation_id: tab.reference_conversation_id.clone(),
-                // BULLETPROOF: Drafts from closed tabs are unpublished
-                published_at: None,
-                published_event_id: None,
-            };
             if let Err(e) = self.draft_service.save_chat_draft(draft) {
                 // BULLETPROOF: Log I/O errors but don't interrupt - critical for tab close flow
                 tlog!("DRAFT", "ERROR saving draft from tab {}: {}", conversation_id, e);
@@ -945,6 +981,9 @@ impl App {
                             agent.name, &agent.pubkey[..8]);
                         self.conversation.selected_agent = Some(agent);
                         draft_had_agent = true;
+                        // CRITICAL FIX: Mark agent as explicitly selected so subsequent autosaves preserve it
+                        // Without this, the next autosave would drop the agent_pubkey since the flag was reset above
+                        self.user_explicitly_selected_agent = true;
                     } else {
                         tlog!("AGENT", "restore_chat_draft: draft agent_pubkey={} NOT FOUND in available_agents",
                             &agent_pubkey[..8.min(agent_pubkey.len())]);
