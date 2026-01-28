@@ -491,8 +491,12 @@ impl AppDataStore {
     /// but extremely long conversations (1000+ messages) may see degraded performance.
     /// A future optimization could maintain a running sum delta.
     fn calculate_runtime_from_messages(messages: &[Message]) -> u64 {
+        // 2026-01-24 00:00:00 UTC = 1769212800
+        const CUTOFF_TIMESTAMP: u64 = 1769212800;
+
         messages
             .iter()
+            .filter(|msg| msg.created_at >= CUTOFF_TIMESTAMP)
             .flat_map(|msg| {
                 msg.llm_metadata
                     .iter()

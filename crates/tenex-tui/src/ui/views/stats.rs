@@ -207,10 +207,19 @@ fn render_metric_cards(
     runtime_by_day: &[(u64, u64)],
     area: Rect,
 ) {
-    // Calculate average daily runtime over the full STATS_WINDOW_DAYS window
-    // This includes zero-runtime days to give an accurate average
-    let total_runtime_ms: u64 = runtime_by_day.iter().map(|(_, r)| *r).sum();
-    let avg_daily_runtime = total_runtime_ms / STATS_WINDOW_DAYS as u64;
+    // Calculate average daily runtime counting only non-zero days
+    let non_zero_days: Vec<u64> = runtime_by_day
+        .iter()
+        .map(|(_, r)| *r)
+        .filter(|r| *r > 0)
+        .collect();
+
+    let (avg_daily_runtime, active_days_count) = if non_zero_days.is_empty() {
+        (0, 0)
+    } else {
+        let total: u64 = non_zero_days.iter().sum();
+        (total / non_zero_days.len() as u64, non_zero_days.len())
+    };
 
     let card_chunks = Layout::horizontal([
         Constraint::Ratio(1, 3),
@@ -239,10 +248,10 @@ fn render_metric_cards(
         card_chunks[1],
     );
 
-    // Card 3: Average Daily Runtime (over full 14-day window)
+    // Card 3: Average Daily Runtime (counting only non-zero days)
     render_metric_card(
         f,
-        &format!("Avg ({}d)", STATS_WINDOW_DAYS),
+        &format!("Avg ({}d)", active_days_count),
         &format_runtime(avg_daily_runtime),
         "per day",
         theme::ACCENT_SPECIAL,
