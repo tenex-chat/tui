@@ -15,8 +15,8 @@ use tenex_core::models::AgentDefinition;
 pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(Clear, area);
 
-    if app.agent_browser_in_detail {
-        if let Some(ref id) = app.viewing_agent_id {
+    if app.home.in_agent_detail() {
+        if let Some(ref id) = app.home.viewing_agent_id {
             let agent = app.data_store.borrow()
                 .get_agent_definition(id)
                 .cloned();
@@ -68,14 +68,14 @@ fn render_list_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(format!(" ({} agents)", count), Style::default().fg(theme::TEXT_MUTED)),
     ];
 
-    let search_line = if app.agent_browser_filter.is_empty() {
+    let search_line = if app.home.agent_browser_filter.is_empty() {
         vec![
             Span::styled("Type to search...", Style::default().fg(theme::TEXT_MUTED)),
         ]
     } else {
         vec![
             Span::styled("Search: ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(&app.agent_browser_filter, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(&app.home.agent_browser_filter, Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)),
         ]
     };
@@ -97,7 +97,7 @@ fn render_list_content(f: &mut Frame, app: &App, area: Rect) {
     let agents = app.filtered_agent_definitions();
 
     if agents.is_empty() {
-        let empty_msg = if app.agent_browser_filter.is_empty() {
+        let empty_msg = if app.home.agent_browser_filter.is_empty() {
             "No agent definitions found. Agents will appear here once subscribed from the network."
         } else {
             "No agents match your search."
@@ -115,7 +115,7 @@ fn render_list_content(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let visible_height = area.height.saturating_sub(2) as usize;
-    let selected_index = app.agent_browser_index.min(agents.len().saturating_sub(1));
+    let selected_index = app.home.agent_browser_index.min(agents.len().saturating_sub(1));
 
     // Calculate scroll to keep selected item visible
     let scroll_offset = if selected_index >= visible_height {

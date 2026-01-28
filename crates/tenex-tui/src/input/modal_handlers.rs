@@ -391,8 +391,8 @@ fn submit_ask_response(app: &mut App) {
     let message_id = modal_state.message_id;
     let ask_author_pubkey = modal_state.ask_author_pubkey;
 
-    if let (Some(ref core_handle), Some(ref thread), Some(ref project)) =
-        (&app.core_handle, &app.selected_thread, &app.selected_project)
+    if let (Some(ref core_handle), Some(thread), Some(ref project)) =
+        (&app.core_handle, app.selected_thread(), &app.selected_project)
     {
         let _ = core_handle.send(NostrCommand::PublishMessage {
             thread_id: thread.id.clone(),
@@ -613,7 +613,7 @@ fn handle_agent_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
         match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
             SelectorAction::Selected(agent) => {
                 // Set agent as recipient - never insert text into input
-                app.selected_agent = Some(agent);
+                app.set_selected_agent(Some(agent));
                 app.user_explicitly_selected_agent = true;
                 app.modal_state = ModalState::None;
             }
@@ -664,13 +664,13 @@ fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {
                 match Clipboard::new() {
                     Ok(mut clipboard) => {
                         if clipboard.set_text(json).is_ok() {
-                            app.set_status("Raw event copied to clipboard");
+                            app.set_warning_status("Raw event copied to clipboard");
                         } else {
-                            app.set_status("Failed to copy to clipboard");
+                            app.set_warning_status("Failed to copy to clipboard");
                         }
                     }
                     Err(_) => {
-                        app.set_status("Failed to access clipboard");
+                        app.set_warning_status("Failed to access clipboard");
                     }
                 }
             }
@@ -956,9 +956,9 @@ fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
                         source_id: state.source_id.clone(),
                         is_fork: matches!(state.mode, ui::modal::AgentCreateMode::Fork),
                     }) {
-                        app.set_status(&format!("Failed to create agent: {}", e));
+                        app.set_warning_status(&format!("Failed to create agent: {}", e));
                     } else {
-                        app.set_status(&format!("Agent '{}' created", state.name));
+                        app.set_warning_status(&format!("Agent '{}' created", state.name));
                     }
                 }
                 app.modal_state = ModalState::None;
@@ -1040,9 +1040,9 @@ fn execute_project_action(
                     project_a_tag: state.project_a_tag.clone(),
                     project_pubkey: Some(state.project_pubkey.clone()),
                 }) {
-                    app.set_status(&format!("Failed to boot: {}", e));
+                    app.set_warning_status(&format!("Failed to boot: {}", e));
                 } else {
-                    app.set_status(&format!("Boot request sent for {}", state.project_name));
+                    app.set_warning_status(&format!("Boot request sent for {}", state.project_name));
                 }
             }
             app.modal_state = ModalState::None;
@@ -1078,13 +1078,20 @@ fn execute_project_action(
                 let project_name = state.project_name.clone();
                 app.selected_project = Some(project);
 
-                if let Some(status) = app.data_store.borrow().get_project_status(&a_tag) {
-                    if let Some(pm) = status.pm_agent() {
-                        app.selected_agent = Some(pm.clone());
+                // Extract values before making mutable calls to avoid borrow issues
+                let (pm_agent, default_branch) = {
+                    let store = app.data_store.borrow();
+                    if let Some(status) = store.get_project_status(&a_tag) {
+                        (status.pm_agent().cloned(), status.default_branch().map(String::from))
+                    } else {
+                        (None, None)
                     }
-                    if app.selected_branch.is_none() {
-                        app.selected_branch = status.default_branch().map(String::from);
-                    }
+                };
+                if let Some(pm) = pm_agent {
+                    app.set_selected_agent(Some(pm));
+                }
+                if app.selected_branch.is_none() {
+                    app.selected_branch = default_branch;
                 }
 
                 app.modal_state = ModalState::None;
@@ -1093,7 +1100,7 @@ fn execute_project_action(
                 app.chat_editor_mut().clear();
             } else {
                 app.modal_state = ModalState::None;
-                app.set_status("Project not found");
+                app.set_warning_status("Project not found");
             }
         }
         ProjectAction::ToggleArchive => {
@@ -1240,7 +1247,7 @@ fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Char('n') => {
                 if state.focus == ReportViewerFocus::Threads || state.show_threads {
-                    app.set_status("Thread creation not yet implemented");
+                    app.set_warning_status("Thread creation not yet implemented");
                 }
             }
             _ => {}
@@ -1309,9 +1316,9 @@ fn handle_agent_settings_modal_key(app: &mut App, key: KeyEvent) {
                         model,
                         tools,
                     }) {
-                        app.set_status(&format!("Failed to update agent config: {}", e));
+                        app.set_warning_status(&format!("Failed to update agent config: {}", e));
                     } else {
-                        app.set_status("Agent config update sent");
+                        app.set_warning_status("Agent config update sent");
                     }
                 }
                 app.modal_state = ModalState::None;
@@ -1404,7 +1411,7 @@ fn execute_conversation_action(
             } else {
                 format!("Unarchived: {}", state.thread_title)
             };
-            app.set_status(&status);
+            app.set_warning_status(&status);
             app.modal_state = ModalState::None;
         }
     }
@@ -1487,7 +1494,7 @@ fn execute_chat_action(
             let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
             app.switch_to_tab(tab_idx);
             app.chat_editor_mut().clear();
-            app.set_status("New conversation (same project, agent, and branch)");
+            app.set_warning_status("New conversation (same project, agent, and branch)");
         }
         ChatAction::GoToParent => {
             if let Some(ref parent_id) = state.parent_conversation_id {
@@ -1503,9 +1510,9 @@ fn execute_chat_action(
                     let a_tag = state.project_a_tag.clone();
                     app.modal_state = ModalState::None;
                     app.open_thread_from_home(&thread, &a_tag);
-                    app.set_status(&format!("Navigated to parent: {}", thread.title));
+                    app.set_warning_status(&format!("Navigated to parent: {}", thread.title));
                 } else {
-                    app.set_status("Parent conversation not found");
+                    app.set_warning_status("Parent conversation not found");
                     app.modal_state = ModalState::None;
                 }
             }
@@ -1652,7 +1659,7 @@ pub(super) fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
     let messages = app.data_store.borrow().get_messages(thread_id).to_vec();
 
     if messages.is_empty() {
-        app.set_status("No messages to export");
+        app.set_warning_status("No messages to export");
         return;
     }
 
@@ -1678,16 +1685,16 @@ pub(super) fn export_thread_as_jsonl(app: &mut App, thread_id: &str) {
     match Clipboard::new() {
         Ok(mut clipboard) => {
             if clipboard.set_text(&content).is_ok() {
-                app.set_status(&format!(
+                app.set_warning_status(&format!(
                     "Exported {} events to clipboard as JSONL",
                     lines.len()
                 ));
             } else {
-                app.set_status("Failed to copy to clipboard");
+                app.set_warning_status("Failed to copy to clipboard");
             }
         }
         Err(_) => {
-            app.set_status("Failed to access clipboard");
+            app.set_warning_status("Failed to access clipboard");
         }
     }
 }
@@ -1817,7 +1824,7 @@ fn execute_backend_approval_action(
     match action {
         BackendApprovalAction::Approve => {
             app.approve_backend(&state.backend_pubkey);
-            app.set_status(&format!(
+            app.set_warning_status(&format!(
                 "Approved backend {}...",
                 &state.backend_pubkey[..8.min(state.backend_pubkey.len())]
             ));
@@ -1829,7 +1836,7 @@ fn execute_backend_approval_action(
         }
         BackendApprovalAction::Block => {
             app.block_backend(&state.backend_pubkey);
-            app.set_status(&format!(
+            app.set_warning_status(&format!(
                 "Blocked backend {}...",
                 &state.backend_pubkey[..8.min(state.backend_pubkey.len())]
             ));
@@ -2559,14 +2566,14 @@ fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
 
                             match result {
                                 Ok(_) => {
-                                    app.set_status(&format!("Nudge '{}' created", state.title));
+                                    app.set_warning_status(&format!("Nudge '{}' created", state.title));
                                 }
                                 Err(e) => {
-                                    app.set_status(&format!("Failed to create nudge: {}", e));
+                                    app.set_warning_status(&format!("Failed to create nudge: {}", e));
                                 }
                             }
                         } else {
-                            app.set_status("Error: Not connected to backend");
+                            app.set_warning_status("Error: Not connected to backend");
                         }
                         app.modal_state = ModalState::None;
                         return;
@@ -2646,7 +2653,7 @@ fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
             // Copy nudge ID to clipboard
             if let Ok(mut clipboard) = arboard::Clipboard::new() {
                 if clipboard.set_text(&state.nudge_id).is_ok() {
-                    app.set_status("Nudge ID copied to clipboard");
+                    app.set_warning_status("Nudge ID copied to clipboard");
                 }
             }
             app.modal_state = ModalState::NudgeDetail(state);
@@ -2689,11 +2696,11 @@ fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
                     if let Err(e) = core_handle.send(NostrCommand::DeleteNudge {
                         nudge_id: state.nudge_id.clone(),
                     }) {
-                        app.set_status(&format!("Failed to delete nudge: {}", e));
+                        app.set_warning_status(&format!("Failed to delete nudge: {}", e));
                     } else {
                         // Remove from selection if this nudge was selected (prevents stale references)
                         app.remove_selected_nudge(&state.nudge_id);
-                        app.set_status("Nudge deleted");
+                        app.set_warning_status("Nudge deleted");
                     }
                 }
             }
@@ -2706,11 +2713,11 @@ fn handle_nudge_delete_confirm_key(app: &mut App, key: KeyEvent) {
                 if let Err(e) = core_handle.send(NostrCommand::DeleteNudge {
                     nudge_id: state.nudge_id.clone(),
                 }) {
-                    app.set_status(&format!("Failed to delete nudge: {}", e));
+                    app.set_warning_status(&format!("Failed to delete nudge: {}", e));
                 } else {
                     // Remove from selection if this nudge was selected (prevents stale references)
                     app.remove_selected_nudge(&state.nudge_id);
-                    app.set_status("Nudge deleted");
+                    app.set_warning_status("Nudge deleted");
                 }
             }
             app.modal_state = ModalState::NudgeList(NudgeListState::new());

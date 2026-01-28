@@ -214,7 +214,7 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     spans.push(Span::styled("Stats", tab_style(HomeTab::Stats)));
 
     // Show archived mode indicator
-    if app.show_archived {
+    if app.home.show_archived {
         spans.push(Span::styled("   ", Style::default()));
         spans.push(Span::styled("[showing archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
     }
@@ -1115,7 +1115,7 @@ fn render_status_card(
     // LINE 2: Summary or activity indicator  [author]        [time]
     let line2_content = if let Some(ref activity) = thread.status_current_activity {
         // Show activity with pulsing indicator
-        let indicator = if app.frame_counter % 4 < 2 { "◉" } else { "○" };
+        let indicator = app.activity_indicator();
         let activity_max = main_col_width.saturating_sub(3); // Space for indicator
         let activity_text = truncate_with_ellipsis(activity, activity_max);
         format!("{} {}", indicator, activity_text)
@@ -2362,15 +2362,15 @@ fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
     )));
 
     // Time filter
-    let time_label = app.time_filter
+    let time_label = app.home.time_filter
         .map(|tf| tf.label())
         .unwrap_or("All");
-    let time_style = if app.time_filter.is_some() {
+    let time_style = if app.home.time_filter.is_some() {
         Style::default().fg(theme::ACCENT_PRIMARY)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let time_indicator = if app.time_filter.is_some() {
+    let time_indicator = if app.home.time_filter.is_some() {
         format!(" {}", card::CHECKMARK)
     } else {
         String::new()

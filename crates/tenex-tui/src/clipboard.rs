@@ -24,13 +24,13 @@ pub(crate) fn handle_clipboard_paste(
 
     // Check for image in clipboard
     if let Ok(image) = clipboard.get_image() {
-        app.set_status("Uploading image...");
+        app.set_warning_status("Uploading image...");
 
         // Convert to PNG bytes
         let png_data = match image_to_png(&image) {
             Ok(data) => data,
             Err(e) => {
-                app.set_status(&format!("Failed to convert image: {}", e));
+                app.set_warning_status(&format!("Failed to convert image: {}", e));
                 return;
             }
         };
@@ -101,11 +101,11 @@ pub(crate) fn handle_image_file_paste(
     }
 
     // Read the file
-    app.set_status("Uploading image...");
+    app.set_warning_status("Uploading image...");
     let data = match std::fs::read(&path) {
         Ok(data) => data,
         Err(e) => {
-            app.set_status(&format!("Failed to read file: {}", e));
+            app.set_warning_status(&format!("Failed to read file: {}", e));
             return true;
         }
     };

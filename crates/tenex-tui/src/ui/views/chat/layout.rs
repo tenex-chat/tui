@@ -33,7 +33,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render header
     let chrome_color = if app.pending_quit { theme::ACCENT_ERROR } else { theme::ACCENT_PRIMARY };
-    let title = app.selected_thread.as_ref()
+    let title = app.selected_thread()
         .map(|t| t.title.clone())
         .or_else(|| app.open_tabs().get(app.active_tab_index()).map(|tab| tab.thread_title.clone()))
         .unwrap_or_else(|| "Chat".to_string());
@@ -56,8 +56,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Calculate total LLM runtime hierarchically (own + all children recursively)
     // This uses the RuntimeHierarchy in the data store for efficient recursive lookups
     let total_llm_runtime_ms: u64 = app
-        .selected_thread
-        .as_ref()
+        .selected_thread()
         .map(|thread| {
             let store = app.data_store.borrow();
             store.get_hierarchical_runtime(&thread.id)
@@ -66,8 +65,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Build conversation metadata from selected thread, including work status
     let metadata = app
-        .selected_thread
-        .as_ref()
+        .selected_thread()
         .map(|thread| {
             // Get working agent names from 24133 events
             let working_agents = {

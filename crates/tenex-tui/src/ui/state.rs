@@ -882,3 +882,594 @@ mod tests {
     }
 
 }
+
+// =============================================================================
+// CONVERSATION STATE
+// =============================================================================
+
+use crate::models::{Message, ProjectAgent, Thread, TimeFilter};
+use std::collections::HashMap;
+
+/// Buffer for local streaming content (per conversation)
+#[derive(Default, Clone)]
+pub struct LocalStreamBuffer {
+    pub agent_pubkey: String,
+    pub text_content: String,
+    pub reasoning_content: String,
+    pub is_complete: bool,
+}
+
+/// State for conversation view - thread/agent selection, subthread navigation, and message display.
+///
+/// This consolidates conversation-related state that was previously scattered across App.
+/// It manages:
+/// - Currently selected thread and agent
+/// - Subthread navigation (viewing replies to a specific message)
+/// - Message selection within the conversation
+/// - Local streaming buffers for real-time message updates
+/// - LLM metadata display toggle
+#[derive(Default)]
+pub struct ConversationState {
+    /// Currently selected thread
+    pub selected_thread: Option<Thread>,
+    /// Currently selected agent for sending messages
+    pub selected_agent: Option<ProjectAgent>,
+    /// Subthread root message ID (when viewing replies to a specific message)
+    pub subthread_root: Option<String>,
+    /// The root message when viewing a subthread (for display and reply tagging)
+    pub subthread_root_message: Option<Message>,
+    /// Index of selected message in chat view (for navigation)
+    pub selected_message_index: usize,
+    /// Local streaming buffers by conversation_id
+    pub local_stream_buffers: HashMap<String, LocalStreamBuffer>,
+    /// Toggle for showing/hiding LLM metadata on messages (model, tokens, cost)
+    pub show_llm_metadata: bool,
+}
+
+impl ConversationState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Enter a subthread view rooted at the given message
+    pub fn enter_subthread(&mut self, message: Message) {
+        self.subthread_root = Some(message.id.clone());
+        self.subthread_root_message = Some(message);
+        self.selected_message_index = 0;
+    }
+
+    /// Exit the current subthread view and return to parent
+    pub fn exit_subthread(&mut self) {
+        self.subthread_root = None;
+        self.subthread_root_message = None;
+        self.selected_message_index = 0;
+    }
+
+    /// Check if we're currently viewing a subthread
+    pub fn in_subthread(&self) -> bool {
+        self.subthread_root.is_some()
+    }
+
+    /// Get current conversation ID (thread ID)
+    pub fn current_conversation_id(&self) -> Option<String> {
+        self.selected_thread.as_ref().map(|t| t.id.clone())
+    }
+
+    /// Get streaming content for current conversation
+    pub fn local_streaming_content(&self) -> Option<&LocalStreamBuffer> {
+        let conv_id = self.current_conversation_id()?;
+        self.local_stream_buffers.get(&conv_id)
+    }
+
+    /// Update streaming buffer from local chunk
+    pub fn handle_local_stream_chunk(
+        &mut self,
+        agent_pubkey: String,
+        conversation_id: String,
+        text_delta: Option<String>,
+        reasoning_delta: Option<String>,
+        is_finish: bool,
+    ) {
+        let buffer = self.local_stream_buffers
+            .entry(conversation_id)
+            .or_default();
+
+        buffer.agent_pubkey = agent_pubkey;
+        if let Some(delta) = text_delta {
+            buffer.text_content.push_str(&delta);
+        }
+        if let Some(delta) = reasoning_delta {
+            buffer.reasoning_content.push_str(&delta);
+        }
+        if is_finish {
+            buffer.is_complete = true;
+        }
+    }
+
+    /// Clear the local stream buffer for a conversation
+    pub fn clear_local_stream_buffer(&mut self, conversation_id: &str) {
+        self.local_stream_buffers.remove(conversation_id);
+    }
+
+    /// Toggle LLM metadata display
+    pub fn toggle_llm_metadata(&mut self) {
+        self.show_llm_metadata = !self.show_llm_metadata;
+    }
+
+    /// Reset message selection to the beginning
+    pub fn reset_message_selection(&mut self) {
+        self.selected_message_index = 0;
+    }
+
+    /// Clear thread and agent selection (e.g., when navigating away)
+    pub fn clear_selection(&mut self) {
+        self.selected_thread = None;
+        self.selected_agent = None;
+        self.subthread_root = None;
+        self.subthread_root_message = None;
+        self.selected_message_index = 0;
+    }
+}
+
+#[cfg(test)]
+mod conversation_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_conversation_state_new() {
+        let state = ConversationState::new();
+        assert!(state.selected_thread.is_none());
+        assert!(state.selected_agent.is_none());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+        assert_eq!(state.selected_message_index, 0);
+        assert!(state.local_stream_buffers.is_empty());
+        assert!(!state.show_llm_metadata);
+    }
+
+    #[test]
+    fn test_subthread_navigation() {
+        let mut state = ConversationState::new();
+
+        // Initially not in subthread
+        assert!(!state.in_subthread());
+
+        // Create a mock message for testing
+        let message = Message {
+            id: "msg-123".to_string(),
+            pubkey: "test-pubkey".to_string(),
+            content: "Test message".to_string(),
+            created_at: 1234567890,
+            thread_id: "thread-456".to_string(),
+            reply_to: None,
+            is_reasoning: false,
+            ask_event: None,
+            q_tags: vec![],
+            a_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            tool_args: None,
+            llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
+        };
+
+        // Enter subthread
+        state.enter_subthread(message.clone());
+        assert!(state.in_subthread());
+        assert_eq!(state.subthread_root, Some("msg-123".to_string()));
+        assert_eq!(state.selected_message_index, 0);
+
+        // Exit subthread
+        state.exit_subthread();
+        assert!(!state.in_subthread());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+    }
+
+    #[test]
+    fn test_streaming_buffer() {
+        let mut state = ConversationState::new();
+
+        // Handle stream chunk
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("Hello ".to_string()),
+            None,
+            false,
+        );
+
+        // Check buffer state
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.agent_pubkey, "agent-pubkey");
+        assert_eq!(buffer.text_content, "Hello ");
+        assert!(!buffer.is_complete);
+
+        // Add more content
+        state.handle_local_stream_chunk(
+            "agent-pubkey".to_string(),
+            "conv-123".to_string(),
+            Some("World!".to_string()),
+            Some("Reasoning text".to_string()),
+            true,
+        );
+
+        let buffer = state.local_stream_buffers.get("conv-123").unwrap();
+        assert_eq!(buffer.text_content, "Hello World!");
+        assert_eq!(buffer.reasoning_content, "Reasoning text");
+        assert!(buffer.is_complete);
+
+        // Clear buffer
+        state.clear_local_stream_buffer("conv-123");
+        assert!(state.local_stream_buffers.get("conv-123").is_none());
+    }
+
+    #[test]
+    fn test_toggle_llm_metadata() {
+        let mut state = ConversationState::new();
+        assert!(!state.show_llm_metadata);
+
+        state.toggle_llm_metadata();
+        assert!(state.show_llm_metadata);
+
+        state.toggle_llm_metadata();
+        assert!(!state.show_llm_metadata);
+    }
+
+    #[test]
+    fn test_clear_selection() {
+        let mut state = ConversationState::new();
+
+        // Set some state
+        state.selected_message_index = 5;
+        state.subthread_root = Some("root-msg".to_string());
+        state.show_llm_metadata = true;
+
+        // Clear selection
+        state.clear_selection();
+
+        assert!(state.selected_thread.is_none());
+        assert!(state.selected_agent.is_none());
+        assert!(state.subthread_root.is_none());
+        assert!(state.subthread_root_message.is_none());
+        assert_eq!(state.selected_message_index, 0);
+        // Note: show_llm_metadata is NOT cleared - it's a display preference
+        assert!(state.show_llm_metadata);
+    }
+}
+
+// =============================================================================
+// HOME VIEW STATE
+// =============================================================================
+
+/// State for home view navigation - time filters, archive toggle, and agent browser.
+///
+/// This consolidates home-screen related navigation state that was previously
+/// scattered across the App struct. It manages:
+/// - Time filter for conversation filtering
+/// - Archived conversations toggle
+/// - Agent browser navigation and filtering
+///
+/// # Agent Browser State
+/// The agent browser has two modes: list view and detail view.
+/// Detail view is active when `viewing_agent_id` is `Some(id)`.
+/// Use `enter_agent_detail()` and `exit_agent_detail()` to transition between modes.
+#[derive(Debug, Clone, Default)]
+pub struct HomeViewState {
+    /// Filter by time since last activity
+    pub time_filter: Option<TimeFilter>,
+    /// Whether to show archived conversations in Recent/Inbox
+    pub show_archived: bool,
+    /// Selected index in agent browser list
+    pub agent_browser_index: usize,
+    /// Search filter for agent browser
+    pub agent_browser_filter: String,
+    /// ID of agent being viewed in detail (None = list view, Some = detail view)
+    pub viewing_agent_id: Option<String>,
+}
+
+impl HomeViewState {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cycle through time filter options
+    pub fn cycle_time_filter(&mut self) {
+        self.time_filter = TimeFilter::cycle_next(self.time_filter);
+    }
+
+    /// Toggle showing archived conversations
+    pub fn toggle_archived(&mut self) {
+        self.show_archived = !self.show_archived;
+    }
+
+    /// Check if currently viewing agent detail (derived from viewing_agent_id)
+    pub fn in_agent_detail(&self) -> bool {
+        self.viewing_agent_id.is_some()
+    }
+
+    /// Enter agent detail view for the specified agent
+    pub fn enter_agent_detail(&mut self, agent_id: String) {
+        self.viewing_agent_id = Some(agent_id);
+    }
+
+    /// Exit agent detail view and return to list
+    pub fn exit_agent_detail(&mut self) {
+        self.viewing_agent_id = None;
+    }
+
+    /// Reset agent browser state completely (index, filter, exit detail view)
+    pub fn reset_agent_browser(&mut self) {
+        self.agent_browser_index = 0;
+        self.agent_browser_filter.clear();
+        self.viewing_agent_id = None;
+    }
+
+    /// Set the agent browser filter text
+    pub fn set_agent_filter(&mut self, filter: String) {
+        self.agent_browser_filter = filter;
+    }
+
+    /// Append a character to the agent browser filter and reset index to 0
+    pub fn append_to_filter(&mut self, c: char) {
+        self.agent_browser_filter.push(c);
+        self.agent_browser_index = 0;
+    }
+
+    /// Remove the last character from the filter (backspace behavior)
+    pub fn backspace_filter(&mut self) {
+        self.agent_browser_filter.pop();
+        self.agent_browser_index = 0;
+    }
+
+    /// Clear the agent browser filter
+    pub fn clear_agent_filter(&mut self) {
+        self.agent_browser_filter.clear();
+    }
+
+    /// Set the selected agent index in the browser list
+    pub fn set_agent_index(&mut self, index: usize) {
+        self.agent_browser_index = index;
+    }
+
+    /// Move selection up in the agent browser list
+    pub fn select_prev_agent(&mut self) {
+        if self.agent_browser_index > 0 {
+            self.agent_browser_index -= 1;
+        }
+    }
+
+    /// Move selection down in the agent browser list, bounded by count
+    pub fn select_next_agent(&mut self, count: usize) {
+        if self.agent_browser_index < count.saturating_sub(1) {
+            self.agent_browser_index += 1;
+        }
+    }
+}
+
+#[cfg(test)]
+mod home_view_state_tests {
+    use super::*;
+
+    #[test]
+    fn test_home_view_state_new() {
+        let state = HomeViewState::new();
+        assert!(state.time_filter.is_none());
+        assert!(!state.show_archived);
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(state.agent_browser_filter.is_empty());
+        assert!(state.viewing_agent_id.is_none());
+        // in_agent_detail is derived from viewing_agent_id
+        assert!(!state.in_agent_detail());
+    }
+
+    #[test]
+    fn test_cycle_time_filter() {
+        let mut state = HomeViewState::new();
+
+        // None -> OneHour
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::OneHour));
+
+        // OneHour -> FourHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::FourHours));
+
+        // FourHours -> TwelveHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::TwelveHours));
+
+        // TwelveHours -> TwentyFourHours
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::TwentyFourHours));
+
+        // TwentyFourHours -> SevenDays
+        state.cycle_time_filter();
+        assert_eq!(state.time_filter, Some(TimeFilter::SevenDays));
+
+        // SevenDays -> None
+        state.cycle_time_filter();
+        assert!(state.time_filter.is_none());
+    }
+
+    #[test]
+    fn test_toggle_archived() {
+        let mut state = HomeViewState::new();
+        assert!(!state.show_archived);
+
+        state.toggle_archived();
+        assert!(state.show_archived);
+
+        state.toggle_archived();
+        assert!(!state.show_archived);
+    }
+
+    #[test]
+    fn test_agent_browser_navigation() {
+        let mut state = HomeViewState::new();
+
+        // Initially not in detail view (derived from viewing_agent_id being None)
+        assert!(!state.in_agent_detail());
+        assert!(state.viewing_agent_id.is_none());
+
+        // Enter detail view using the API method
+        state.enter_agent_detail("agent-123".to_string());
+        assert!(state.in_agent_detail());
+        assert_eq!(state.viewing_agent_id, Some("agent-123".to_string()));
+
+        // Exit detail view using the API method
+        state.exit_agent_detail();
+        assert!(!state.in_agent_detail());
+        assert!(state.viewing_agent_id.is_none());
+    }
+
+    #[test]
+    fn test_reset_agent_browser() {
+        let mut state = HomeViewState::new();
+
+        // Set some state using setters
+        state.set_agent_index(5);
+        state.set_agent_filter("test".to_string());
+        state.enter_agent_detail("agent-456".to_string());
+
+        // Verify state before reset
+        assert_eq!(state.agent_browser_index, 5);
+        assert_eq!(state.agent_browser_filter, "test");
+        assert!(state.in_agent_detail());
+
+        // Reset clears everything
+        state.reset_agent_browser();
+
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(state.agent_browser_filter.is_empty());
+        assert!(!state.in_agent_detail());
+        assert!(state.viewing_agent_id.is_none());
+    }
+
+    #[test]
+    fn test_agent_filter_operations() {
+        let mut state = HomeViewState::new();
+
+        // Set filter
+        state.set_agent_filter("search term".to_string());
+        assert_eq!(state.agent_browser_filter, "search term");
+
+        // Clear filter
+        state.clear_agent_filter();
+        assert!(state.agent_browser_filter.is_empty());
+    }
+
+    #[test]
+    fn test_in_agent_detail_is_derived() {
+        let mut state = HomeViewState::new();
+
+        // Directly setting viewing_agent_id affects in_agent_detail()
+        state.viewing_agent_id = Some("test-agent".to_string());
+        assert!(state.in_agent_detail());
+
+        state.viewing_agent_id = None;
+        assert!(!state.in_agent_detail());
+
+        // This confirms the boolean is truly derived, not stored separately
+    }
+
+    #[test]
+    fn test_append_and_backspace_filter() {
+        let mut state = HomeViewState::new();
+        state.set_agent_index(5); // Set index to non-zero
+
+        // Append character resets index to 0
+        state.append_to_filter('a');
+        assert_eq!(state.agent_browser_filter, "a");
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Append more characters
+        state.append_to_filter('b');
+        state.append_to_filter('c');
+        assert_eq!(state.agent_browser_filter, "abc");
+
+        // Backspace removes last character and resets index
+        state.set_agent_index(3);
+        state.backspace_filter();
+        assert_eq!(state.agent_browser_filter, "ab");
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Continue backspacing
+        state.backspace_filter();
+        state.backspace_filter();
+        assert!(state.agent_browser_filter.is_empty());
+
+        // Backspace on empty is safe (no panic)
+        state.backspace_filter();
+        assert!(state.agent_browser_filter.is_empty());
+    }
+
+    #[test]
+    fn test_agent_index_navigation() {
+        let mut state = HomeViewState::new();
+
+        // Start at 0
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Can't go negative (select_prev does nothing at 0)
+        state.select_prev_agent();
+        assert_eq!(state.agent_browser_index, 0);
+
+        // Navigate down with a count of 5 items
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 1);
+
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 2);
+
+        // Navigate to last item
+        state.select_next_agent(5);
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 4);
+
+        // Can't go past the end
+        state.select_next_agent(5);
+        assert_eq!(state.agent_browser_index, 4);
+
+        // Navigate back up
+        state.select_prev_agent();
+        assert_eq!(state.agent_browser_index, 3);
+    }
+
+    #[test]
+    fn test_complete_agent_browser_workflow() {
+        // Integration-style test: simulates a complete user workflow
+        let mut state = HomeViewState::new();
+
+        // User types a search filter
+        state.append_to_filter('t');
+        state.append_to_filter('e');
+        state.append_to_filter('s');
+        state.append_to_filter('t');
+        assert_eq!(state.agent_browser_filter, "test");
+
+        // User navigates through results (assume 3 agents matched)
+        state.select_next_agent(3);
+        state.select_next_agent(3);
+        assert_eq!(state.agent_browser_index, 2);
+
+        // User selects an agent to view details
+        state.enter_agent_detail("selected-agent-id".to_string());
+        assert!(state.in_agent_detail());
+        assert_eq!(state.viewing_agent_id, Some("selected-agent-id".to_string()));
+
+        // User exits back to list
+        state.exit_agent_detail();
+        assert!(!state.in_agent_detail());
+        // Filter and index should still be preserved
+        assert_eq!(state.agent_browser_filter, "test");
+        assert_eq!(state.agent_browser_index, 2);
+
+        // User clears everything
+        state.reset_agent_browser();
+        assert!(state.agent_browser_filter.is_empty());
+        assert_eq!(state.agent_browser_index, 0);
+        assert!(!state.in_agent_detail());
+    }
+}
