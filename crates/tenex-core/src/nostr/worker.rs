@@ -107,6 +107,7 @@ pub enum NostrCommand {
         name: String,
         description: String,
         agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
     },
     /// Create a new agent definition (kind:4199)
     CreateAgentDefinition {
@@ -320,9 +321,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
-                    NostrCommand::CreateProject { name, description, agent_ids } => {
+                    NostrCommand::CreateProject { name, description, agent_ids, mcp_tool_ids } => {
                         debug_log(&format!("Worker: Creating project {}", name));
-                        if let Err(e) = rt.block_on(self.handle_create_project(name, description, agent_ids)) {
+                        if let Err(e) = rt.block_on(self.handle_create_project(name, description, agent_ids, mcp_tool_ids)) {
                             tlog!("ERROR", "Failed to create project: {}", e);
                         }
                     }
@@ -1038,6 +1039,7 @@ impl NostrWorker {
         name: String,
         description: String,
         agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
@@ -1070,6 +1072,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
                 vec![agent_id.clone()],
+            ));
+        }
+
+        // Add MCP tool tags
+        for tool_id in &mcp_tool_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+                vec![tool_id.clone()],
             ));
         }
 

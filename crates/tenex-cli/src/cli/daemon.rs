@@ -888,6 +888,8 @@ fn handle_request(
                 description: String,
                 #[serde(default)]
                 agent_ids: Vec<String>,
+                #[serde(default)]
+                mcp_tool_ids: Vec<String>,
             }
 
             let params: CreateProjectParams = match serde_json::from_value(request.params.clone()) {
@@ -913,6 +915,7 @@ fn handle_request(
                     name: name.to_string(),
                     description: params.description,
                     agent_ids: params.agent_ids,
+                    mcp_tool_ids: params.mcp_tool_ids,
                 })
                 .is_ok()
             {
