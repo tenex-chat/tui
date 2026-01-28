@@ -106,7 +106,7 @@ struct ConversationsView: View {
 // MARK: - Conversation Tree Node (Recursive)
 // Uses separate tap areas to avoid nested Button issues (gestures conflict)
 
-struct ConversationTreeNode: View {
+private struct ConversationTreeNode: View {
     let conversation: ConversationInfo
     let allConversations: [ConversationInfo]
     let depth: Int
