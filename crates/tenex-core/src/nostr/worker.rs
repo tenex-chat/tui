@@ -147,10 +147,13 @@ pub enum NostrCommand {
         description: String,
         content: String,
         hashtags: Vec<String>,
-        /// Tools to allow (allow-tool tags)
+        /// Tools to allow (allow-tool tags) - Additive mode
         allow_tools: Vec<String>,
-        /// Tools to deny (deny-tool tags)
+        /// Tools to deny (deny-tool tags) - Additive mode
         deny_tools: Vec<String>,
+        /// Exclusive tool list (only-tool tags) - Exclusive mode
+        /// When present, overrides all other tool permissions
+        only_tools: Vec<String>,
     },
     /// Update an existing nudge (republish kind:4201 with same d-tag for replaceable events)
     /// Note: kind:4201 is NOT a replaceable event in NIP-33, so we create a new event
@@ -163,6 +166,8 @@ pub enum NostrCommand {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        /// Exclusive tool list (only-tool tags)
+        only_tools: Vec<String>,
     },
     /// Delete a nudge (kind:5 deletion event referencing the nudge)
     DeleteNudge {
@@ -358,15 +363,15 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to subscribe to project metadata: {}", e);
                         }
                     }
-                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools } => {
+                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
                         debug_log(&format!("Worker: Creating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
                             tlog!("ERROR", "Failed to create nudge: {}", e);
                         }
                     }
-                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools } => {
+                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
                         debug_log(&format!("Worker: Updating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
                             tlog!("ERROR", "Failed to update nudge: {}", e);
                         }
                     }
@@ -1384,6 +1389,7 @@ impl NostrWorker {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        only_tools: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
@@ -1416,20 +1422,30 @@ impl NostrWorker {
             ));
         }
 
-        // Add allow-tool tags
-        for tool in &allow_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
-                vec![tool.clone()],
-            ));
-        }
+        // Tool permissions: only-tool takes priority (XOR with allow/deny)
+        if !only_tools.is_empty() {
+            // Exclusive mode: only-tool tags
+            for tool in &only_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("only-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        } else {
+            // Additive mode: allow-tool and deny-tool tags
+            for tool in &allow_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                    vec![tool.clone()],
+                ));
+            }
 
-        // Add deny-tool tags
-        for tool in &deny_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
-                vec![tool.clone()],
-            ));
+            for tool in &deny_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                    vec![tool.clone()],
+                ));
+            }
         }
 
         let signed_event = event.sign_with_keys(keys)?;
@@ -1462,6 +1478,7 @@ impl NostrWorker {
         hashtags: Vec<String>,
         allow_tools: Vec<String>,
         deny_tools: Vec<String>,
+        only_tools: Vec<String>,
     ) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
@@ -1499,20 +1516,30 @@ impl NostrWorker {
             ));
         }
 
-        // Add allow-tool tags
-        for tool in &allow_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
-                vec![tool.clone()],
-            ));
-        }
+        // Tool permissions: only-tool takes priority (XOR with allow/deny)
+        if !only_tools.is_empty() {
+            // Exclusive mode: only-tool tags
+            for tool in &only_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("only-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        } else {
+            // Additive mode: allow-tool and deny-tool tags
+            for tool in &allow_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                    vec![tool.clone()],
+                ));
+            }
 
-        // Add deny-tool tags
-        for tool in &deny_tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
-                vec![tool.clone()],
-            ));
+            for tool in &deny_tools {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                    vec![tool.clone()],
+                ));
+            }
         }
 
         let signed_event = event.sign_with_keys(keys)?;
@@ -1749,5 +1776,204 @@ mod tests {
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
     }
 
-    // Streaming delta parsing tests removed.
+    /// Helper to build nudge event tags based on tool permission mode
+    /// Returns the tags that would be added to a nudge event
+    fn build_nudge_tool_tags(
+        allow_tools: &[String],
+        deny_tools: &[String],
+        only_tools: &[String],
+    ) -> Vec<Tag> {
+        let mut tags = Vec::new();
+
+        // XOR logic: only_tools takes priority (exclusive mode)
+        if !only_tools.is_empty() {
+            // Exclusive mode: only-tool tags
+            for tool in only_tools {
+                tags.push(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("only-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        } else {
+            // Additive mode: allow-tool and deny-tool tags
+            for tool in allow_tools {
+                tags.push(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("allow-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+
+            for tool in deny_tools {
+                tags.push(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("deny-tool")),
+                    vec![tool.clone()],
+                ));
+            }
+        }
+
+        tags
+    }
+
+    /// Helper to check if a tag list contains a specific tag type
+    fn has_tag_type(tags: &[Tag], tag_name: &str) -> bool {
+        tags.iter().any(|t| {
+            if let TagKind::Custom(name) = t.kind() {
+                name.as_ref() == tag_name
+            } else {
+                false
+            }
+        })
+    }
+
+    /// Helper to extract all values for a specific tag type
+    fn get_tag_values(tags: &[Tag], tag_name: &str) -> Vec<String> {
+        tags.iter()
+            .filter_map(|t| {
+                if let TagKind::Custom(name) = t.kind() {
+                    if name.as_ref() == tag_name {
+                        t.content().map(|s| s.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn test_create_nudge_emits_only_tool_tags_in_exclusive_mode() {
+        let allow_tools = vec!["Bash".to_string(), "Read".to_string()];
+        let deny_tools = vec!["Write".to_string()];
+        let only_tools = vec!["Grep".to_string(), "Glob".to_string()];
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // Exclusive mode: should emit only-tool tags
+        assert!(has_tag_type(&tags, "only-tool"), "Should have only-tool tags");
+
+        // Exclusive mode: should NOT emit allow-tool or deny-tool tags
+        assert!(!has_tag_type(&tags, "allow-tool"), "Should NOT have allow-tool tags in exclusive mode");
+        assert!(!has_tag_type(&tags, "deny-tool"), "Should NOT have deny-tool tags in exclusive mode");
+
+        // Verify the only-tool values
+        let only_values = get_tag_values(&tags, "only-tool");
+        assert_eq!(only_values.len(), 2);
+        assert!(only_values.contains(&"Grep".to_string()));
+        assert!(only_values.contains(&"Glob".to_string()));
+    }
+
+    #[test]
+    fn test_create_nudge_emits_allow_deny_tags_in_additive_mode() {
+        let allow_tools = vec!["Bash".to_string(), "Read".to_string()];
+        let deny_tools = vec!["Write".to_string()];
+        let only_tools: Vec<String> = vec![]; // Empty = additive mode
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // Additive mode: should emit allow-tool and deny-tool tags
+        assert!(has_tag_type(&tags, "allow-tool"), "Should have allow-tool tags");
+        assert!(has_tag_type(&tags, "deny-tool"), "Should have deny-tool tags");
+
+        // Additive mode: should NOT emit only-tool tags
+        assert!(!has_tag_type(&tags, "only-tool"), "Should NOT have only-tool tags in additive mode");
+
+        // Verify the allow-tool values
+        let allow_values = get_tag_values(&tags, "allow-tool");
+        assert_eq!(allow_values.len(), 2);
+        assert!(allow_values.contains(&"Bash".to_string()));
+        assert!(allow_values.contains(&"Read".to_string()));
+
+        // Verify the deny-tool values
+        let deny_values = get_tag_values(&tags, "deny-tool");
+        assert_eq!(deny_values.len(), 1);
+        assert!(deny_values.contains(&"Write".to_string()));
+    }
+
+    #[test]
+    fn test_exclusive_mode_never_emits_allow_deny_tags() {
+        // Even when allow/deny lists are non-empty, exclusive mode ignores them
+        let allow_tools = vec!["Tool1".to_string(), "Tool2".to_string()];
+        let deny_tools = vec!["Tool3".to_string(), "Tool4".to_string()];
+        let only_tools = vec!["ExclusiveTool".to_string()]; // Non-empty = exclusive mode
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // Exclusive mode takes precedence
+        assert!(has_tag_type(&tags, "only-tool"));
+        assert!(!has_tag_type(&tags, "allow-tool"), "Exclusive mode must never emit allow-tool");
+        assert!(!has_tag_type(&tags, "deny-tool"), "Exclusive mode must never emit deny-tool");
+
+        // Only the only-tool should be present
+        let only_values = get_tag_values(&tags, "only-tool");
+        assert_eq!(only_values, vec!["ExclusiveTool"]);
+    }
+
+    #[test]
+    fn test_additive_mode_never_emits_only_tool_tags() {
+        let allow_tools = vec!["AllowTool".to_string()];
+        let deny_tools = vec!["DenyTool".to_string()];
+        let only_tools: Vec<String> = vec![]; // Empty = additive mode
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // Additive mode should never emit only-tool
+        assert!(!has_tag_type(&tags, "only-tool"), "Additive mode must never emit only-tool");
+        assert!(has_tag_type(&tags, "allow-tool"));
+        assert!(has_tag_type(&tags, "deny-tool"));
+    }
+
+    #[test]
+    fn test_update_nudge_xor_logic_exclusive_mode() {
+        // This test verifies the same XOR logic applies to UpdateNudge
+        let allow_tools = vec!["OldAllow".to_string()];
+        let deny_tools = vec!["OldDeny".to_string()];
+        let only_tools = vec!["NewExclusive1".to_string(), "NewExclusive2".to_string()];
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // XOR: only_tools present means exclusive mode
+        assert!(has_tag_type(&tags, "only-tool"));
+        assert!(!has_tag_type(&tags, "allow-tool"));
+        assert!(!has_tag_type(&tags, "deny-tool"));
+
+        let only_values = get_tag_values(&tags, "only-tool");
+        assert_eq!(only_values.len(), 2);
+    }
+
+    #[test]
+    fn test_update_nudge_xor_logic_additive_mode() {
+        // UpdateNudge with empty only_tools falls back to additive mode
+        let allow_tools = vec!["AllowA".to_string(), "AllowB".to_string()];
+        let deny_tools = vec!["DenyX".to_string()];
+        let only_tools: Vec<String> = vec![];
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        // XOR: empty only_tools means additive mode
+        assert!(!has_tag_type(&tags, "only-tool"));
+        assert!(has_tag_type(&tags, "allow-tool"));
+        assert!(has_tag_type(&tags, "deny-tool"));
+
+        let allow_values = get_tag_values(&tags, "allow-tool");
+        assert_eq!(allow_values.len(), 2);
+
+        let deny_values = get_tag_values(&tags, "deny-tool");
+        assert_eq!(deny_values.len(), 1);
+    }
+
+    #[test]
+    fn test_empty_tools_produces_no_tool_tags() {
+        let allow_tools: Vec<String> = vec![];
+        let deny_tools: Vec<String> = vec![];
+        let only_tools: Vec<String> = vec![];
+
+        let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
+
+        assert!(!has_tag_type(&tags, "only-tool"));
+        assert!(!has_tag_type(&tags, "allow-tool"));
+        assert!(!has_tag_type(&tags, "deny-tool"));
+        assert!(tags.is_empty());
+    }
 }
