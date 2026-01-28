@@ -27,6 +27,9 @@ use crate::models::Thread;
 use crate::store::AppDataStore;
 use std::cell::Ref;
 use std::collections::{HashMap, HashSet};
+// Re-use shared search utilities from tenex_core to prevent semantic drift
+pub use tenex_core::search::parse_search_terms;
+use tenex_core::search::text_contains_term;
 
 /// State for the sidebar search input
 #[derive(Debug, Clone, Default)]
@@ -430,53 +433,11 @@ pub fn search_reports(
     results
 }
 
-/// Parse a search query into individual search terms.
-///
-/// The '+' operator splits the query into multiple terms that must ALL match
-/// (AND semantics at the conversation level). Each term is trimmed and lowercased.
-///
-/// # Examples
-/// - "error" -> ["error"]
-/// - "error+timeout" -> ["error", "timeout"]
-/// - "  error + timeout  " -> ["error", "timeout"]
-/// - "error++timeout" -> ["error", "timeout"] (empty terms ignored)
-/// - "" -> []
-pub fn parse_search_terms(query: &str) -> Vec<String> {
-    query
-        .split('+')
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty())
-        .collect()
-}
-
-/// Check if text contains a search term (ASCII case-insensitive)
-/// Uses ASCII-only case folding for consistency with highlight_text_spans in home.rs
-fn text_contains_term(text: &str, term: &str) -> bool {
-    let text_chars: Vec<char> = text.chars().collect();
-    let term_chars: Vec<char> = term.chars().collect();
-
-    if term_chars.is_empty() {
-        return true;
-    }
-
-    if text_chars.len() < term_chars.len() {
-        return false;
-    }
-
-    // Use ASCII case-insensitive matching (consistent with highlighting)
-    for start_idx in 0..=(text_chars.len() - term_chars.len()) {
-        let matches = term_chars.iter().enumerate().all(|(i, tc)| {
-            text_chars.get(start_idx + i)
-                .map_or(false, |c| c.eq_ignore_ascii_case(tc))
-        });
-        if matches {
-            return true;
-        }
-    }
-    false
-}
+// NOTE: parse_search_terms and text_contains_term are now imported from tenex_core::search
+// to ensure consistent search semantics across the codebase.
 
 /// Check if text starts with a prefix (ASCII case-insensitive)
+/// Used for conversation ID prefix matching (TUI-specific feature)
 fn text_starts_with_ascii(text: &str, prefix: &str) -> bool {
     let text_chars: Vec<char> = text.chars().collect();
     let prefix_chars: Vec<char> = prefix.chars().collect();
