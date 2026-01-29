@@ -3,6 +3,18 @@ import Foundation
 /// A draft message for composition.
 /// Can be for a new conversation (thread) or an existing conversation.
 struct Draft: Codable, Identifiable, Equatable {
+    // MARK: - Codable Keys
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case conversationId
+        case projectId
+        case title
+        case content
+        case agentPubkey
+        case isNewConversation
+        case lastEdited
+    }
     /// Unique identifier for the draft
     var id: String
 
@@ -53,6 +65,27 @@ struct Draft: Codable, Identifiable, Equatable {
         self.lastEdited = Date()
     }
 
+    // MARK: - Migration Support
+
+    /// Custom decoder for backward compatibility
+    /// Handles drafts from before projectId was added
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.id = try container.decode(String.self, forKey: .id)
+        self.conversationId = try container.decodeIfPresent(String.self, forKey: .conversationId)
+
+        // Migration: projectId is now required, but old drafts didn't have it
+        // Use empty string as placeholder - these drafts will be orphaned but won't crash
+        self.projectId = try container.decodeIfPresent(String.self, forKey: .projectId) ?? ""
+
+        self.title = try container.decode(String.self, forKey: .title)
+        self.content = try container.decode(String.self, forKey: .content)
+        self.agentPubkey = try container.decodeIfPresent(String.self, forKey: .agentPubkey)
+        self.isNewConversation = try container.decode(Bool.self, forKey: .isNewConversation)
+        self.lastEdited = try container.decode(Date.self, forKey: .lastEdited)
+    }
+
     // MARK: - Computed Properties
 
     /// Whether the draft has meaningful content
@@ -68,8 +101,10 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Whether the draft is valid for sending
     var isValid: Bool {
         if isNewConversation {
-            // New conversation needs at least a title
-            return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            // New conversation needs both title AND content
+            // Empty content-only conversations are not useful
+            return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         } else {
             // Reply needs content
             return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -102,6 +137,12 @@ struct Draft: Codable, Identifiable, Equatable {
         lastEdited = Date()
     }
 
+    /// Update the project ID (useful when switching projects in composer)
+    mutating func updateProjectId(_ newProjectId: String) {
+        projectId = newProjectId
+        lastEdited = Date()
+    }
+
     /// Clear all content from the draft
     mutating func clear() {
         title = ""
@@ -116,10 +157,17 @@ struct Draft: Codable, Identifiable, Equatable {
 extension Draft {
     /// Create a unique key for storing drafts
     /// For new conversations: "new-{projectId}"
-    /// For existing conversations: "reply-{conversationId}"
+    /// For existing conversations: "reply-{projectId}-{conversationId}"
+    ///
+    /// Note: Conversation IDs are Nostr event IDs (SHA-256 hashes) which are globally unique
+    /// across the entire Nostr network. However, we include projectId in the reply key for
+    /// defense-in-depth and to support potential future scenarios where the same conversation
+    /// might be accessed from different projects.
     static func storageKey(for conversationId: String?, projectId: String) -> String {
         if let conversationId = conversationId {
-            return "reply-\(conversationId)"
+            // Include projectId to avoid collisions if conversation IDs are not globally unique
+            // or if the same conversation is accessed from multiple projects
+            return "reply-\(projectId)-\(conversationId)"
         } else {
             return "new-\(projectId)"
         }

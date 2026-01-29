@@ -18,38 +18,74 @@ actor DraftStore {
     }
 
     /// Load drafts from disk
-    func loadDrafts() -> [String: Draft] {
+    /// - Returns: Tuple of (drafts, loadFailed) where loadFailed indicates if file exists but couldn't be read
+    func loadDrafts() -> (drafts: [String: Draft], loadFailed: Bool) {
         let fileURL = draftsFileURL
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             print("[DraftStore] No existing drafts file found")
-            return [:]
+            return ([:], false)
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
             let loadedDrafts = try decoder.decode([String: Draft].self, from: data)
             print("[DraftStore] Loaded \(loadedDrafts.count) drafts")
-            return loadedDrafts
+            return (loadedDrafts, false)
         } catch {
-            print("[DraftStore] Failed to load drafts: \(error)")
-            return [:]
+            print("[DraftStore] CRITICAL: Failed to load drafts: \(error)")
+
+            // CRITICAL DATA SAFETY: Quarantine corrupted file to prevent data loss
+            // Move it to a backup location so user can potentially recover it
+            let backupURL = fileURL.deletingPathExtension().appendingPathExtension("corrupted-\(Date().timeIntervalSince1970).json")
+            do {
+                try FileManager.default.moveItem(at: fileURL, to: backupURL)
+                print("[DraftStore] Quarantined corrupted drafts file to: \(backupURL.path)")
+                print("[DraftStore] Original data preserved for manual recovery")
+            } catch {
+                print("[DraftStore] ERROR: Failed to quarantine corrupted file: \(error)")
+            }
+
+            return ([:], true)
         }
     }
 
     /// Save drafts to disk
-    func saveDrafts(_ drafts: [String: Draft]) throws {
+    /// - Parameter drafts: The drafts to save
+    /// - Parameter allowSave: Whether saving is allowed (false if load failed and file is quarantined)
+    /// - Throws: Error if save fails or if saving is not allowed
+    func saveDrafts(_ drafts: [String: Draft], allowSave: Bool) throws {
+        guard allowSave else {
+            throw DraftStoreError.saveForbidden(reason: "Cannot save - previous load failed and file was quarantined. Fix corruption first.")
+        }
+
         let data = try encoder.encode(drafts)
         try data.write(to: draftsFileURL, options: .atomic)
         print("[DraftStore] Saved \(drafts.count) drafts")
+    }
+
+    enum DraftStoreError: Error, LocalizedError {
+        case saveForbidden(reason: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .saveForbidden(let reason):
+                return "Save forbidden: \(reason)"
+            }
+        }
     }
 }
 
 /// Manager for handling draft persistence with debounced auto-save.
 /// Thread-safe with actor-isolated persistence operations.
+/// Singleton to prevent multiple instances from overwriting each other's data.
 @Observable
 @MainActor
 final class DraftManager {
+    // MARK: - Singleton
+
+    static let shared = DraftManager()
+
     // MARK: - Constants
 
     private static let saveDelay: TimeInterval = 0.5 // 500ms debounce
@@ -68,16 +104,21 @@ final class DraftManager {
     /// Whether drafts failed to load (distinguishes from empty)
     private(set) var loadFailed = false
 
+    /// Whether initial draft loading has completed
+    private(set) var loadCompleted = false
+
     // MARK: - Private Properties
 
     private var saveTask: Task<Void, Never>?
     private let store = DraftStore()
+    private var loadTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
-    init() {
-        Task { @MainActor in
+    private init() {
+        loadTask = Task { @MainActor in
             await loadDrafts()
+            loadCompleted = true
         }
     }
 
@@ -98,7 +139,11 @@ final class DraftManager {
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
     /// - Returns: The existing draft or a newly created one
-    func getOrCreateDraft(conversationId: String?, projectId: String) -> Draft {
+    /// - Note: Waits for initial draft loading to complete before returning
+    func getOrCreateDraft(conversationId: String?, projectId: String) async -> Draft {
+        // Wait for initial load to complete to avoid race conditions
+        await loadTask?.value
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
 
         if let existing = drafts[key] {
@@ -122,7 +167,10 @@ final class DraftManager {
     ///   - content: The new content
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
-    func updateContent(_ content: String, conversationId: String?, projectId: String) {
+    func updateContent(_ content: String, conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
 
         if var draft = drafts[key] {
@@ -145,7 +193,10 @@ final class DraftManager {
     /// - Parameters:
     ///   - title: The new title
     ///   - projectId: The project ID
-    func updateTitle(_ title: String, projectId: String) {
+    func updateTitle(_ title: String, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         let key = Draft.storageKey(for: nil, projectId: projectId)
 
         if var draft = drafts[key] {
@@ -164,7 +215,10 @@ final class DraftManager {
     ///   - agentPubkey: The selected agent pubkey (nil to clear)
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
-    func updateAgent(_ agentPubkey: String?, conversationId: String?, projectId: String) {
+    func updateAgent(_ agentPubkey: String?, conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
 
         if var draft = drafts[key] {
@@ -187,7 +241,10 @@ final class DraftManager {
     /// - Parameters:
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
-    func deleteDraft(conversationId: String?, projectId: String) {
+    func deleteDraft(conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
         drafts.removeValue(forKey: key)
         scheduleSave()
@@ -197,7 +254,10 @@ final class DraftManager {
     /// - Parameters:
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
-    func clearDraft(conversationId: String?, projectId: String) {
+    func clearDraft(conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
 
         if var draft = drafts[key] {
@@ -216,17 +276,26 @@ final class DraftManager {
 
     /// Delete all drafts for a project
     /// - Parameter projectId: The project ID
-    func deleteProjectDrafts(_ projectId: String) {
+    func deleteProjectDrafts(_ projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
         drafts = drafts.filter { $0.value.projectId != projectId }
         scheduleSave()
     }
 
     /// Force save immediately, cancelling any pending debounced save
-    func saveNow() {
+    /// - Note: This is truly synchronous - blocks until save completes
+    /// - Throws: Error if save fails (including if load failed and saves are blocked)
+    func saveNow() async throws {
+        // BLOCKER FIX: Wait for initial load to complete before saving
+        // This prevents saveNow() from persisting empty snapshot before disk drafts are loaded
+        await ensureLoaded()
+
         saveTask?.cancel()
         saveTask = nil
         hasPendingSave = false
-        performSave()
+        try await performSaveSyncWithThrow()
     }
 
     /// Clean up old orphaned drafts (drafts older than specified age with no content)
@@ -248,22 +317,79 @@ final class DraftManager {
 
     // MARK: - Private Methods
 
+    /// Ensure initial load has completed before proceeding with mutations
+    /// - Note: Prevents race conditions where mutations occur before drafts are loaded
+    private func ensureLoaded() async {
+        await loadTask?.value
+    }
+
     private func loadDrafts() async {
-        let loadedDrafts = await store.loadDrafts()
-        drafts = loadedDrafts
-        loadFailed = loadedDrafts.isEmpty && FileManager.default.fileExists(
-            atPath: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("message_drafts.json").path
-        )
+        let loadResult = await store.loadDrafts()
+        let loadedDrafts = loadResult.drafts
+        loadFailed = loadResult.loadFailed
+
+        // CRITICAL DATA SAFETY: If load failed, prevent any saves to avoid overwriting quarantined file
+        if loadFailed {
+            print("[DraftManager] CRITICAL: Load failed - all saves are now BLOCKED to prevent data loss")
+            print("[DraftManager] Fix the corrupted file or restore from backup before proceeding")
+            drafts = [:] // Start with empty drafts - do NOT overwrite quarantined file
+            return
+        }
+
+        // Migration: Re-key drafts to match new storage key format
+        // Old drafts might have been stored with different keys or missing projectId
+        var migratedDrafts: [String: Draft] = [:]
+        var legacyDrafts: [String: Draft] = [:]
+
+        for (oldKey, draft) in loadedDrafts {
+            // Preserve legacy drafts with empty projectId instead of deleting them
+            // Store them under a special "legacy-{originalKey}" key for recovery
+            if draft.projectId.isEmpty {
+                let legacyKey = "legacy-\(oldKey)"
+                print("[DraftManager] Preserving legacy draft with no projectId: \(oldKey) -> \(legacyKey)")
+                legacyDrafts[legacyKey] = draft
+                continue
+            }
+
+            // Calculate the correct storage key based on current format
+            let correctKey = draft.storageKey
+
+            // If the key changed, migrate it
+            if oldKey != correctKey {
+                print("[DraftManager] Migrating draft from '\(oldKey)' to '\(correctKey)'")
+                migratedDrafts[correctKey] = draft
+            } else {
+                migratedDrafts[correctKey] = draft
+            }
+        }
+
+        // Merge legacy drafts into migrated drafts so they're preserved on disk
+        drafts = migratedDrafts.merging(legacyDrafts) { current, _ in current }
+
+        // If we migrated any keys or found legacy drafts, save immediately to persist
+        if drafts.keys.sorted() != loadedDrafts.keys.sorted() {
+            print("[DraftManager] Persisting migrated/legacy drafts")
+            if !legacyDrafts.isEmpty {
+                print("[DraftManager] WARNING: Found \(legacyDrafts.count) legacy draft(s) without projectId. These are preserved under 'legacy-*' keys for manual recovery.")
+            }
+            scheduleSave()
+        }
     }
 
     private func scheduleSave() {
+        // CRITICAL DATA SAFETY: Block all saves if load failed
+        if loadFailed {
+            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
+            return
+        }
+
         // Cancel any existing save task
         saveTask?.cancel()
         hasPendingSave = true
 
         // Capture drafts snapshot for the save
         let draftsSnapshot = drafts
+        let allowSave = !loadFailed
 
         // Schedule new save after debounce delay
         saveTask = Task { [weak self, store] in
@@ -274,7 +400,7 @@ final class DraftManager {
                 try Task.checkCancellation()
 
                 // Perform save on the actor (off main thread)
-                try await store.saveDrafts(draftsSnapshot)
+                try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
 
                 await MainActor.run {
                     self?.hasPendingSave = false
@@ -294,10 +420,11 @@ final class DraftManager {
 
     private func performSave() {
         let draftsSnapshot = drafts
+        let allowSave = !loadFailed
 
         Task { [weak self, store] in
             do {
-                try await store.saveDrafts(draftsSnapshot)
+                try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
                 await MainActor.run {
                     self?.lastSaveError = nil
                 }
@@ -307,6 +434,51 @@ final class DraftManager {
                     print("[DraftManager] Save failed: \(error)")
                 }
             }
+        }
+    }
+
+    /// Perform synchronous save (blocks until complete)
+    private func performSaveSync() async {
+        // CRITICAL DATA SAFETY: Block all saves if load failed
+        if loadFailed {
+            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
+            lastSaveError = DraftStore.DraftStoreError.saveForbidden(reason: "Load failed - file quarantined")
+            return
+        }
+
+        let draftsSnapshot = drafts
+        let allowSave = !loadFailed
+
+        do {
+            try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = error
+            print("[DraftManager] Save failed: \(error)")
+        }
+    }
+
+    /// Perform synchronous save (blocks until complete) - throws on error
+    /// - Throws: Error if save fails (including if load failed and saves are blocked)
+    private func performSaveSyncWithThrow() async throws {
+        // CRITICAL DATA SAFETY: Block all saves if load failed
+        if loadFailed {
+            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
+            let error = DraftStore.DraftStoreError.saveForbidden(reason: "Load failed - file quarantined")
+            lastSaveError = error
+            throw error
+        }
+
+        let draftsSnapshot = drafts
+        let allowSave = !loadFailed
+
+        do {
+            try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = error
+            print("[DraftManager] Save failed: \(error)")
+            throw error
         }
     }
 }
