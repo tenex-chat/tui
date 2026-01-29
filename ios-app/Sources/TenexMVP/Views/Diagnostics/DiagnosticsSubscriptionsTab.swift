@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Subscriptions tab showing active relay subscriptions
 struct DiagnosticsSubscriptionsTab: View {
-    /// Subscriptions data passed directly (already unwrapped from optional)
+    /// Subscriptions data, pre-sorted by events received (highest first)
+    /// Sorting is handled by DiagnosticsSnapshot.sortedSubscriptions to keep business logic out of views
     let subscriptions: [SubscriptionDiagnostics]
     let totalEvents: UInt64
 
@@ -46,15 +47,7 @@ struct DiagnosticsSubscriptionsTab: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
-        )
+        .diagnosticCardStyle(withShadow: true)
     }
 
     // MARK: - Subscriptions List
@@ -64,7 +57,7 @@ struct DiagnosticsSubscriptionsTab: View {
             SectionHeader(title: "Active Subscriptions")
 
             VStack(spacing: 8) {
-                ForEach(subscriptions.sorted(by: { $0.eventsReceived > $1.eventsReceived }), id: \.subId) { sub in
+                ForEach(subscriptions, id: \.subId) { sub in
                     SubscriptionRow(subscription: sub)
                 }
             }
@@ -165,12 +158,7 @@ struct SubscriptionRow: View {
                 .background(Color(.systemGray6))
             }
         }
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
-        )
+        .diagnosticCardStyle()
     }
 
     private func formatAge(_ seconds: UInt64) -> String {

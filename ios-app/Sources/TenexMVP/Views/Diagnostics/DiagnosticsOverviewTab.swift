@@ -33,13 +33,7 @@ struct DiagnosticsOverviewTab: View {
                         icon: "arrow.triangle.2.circlepath"
                     )
                 } else {
-                    DiagnosticCard(
-                        title: "Relay Sync",
-                        value: "—",
-                        subtitle: "Unavailable",
-                        color: .gray,
-                        icon: "arrow.triangle.2.circlepath"
-                    )
+                    DiagnosticCard.unavailable(title: "Relay Sync", icon: "arrow.triangle.2.circlepath")
                 }
 
                 // Subscriptions Card
@@ -52,13 +46,7 @@ struct DiagnosticsOverviewTab: View {
                         icon: "antenna.radiowaves.left.and.right"
                     )
                 } else {
-                    DiagnosticCard(
-                        title: "Subscriptions",
-                        value: "—",
-                        subtitle: "Unavailable",
-                        color: .gray,
-                        icon: "antenna.radiowaves.left.and.right"
-                    )
+                    DiagnosticCard.unavailable(title: "Subscriptions", icon: "antenna.radiowaves.left.and.right")
                 }
             }
 
@@ -73,13 +61,7 @@ struct DiagnosticsOverviewTab: View {
                         icon: "clock.fill"
                     )
                 } else {
-                    DiagnosticCard(
-                        title: "Uptime",
-                        value: "—",
-                        subtitle: "Unavailable",
-                        color: .gray,
-                        icon: "clock.fill"
-                    )
+                    DiagnosticCard.unavailable(title: "Uptime", icon: "clock.fill")
                 }
 
                 // Total Events Card
@@ -92,13 +74,7 @@ struct DiagnosticsOverviewTab: View {
                         icon: "doc.text.fill"
                     )
                 } else {
-                    DiagnosticCard(
-                        title: "Total Events",
-                        value: "—",
-                        subtitle: "Not loaded",
-                        color: .gray,
-                        icon: "doc.text.fill"
-                    )
+                    DiagnosticCard.unavailable(title: "Total Events", icon: "doc.text.fill", subtitle: "Not loaded")
                 }
             }
         }
@@ -150,12 +126,7 @@ struct DiagnosticsOverviewTab: View {
                         )
                     }
                 }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.systemGray5), lineWidth: 1)
-                )
+                .diagnosticCardStyle()
             } else {
                 SectionUnavailablePlaceholder(message: "System information unavailable")
             }
@@ -231,12 +202,7 @@ struct DiagnosticsOverviewTab: View {
                     )
                 }
             }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(.systemGray5), lineWidth: 1)
-            )
+            .diagnosticCardStyle()
         }
     }
 
@@ -257,12 +223,7 @@ struct SectionUnavailablePlaceholder: View {
         }
         .padding()
         .frame(maxWidth: .infinity)
-        .background(Color(.systemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
-        )
+        .diagnosticCardStyle()
     }
 }
 
@@ -301,14 +262,21 @@ struct DiagnosticCard: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
+        .diagnosticCardStyle(withShadow: true)
+    }
+
+    /// Factory method for creating an unavailable/fallback card
+    /// - Parameters:
+    ///   - title: The card title
+    ///   - icon: SF Symbol name for the card icon
+    ///   - subtitle: Optional custom subtitle (defaults to "Unavailable")
+    static func unavailable(title: String, icon: String, subtitle: String = "Unavailable") -> DiagnosticCard {
+        DiagnosticCard(
+            title: title,
+            value: "—",
+            subtitle: subtitle,
+            color: .gray,
+            icon: icon
         )
     }
 }
@@ -406,4 +374,48 @@ struct StatusRow: View {
         .padding()
     }
     .background(Color(.systemGroupedBackground))
+}
+
+// MARK: - Diagnostic Card Style ViewModifier
+
+/// ViewModifier for consistent diagnostic card styling across all tabs
+/// Consolidates the repeated pattern of background, rounded corners, and border
+struct DiagnosticCardStyle: ViewModifier {
+    /// Whether to include a shadow (used for summary/featured cards)
+    let withShadow: Bool
+
+    init(withShadow: Bool = false) {
+        self.withShadow = withShadow
+    }
+
+    func body(content: Content) -> some View {
+        if withShadow {
+            content
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(.systemBackground))
+                        .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(.systemGray5), lineWidth: 1)
+                )
+        } else {
+            content
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color(.systemGray5), lineWidth: 1)
+                )
+        }
+    }
+}
+
+extension View {
+    /// Apply consistent diagnostic card styling
+    /// - Parameter withShadow: Whether to include shadow (for featured/summary cards)
+    func diagnosticCardStyle(withShadow: Bool = false) -> some View {
+        modifier(DiagnosticCardStyle(withShadow: withShadow))
+    }
 }

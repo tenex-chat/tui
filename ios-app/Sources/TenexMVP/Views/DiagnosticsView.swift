@@ -151,9 +151,9 @@ struct DiagnosticsTabContent: View {
                     )
                 }
             case .subscriptions:
-                if let subscriptions = snapshot.subscriptions {
+                if snapshot.subscriptions != nil {
                     DiagnosticsSubscriptionsTab(
-                        subscriptions: subscriptions,
+                        subscriptions: snapshot.sortedSubscriptions,
                         totalEvents: snapshot.totalSubscriptionEvents
                     )
                 } else {

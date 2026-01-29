@@ -60,12 +60,7 @@ struct DiagnosticsDatabaseTab: View {
                         }
                     }
                 }
-                .background(Color(.systemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(Color(.systemGray5), lineWidth: 1)
-                )
+                .diagnosticCardStyle()
             }
         }
     }
