@@ -12,3 +12,4 @@ addresses.txt
 *.swo
 *~
 ios-app/build/
+__.SYMDEF
