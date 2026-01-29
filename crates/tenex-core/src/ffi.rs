@@ -1054,7 +1054,7 @@ impl TenexCore {
 
                 // Determine priority based on event type
                 let priority = match item.event_type {
-                    crate::models::InboxEventType::Ask => "urgent".to_string(),
+                    crate::models::InboxEventType::Ask => "high".to_string(),
                     crate::models::InboxEventType::Mention => "high".to_string(),
                     crate::models::InboxEventType::Reply => "medium".to_string(),
                     crate::models::InboxEventType::ThreadReply => "low".to_string(),
