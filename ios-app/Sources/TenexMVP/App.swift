@@ -228,11 +228,10 @@ struct MainTabView: View {
                 }
                 .environmentObject(coreManager)
 
-            // TODO: Enable Stats tab once StatsSnapshot FFI bindings are generated
-            // StatsView(coreManager: coreManager)
-            //     .tabItem {
-            //         Label("Stats", systemImage: "chart.bar.fill")
-            //     }
+            StatsView(coreManager: coreManager)
+                .tabItem {
+                    Label("Stats", systemImage: "chart.bar.fill")
+                }
 
             InboxView()
                 .tabItem {
