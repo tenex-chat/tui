@@ -23,7 +23,6 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
-use std::collections::HashMap;
 
 // Unicode bar characters for charts
 const BAR_FULL: char = '█';
@@ -921,8 +920,9 @@ fn render_activity_grid(
     }
 
     // Build the activity grid
-    // Layout: rows represent hours of day (0-23), columns represent calendar days
+    // Layout: rows represent calendar days, columns represent hours of day (0-23)
     // Each cell shows activity for that hour on that specific calendar day
+    // This matches GitHub's contribution graph layout (time = columns, sequence = rows)
     let num_days = view_mode.num_days();
     let seconds_per_day: u64 = 86400;
     let seconds_per_hour: u64 = 3600;
@@ -960,7 +960,7 @@ fn render_activity_grid(
     }
 
     // Render the grid
-    // Display format: rows are hours (0-23), columns are days (most recent on right)
+    // Display format: rows are days (most recent on bottom), columns are hours (0-23 left to right)
     let mut lines: Vec<Line> = Vec::new();
 
     // Add legend at top
@@ -977,18 +977,46 @@ fn render_activity_grid(
     ]));
     lines.push(Line::from(vec![Span::raw("")])); // Spacer
 
-    // Render grid: each row is an hour, each column is a day
+    // Add hour labels at top
+    let mut hour_label_spans = vec![Span::styled("     ", Style::default())];
     for hour in 0..HOURS_PER_DAY {
+        // Show label for every 3rd hour to avoid clutter
+        if hour % 3 == 0 {
+            hour_label_spans.push(Span::styled(
+                format!("{:02}h ", hour),
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+        } else {
+            hour_label_spans.push(Span::styled("    ", Style::default()));
+        }
+    }
+    lines.push(Line::from(hour_label_spans));
+    lines.push(Line::from(vec![Span::raw("")])); // Spacer
+
+    // Render grid: each row is a day, each column is an hour
+    // Days in reverse order (oldest first = top, newest = bottom)
+    for day_offset in (0..num_days).rev() {
+        // Day label
+        let day_label = if day_offset == 0 {
+            "Today".to_string()
+        } else if day_offset == 1 {
+            "Yest.".to_string()
+        } else {
+            // Calculate the actual date for this day
+            let day_start = today_start - (day_offset as u64 * seconds_per_day);
+            format_day_label_from_timestamp(day_start, today_start)
+        };
+
         let mut line_spans = vec![
             Span::styled(
-                format!("{:02}h ", hour),
+                format!("{:>5} ", day_label),
                 Style::default().fg(theme::TEXT_MUTED),
             ),
         ];
 
-        // Days in reverse order (oldest first, newest last) - left to right
-        for day in (0..num_days).rev() {
-            let value = grid[day][hour];
+        // Hours go left to right (00-23)
+        for hour in 0..HOURS_PER_DAY {
+            let value = grid[day_offset][hour];
             let color = get_activity_color(value, max_value);
             line_spans.push(Span::styled("█", Style::default().fg(color)));
             line_spans.push(Span::raw(" ")); // Space between blocks
@@ -996,25 +1024,6 @@ fn render_activity_grid(
 
         lines.push(Line::from(line_spans));
     }
-
-    // Add day labels at bottom
-    lines.push(Line::from(vec![Span::raw("")])); // Spacer
-    let mut day_label_spans = vec![Span::styled("    ", Style::default())];
-
-    for day in (0..num_days).rev() {
-        let day_label = if day == 0 {
-            "T"
-        } else if day == 1 {
-            "Y"
-        } else {
-            " "
-        };
-        day_label_spans.push(Span::styled(
-            format!("{} ", day_label),
-            Style::default().fg(theme::TEXT_DIM),
-        ));
-    }
-    lines.push(Line::from(day_label_spans));
 
     let paragraph = Paragraph::new(lines);
     let chart_area = Rect::new(
