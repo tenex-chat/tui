@@ -634,6 +634,17 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getMessages(conversationId: String)  -> [MessageInfo]
     
     /**
+     * Get profile picture URL for a pubkey from kind:0 metadata.
+     *
+     * Returns the picture URL if the profile exists and has a picture set.
+     * This fetches from cached kind:0 events, not the network.
+     *
+     * Returns Result to allow Swift to properly handle errors (lock failures, etc.)
+     * instead of silently returning nil.
+     */
+    func getProfilePicture(pubkey: String) throws  -> String?
+    
+    /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
      */
@@ -714,6 +725,10 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     /**
      * Refresh data from relays.
      * Call this to fetch the latest data from relays.
+     *
+     * Includes throttling: if called within REFRESH_THROTTLE_INTERVAL_MS of the last
+     * refresh, returns immediately without doing work. This prevents excessive CPU/relay
+     * load from rapid successive calls (e.g., multiple views loading simultaneously).
      */
     func refresh()  -> Bool
     
@@ -977,6 +992,23 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
 }
     
     /**
+     * Get profile picture URL for a pubkey from kind:0 metadata.
+     *
+     * Returns the picture URL if the profile exists and has a picture set.
+     * This fetches from cached kind:0 events, not the network.
+     *
+     * Returns Result to allow Swift to properly handle errors (lock failures, etc.)
+     * instead of silently returning nil.
+     */
+open func getProfilePicture(pubkey: String)throws  -> String?  {
+    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),$0
+    )
+})
+}
+    
+    /**
      * Get all projects with filter info (visibility, counts).
      * Returns Result to distinguish "no data" from "core error".
      */
@@ -1115,6 +1147,10 @@ open func logout()throws   {try rustCallWithError(FfiConverterTypeTenexError_lif
     /**
      * Refresh data from relays.
      * Call this to fetch the latest data from relays.
+     *
+     * Includes throttling: if called within REFRESH_THROTTLE_INTERVAL_MS of the last
+     * refresh, returns immediately without doing work. This prevents excessive CPU/relay
+     * load from rapid successive calls (e.g., multiple views loading simultaneously).
      */
 open func refresh() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
@@ -1940,9 +1976,13 @@ public struct ConversationInfo {
      */
     public var title: String
     /**
-     * Agent or user who started the conversation
+     * Agent or user who started the conversation (display name)
      */
     public var author: String
+    /**
+     * Author's public key (hex) for profile lookups
+     */
+    public var authorPubkey: String
     /**
      * Brief summary or first line of content
      */
@@ -1974,8 +2014,11 @@ public struct ConversationInfo {
          * Title/subject of the conversation
          */title: String, 
         /**
-         * Agent or user who started the conversation
+         * Agent or user who started the conversation (display name)
          */author: String, 
+        /**
+         * Author's public key (hex) for profile lookups
+         */authorPubkey: String, 
         /**
          * Brief summary or first line of content
          */summary: String?, 
@@ -1994,6 +2037,7 @@ public struct ConversationInfo {
         self.id = id
         self.title = title
         self.author = author
+        self.authorPubkey = authorPubkey
         self.summary = summary
         self.messageCount = messageCount
         self.lastActivity = lastActivity
@@ -2018,6 +2062,9 @@ extension ConversationInfo: Equatable, Hashable {
         if lhs.author != rhs.author {
             return false
         }
+        if lhs.authorPubkey != rhs.authorPubkey {
+            return false
+        }
         if lhs.summary != rhs.summary {
             return false
         }
@@ -2040,6 +2087,7 @@ extension ConversationInfo: Equatable, Hashable {
         hasher.combine(id)
         hasher.combine(title)
         hasher.combine(author)
+        hasher.combine(authorPubkey)
         hasher.combine(summary)
         hasher.combine(messageCount)
         hasher.combine(lastActivity)
@@ -2060,6 +2108,7 @@ public struct FfiConverterTypeConversationInfo: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 author: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
                 messageCount: FfiConverterUInt32.read(from: &buf), 
                 lastActivity: FfiConverterUInt64.read(from: &buf), 
@@ -2072,6 +2121,7 @@ public struct FfiConverterTypeConversationInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.author, into: &buf)
+        FfiConverterString.write(value.authorPubkey, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
         FfiConverterUInt32.write(value.messageCount, into: &buf)
         FfiConverterUInt64.write(value.lastActivity, into: &buf)
@@ -5654,6 +5704,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5687,7 +5740,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 20996) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 31823) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 48105) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
