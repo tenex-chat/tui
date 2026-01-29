@@ -314,9 +314,11 @@ struct InboxView: View {
             guard !Task.isCancelled else { return }
 
             // Perform fetch on background thread
-            // Note: getInbox() is called off-main via detached task
+            // Note: refresh() and getInbox() are called off-main via detached task
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
             let fetched = await Task.detached(priority: .userInitiated) { [coreManager] in
-                coreManager.core.getInbox()
+                _ = coreManager.core.refresh()
+                return coreManager.core.getInbox()
             }.value
 
             // Check for cancellation after fetch
@@ -608,8 +610,10 @@ struct InboxConversationView: View {
 
             guard !Task.isCancelled else { return }
 
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
             let fetched = await Task.detached(priority: .userInitiated) { [coreManager, conversationId] in
-                coreManager.core.getMessages(conversationId: conversationId)
+                _ = coreManager.core.refresh()
+                return coreManager.core.getMessages(conversationId: conversationId)
             }.value
 
             guard !Task.isCancelled else { return }

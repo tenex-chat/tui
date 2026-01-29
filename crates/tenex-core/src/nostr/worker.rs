@@ -1380,7 +1380,17 @@ impl NostrWorker {
         Ok(())
     }
 
-    async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
+    /// Shared helper for subscribing to project filters with deduplication.
+    ///
+    /// This method handles the common pattern of:
+    /// 1. Atomic check+insert to prevent duplicate subscriptions (critical for iOS races)
+    /// 2. Logging the subscription attempt
+    /// 3. Calling subscribe_project_filters
+    /// 4. Removing from set on failure to allow retry
+    ///
+    /// Used by both handle_subscribe_to_project_messages and handle_subscribe_to_project_metadata
+    /// since they had identical logic.
+    async fn subscribe_to_project_with_dedup(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Use atomic check+insert to prevent duplicate subscriptions
@@ -1407,31 +1417,12 @@ impl NostrWorker {
         }
     }
 
+    async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
+        self.subscribe_to_project_with_dedup(project_a_tag).await
+    }
+
     async fn handle_subscribe_to_project_metadata(&self, project_a_tag: String) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-
-        // Use atomic check+insert to prevent duplicate subscriptions
-        // This is critical for iOS where refresh() and notification handler can race
-        let is_new = self.subscribed_projects.write().await.insert(project_a_tag.clone());
-        if !is_new {
-            // Already subscribed (likely by notification handler)
-            let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-            tlog!("CONN", "Skipping duplicate subscription for project: {}", project_name);
-            return Ok(());
-        }
-
-        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-        tlog!("CONN", "Adding subscriptions for project: {}", project_name);
-
-        // Use the shared helper for consistent subscription behavior
-        match subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                // Subscription failed - remove from set so we can retry later
-                self.subscribed_projects.write().await.remove(&project_a_tag);
-                Err(e)
-            }
-        }
+        self.subscribe_to_project_with_dedup(project_a_tag).await
     }
 
     async fn handle_disconnect(&mut self) -> Result<()> {

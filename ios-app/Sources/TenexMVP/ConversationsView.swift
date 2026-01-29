@@ -98,6 +98,9 @@ struct ConversationsView: View {
     private func loadConversations() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh data from relays before fetching conversations
+            // This ensures the AppDataStore is updated with latest messages from nostrdb
+            _ = coreManager.core.refresh()
             let fetched = coreManager.core.getConversations(projectId: project.id)
             // Precompute hierarchy on background thread for O(1) access per row
             let computedHierarchy = ConversationHierarchy(conversations: fetched)
@@ -284,6 +287,8 @@ struct MessagesView: View {
     private func loadMessages() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             let fetched = coreManager.core.getMessages(conversationId: conversation.id)
             DispatchQueue.main.async {
                 self.messages = fetched
