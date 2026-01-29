@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var showLogoutError = false
     @State private var logoutErrorMessage = ""
     @State private var isLoggingOut = false
+    @State private var showNewConversation = false
 
     var body: some View {
         NavigationStack {
@@ -44,10 +45,16 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: loadProjects) {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 16) {
+                        Button(action: loadProjects) {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .disabled(isLoading)
+
+                        Button(action: { showNewConversation = true }) {
+                            Image(systemName: "plus.message")
+                        }
                     }
-                    .disabled(isLoading)
                 }
             }
             .onAppear {
@@ -60,6 +67,16 @@ struct ContentView: View {
                 Button("Cancel", role: .cancel) { }
             } message: {
                 Text(logoutErrorMessage)
+            }
+            .sheet(isPresented: $showNewConversation) {
+                MessageComposerView(
+                    project: nil,
+                    onSend: { _ in
+                        // Optionally refresh projects or navigate somewhere
+                        loadProjects()
+                    }
+                )
+                .environmentObject(coreManager)
             }
         }
     }

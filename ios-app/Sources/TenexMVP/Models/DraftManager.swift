@@ -250,7 +250,37 @@ final class DraftManager {
 
     private func loadDrafts() async {
         let loadedDrafts = await store.loadDrafts()
-        drafts = loadedDrafts
+
+        // Migration: Re-key drafts to match new storage key format
+        // Old drafts might have been stored with different keys or missing projectId
+        var migratedDrafts: [String: Draft] = [:]
+        for (oldKey, draft) in loadedDrafts {
+            // Skip orphaned drafts with empty projectId (from old versions)
+            guard !draft.projectId.isEmpty else {
+                print("[DraftManager] Skipping orphaned draft with no projectId: \(oldKey)")
+                continue
+            }
+
+            // Calculate the correct storage key based on current format
+            let correctKey = draft.storageKey
+
+            // If the key changed, migrate it
+            if oldKey != correctKey {
+                print("[DraftManager] Migrating draft from '\(oldKey)' to '\(correctKey)'")
+                migratedDrafts[correctKey] = draft
+            } else {
+                migratedDrafts[correctKey] = draft
+            }
+        }
+
+        drafts = migratedDrafts
+
+        // If we migrated any keys, save immediately to persist the migration
+        if migratedDrafts.keys.sorted() != loadedDrafts.keys.sorted() {
+            print("[DraftManager] Persisting migrated drafts")
+            scheduleSave()
+        }
+
         loadFailed = loadedDrafts.isEmpty && FileManager.default.fileExists(
             atPath: FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("message_drafts.json").path
