@@ -228,11 +228,10 @@ struct MainTabView: View {
                 }
                 .environmentObject(coreManager)
 
-            ConversationsTabView()
+            StatsView(coreManager: coreManager)
                 .tabItem {
-                    Label("Conversations", systemImage: "bubble.left.and.bubble.right.fill")
+                    Label("Stats", systemImage: "chart.bar.fill")
                 }
-                .environmentObject(coreManager)
 
             InboxView()
                 .tabItem {
