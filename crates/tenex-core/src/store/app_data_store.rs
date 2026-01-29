@@ -4345,28 +4345,31 @@ mod tests {
         assert_eq!(result.get(&base_timestamp), Some(&100_u64), "Hour 10:00 should have 100 tokens");
         assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), None, "Hour 12:00 should NOT be in window");
 
-        // Test 5: Verify day boundary handling by adding messages across day transitions
-        // Add message at 03:00 (early morning, before our base_timestamp at 10:00)
+        // Test 5: Verify day boundary handling by adding messages that cross midnight
+        // Current base_timestamp is 2024-01-15 10:00:00 UTC
+        // Add message at 23:00 on 2024-01-14 (prior day) to verify midnight rollover
         let seconds_per_day: u64 = 86400;
         let day_start = (base_timestamp / seconds_per_day) * seconds_per_day;
-        let hour_03 = day_start + 3 * seconds_per_hour;
 
-        let mut msg = make_test_message("msg_03", "pubkey1", "thread1", "test", hour_03);
-        msg.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
+        // Prior day's 23:00 (one hour before midnight)
+        let prior_day_23 = day_start - seconds_per_hour;
+
+        let mut msg = make_test_message("msg_23", "pubkey1", "thread1", "test", prior_day_23);
+        msg.llm_metadata = vec![("total-tokens".to_string(), "600".to_string())];
         store.messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg);
         store.rebuild_llm_activity_by_hour();
 
-        // Window from 10:00 looking back 10 hours should see hours: 10,9,8,7,6,5,4,3,2,1
-        // Only hour 3 has data
-        let hour_10_start = base_timestamp;
-        let result = store.get_tokens_by_hour_from(hour_10_start, 10);
-        // Should have 2 entries: 10:00 (100 tokens) and 03:00 (300 tokens)
-        assert_eq!(result.len(), 2, "Window from 10:00 looking back 10 hours should return 2 entries");
-        assert_eq!(result.get(&hour_10_start), Some(&100_u64), "Hour 10:00 should have 100 tokens");
-        assert_eq!(result.get(&hour_03), Some(&300_u64), "Hour 03:00 should have 300 tokens");
+        // Window from 01:00 current day looking back 3 hours should cross midnight
+        // Should see: 01:00, 00:00, 23:00 (prior day)
+        let hour_01_start = day_start + seconds_per_hour;
+        let result = store.get_tokens_by_hour_from(hour_01_start, 3);
+
+        // We should see the 23:00 hour from the prior day in the window
+        assert!(result.contains_key(&prior_day_23), "Window should include prior day's 23:00 hour when crossing midnight");
+        assert_eq!(result.get(&prior_day_23), Some(&600_u64), "Prior day's 23:00 should have 600 tokens");
     }
 
     /// Test that get_tokens_by_hour and get_message_count_by_hour return empty results
