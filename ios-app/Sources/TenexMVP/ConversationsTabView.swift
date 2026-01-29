@@ -7,6 +7,7 @@ struct ConversationsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
+    @State private var showDiagnostics = false
     @State private var selectedConversation: ConversationFullInfo?
 
     /// Filtered conversations based on selected projects
@@ -14,7 +15,11 @@ struct ConversationsTabView: View {
         if selectedProjectIds.isEmpty {
             return coreManager.conversations
         }
-        return coreManager.conversations.filter { selectedProjectIds.contains($0.projectATag) }
+        return coreManager.conversations.filter { conv in
+            // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
+            let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+            return selectedProjectIds.contains(projectId)
+        }
     }
 
     /// Root conversations (no parent or orphaned) sorted by effective last activity
@@ -83,6 +88,16 @@ struct ConversationsTabView: View {
                         Label(filterButtonLabel, systemImage: selectedProjectIds.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button(action: { showDiagnostics = true }) {
+                            Label("Diagnostics", systemImage: "gauge.with.needle")
+                        }
+                    } label: {
+                        Image(systemName: "person.circle")
+                            .font(.title3)
+                    }
+                }
             }
             .sheet(isPresented: $showFilterSheet) {
                 ProjectFilterSheet(
@@ -94,12 +109,16 @@ struct ConversationsTabView: View {
                 ConversationDetailView(conversation: conversation)
                     .environmentObject(coreManager)
             }
+            .sheet(isPresented: $showDiagnostics) {
+                DiagnosticsView(coreManager: coreManager)
+            }
         }
     }
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {
-        // Find project title from the conversation's projectATag
-        return coreManager.projects.first { $0.id == conversation.projectATag }?.title
+        // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
+        let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+        return coreManager.projects.first { $0.id == projectId }?.title
     }
 }
 
