@@ -127,24 +127,19 @@ private enum InboxDateFormatters {
 struct InboxView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
-    // Use State for data since we need EnvironmentObject for coreManager
-    @State private var inboxItems: [InboxItem] = []
-    @State private var isLoading = false
     @State private var selectedFilter: InboxFilter = .all
-    @State private var loadTask: Task<Void, Never>?
-
     @State private var selectedItem: InboxItem?
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
 
-    /// Items filtered by current tab selection
+    /// Items filtered by current tab selection from centralized store
     private var filteredItems: [InboxItem] {
-        inboxItems.filter { $0.matches(filter: selectedFilter) }
+        coreManager.inboxItems.filter { $0.matches(filter: selectedFilter) }
     }
 
     /// Count of unread items for badge display
     private var unreadCount: Int {
-        inboxItems.filter(\.isUnread).count
+        coreManager.inboxItems.filter(\.isUnread).count
     }
 
     /// Unread count for a specific filter
@@ -152,7 +147,7 @@ struct InboxView: View {
         if filter == .all {
             return unreadCount
         }
-        return inboxItems.filter { $0.matches(filter: filter) && $0.isUnread }.count
+        return coreManager.inboxItems.filter { $0.matches(filter: filter) && $0.isUnread }.count
     }
 
     var body: some View {
@@ -163,34 +158,18 @@ struct InboxView: View {
 
                 Divider()
 
-                // Inbox list
-                if isLoading {
-                    Spacer()
-                    ProgressView("Loading inbox...")
-                    Spacer()
-                } else if filteredItems.isEmpty {
+                // Inbox list - uses centralized coreManager.inboxItems
+                if filteredItems.isEmpty {
                     emptyStateView
                 } else {
                     inboxList
+                        .refreshable {
+                            await coreManager.manualRefresh()
+                        }
                 }
             }
             .navigationTitle("Inbox")
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: loadInbox) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(isLoading)
-                }
-            }
-            .task {
-                loadInbox()
-            }
-            .onDisappear {
-                // Cancel load task when view disappears
-                loadTask?.cancel()
-            }
             .sheet(item: $selectedItem, onDismiss: {
                 // Handle navigation after sheet dismisses deterministically
                 if let pending = pendingNavigation {
