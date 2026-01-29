@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// A premium message composition view for both new conversations and replies.
 /// Supports project selection (for new conversations), agent selection, draft persistence, and markdown input.
@@ -32,7 +33,6 @@ struct MessageComposerView: View {
     @State private var availableProjects: [ProjectInfo] = []
     @State private var showProjectSelector = false
     @State private var draft: Draft
-    @State private var draftManager = DraftManager()
     @State private var availableAgents: [AgentInfo] = []
     @State private var agentsLoadError: String?
     @State private var showAgentSelector = false
@@ -40,8 +40,13 @@ struct MessageComposerView: View {
     @State private var sendError: String?
     @State private var showSendError = false
     @State private var isDirty = false // Track if user has made edits before load completes
+    @State private var showLoadFailedAlert = false
 
     // MARK: - Computed
+
+    private var draftManager: DraftManager {
+        DraftManager.shared
+    }
 
     private var isNewConversation: Bool {
         conversationId == nil
@@ -50,6 +55,11 @@ struct MessageComposerView: View {
     private var canSend: Bool {
         // Project is required for all messages (new conversations and replies)
         guard selectedProject != nil else {
+            return false
+        }
+
+        // CRITICAL DATA SAFETY: Block sending if draft load failed
+        guard !draftManager.loadFailed else {
             return false
         }
 
@@ -130,8 +140,25 @@ struct MessageComposerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        // CRITICAL DATA SAFETY: Use background task to guarantee save completes
+                        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+                        backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                            print("[MessageComposerView] WARNING: Background save time expired on cancel")
+                            if backgroundTaskID != .invalid {
+                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                backgroundTaskID = .invalid
+                            }
+                        }
+
                         Task {
                             await draftManager.saveNow()
+
+                            if backgroundTaskID != .invalid {
+                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                backgroundTaskID = .invalid
+                            }
+
                             onDismiss?()
                             dismiss()
                         }
@@ -181,13 +208,39 @@ struct MessageComposerView: View {
             } message: {
                 Text(sendError ?? "Unknown error")
             }
+            .alert("Draft Load Failed", isPresented: $showLoadFailedAlert) {
+                Button("OK") {
+                    // Dismiss the composer when user acknowledges the error
+                    onDismiss?()
+                    dismiss()
+                }
+            } message: {
+                Text("Failed to load existing drafts. The corrupted file has been quarantined for recovery. Editing is blocked to prevent data loss. Please fix the corrupted file or restore from backup.")
+            }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 // CRITICAL DATA SAFETY: Flush drafts immediately when app goes to background
-                // This eliminates the 500ms debounce window that could lose data on app termination
+                // Use proper background task to guarantee completion even if app is suspended
                 if newPhase == .background || newPhase == .inactive {
+                    var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+                    backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                        // Background time expired - clean up
+                        print("[MessageComposerView] WARNING: Background save time expired")
+                        if backgroundTaskID != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                            backgroundTaskID = .invalid
+                        }
+                    }
+
                     Task {
                         await draftManager.saveNow()
                         print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
+
+                        // End background task after save completes
+                        if backgroundTaskID != .invalid {
+                            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                            backgroundTaskID = .invalid
+                        }
                     }
                 }
             }
@@ -261,8 +314,8 @@ struct MessageComposerView: View {
         .font(.headline)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .disabled(isNewConversation && selectedProject == nil)
-        .opacity(isNewConversation && selectedProject == nil ? 0.5 : 1.0)
+        .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed)
+        .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed ? 0.5 : 1.0)
     }
 
     private var contentEditorView: some View {
@@ -283,8 +336,8 @@ struct MessageComposerView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .scrollContentBackground(.hidden)
-            .disabled(isNewConversation && selectedProject == nil)
-            .opacity(isNewConversation && selectedProject == nil ? 0.5 : 1.0)
+            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed)
+            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed ? 0.5 : 1.0)
 
             if draft.content.isEmpty {
                 Text(isNewConversation && selectedProject == nil
@@ -402,6 +455,12 @@ struct MessageComposerView: View {
         Task {
             let loadedDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: projectId)
 
+            // CRITICAL DATA SAFETY: Check if load failed and alert user
+            if draftManager.loadFailed {
+                showLoadFailedAlert = true
+                return
+            }
+
             // CRITICAL DATA SAFETY: Only apply loaded draft if user hasn't made edits yet
             // This prevents async load from overwriting live user typing
             if !isDirty {
@@ -481,7 +540,9 @@ struct MessageComposerView: View {
                 print("[MessageComposerView] Warning: Agent pubkey '\(agentPubkey)' not found in current project's agents. Clearing agent selection.")
                 // Clear invalid agent from draft
                 draft.clearAgent()
-                draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+                Task {
+                    await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+                }
                 validatedAgentPubkey = nil
             }
         }
@@ -531,7 +592,9 @@ struct MessageComposerView: View {
     }
 
     private func clearDraft() {
-        isDirty = false // Reset dirty flag when clearing
+        // CRITICAL DATA SAFETY: Do NOT reset isDirty on clear
+        // This prevents async load from overwriting the user's intentional clear (delete)
+        // isDirty = false // REMOVED - keep isDirty=true to protect against async load
         draft.clear()
         if let projectId = selectedProject?.id {
             Task {

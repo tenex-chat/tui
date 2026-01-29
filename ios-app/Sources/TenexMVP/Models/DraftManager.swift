@@ -78,9 +78,14 @@ actor DraftStore {
 
 /// Manager for handling draft persistence with debounced auto-save.
 /// Thread-safe with actor-isolated persistence operations.
+/// Singleton to prevent multiple instances from overwriting each other's data.
 @Observable
 @MainActor
 final class DraftManager {
+    // MARK: - Singleton
+
+    static let shared = DraftManager()
+
     // MARK: - Constants
 
     private static let saveDelay: TimeInterval = 0.5 // 500ms debounce
@@ -110,7 +115,7 @@ final class DraftManager {
 
     // MARK: - Initialization
 
-    init() {
+    private init() {
         loadTask = Task { @MainActor in
             await loadDrafts()
             loadCompleted = true
@@ -410,10 +415,11 @@ final class DraftManager {
 
     private func performSave() {
         let draftsSnapshot = drafts
+        let allowSave = !loadFailed
 
         Task { [weak self, store] in
             do {
-                try await store.saveDrafts(draftsSnapshot)
+                try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
                 await MainActor.run {
                     self?.lastSaveError = nil
                 }
