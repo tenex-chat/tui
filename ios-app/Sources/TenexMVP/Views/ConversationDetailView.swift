@@ -127,31 +127,20 @@ struct ConversationDetailView: View {
             // Agents
             HStack(spacing: 12) {
                 ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
-                    VStack(spacing: 6) {
-                        AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
-                            .environmentObject(coreManager)
-                        Text(AgentNameFormatter.format(agent))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
+                    AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
+                        .environmentObject(coreManager)
                 }
 
                 if viewModel.participatingAgents.count > 8 {
-                    VStack(spacing: 6) {
-                        Circle()
-                            .fill(Color(.systemGray4))
-                            .frame(width: 44, height: 44)
-                            .overlay {
-                                Text("+\(viewModel.participatingAgents.count - 8)")
-                                    .font(.subheadline)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.secondary)
-                            }
-                        Text("More")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
+                    Circle()
+                        .fill(Color(.systemGray4))
+                        .frame(width: 44, height: 44)
+                        .overlay {
+                            Text("+\(viewModel.participatingAgents.count - 8)")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                        }
                 }
             }
 
@@ -185,10 +174,17 @@ struct ConversationDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(.init(reply.content))
-                .font(.body)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
+            if let attributedString = try? AttributedString(markdown: reply.content) {
+                Text(attributedString)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+            } else {
+                Text(reply.content)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
