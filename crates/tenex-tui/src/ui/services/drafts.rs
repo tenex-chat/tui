@@ -495,6 +495,7 @@ mod tests {
             selected_branch: None,
             last_modified: 1234567890,
             reference_conversation_id: None,
+            fork_message_id: None,
             published_at: None,
             published_event_id: None,
             confirmed_at: None,
@@ -601,6 +602,7 @@ mod tests {
             selected_branch: None,
             last_modified: 1234567890,
             reference_conversation_id: None,
+            fork_message_id: None,
             published_at: None,
             published_event_id: None,
             confirmed_at: None,
@@ -737,6 +739,7 @@ mod tests {
         draft.selected_agent_pubkey = Some("agent-123".to_string());
         draft.selected_branch = Some("feature-branch".to_string());
         draft.reference_conversation_id = Some("ref-conv".to_string());
+        draft.fork_message_id = Some("fork-msg".to_string());
 
         service.save_chat_draft(draft).unwrap();
 
@@ -748,6 +751,7 @@ mod tests {
         assert!(loaded.text.is_empty()); // Content cleared
         assert!(loaded.attachments.is_empty()); // Attachments cleared
         assert!(loaded.reference_conversation_id.is_none()); // Reference cleared
+        assert!(loaded.fork_message_id.is_none()); // Fork message cleared
         // Note: The underlying implementation preserves agent/branch but clears text
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-123".to_string())); // Preserved
         assert_eq!(loaded.selected_branch, Some("feature-branch".to_string())); // Preserved
@@ -778,5 +782,41 @@ mod tests {
         assert_eq!(drafts_after.len(), 1);
         assert_eq!(drafts_after[0].text, "Updated content");
         assert_eq!(drafts_after[0].id, draft_id); // Same ID
+    }
+
+    #[test]
+    fn test_fork_message_id_round_trip_persistence() {
+        let (service, _temp_dir) = create_test_service();
+
+        // Create a draft with fork metadata (simulating a forked conversation)
+        let mut draft = create_test_chat_draft("fork-persist-test", "Forked conversation content");
+        draft.reference_conversation_id = Some("source-conv-123".to_string());
+        draft.fork_message_id = Some("fork-msg-456".to_string());
+        draft.selected_agent_pubkey = Some("agent-xyz".to_string());
+        draft.selected_branch = Some("feature-fork".to_string());
+
+        // Save the draft
+        service.save_chat_draft(draft).unwrap();
+
+        // Load the draft and verify all fork metadata persists
+        let loaded = service.load_chat_draft("fork-persist-test").unwrap();
+        assert_eq!(loaded.text, "Forked conversation content");
+        assert_eq!(loaded.reference_conversation_id, Some("source-conv-123".to_string()));
+        assert_eq!(loaded.fork_message_id, Some("fork-msg-456".to_string()));
+        assert_eq!(loaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
+        assert_eq!(loaded.selected_branch, Some("feature-fork".to_string()));
+
+        // Update the draft text and save again (simulating user typing)
+        let mut updated_draft = loaded;
+        updated_draft.text = "Updated forked conversation content".to_string();
+        service.save_chat_draft(updated_draft).unwrap();
+
+        // Load again and verify fork metadata is still preserved after update
+        let reloaded = service.load_chat_draft("fork-persist-test").unwrap();
+        assert_eq!(reloaded.text, "Updated forked conversation content");
+        assert_eq!(reloaded.reference_conversation_id, Some("source-conv-123".to_string()));
+        assert_eq!(reloaded.fork_message_id, Some("fork-msg-456".to_string()));
+        assert_eq!(reloaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
+        assert_eq!(reloaded.selected_branch, Some("feature-fork".to_string()));
     }
 }

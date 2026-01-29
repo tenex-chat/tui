@@ -779,6 +779,7 @@ impl App {
     /// - `agent_pubkey`: The agent pubkey to save (or None if not explicitly selected)
     /// - `branch`: The branch to save (or None)
     /// - `reference_conversation_id`: Reference conversation for context tags
+    /// - `fork_message_id`: Fork message ID for fork tags
     /// - `project_a_tag_fallback`: Fallback project if no existing draft
     /// - `existing_draft`: Optional existing draft to preserve session_id, message_sequence, etc.
     fn build_chat_draft(
@@ -787,6 +788,7 @@ impl App {
         agent_pubkey: Option<String>,
         branch: Option<String>,
         reference_conversation_id: Option<String>,
+        fork_message_id: Option<String>,
         project_a_tag_fallback: Option<String>,
         existing_draft: Option<&ChatDraft>,
     ) -> ChatDraft {
@@ -815,6 +817,7 @@ impl App {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
             reference_conversation_id,
+            fork_message_id,
             // BULLETPROOF: New/updated drafts are unpublished - they stay until relay confirms
             published_at: None,
             published_event_id: None,
@@ -851,8 +854,9 @@ impl App {
             );
 
             let editor = self.chat_editor();
-            let reference_conversation_id = self.tabs.active_tab()
-                .and_then(|t| t.reference_conversation_id.clone());
+            let (reference_conversation_id, fork_message_id) = self.tabs.active_tab()
+                .map(|t| (t.reference_conversation_id.clone(), t.fork_message_id.clone()))
+                .unwrap_or((None, None));
             let project_a_tag_fallback = self.tabs.active_tab().map(|t| t.project_a_tag.clone());
 
             let draft = Self::build_chat_draft(
@@ -861,6 +865,7 @@ impl App {
                 agent_pubkey,
                 self.selected_branch.clone(),
                 reference_conversation_id,
+                fork_message_id,
                 project_a_tag_fallback,
                 existing_draft.as_ref(),
             );
@@ -906,6 +911,7 @@ impl App {
                 agent_pubkey,
                 branch,
                 tab.reference_conversation_id.clone(),
+                tab.fork_message_id.clone(),
                 Some(tab.project_a_tag.clone()),
                 existing_draft.as_ref(),
             );
@@ -1006,9 +1012,10 @@ impl App {
                     draft_had_branch = true;
                 }
 
-                // Restore reference_conversation_id from draft into the active tab
+                // Restore reference_conversation_id and fork_message_id from draft into the active tab
                 if let Some(tab) = self.tabs.active_tab_mut() {
                     tab.reference_conversation_id = draft.reference_conversation_id.clone();
+                    tab.fork_message_id = draft.fork_message_id.clone();
                 }
             } else {
                 tlog!("AGENT", "restore_chat_draft: no draft found for key");
@@ -1827,6 +1834,12 @@ impl App {
         if let Some(mut draft) = draft_opt {
             // Update the conversation_id to the new thread ID
             draft.conversation_id = thread.id.clone();
+
+            // CRITICAL: Clear fork/reference metadata after thread creation to prevent stale state
+            // These metadata fields are only relevant for the initial thread creation message
+            // and should not persist after the thread is created
+            draft.reference_conversation_id = None;
+            draft.fork_message_id = None;
 
             // Delete the old draft keyed by project:new
             if let Err(e) = self.draft_service.delete_chat_draft(draft_id) {

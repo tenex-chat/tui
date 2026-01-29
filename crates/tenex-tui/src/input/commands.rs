@@ -497,6 +497,13 @@ pub static COMMANDS: &[Command] = &[
         execute: reference_conversation,
     },
     Command {
+        key: 'F',
+        label: "Fork conversation",
+        section: "Conversation",
+        available: |app| app.view == View::Chat && app.input_mode == InputMode::Normal && app.selected_thread().is_some(),
+        execute: fork_conversation,
+    },
+    Command {
         key: 'x',
         label: "Close tab",
         section: "Tab",
@@ -1158,27 +1165,30 @@ fn copy_conversation_id(app: &mut App) {
     }
 }
 
-/// Create a new conversation referencing the current one with a "context" tag.
-/// The new conversation:
-/// 1. Has the same agent, branch, and project as the current one
-/// 2. Is pre-filled with a message instructing the agent to inspect the source conversation
-/// 3. Includes a "context" tag pointing to the source conversation's event ID
-///    (NOTE: "context" is used instead of "q" because "q" is reserved for delegation/child links)
-fn reference_conversation(app: &mut App) {
+/// Helper function to extract shared logic for creating contextual drafts (reference/fork).
+/// Opens a new draft tab with the same agent, branch, and project as the source conversation,
+/// and adds a text attachment with the provided context message.
+/// Returns the source thread ID for use in status messages.
+fn open_contextual_draft(
+    app: &mut App,
+    context_message: &str,
+    fork_message_id: Option<String>,
+    error_message: &str,
+) -> Option<String> {
     // Get required context from current state
     let (source_thread_id, project_a_tag, project_name, agent, branch) = {
         let thread = match app.selected_thread() {
             Some(t) => t,
             None => {
-                app.set_warning_status("No conversation to reference");
-                return;
+                app.set_warning_status(error_message);
+                return None;
             }
         };
         let project = match &app.selected_project {
             Some(p) => p,
             None => {
                 app.set_warning_status("No project selected");
-                return;
+                return None;
             }
         };
         (
@@ -1190,12 +1200,6 @@ fn reference_conversation(app: &mut App) {
         )
     };
 
-    // Calculate approximate token count from current conversation history
-    // Using chars / 4 as a rough approximation
-    let messages = app.messages();
-    let total_chars: usize = messages.iter().map(|m| m.content.len()).sum();
-    let approx_tokens = total_chars / 4;
-
     // Create new draft tab with same project/agent/branch
     app.save_chat_draft();
     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
@@ -1205,27 +1209,111 @@ fn reference_conversation(app: &mut App) {
     app.set_selected_agent(agent.clone());
     app.selected_branch = branch;
 
+    // Add context as a text attachment
+    app.chat_editor_mut().add_text_attachment(context_message);
+
+    // Store the reference conversation ID (and optionally fork message ID) in the active tab
+    if let Some(tab) = app.tabs.active_tab_mut() {
+        tab.reference_conversation_id = Some(source_thread_id.clone());
+        tab.fork_message_id = fork_message_id;
+    }
+
+    // Set view mode for editing
+    app.view = View::Chat;
+    app.input_mode = InputMode::Editing;
+
+    Some(source_thread_id)
+}
+
+/// Create a new conversation referencing the current one with a "context" tag.
+/// The new conversation:
+/// 1. Has the same agent, branch, and project as the current one
+/// 2. Is pre-filled with a message instructing the agent to inspect the source conversation
+/// 3. Includes a "context" tag pointing to the source conversation's event ID
+///    (NOTE: "context" is used instead of "q" because "q" is reserved for delegation/child links)
+fn reference_conversation(app: &mut App) {
+    // Calculate approximate token count from current conversation history
+    // Using chars / 4 as a rough approximation
+    let messages = app.messages();
+    let total_chars: usize = messages.iter().map(|m| m.content.len()).sum();
+    let approx_tokens = total_chars / 4;
+
     // Pre-fill the editor with the context message as a text attachment
-    // This keeps the input clean while providing full context
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
-        source_thread_id,
+        app.selected_thread().map(|t| t.id.as_str()).unwrap_or("unknown"),
         approx_tokens
     );
 
-    // Add context as a text attachment (like large pastes) instead of inline text
-    app.chat_editor_mut().add_text_attachment(&context_message);
+    // Use shared helper to set up the contextual draft
+    let source_thread_id = match open_contextual_draft(
+        app,
+        &context_message,
+        None, // No fork message ID for simple reference
+        "No conversation to reference",
+    ) {
+        Some(id) => id,
+        None => return, // Error already reported by helper
+    };
 
-    // Store the reference conversation ID in the active tab for when the message is sent
-    if let Some(tab) = app.tabs.active_tab_mut() {
-        tab.reference_conversation_id = Some(source_thread_id.clone());
-    }
-
-    app.view = View::Chat;
-    app.input_mode = InputMode::Editing;
     app.set_warning_status(&format!(
         "New conversation referencing {} (~{} tokens)",
         &source_thread_id[..8.min(source_thread_id.len())],
         approx_tokens
+    ));
+}
+
+/// Fork a conversation from a selected message.
+/// Creates a new conversation with:
+/// 1. Same agent, branch, and project as current conversation
+/// 2. A "fork" tag with both conversation ID and selected message ID
+/// 3. Pre-filled message instructing agent to use conversation_get with sinceId parameter
+fn fork_conversation(app: &mut App) {
+    // Get the selected message ID from the current conversation view
+    let messages = app.messages();
+    let thread_id = app.selected_thread().map(|t| t.id.as_str());
+    let subthread_root = app.subthread_root().map(|s| s.as_str());
+    let grouped = filter_and_group_messages(&messages, thread_id, subthread_root);
+
+    let fork_message_id = if let Some(item) = grouped.get(app.selected_message_index()) {
+        match get_message_id(item) {
+            Some(id) => id,
+            None => {
+                app.set_warning_status("Cannot fork from delegation preview");
+                return;
+            }
+        }
+    } else {
+        app.set_warning_status("No message selected");
+        return;
+    };
+
+    // Get source thread ID for the context message
+    let source_thread_id_for_msg = app.selected_thread().map(|t| t.id.clone()).unwrap_or_default();
+
+    // Pre-fill the editor with the fork context message as a text attachment
+    let context_message = format!(
+        "This conversation is forked from conversation id {} starting at message id {}. Your first task is to inspect that conversation slice with conversation_get(conversationId: \"{}\", sinceId: \"{}\") to understand the context we're working from.",
+        source_thread_id_for_msg,
+        fork_message_id,
+        source_thread_id_for_msg,
+        fork_message_id
+    );
+
+    // Use shared helper to set up the contextual draft (with fork message ID)
+    let source_thread_id = match open_contextual_draft(
+        app,
+        &context_message,
+        Some(fork_message_id.clone()),
+        "No conversation to fork",
+    ) {
+        Some(id) => id,
+        None => return, // Error already reported by helper
+    };
+
+    app.set_warning_status(&format!(
+        "New conversation forked from {} at message {}",
+        &source_thread_id[..8.min(source_thread_id.len())],
+        &fork_message_id[..8.min(fork_message_id.len())]
     ));
 }
