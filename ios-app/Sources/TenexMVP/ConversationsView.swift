@@ -9,7 +9,11 @@ struct ConversationsView: View {
 
     /// Conversations filtered by this project from the centralized store
     private var projectConversations: [ConversationFullInfo] {
-        coreManager.conversations.filter { $0.projectATag == project.id }
+        coreManager.conversations.filter { conv in
+            // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
+            let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+            return projectId == project.id
+        }
     }
 
     /// Root conversations (no parent or orphaned) sorted by effective last activity

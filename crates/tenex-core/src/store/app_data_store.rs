@@ -2036,6 +2036,16 @@ impl AppDataStore {
         None
     }
 
+    /// Get the project a-tag for a given thread ID (searches across all projects)
+    pub fn get_project_a_tag_for_thread(&self, thread_id: &str) -> Option<String> {
+        for (project_a_tag, threads) in &self.threads_by_project {
+            if threads.iter().any(|t| t.id == thread_id) {
+                return Some(project_a_tag.clone());
+            }
+        }
+        None
+    }
+
     /// Lazy-load metadata for a specific thread if it wasn't loaded initially.
     /// This is useful when a conversation's metadata wasn't in the initial load window.
     /// Returns true if metadata was found and applied, false otherwise.
