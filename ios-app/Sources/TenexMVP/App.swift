@@ -434,11 +434,6 @@ struct MainTabView: View {
                     Label("Stats", systemImage: "chart.bar.fill")
                 }
 
-            DiagnosticsView(coreManager: coreManager)
-                .tabItem {
-                    Label("Diagnostics", systemImage: "gauge.with.needle")
-                }
-
             InboxView()
                 .tabItem {
                     Label("Inbox", systemImage: "tray.fill")
