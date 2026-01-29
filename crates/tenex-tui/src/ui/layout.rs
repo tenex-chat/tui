@@ -22,8 +22,9 @@ pub const MODAL_PADDING_H: u16 = 2;
 pub const SIDEBAR_WIDTH_HOME: u16 = 42;
 
 /// Sidebar width for the chat view (todos + metadata)
-/// Increased from 30 to 36 to accommodate longer content while maintaining
-/// minimum 40-column message area on 80-column terminals (80 - 36 = 44, minus 4 for padding = 40)
+/// Increased from 30 to 36 (20% increase) to accommodate longer content while
+/// preserving the 40-column minimum message width requirement on 80-column terminals.
+/// Layout math: 80 - 36 - (2 * CONTENT_PADDING_H) = 80 - 36 - 4 = 40 columns
 pub const SIDEBAR_WIDTH_CHAT: u16 = 36;
 
 // =============================================================================
