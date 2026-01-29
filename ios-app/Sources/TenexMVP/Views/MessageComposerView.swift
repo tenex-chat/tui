@@ -23,6 +23,7 @@ struct MessageComposerView: View {
     // MARK: - Environment
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var coreManager: TenexCoreManager
 
     // MARK: - State
@@ -38,6 +39,7 @@ struct MessageComposerView: View {
     @State private var isSending = false
     @State private var sendError: String?
     @State private var showSendError = false
+    @State private var isDirty = false // Track if user has made edits before load completes
 
     // MARK: - Computed
 
@@ -165,8 +167,11 @@ struct MessageComposerView: View {
                     agents: availableAgents,
                     selectedPubkey: $draft.agentPubkey,
                     onDone: {
+                        isDirty = true // Mark as dirty when user selects agent
                         if let projectId = selectedProject?.id {
-                            draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
+                            Task {
+                                await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
+                            }
                         }
                     }
                 )
@@ -175,6 +180,16 @@ struct MessageComposerView: View {
                 Button("OK") { }
             } message: {
                 Text(sendError ?? "Unknown error")
+            }
+            .onChange(of: scenePhase) { oldPhase, newPhase in
+                // CRITICAL DATA SAFETY: Flush drafts immediately when app goes to background
+                // This eliminates the 500ms debounce window that could lose data on app termination
+                if newPhase == .background || newPhase == .inactive {
+                    Task {
+                        await draftManager.saveNow()
+                        print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
+                    }
+                }
             }
         }
     }
@@ -215,9 +230,12 @@ struct MessageComposerView: View {
     private func agentChipView(_ agent: AgentInfo) -> some View {
         HStack(spacing: 8) {
             AgentChipView(agent: agent) {
+                isDirty = true // Mark as dirty when user changes agent
                 draft.clearAgent()
                 if let projectId = selectedProject?.id {
-                    draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
+                    Task {
+                        await draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
+                    }
                 }
             }
             Spacer()
@@ -231,9 +249,12 @@ struct MessageComposerView: View {
         TextField("Conversation Title", text: Binding(
             get: { draft.title },
             set: { newValue in
+                isDirty = true // Mark as dirty when user edits
                 draft.updateTitle(newValue)
                 if let projectId = selectedProject?.id {
-                    draftManager.updateTitle(newValue, projectId: projectId)
+                    Task {
+                        await draftManager.updateTitle(newValue, projectId: projectId)
+                    }
                 }
             }
         ))
@@ -249,9 +270,12 @@ struct MessageComposerView: View {
             TextEditor(text: Binding(
                 get: { draft.content },
                 set: { newValue in
+                    isDirty = true // Mark as dirty when user edits
                     draft.updateContent(newValue)
                     if let projectId = selectedProject?.id {
-                        draftManager.updateContent(newValue, conversationId: conversationId, projectId: projectId)
+                        Task {
+                            await draftManager.updateContent(newValue, conversationId: conversationId, projectId: projectId)
+                        }
                     }
                 }
             ))
@@ -377,7 +401,14 @@ struct MessageComposerView: View {
         // This will preserve any existing draft content for this specific project
         Task {
             let loadedDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: projectId)
-            draft = loadedDraft
+
+            // CRITICAL DATA SAFETY: Only apply loaded draft if user hasn't made edits yet
+            // This prevents async load from overwriting live user typing
+            if !isDirty {
+                draft = loadedDraft
+            } else {
+                print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
+            }
         }
     }
 
@@ -417,6 +448,7 @@ struct MessageComposerView: View {
             // Clear current in-memory state
             availableAgents = []
             agentsLoadError = nil
+            isDirty = false // Reset dirty flag when switching projects
 
             // Load or create draft for the new project
             // This ensures we get fresh content for the new project, not leaked content
@@ -426,7 +458,7 @@ struct MessageComposerView: View {
             // Validate and clear agent if it doesn't belong to this project
             // (will be validated again before sending)
             draft.clearAgent()
-            draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+            await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
 
             // Load agents for the new project
             loadAgents()
@@ -481,11 +513,12 @@ struct MessageComposerView: View {
                     isSending = false
 
                     // Clear draft on success
-                    draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
-
-                    // Notify and dismiss
-                    onSend?(result)
-                    dismiss()
+                    Task {
+                        await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
+                        // Notify and dismiss after delete completes
+                        onSend?(result)
+                        dismiss()
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -498,9 +531,12 @@ struct MessageComposerView: View {
     }
 
     private func clearDraft() {
+        isDirty = false // Reset dirty flag when clearing
         draft.clear()
         if let projectId = selectedProject?.id {
-            draftManager.clearDraft(conversationId: conversationId, projectId: projectId)
+            Task {
+                await draftManager.clearDraft(conversationId: conversationId, projectId: projectId)
+            }
         }
     }
 }
