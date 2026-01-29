@@ -128,9 +128,11 @@ struct MessageComposerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
-                        draftManager.saveNow()
-                        onDismiss?()
-                        dismiss()
+                        Task {
+                            await draftManager.saveNow()
+                            onDismiss?()
+                            dismiss()
+                        }
                     }
                 }
 
@@ -373,8 +375,10 @@ struct MessageComposerView: View {
         guard let projectId = selectedProject?.id else { return }
         // Get or create draft for this project/conversation
         // This will preserve any existing draft content for this specific project
-        let loadedDraft = draftManager.getOrCreateDraft(conversationId: conversationId, projectId: projectId)
-        draft = loadedDraft
+        Task {
+            let loadedDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: projectId)
+            draft = loadedDraft
+        }
     }
 
     private func loadAgents() {
@@ -392,7 +396,8 @@ struct MessageComposerView: View {
                 }
             } catch {
                 DispatchQueue.main.async {
-                    availableAgents = []
+                    // Don't clear availableAgents on error - preserve existing data
+                    // Only update error state so UI can show warning
                     agentsLoadError = error.localizedDescription
                     print("[MessageComposerView] Failed to load agents: \(error)")
                 }
@@ -403,38 +408,44 @@ struct MessageComposerView: View {
     private func projectChanged() {
         guard let project = selectedProject else { return }
 
-        // Save any pending changes to the current draft before switching
-        if !draft.projectId.isEmpty {
-            draftManager.saveNow()
+        Task {
+            // Save any pending changes to the current draft before switching
+            if !draft.projectId.isEmpty {
+                await draftManager.saveNow()
+            }
+
+            // Clear current in-memory state
+            availableAgents = []
+            agentsLoadError = nil
+
+            // Load or create draft for the new project
+            // This ensures we get fresh content for the new project, not leaked content
+            let projectDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: project.id)
+            draft = projectDraft
+
+            // Validate and clear agent if it doesn't belong to this project
+            // (will be validated again before sending)
+            draft.clearAgent()
+            draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+
+            // Load agents for the new project
+            loadAgents()
         }
-
-        // Clear current in-memory state
-        availableAgents = []
-        agentsLoadError = nil
-
-        // Load or create draft for the new project
-        // This ensures we get fresh content for the new project, not leaked content
-        let projectDraft = draftManager.getOrCreateDraft(conversationId: conversationId, projectId: project.id)
-        draft = projectDraft
-
-        // Validate and clear agent if it doesn't belong to this project
-        // (will be validated again before sending)
-        draft.clearAgent()
-        draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
-
-        // Load agents for the new project
-        loadAgents()
     }
 
     private func sendMessage() {
         guard canSend, let project = selectedProject else { return }
 
         // Validate agent pubkey against current project's agents before sending
+        // CRITICAL: Only validate if we have a successful agent list (no load error)
+        // Don't clear agent selection on transient errors - preserve user's choice
         var validatedAgentPubkey: String? = draft.agentPubkey
-        if let agentPubkey = draft.agentPubkey {
-            // Check if the agent exists in the current project's agent list
+        if let agentPubkey = draft.agentPubkey, agentsLoadError == nil {
+            // Only validate if we successfully loaded agents
             let agentExists = availableAgents.contains { $0.pubkey == agentPubkey }
-            if !agentExists {
+            if !agentExists && !availableAgents.isEmpty {
+                // Only clear if we have agents but this one isn't in the list
+                // If availableAgents is empty, the project might have no agents (valid state)
                 print("[MessageComposerView] Warning: Agent pubkey '\(agentPubkey)' not found in current project's agents. Clearing agent selection.")
                 // Clear invalid agent from draft
                 draft.clearAgent()
