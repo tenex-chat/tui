@@ -1471,6 +1471,7 @@ impl TenexCore {
                 branch: None,
                 nudge_ids: Vec::new(),
                 reference_conversation_id: None,
+                fork_message_id: None,
                 response_tx: Some(response_tx),
             })
             .map_err(|e| TenexError::Internal {
