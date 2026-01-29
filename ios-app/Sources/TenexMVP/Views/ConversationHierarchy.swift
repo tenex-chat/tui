@@ -1,5 +1,6 @@
 import SwiftUI
 import CryptoKit
+import Kingfisher
 
 // MARK: - Shared UI Constants
 
@@ -326,20 +327,16 @@ struct AgentAvatarView: View {
     var body: some View {
         Group {
             if let pictureUrl = effectivePictureUrl, let url = URL(string: pictureUrl) {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .aspectRatio(contentMode: .fill)
-                    case .failure, .empty:
-                        placeholderAvatar
-                    @unknown default:
+                KFImage(url)
+                    .placeholder {
                         placeholderAvatar
                     }
-                }
-                .frame(width: size, height: size)
-                .clipShape(Circle())
+                    .retry(maxCount: 2, interval: .seconds(1))
+                    .fade(duration: 0.2)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
             } else {
                 placeholderAvatar
             }
