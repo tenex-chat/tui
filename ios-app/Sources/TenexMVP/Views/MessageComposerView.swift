@@ -72,6 +72,11 @@ struct MessageComposerView: View {
             return false
         }
 
+        // HIGH #2 FIX: Block sending during project switch to prevent stale draft + new project
+        guard !isSwitchingProject else {
+            return false
+        }
+
         // Draft must be valid (has required content) and not currently sending
         return draft.isValid && !isSending
     }
@@ -539,6 +544,9 @@ struct MessageComposerView: View {
         guard let project = selectedProject else { return }
 
         Task {
+            // HIGH #1 FIX: Store previous project to revert on save failure
+            let previousProject = availableProjects.first { $0.id == draft.projectId }
+
             // BLOCKER #2 FIX: Disable editing during project switch
             isSwitchingProject = true
 
@@ -552,6 +560,8 @@ struct MessageComposerView: View {
                     try await draftManager.saveNow()
                 } catch {
                     print("[MessageComposerView] ERROR: Failed to save before project switch: \(error)")
+                    // HIGH #1 FIX: Revert selectedProject to prevent wrong-project editing/sending
+                    selectedProject = previousProject
                     // Show error alert and abort project switch
                     saveFailedError = error.localizedDescription
                     showSaveFailedAlert = true
@@ -565,17 +575,15 @@ struct MessageComposerView: View {
             agentsLoadError = nil
             isDirty = false // Reset dirty flag when switching projects
 
+            // MEDIUM FIX: ALWAYS load fresh draft for new project to prevent cross-project content leakage
+            // This is the safest approach - content should never silently carry across projects
             // Load or create draft for the new project
-            // This ensures we get fresh content for the new project, not leaked content
             let projectDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: project.id)
 
-            // BLOCKER #2 FIX: Only replace draft if user didn't make edits during the switch
-            // This prevents async load from overwriting live user typing
-            if !isDirty && !wasDirtyAtStart {
-                draft = projectDraft
-            } else {
-                print("[MessageComposerView] Skipping draft replacement - user made edits during project switch (isDirty=\(isDirty), wasDirtyAtStart=\(wasDirtyAtStart))")
-            }
+            // Always replace draft with project-specific draft (no wasDirtyAtStart check)
+            // This ensures content from Project A never persists under Project B
+            draft = projectDraft
+            print("[MessageComposerView] Loaded draft for project '\(project.id)' (absolute data safety: no cross-project content leakage)")
 
             // Validate and clear agent if it doesn't belong to this project
             // (will be validated again before sending)
