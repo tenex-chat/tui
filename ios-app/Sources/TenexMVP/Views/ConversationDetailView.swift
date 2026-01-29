@@ -9,9 +9,18 @@ struct ConversationDetailView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
-    @State private var viewModel: ConversationDetailViewModel?
+    @StateObject private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
     @State private var showFullConversation = false
+
+    /// Initialize the view with a conversation and core manager
+    /// Note: coreManager is passed explicitly to support @StateObject initialization
+    init(conversation: ConversationFullInfo, coreManager: TenexCoreManager? = nil) {
+        self.conversation = conversation
+        // Create the view model with a placeholder coreManager initially
+        // The actual coreManager will be set via onAppear when using @EnvironmentObject
+        self._viewModel = StateObject(wrappedValue: ConversationDetailViewModel(conversation: conversation))
+    }
 
     var body: some View {
         NavigationStack {
@@ -24,20 +33,20 @@ struct ConversationDetailView: View {
                         Button("Back") { dismiss() }
                     }
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: { Task { await viewModel?.loadData() } }) {
+                        Button(action: { Task { await viewModel.loadData() } }) {
                             Image(systemName: "arrow.clockwise")
                         }
-                        .disabled(viewModel?.isLoading ?? true)
+                        .disabled(viewModel.isLoading)
                     }
                 }
                 .task {
                     await initializeAndLoad()
                 }
                 .refreshable {
-                    await viewModel?.loadData()
+                    await viewModel.loadData()
                 }
                 .sheet(item: $selectedDelegation) { delegation in
-                    if let childConv = viewModel?.childConversation(for: delegation.conversationId) {
+                    if let childConv = viewModel.childConversation(for: delegation.conversationId) {
                         ConversationDetailView(conversation: childConv)
                             .environmentObject(coreManager)
                     } else {
@@ -47,7 +56,7 @@ struct ConversationDetailView: View {
                 .sheet(isPresented: $showFullConversation) {
                     FullConversationSheet(
                         conversation: conversation,
-                        messages: viewModel?.messages ?? []
+                        messages: viewModel.messages
                     )
                     .environmentObject(coreManager)
                 }
@@ -56,17 +65,20 @@ struct ConversationDetailView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        if let viewModel = viewModel {
+        if viewModel.isLoading && viewModel.messages.isEmpty {
+            ProgressView("Loading...")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
             ScrollView {
                 VStack(spacing: 0) {
                     // Header Section
                     headerSection
 
                     // Agents Section
-                    agentsSection(viewModel: viewModel)
+                    agentsSection
 
                     // Runtime Section
-                    runtimeSection(viewModel: viewModel)
+                    runtimeSection
 
                     // Latest Reply Section
                     if let reply = viewModel.latestReply {
@@ -75,7 +87,7 @@ struct ConversationDetailView: View {
 
                     // Delegations Section
                     if !viewModel.delegations.isEmpty {
-                        delegationsSection(viewModel: viewModel)
+                        delegationsSection
                     }
 
                     // Full Conversation Button
@@ -83,22 +95,13 @@ struct ConversationDetailView: View {
                 }
                 .padding(.bottom, 20)
             }
-        } else {
-            ProgressView("Loading...")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
-    /// Initializes the view model and loads data
+    /// Initializes the view model with the core manager and loads data
     private func initializeAndLoad() async {
-        if viewModel == nil {
-            let vm = ConversationDetailViewModel(
-                conversation: conversation,
-                coreManager: coreManager
-            )
-            viewModel = vm
-        }
-        await viewModel?.loadData()
+        viewModel.setCoreManager(coreManager)
+        await viewModel.loadData()
     }
 
     // MARK: - Header Section
@@ -120,18 +123,18 @@ struct ConversationDetailView: View {
                         .lineLimit(3)
                 }
 
-                // Status row
+                // Status row - uses refreshable metadata from view model
                 HStack(spacing: 12) {
                     Text("Status:")
                         .font(.subheadline)
                         .fontWeight(.medium)
                         .foregroundStyle(.secondary)
 
-                    StatusBadge(status: conversation.status ?? "unknown", isActive: conversation.isActive)
+                    StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
                 }
 
                 // Activity row
-                if let activity = conversation.currentActivity {
+                if let activity = viewModel.currentActivity {
                     HStack(spacing: 12) {
                         Text("Activity:")
                             .font(.subheadline)
@@ -149,7 +152,7 @@ struct ConversationDetailView: View {
 
     // MARK: - Agents Section
 
-    private func agentsSection(viewModel: ConversationDetailViewModel) -> some View {
+    private var agentsSection: some View {
         SharedCardView(title: "AGENTS") {
             HStack(spacing: 16) {
                 ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
@@ -186,9 +189,9 @@ struct ConversationDetailView: View {
 
     // MARK: - Runtime Section
 
-    private func runtimeSection(viewModel: ConversationDetailViewModel) -> some View {
+    private var runtimeSection: some View {
         SharedCardView(title: "EFFECTIVE RUNTIME") {
-            RuntimeDisplayView(isActive: conversation.isActive) { currentTime in
+            RuntimeDisplayView(isActive: viewModel.currentIsActive) { currentTime in
                 viewModel.formatEffectiveRuntime(currentTime: currentTime)
             }
         }
@@ -227,7 +230,7 @@ struct ConversationDetailView: View {
 
     // MARK: - Delegations Section
 
-    private func delegationsSection(viewModel: ConversationDetailViewModel) -> some View {
+    private var delegationsSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Header
             Text("DELEGATIONS")
@@ -275,15 +278,6 @@ struct ConversationDetailView: View {
 }
 
 // MARK: - Supporting Views
-
-/// Delegation item data model
-struct DelegationItem: Identifiable {
-    let id: String
-    let recipient: String
-    let messagePreview: String
-    let conversationId: String
-    let timestamp: UInt64
-}
 
 /// Preview sheet for delegation when child conversation not found
 struct DelegationPreviewSheet: View {
