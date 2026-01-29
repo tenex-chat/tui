@@ -208,6 +208,9 @@ pub struct OpenTab {
     /// This is set when using "Reference conversation" command and consumed when sending
     /// NOTE: Uses "context" instead of "q" because "q" is reserved for delegation/child links
     pub reference_conversation_id: Option<String>,
+    /// Fork message ID for the "fork" tag when creating a forked conversation
+    /// This is set when using "Fork conversation" command along with reference_conversation_id
+    pub fork_message_id: Option<String>,
 }
 
 impl OpenTab {
@@ -237,6 +240,7 @@ impl OpenTab {
             selected_nudge_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            fork_message_id: None,
         }
     }
 
@@ -262,6 +266,7 @@ impl OpenTab {
             selected_nudge_ids: Vec::new(),
             editor: TextEditor::new(),
             reference_conversation_id: None,
+            fork_message_id: None,
         }
     }
 }
@@ -426,6 +431,12 @@ impl TabManager {
             tab.thread_id = thread_id;
             tab.thread_title = thread_title;
             tab.draft_id = None;
+
+            // CRITICAL: Clear fork/reference metadata after thread creation
+            // These fields were used to tag the initial thread creation message
+            // and should not persist after the thread is created
+            tab.reference_conversation_id = None;
+            tab.fork_message_id = None;
         }
     }
 

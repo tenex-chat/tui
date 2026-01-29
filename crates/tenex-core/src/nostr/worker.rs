@@ -77,6 +77,8 @@ pub enum NostrCommand {
         nudge_ids: Vec<String>,
         /// Optional reference to another conversation (adds "context" tag for referencing source conversations)
         reference_conversation_id: Option<String>,
+        /// Optional fork message ID (used with reference_conversation_id to create a "fork" tag)
+        fork_message_id: Option<String>,
         /// Optional channel to send back the event ID after signing
         response_tx: Option<EventIdSender>,
     },
@@ -289,9 +291,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, response_tx } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, fork_message_id, response_tx } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id)) {
+                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, fork_message_id)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -771,6 +773,7 @@ impl NostrWorker {
         branch: Option<String>,
         nudge_ids: Vec<String>,
         reference_conversation_id: Option<String>,
+        fork_message_id: Option<String>,
     ) -> Result<String> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
@@ -817,11 +820,27 @@ impl NostrWorker {
 
         // Reference conversation tag ("context" tag) for linking to source conversation
         // NOTE: Using "context" instead of "q" because "q" is reserved for delegation/child links
-        if let Some(ref_id) = reference_conversation_id {
+        if let Some(ref_id) = reference_conversation_id.clone() {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("context")),
                 vec![ref_id],
             ));
+        }
+
+        // Fork tag: includes both conversation ID and message ID for forking from a specific point
+        // Format: ["fork", "<conversation-id>", "<message-id>"]
+        // INVARIANT: fork_message_id requires reference_conversation_id - enforce this to prevent silent data loss
+        if let Some(msg_id) = fork_message_id {
+            if let Some(conv_id) = reference_conversation_id.clone() {
+                event = event.tag(Tag::custom(
+                    TagKind::Custom(std::borrow::Cow::Borrowed("fork")),
+                    vec![conv_id, msg_id],
+                ));
+            } else {
+                // CRITICAL: fork_message_id without reference_conversation_id is invalid state
+                tlog!("ERROR", "Fork tag dropped: fork_message_id set without reference_conversation_id. This is a bug.");
+                // Log the invalid state for debugging but continue execution
+            }
         }
 
         // Build and sign the event
