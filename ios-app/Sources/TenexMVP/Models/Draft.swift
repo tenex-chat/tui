@@ -157,10 +157,17 @@ struct Draft: Codable, Identifiable, Equatable {
 extension Draft {
     /// Create a unique key for storing drafts
     /// For new conversations: "new-{projectId}"
-    /// For existing conversations: "reply-{conversationId}"
+    /// For existing conversations: "reply-{projectId}-{conversationId}"
+    ///
+    /// Note: Conversation IDs are Nostr event IDs (SHA-256 hashes) which are globally unique
+    /// across the entire Nostr network. However, we include projectId in the reply key for
+    /// defense-in-depth and to support potential future scenarios where the same conversation
+    /// might be accessed from different projects.
     static func storageKey(for conversationId: String?, projectId: String) -> String {
         if let conversationId = conversationId {
-            return "reply-\(conversationId)"
+            // Include projectId to avoid collisions if conversation IDs are not globally unique
+            // or if the same conversation is accessed from multiple projects
+            return "reply-\(projectId)-\(conversationId)"
         } else {
             return "new-\(projectId)"
         }

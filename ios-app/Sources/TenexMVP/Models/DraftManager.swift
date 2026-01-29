@@ -68,16 +68,21 @@ final class DraftManager {
     /// Whether drafts failed to load (distinguishes from empty)
     private(set) var loadFailed = false
 
+    /// Whether initial draft loading has completed
+    private(set) var loadCompleted = false
+
     // MARK: - Private Properties
 
     private var saveTask: Task<Void, Never>?
     private let store = DraftStore()
+    private var loadTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
     init() {
-        Task { @MainActor in
+        loadTask = Task { @MainActor in
             await loadDrafts()
+            loadCompleted = true
         }
     }
 
@@ -98,7 +103,11 @@ final class DraftManager {
     ///   - conversationId: The conversation ID (nil for new thread)
     ///   - projectId: The project ID
     /// - Returns: The existing draft or a newly created one
-    func getOrCreateDraft(conversationId: String?, projectId: String) -> Draft {
+    /// - Note: Waits for initial draft loading to complete before returning
+    func getOrCreateDraft(conversationId: String?, projectId: String) async -> Draft {
+        // Wait for initial load to complete to avoid race conditions
+        await loadTask?.value
+
         let key = Draft.storageKey(for: conversationId, projectId: projectId)
 
         if let existing = drafts[key] {
@@ -222,11 +231,12 @@ final class DraftManager {
     }
 
     /// Force save immediately, cancelling any pending debounced save
-    func saveNow() {
+    /// - Note: This is truly synchronous - blocks until save completes
+    func saveNow() async {
         saveTask?.cancel()
         saveTask = nil
         hasPendingSave = false
-        performSave()
+        await performSaveSync()
     }
 
     /// Clean up old orphaned drafts (drafts older than specified age with no content)
@@ -254,10 +264,15 @@ final class DraftManager {
         // Migration: Re-key drafts to match new storage key format
         // Old drafts might have been stored with different keys or missing projectId
         var migratedDrafts: [String: Draft] = [:]
+        var legacyDrafts: [String: Draft] = [:]
+
         for (oldKey, draft) in loadedDrafts {
-            // Skip orphaned drafts with empty projectId (from old versions)
-            guard !draft.projectId.isEmpty else {
-                print("[DraftManager] Skipping orphaned draft with no projectId: \(oldKey)")
+            // Preserve legacy drafts with empty projectId instead of deleting them
+            // Store them under a special "legacy-{originalKey}" key for recovery
+            if draft.projectId.isEmpty {
+                let legacyKey = "legacy-\(oldKey)"
+                print("[DraftManager] Preserving legacy draft with no projectId: \(oldKey) -> \(legacyKey)")
+                legacyDrafts[legacyKey] = draft
                 continue
             }
 
@@ -273,11 +288,15 @@ final class DraftManager {
             }
         }
 
-        drafts = migratedDrafts
+        // Merge legacy drafts into migrated drafts so they're preserved on disk
+        drafts = migratedDrafts.merging(legacyDrafts) { current, _ in current }
 
-        // If we migrated any keys, save immediately to persist the migration
-        if migratedDrafts.keys.sorted() != loadedDrafts.keys.sorted() {
-            print("[DraftManager] Persisting migrated drafts")
+        // If we migrated any keys or found legacy drafts, save immediately to persist
+        if drafts.keys.sorted() != loadedDrafts.keys.sorted() {
+            print("[DraftManager] Persisting migrated/legacy drafts")
+            if !legacyDrafts.isEmpty {
+                print("[DraftManager] WARNING: Found \(legacyDrafts.count) legacy draft(s) without projectId. These are preserved under 'legacy-*' keys for manual recovery.")
+            }
             scheduleSave()
         }
 
@@ -337,6 +356,19 @@ final class DraftManager {
                     print("[DraftManager] Save failed: \(error)")
                 }
             }
+        }
+    }
+
+    /// Perform synchronous save (blocks until complete)
+    private func performSaveSync() async {
+        let draftsSnapshot = drafts
+
+        do {
+            try await store.saveDrafts(draftsSnapshot)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = error
+            print("[DraftManager] Save failed: \(error)")
         }
     }
 }
