@@ -120,37 +120,28 @@ struct ConversationDetailView: View {
         .padding(.bottom, 16)
     }
 
-    // MARK: - Agents and Runtime Section
+    // MARK: - Agents Section
 
     private var agentsAndRuntimeSection: some View {
-        HStack(alignment: .center) {
-            // Agents
-            HStack(spacing: 12) {
-                ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
-                    AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
-                        .environmentObject(coreManager)
-                }
-
-                if viewModel.participatingAgents.count > 8 {
-                    Circle()
-                        .fill(Color(.systemGray4))
-                        .frame(width: 44, height: 44)
-                        .overlay {
-                            Text("+\(viewModel.participatingAgents.count - 8)")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.secondary)
-                        }
-                }
+        HStack(alignment: .center, spacing: 12) {
+            ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
+                AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
+                    .environmentObject(coreManager)
             }
 
-            Spacer()
-
-            // Runtime
-            RuntimeCompactView(isActive: viewModel.currentIsActive) { currentTime in
-                viewModel.formatEffectiveRuntime(currentTime: currentTime)
+            if viewModel.participatingAgents.count > 8 {
+                Circle()
+                    .fill(Color(.systemGray4))
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Text("+\(viewModel.participatingAgents.count - 8)")
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(.secondary)
+                    }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) {
@@ -174,17 +165,10 @@ struct ConversationDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if let attributedString = try? AttributedString(markdown: reply.content) {
-                Text(attributedString)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-            } else {
-                Text(reply.content)
-                    .font(.body)
-                    .foregroundStyle(.primary)
-                    .textSelection(.enabled)
-            }
+            Text(reply.content)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
@@ -229,32 +213,6 @@ struct ConversationDetailView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
-    }
-}
-
-// MARK: - Compact Runtime View
-
-/// Compact runtime display for inline use
-struct RuntimeCompactView: View {
-    let isActive: Bool
-    let computeRuntime: (Date) -> String
-
-    var body: some View {
-        if isActive {
-            TimelineView(.periodic(from: .now, by: 1.0)) { context in
-                runtimeText(currentTime: context.date)
-            }
-        } else {
-            runtimeText(currentTime: Date())
-        }
-    }
-
-    @ViewBuilder
-    private func runtimeText(currentTime: Date) -> some View {
-        Text(computeRuntime(currentTime))
-            .font(.system(size: 32, weight: .light))
-            .monospacedDigit()
-            .foregroundStyle(.primary)
     }
 }
 
