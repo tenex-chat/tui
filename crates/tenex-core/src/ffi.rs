@@ -1192,22 +1192,23 @@ impl TenexCore {
         store.get_hierarchical_runtime(&conversation_id)
     }
 
-    /// Get total aggregated LLM runtime across all conversations (in milliseconds).
-    /// Only includes conversations created after the runtime cutoff timestamp.
-    /// Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
+    /// Get today's LLM runtime for statusbar display (in milliseconds).
+    /// Includes today's confirmed runtime + estimated runtime from active agents.
+    /// This matches exactly what the TUI statusbar shows.
     /// Returns 0 if store is not initialized.
-    pub fn get_total_runtime_ms(&self) -> u64 {
-        let store_guard = match self.store.read() {
+    pub fn get_today_runtime_ms(&self) -> u64 {
+        let mut store_guard = match self.store.write() {
             Ok(g) => g,
             Err(_) => return 0,
         };
 
-        let store = match store_guard.as_ref() {
+        let store = match store_guard.as_mut() {
             Some(s) => s,
             None => return 0,
         };
 
-        store.get_total_unique_runtime()
+        let (runtime_ms, _, _) = store.get_statusbar_runtime_ms();
+        runtime_ms
     }
 
     /// Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)

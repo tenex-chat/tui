@@ -14,7 +14,7 @@ struct ConversationsTabView: View {
 
     /// Formatted runtime text for the toolbar button
     private var runtimeText: String {
-        let totalMs = coreManager.core.getTotalRuntimeMs()
+        let totalMs = coreManager.core.getTodayRuntimeMs()
         let totalMinutes = Double(totalMs) / 60_000.0
         if totalMinutes >= 60.0 {
             // Show hours with 2 decimal places (e.g., "1.35h")
