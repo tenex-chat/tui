@@ -90,6 +90,7 @@ struct ConversationsTabView: View {
                                     selectedConversation = selected
                                 }
                             )
+                            .environmentObject(coreManager)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     // Archive action placeholder
@@ -168,9 +169,30 @@ struct ConversationsTabView: View {
 
 /// Conversation row that uses ConversationFullInfo's rich data
 private struct ConversationRowFull: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
     let conversation: ConversationFullInfo
     let projectTitle: String?
     let onSelect: (ConversationFullInfo) -> Void
+
+    /// Compute delegation agent infos by finding all descendants
+    private var delegationAgentInfos: [AgentAvatarInfo] {
+        // Get all descendants of this conversation
+        let descendantIds = coreManager.core.getDescendantConversationIds(conversationId: conversation.id)
+        let descendants = coreManager.core.getConversationsByIds(conversationIds: descendantIds)
+
+        // Collect unique agents from descendants (excluding the conversation author)
+        var agentsByPubkey: [String: AgentAvatarInfo] = [:]
+        for descendant in descendants {
+            if descendant.authorPubkey != conversation.authorPubkey {
+                agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                    name: descendant.author,
+                    pubkey: descendant.authorPubkey
+                )
+            }
+        }
+
+        return agentsByPubkey.values.sorted { $0.name < $1.name }
+    }
 
     private var statusColor: Color {
         if conversation.isActive { return .green }
@@ -249,9 +271,37 @@ private struct ConversationRowFull: View {
                     }
                 }
 
-                // Row 3: Author avatar and project badge
-                HStack(spacing: -8) {
-                    SharedAgentAvatar(agentName: conversation.author)
+                // Row 3: Author avatar (standalone) + delegation agents (overlapping) + badges
+                HStack(spacing: 0) {
+                    // Author who started the conversation (standalone)
+                    AgentAvatarView(agentName: conversation.author, pubkey: conversation.authorPubkey)
+                        .environmentObject(coreManager)
+
+                    // Gap and delegation agents
+                    if !delegationAgentInfos.isEmpty {
+                        Spacer()
+                            .frame(width: 12)
+
+                        // Delegation agents (overlapping)
+                        HStack(spacing: -8) {
+                            ForEach(delegationAgentInfos.prefix(maxVisibleAvatars - 1)) { agentInfo in
+                                AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey)
+                                    .environmentObject(coreManager)
+                            }
+
+                            if delegationAgentInfos.count > maxVisibleAvatars - 1 {
+                                Circle()
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 24, height: 24)
+                                    .overlay {
+                                        Text("+\(delegationAgentInfos.count - (maxVisibleAvatars - 1))")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.secondary)
+                                    }
+                            }
+                        }
+                    }
 
                     Spacer()
 
@@ -351,24 +401,38 @@ private struct HierarchyConversationRowOptimized: View {
                     }
                 }
 
-                // Row 3: Participating agent avatars with profile pictures from kind:0 events
-                HStack(spacing: -8) {
-                    ForEach(aggregatedData.participatingAgentInfos.prefix(maxVisibleAvatars)) { agentInfo in
-                        AgentAvatarWithPicture(agentInfo: agentInfo)
+                // Row 3: Author avatar (standalone) + delegation agents (overlapping)
+                HStack(spacing: 0) {
+                    // Author who started the conversation (standalone)
+                    if let authorInfo = aggregatedData.authorInfo {
+                        AgentAvatarView(agentName: authorInfo.name, pubkey: authorInfo.pubkey)
                             .environmentObject(coreManager)
                     }
 
-                    // Show overflow count if more than maxVisibleAvatars agents
-                    if aggregatedData.participatingAgentInfos.count > maxVisibleAvatars {
-                        Circle()
-                            .fill(Color(.systemGray4))
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Text("+\(aggregatedData.participatingAgentInfos.count - maxVisibleAvatars)")
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.secondary)
+                    // Gap between author and delegation agents
+                    if !aggregatedData.delegationAgentInfos.isEmpty {
+                        Spacer()
+                            .frame(width: 12)
+
+                        // Delegation agents (overlapping)
+                        HStack(spacing: -8) {
+                            ForEach(aggregatedData.delegationAgentInfos.prefix(maxVisibleAvatars - 1)) { agentInfo in
+                                AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey)
+                                    .environmentObject(coreManager)
                             }
+
+                            if aggregatedData.delegationAgentInfos.count > maxVisibleAvatars - 1 {
+                                Circle()
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 24, height: 24)
+                                    .overlay {
+                                        Text("+\(aggregatedData.delegationAgentInfos.count - (maxVisibleAvatars - 1))")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.secondary)
+                                    }
+                            }
+                        }
                     }
 
                     Spacer()

@@ -31,8 +31,8 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Cached latest reply (most recent non-tool-call message)
     @Published private(set) var latestReply: MessageInfo?
 
-    /// Cached participating agents
-    @Published private(set) var participatingAgents: [String] = []
+    /// Cached participating agent infos with pubkeys for avatar lookups
+    @Published private(set) var participatingAgentInfos: [AgentAvatarInfo] = []
 
     // MARK: - Refreshable Metadata
 
@@ -198,16 +198,26 @@ final class ConversationDetailViewModel: ObservableObject {
 
     /// Recomputes all cached derived state when messages/children change
     private func recomputeDerivedState() {
-        // Compute participating agents
-        var agents = Set<String>()
-        agents.insert(conversation.author)
-        for msg in messages {
-            agents.insert(msg.author)
-        }
+        // Compute participating agent infos with pubkeys for avatar lookups
+        // Use pubkey as unique key to avoid duplicates from same agent
+        var agentInfosByPubkey: [String: AgentAvatarInfo] = [:]
+
+        // Add conversation author
+        agentInfosByPubkey[conversation.authorPubkey] = AgentAvatarInfo(
+            name: conversation.author,
+            pubkey: conversation.authorPubkey
+        )
+
+        // Add all descendant authors
         for descendant in allDescendants {
-            agents.insert(descendant.author)
+            agentInfosByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                name: descendant.author,
+                pubkey: descendant.authorPubkey
+            )
         }
-        participatingAgents = agents.sorted()
+
+        // Sort by name for consistent display
+        participatingAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
 
         // Compute latest reply (last non-tool-call, non-empty message)
         latestReply = messages.last { !$0.isToolCall && !$0.content.isEmpty }
@@ -227,9 +237,18 @@ final class ConversationDetailViewModel: ObservableObject {
                 for qTag in message.qTags {
                     // Find the child conversation matching this qTag
                     if let childConv = childConversations.first(where: { $0.id == qTag }) {
+                        // Get recipient from p-tag (who was delegated TO)
+                        // P-tags contain pubkeys, so convert to display name
+                        let recipient: String
+                        if let pTagPubkey = message.pTags.first, let core = coreManager?.core {
+                            recipient = core.getProfileName(pubkey: pTagPubkey)
+                        } else {
+                            recipient = childConv.author
+                        }
+
                         let delegation = DelegationItem(
                             id: qTag,
-                            recipient: childConv.author,
+                            recipient: recipient,
                             messagePreview: childConv.title,
                             conversationId: qTag,
                             timestamp: message.createdAt
