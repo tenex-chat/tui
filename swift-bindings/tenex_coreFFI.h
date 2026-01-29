@@ -332,6 +332,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_projects(void*_Nonnull ptr,
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_reports(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_stats_snapshot(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_INIT
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_INIT
 int8_t uniffi_tenex_core_fn_method_tenexcore_init(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -767,6 +772,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_projects(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_REPORTS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_REPORTS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_reports(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot(void
     
 );
 #endif

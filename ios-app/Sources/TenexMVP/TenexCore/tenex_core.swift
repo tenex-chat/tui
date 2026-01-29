@@ -400,6 +400,22 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
+    typealias FfiType = UInt8
+    typealias SwiftType = UInt8
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt8 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: UInt8, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -426,6 +442,22 @@ fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
 
     public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
         writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterDouble: FfiConverterPrimitive {
+    typealias FfiType = Double
+    typealias SwiftType = Double
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Double {
+        return try lift(readDouble(&buf))
+    }
+
+    public static func write(_ value: Double, into buf: inout [UInt8]) {
+        writeDouble(&buf, lower(value))
     }
 }
 
@@ -589,6 +621,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Get reports for a project.
      */
     func getReports(projectId: String)  -> [ReportInfo]
+    
+    /**
+     * Get comprehensive stats snapshot with full TUI parity.
+     * This is a single batched FFI call that returns all stats data pre-computed.
+     *
+     * Returns Result to distinguish "no data" from "core error".
+     */
+    func getStatsSnapshot() throws  -> StatsSnapshot
     
     /**
      * Initialize the core. Must be called before other operations.
@@ -918,6 +958,19 @@ open func getReports(projectId: String) -> [ReportInfo]  {
     return try!  FfiConverterSequenceTypeReportInfo.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_reports(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
+     * Get comprehensive stats snapshot with full TUI parity.
+     * This is a single batched FFI call that returns all stats data pre-computed.
+     *
+     * Returns Result to distinguish "no data" from "core error".
+     */
+open func getStatsSnapshot()throws  -> StatsSnapshot  {
+    return try  FfiConverterTypeStatsSnapshot_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_stats_snapshot(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1996,6 +2049,317 @@ public func FfiConverterTypeConversationInfo_lower(_ value: ConversationInfo) ->
 
 
 /**
+ * Messages count for a single day (unix timestamp for day start, user count, all count)
+ */
+public struct DayMessages {
+    /**
+     * Unix timestamp (seconds) for the start of the day (UTC)
+     */
+    public var dayStart: UInt64
+    /**
+     * Number of messages from the current user
+     */
+    public var userCount: UInt64
+    /**
+     * Total number of messages from all users
+     */
+    public var allCount: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unix timestamp (seconds) for the start of the day (UTC)
+         */dayStart: UInt64, 
+        /**
+         * Number of messages from the current user
+         */userCount: UInt64, 
+        /**
+         * Total number of messages from all users
+         */allCount: UInt64) {
+        self.dayStart = dayStart
+        self.userCount = userCount
+        self.allCount = allCount
+    }
+}
+
+#if compiler(>=6)
+extension DayMessages: Sendable {}
+#endif
+
+
+extension DayMessages: Equatable, Hashable {
+    public static func ==(lhs: DayMessages, rhs: DayMessages) -> Bool {
+        if lhs.dayStart != rhs.dayStart {
+            return false
+        }
+        if lhs.userCount != rhs.userCount {
+            return false
+        }
+        if lhs.allCount != rhs.allCount {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dayStart)
+        hasher.combine(userCount)
+        hasher.combine(allCount)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDayMessages: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayMessages {
+        return
+            try DayMessages(
+                dayStart: FfiConverterUInt64.read(from: &buf), 
+                userCount: FfiConverterUInt64.read(from: &buf), 
+                allCount: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DayMessages, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.dayStart, into: &buf)
+        FfiConverterUInt64.write(value.userCount, into: &buf)
+        FfiConverterUInt64.write(value.allCount, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayMessages_lift(_ buf: RustBuffer) throws -> DayMessages {
+    return try FfiConverterTypeDayMessages.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayMessages_lower(_ value: DayMessages) -> RustBuffer {
+    return FfiConverterTypeDayMessages.lower(value)
+}
+
+
+/**
+ * A single day's runtime data (unix timestamp for day start, runtime in ms)
+ */
+public struct DayRuntime {
+    /**
+     * Unix timestamp (seconds) for the start of the day (UTC)
+     */
+    public var dayStart: UInt64
+    /**
+     * Total runtime in milliseconds for this day
+     */
+    public var runtimeMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unix timestamp (seconds) for the start of the day (UTC)
+         */dayStart: UInt64, 
+        /**
+         * Total runtime in milliseconds for this day
+         */runtimeMs: UInt64) {
+        self.dayStart = dayStart
+        self.runtimeMs = runtimeMs
+    }
+}
+
+#if compiler(>=6)
+extension DayRuntime: Sendable {}
+#endif
+
+
+extension DayRuntime: Equatable, Hashable {
+    public static func ==(lhs: DayRuntime, rhs: DayRuntime) -> Bool {
+        if lhs.dayStart != rhs.dayStart {
+            return false
+        }
+        if lhs.runtimeMs != rhs.runtimeMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dayStart)
+        hasher.combine(runtimeMs)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDayRuntime: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DayRuntime {
+        return
+            try DayRuntime(
+                dayStart: FfiConverterUInt64.read(from: &buf), 
+                runtimeMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DayRuntime, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.dayStart, into: &buf)
+        FfiConverterUInt64.write(value.runtimeMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayRuntime_lift(_ buf: RustBuffer) throws -> DayRuntime {
+    return try FfiConverterTypeDayRuntime.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDayRuntime_lower(_ value: DayRuntime) -> RustBuffer {
+    return FfiConverterTypeDayRuntime.lower(value)
+}
+
+
+/**
+ * Activity data for a single hour (unix timestamp for hour start, tokens used, message count)
+ */
+public struct HourActivity {
+    /**
+     * Unix timestamp (seconds) for the start of the hour (UTC)
+     */
+    public var hourStart: UInt64
+    /**
+     * Total tokens used in this hour
+     */
+    public var tokens: UInt64
+    /**
+     * Number of messages generated in this hour
+     */
+    public var messages: UInt64
+    /**
+     * Pre-normalized intensity (0-255) for token-based visualization
+     */
+    public var tokenIntensity: UInt8
+    /**
+     * Pre-normalized intensity (0-255) for message-based visualization
+     */
+    public var messageIntensity: UInt8
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Unix timestamp (seconds) for the start of the hour (UTC)
+         */hourStart: UInt64, 
+        /**
+         * Total tokens used in this hour
+         */tokens: UInt64, 
+        /**
+         * Number of messages generated in this hour
+         */messages: UInt64, 
+        /**
+         * Pre-normalized intensity (0-255) for token-based visualization
+         */tokenIntensity: UInt8, 
+        /**
+         * Pre-normalized intensity (0-255) for message-based visualization
+         */messageIntensity: UInt8) {
+        self.hourStart = hourStart
+        self.tokens = tokens
+        self.messages = messages
+        self.tokenIntensity = tokenIntensity
+        self.messageIntensity = messageIntensity
+    }
+}
+
+#if compiler(>=6)
+extension HourActivity: Sendable {}
+#endif
+
+
+extension HourActivity: Equatable, Hashable {
+    public static func ==(lhs: HourActivity, rhs: HourActivity) -> Bool {
+        if lhs.hourStart != rhs.hourStart {
+            return false
+        }
+        if lhs.tokens != rhs.tokens {
+            return false
+        }
+        if lhs.messages != rhs.messages {
+            return false
+        }
+        if lhs.tokenIntensity != rhs.tokenIntensity {
+            return false
+        }
+        if lhs.messageIntensity != rhs.messageIntensity {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(hourStart)
+        hasher.combine(tokens)
+        hasher.combine(messages)
+        hasher.combine(tokenIntensity)
+        hasher.combine(messageIntensity)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeHourActivity: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> HourActivity {
+        return
+            try HourActivity(
+                hourStart: FfiConverterUInt64.read(from: &buf), 
+                tokens: FfiConverterUInt64.read(from: &buf), 
+                messages: FfiConverterUInt64.read(from: &buf), 
+                tokenIntensity: FfiConverterUInt8.read(from: &buf), 
+                messageIntensity: FfiConverterUInt8.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: HourActivity, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.hourStart, into: &buf)
+        FfiConverterUInt64.write(value.tokens, into: &buf)
+        FfiConverterUInt64.write(value.messages, into: &buf)
+        FfiConverterUInt8.write(value.tokenIntensity, into: &buf)
+        FfiConverterUInt8.write(value.messageIntensity, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHourActivity_lift(_ buf: RustBuffer) throws -> HourActivity {
+    return try FfiConverterTypeHourActivity.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeHourActivity_lower(_ value: HourActivity) -> RustBuffer {
+    return FfiConverterTypeHourActivity.lower(value)
+}
+
+
+/**
  * An inbox item (task/notification waiting for attention).
  */
 public struct InboxItem {
@@ -2471,6 +2835,105 @@ public func FfiConverterTypeMessageInfo_lift(_ buf: RustBuffer) throws -> Messag
 #endif
 public func FfiConverterTypeMessageInfo_lower(_ value: MessageInfo) -> RustBuffer {
     return FfiConverterTypeMessageInfo.lower(value)
+}
+
+
+/**
+ * Cost data for a project
+ */
+public struct ProjectCost {
+    /**
+     * Project a_tag
+     */
+    public var aTag: String
+    /**
+     * Human-readable project name
+     */
+    public var name: String
+    /**
+     * Total cost in USD
+     */
+    public var cost: Double
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Project a_tag
+         */aTag: String, 
+        /**
+         * Human-readable project name
+         */name: String, 
+        /**
+         * Total cost in USD
+         */cost: Double) {
+        self.aTag = aTag
+        self.name = name
+        self.cost = cost
+    }
+}
+
+#if compiler(>=6)
+extension ProjectCost: Sendable {}
+#endif
+
+
+extension ProjectCost: Equatable, Hashable {
+    public static func ==(lhs: ProjectCost, rhs: ProjectCost) -> Bool {
+        if lhs.aTag != rhs.aTag {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.cost != rhs.cost {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(aTag)
+        hasher.combine(name)
+        hasher.combine(cost)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeProjectCost: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectCost {
+        return
+            try ProjectCost(
+                aTag: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                cost: FfiConverterDouble.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ProjectCost, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.aTag, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterDouble.write(value.cost, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectCost_lift(_ buf: RustBuffer) throws -> ProjectCost {
+    return try FfiConverterTypeProjectCost.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectCost_lower(_ value: ProjectCost) -> RustBuffer {
+    return FfiConverterTypeProjectCost.lower(value)
 }
 
 
@@ -2980,6 +3443,319 @@ public func FfiConverterTypeSendMessageResult_lift(_ buf: RustBuffer) throws -> 
 #endif
 public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) -> RustBuffer {
     return FfiConverterTypeSendMessageResult.lower(value)
+}
+
+
+/**
+ * Complete stats snapshot with all data needed for iOS Stats tab
+ * This matches full TUI stats parity with pre-computed values
+ */
+public struct StatsSnapshot {
+    /**
+     * Total all-time cost in USD
+     */
+    public var totalCost: Double
+    /**
+     * 24-hour runtime in milliseconds
+     */
+    public var todayRuntimeMs: UInt64
+    /**
+     * 14-day average daily runtime in milliseconds (counting only non-zero days)
+     */
+    public var avgDailyRuntimeMs: UInt64
+    /**
+     * Number of active days in the 14-day window (days with non-zero runtime)
+     */
+    public var activeDaysCount: UInt32
+    /**
+     * Last 14 days of runtime data (newest first)
+     */
+    public var runtimeByDay: [DayRuntime]
+    /**
+     * Cost by project (sorted descending)
+     */
+    public var costByProject: [ProjectCost]
+    /**
+     * Top 20 conversations by runtime (sorted descending)
+     */
+    public var topConversations: [TopConversation]
+    /**
+     * Last 14 days of message counts (user vs all, newest first)
+     */
+    public var messagesByDay: [DayMessages]
+    /**
+     * Last 720 hours of activity data with pre-computed intensities
+     * Pre-normalized to 0-255 intensity scale for direct visualization
+     */
+    public var activityByHour: [HourActivity]
+    /**
+     * Maximum token value across all hours (for legend display)
+     */
+    public var maxTokens: UInt64
+    /**
+     * Maximum message count across all hours (for legend display)
+     */
+    public var maxMessages: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Total all-time cost in USD
+         */totalCost: Double, 
+        /**
+         * 24-hour runtime in milliseconds
+         */todayRuntimeMs: UInt64, 
+        /**
+         * 14-day average daily runtime in milliseconds (counting only non-zero days)
+         */avgDailyRuntimeMs: UInt64, 
+        /**
+         * Number of active days in the 14-day window (days with non-zero runtime)
+         */activeDaysCount: UInt32, 
+        /**
+         * Last 14 days of runtime data (newest first)
+         */runtimeByDay: [DayRuntime], 
+        /**
+         * Cost by project (sorted descending)
+         */costByProject: [ProjectCost], 
+        /**
+         * Top 20 conversations by runtime (sorted descending)
+         */topConversations: [TopConversation], 
+        /**
+         * Last 14 days of message counts (user vs all, newest first)
+         */messagesByDay: [DayMessages], 
+        /**
+         * Last 720 hours of activity data with pre-computed intensities
+         * Pre-normalized to 0-255 intensity scale for direct visualization
+         */activityByHour: [HourActivity], 
+        /**
+         * Maximum token value across all hours (for legend display)
+         */maxTokens: UInt64, 
+        /**
+         * Maximum message count across all hours (for legend display)
+         */maxMessages: UInt64) {
+        self.totalCost = totalCost
+        self.todayRuntimeMs = todayRuntimeMs
+        self.avgDailyRuntimeMs = avgDailyRuntimeMs
+        self.activeDaysCount = activeDaysCount
+        self.runtimeByDay = runtimeByDay
+        self.costByProject = costByProject
+        self.topConversations = topConversations
+        self.messagesByDay = messagesByDay
+        self.activityByHour = activityByHour
+        self.maxTokens = maxTokens
+        self.maxMessages = maxMessages
+    }
+}
+
+#if compiler(>=6)
+extension StatsSnapshot: Sendable {}
+#endif
+
+
+extension StatsSnapshot: Equatable, Hashable {
+    public static func ==(lhs: StatsSnapshot, rhs: StatsSnapshot) -> Bool {
+        if lhs.totalCost != rhs.totalCost {
+            return false
+        }
+        if lhs.todayRuntimeMs != rhs.todayRuntimeMs {
+            return false
+        }
+        if lhs.avgDailyRuntimeMs != rhs.avgDailyRuntimeMs {
+            return false
+        }
+        if lhs.activeDaysCount != rhs.activeDaysCount {
+            return false
+        }
+        if lhs.runtimeByDay != rhs.runtimeByDay {
+            return false
+        }
+        if lhs.costByProject != rhs.costByProject {
+            return false
+        }
+        if lhs.topConversations != rhs.topConversations {
+            return false
+        }
+        if lhs.messagesByDay != rhs.messagesByDay {
+            return false
+        }
+        if lhs.activityByHour != rhs.activityByHour {
+            return false
+        }
+        if lhs.maxTokens != rhs.maxTokens {
+            return false
+        }
+        if lhs.maxMessages != rhs.maxMessages {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(totalCost)
+        hasher.combine(todayRuntimeMs)
+        hasher.combine(avgDailyRuntimeMs)
+        hasher.combine(activeDaysCount)
+        hasher.combine(runtimeByDay)
+        hasher.combine(costByProject)
+        hasher.combine(topConversations)
+        hasher.combine(messagesByDay)
+        hasher.combine(activityByHour)
+        hasher.combine(maxTokens)
+        hasher.combine(maxMessages)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StatsSnapshot {
+        return
+            try StatsSnapshot(
+                totalCost: FfiConverterDouble.read(from: &buf), 
+                todayRuntimeMs: FfiConverterUInt64.read(from: &buf), 
+                avgDailyRuntimeMs: FfiConverterUInt64.read(from: &buf), 
+                activeDaysCount: FfiConverterUInt32.read(from: &buf), 
+                runtimeByDay: FfiConverterSequenceTypeDayRuntime.read(from: &buf), 
+                costByProject: FfiConverterSequenceTypeProjectCost.read(from: &buf), 
+                topConversations: FfiConverterSequenceTypeTopConversation.read(from: &buf), 
+                messagesByDay: FfiConverterSequenceTypeDayMessages.read(from: &buf), 
+                activityByHour: FfiConverterSequenceTypeHourActivity.read(from: &buf), 
+                maxTokens: FfiConverterUInt64.read(from: &buf), 
+                maxMessages: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: StatsSnapshot, into buf: inout [UInt8]) {
+        FfiConverterDouble.write(value.totalCost, into: &buf)
+        FfiConverterUInt64.write(value.todayRuntimeMs, into: &buf)
+        FfiConverterUInt64.write(value.avgDailyRuntimeMs, into: &buf)
+        FfiConverterUInt32.write(value.activeDaysCount, into: &buf)
+        FfiConverterSequenceTypeDayRuntime.write(value.runtimeByDay, into: &buf)
+        FfiConverterSequenceTypeProjectCost.write(value.costByProject, into: &buf)
+        FfiConverterSequenceTypeTopConversation.write(value.topConversations, into: &buf)
+        FfiConverterSequenceTypeDayMessages.write(value.messagesByDay, into: &buf)
+        FfiConverterSequenceTypeHourActivity.write(value.activityByHour, into: &buf)
+        FfiConverterUInt64.write(value.maxTokens, into: &buf)
+        FfiConverterUInt64.write(value.maxMessages, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStatsSnapshot_lift(_ buf: RustBuffer) throws -> StatsSnapshot {
+    return try FfiConverterTypeStatsSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeStatsSnapshot_lower(_ value: StatsSnapshot) -> RustBuffer {
+    return FfiConverterTypeStatsSnapshot.lower(value)
+}
+
+
+/**
+ * Top conversation by runtime
+ */
+public struct TopConversation {
+    /**
+     * Conversation ID (event ID)
+     */
+    public var id: String
+    /**
+     * Conversation title
+     */
+    public var title: String
+    /**
+     * Total runtime in milliseconds
+     */
+    public var runtimeMs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Conversation ID (event ID)
+         */id: String, 
+        /**
+         * Conversation title
+         */title: String, 
+        /**
+         * Total runtime in milliseconds
+         */runtimeMs: UInt64) {
+        self.id = id
+        self.title = title
+        self.runtimeMs = runtimeMs
+    }
+}
+
+#if compiler(>=6)
+extension TopConversation: Sendable {}
+#endif
+
+
+extension TopConversation: Equatable, Hashable {
+    public static func ==(lhs: TopConversation, rhs: TopConversation) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.runtimeMs != rhs.runtimeMs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(title)
+        hasher.combine(runtimeMs)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeTopConversation: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> TopConversation {
+        return
+            try TopConversation(
+                id: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                runtimeMs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: TopConversation, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterUInt64.write(value.runtimeMs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopConversation_lift(_ buf: RustBuffer) throws -> TopConversation {
+    return try FfiConverterTypeTopConversation.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeTopConversation_lower(_ value: TopConversation) -> RustBuffer {
+    return FfiConverterTypeTopConversation.lower(value)
 }
 
 
@@ -3565,6 +4341,81 @@ fileprivate struct FfiConverterSequenceTypeConversationInfo: FfiConverterRustBuf
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeDayMessages: FfiConverterRustBuffer {
+    typealias SwiftType = [DayMessages]
+
+    public static func write(_ value: [DayMessages], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDayMessages.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DayMessages] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DayMessages]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDayMessages.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeDayRuntime: FfiConverterRustBuffer {
+    typealias SwiftType = [DayRuntime]
+
+    public static func write(_ value: [DayRuntime], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeDayRuntime.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [DayRuntime] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [DayRuntime]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeDayRuntime.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeHourActivity: FfiConverterRustBuffer {
+    typealias SwiftType = [HourActivity]
+
+    public static func write(_ value: [HourActivity], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeHourActivity.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [HourActivity] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [HourActivity]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeHourActivity.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeInboxItem: FfiConverterRustBuffer {
     typealias SwiftType = [InboxItem]
 
@@ -3607,6 +4458,31 @@ fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeMessageInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeProjectCost: FfiConverterRustBuffer {
+    typealias SwiftType = [ProjectCost]
+
+    public static func write(_ value: [ProjectCost], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeProjectCost.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ProjectCost] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ProjectCost]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeProjectCost.read(from: &buf))
         }
         return seq
     }
@@ -3690,6 +4566,31 @@ fileprivate struct FfiConverterSequenceTypeReportInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeTopConversation: FfiConverterRustBuffer {
+    typealias SwiftType = [TopConversation]
+
+    public static func write(_ value: [TopConversation], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeTopConversation.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [TopConversation] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [TopConversation]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeTopConversation.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAskQuestionInfo: FfiConverterRustBuffer {
     typealias SwiftType = [AskQuestionInfo]
 
@@ -3764,6 +4665,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 28510) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot() != 9826) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {
