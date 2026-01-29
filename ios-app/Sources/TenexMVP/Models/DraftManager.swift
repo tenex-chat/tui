@@ -288,6 +288,10 @@ final class DraftManager {
     /// - Note: This is truly synchronous - blocks until save completes
     /// - Throws: Error if save fails (including if load failed and saves are blocked)
     func saveNow() async throws {
+        // BLOCKER FIX: Wait for initial load to complete before saving
+        // This prevents saveNow() from persisting empty snapshot before disk drafts are loaded
+        await ensureLoaded()
+
         saveTask?.cancel()
         saveTask = nil
         hasPendingSave = false
