@@ -217,6 +217,11 @@ impl AppDataStore {
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
                 // Check for inbox: ask events that p-tag the user
                 if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
+                    // Skip ask events that user has already answered
+                    if answered_ask_ids.contains(&message.id) {
+                        continue;
+                    }
+
                     // Extract project a_tag directly from the note first, fall back to thread lookup
                     let project_a_tag = Self::extract_project_a_tag(&note)
                         .or_else(|| self.find_project_for_thread(&thread_id));
@@ -224,7 +229,7 @@ impl AppDataStore {
 
                     let inbox_item = InboxItem {
                         id: message.id.clone(),
-                        event_type: InboxEventType::Mention,
+                        event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
                         title: message.content.chars().take(50).collect(),
                         project_a_tag: project_a_tag_str,
                         author_pubkey: message.pubkey.clone(),
@@ -1697,7 +1702,7 @@ impl AppDataStore {
 
                         let inbox_item = InboxItem {
                             id: message_id.clone(),
-                            event_type: InboxEventType::Mention,
+                            event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
                             title: message.content.chars().take(50).collect(),
                             project_a_tag: project_a_tag_str,
                             author_pubkey: pubkey.clone(),

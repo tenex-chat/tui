@@ -2236,13 +2236,10 @@ impl App {
             .collect()
     }
 
-    /// Get inbox items for Home view (filtered by visible_projects, time_filter, archived)
+    /// Get inbox items for Home view (filtered by time_filter, archived)
+    /// NOTE: Inbox items are NOT filtered by visible_projects - if someone asks you a question,
+    /// you should see it regardless of project filtering.
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
-        // Empty visible_projects = show nothing (inverted default)
-        if self.visible_projects.is_empty() {
-            return vec![];
-        }
-
         let items = self.data_store.borrow().get_inbox_items().to_vec();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -2251,8 +2248,7 @@ impl App {
         let prefs = self.preferences.borrow();
 
         items.into_iter()
-            // Project filter
-            .filter(|item| self.visible_projects.contains(&item.project_a_tag))
+            // NOTE: NO project filter for inbox - you should see all asks/mentions regardless of project selection
             // Archive filter - hide items from archived threads unless show_archived is true
             .filter(|item| {
                 if let Some(ref thread_id) = item.thread_id {
