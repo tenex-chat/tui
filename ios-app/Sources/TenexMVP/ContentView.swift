@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 struct ContentView: View {
     @Binding var userNpub: String
@@ -283,11 +284,13 @@ struct ProjectRowView: View {
         .padding(.vertical, 8)
     }
 
+    /// Deterministic color using SHA-256 hash (stable across app launches)
     private var projectColor: Color {
-        // Generate consistent color based on project ID
         let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal]
-        let hash = project.id.hashValue
-        return colors[abs(hash) % colors.count]
+        let data = Data(project.id.utf8)
+        let hash = SHA256.hash(data: data)
+        let firstByte = hash.withUnsafeBytes { $0[0] }
+        return colors[Int(firstByte) % colors.count]
     }
 }
 

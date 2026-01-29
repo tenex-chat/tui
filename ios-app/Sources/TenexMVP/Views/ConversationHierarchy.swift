@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 // MARK: - Conversation Hierarchy Data Model
 
@@ -63,16 +64,35 @@ final class ConversationHierarchy {
             let earliestActivity = allActivities.min() ?? conversation.lastActivity
             let activitySpan = TimeInterval(effectiveLastActivity - earliestActivity)
 
-            var agents = Set<String>()
-            agents.insert(conversation.author)
+            // Track agent names (for backward compatibility)
+            var agentNames = Set<String>()
+            agentNames.insert(conversation.author)
             for descendant in descendants {
-                agents.insert(descendant.author)
+                agentNames.insert(descendant.author)
             }
+
+            // Track agent info (name + pubkey) for avatar lookups
+            // Use pubkey as unique key to avoid duplicates from same agent
+            var agentInfosByPubkey: [String: AgentAvatarInfo] = [:]
+            agentInfosByPubkey[conversation.authorPubkey] = AgentAvatarInfo(
+                name: conversation.author,
+                pubkey: conversation.authorPubkey
+            )
+            for descendant in descendants {
+                agentInfosByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                    name: descendant.author,
+                    pubkey: descendant.authorPubkey
+                )
+            }
+
+            // Sort agent infos by name for consistent display
+            let sortedAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
 
             aggregated[conversation.id] = AggregatedConversationData(
                 effectiveLastActivity: effectiveLastActivity,
                 activitySpan: activitySpan,
-                participatingAgents: agents.sorted(),
+                participatingAgents: agentNames.sorted(),
+                participatingAgentInfos: sortedAgentInfos,
                 descendantCount: descendants.count
             )
         }
@@ -147,8 +167,11 @@ struct AggregatedConversationData {
     /// Time span from earliest to latest activity (renamed from "total running time")
     let activitySpan: TimeInterval
 
-    /// Sorted list of unique participating agent names
+    /// Sorted list of unique participating agent names (kept for backward compatibility)
     let participatingAgents: [String]
+
+    /// List of participating agents with pubkeys for avatar lookups
+    let participatingAgentInfos: [AgentAvatarInfo]
 
     /// Number of descendant conversations
     let descendantCount: Int
@@ -158,23 +181,96 @@ struct AggregatedConversationData {
         effectiveLastActivity: 0,
         activitySpan: 0,
         participatingAgents: [],
+        participatingAgentInfos: [],
         descendantCount: 0
     )
 }
 
-// MARK: - Shared Agent Avatar View
+// MARK: - Agent Avatar Info
 
-/// Reusable avatar view for displaying agent initials with consistent colors
-struct SharedAgentAvatar: View {
+/// Information needed to display an agent's avatar
+struct AgentAvatarInfo: Hashable, Identifiable {
+    let name: String
+    let pubkey: String
+
+    var id: String { pubkey }
+}
+
+// MARK: - Unified Agent Avatar View
+
+/// Unified reusable avatar view for displaying agent avatars throughout the app.
+///
+/// Features:
+/// - Deterministic SHA-256 hash for stable avatar colors across app launches
+/// - Cached profile picture lookups to prevent repeated FFI calls during scroll
+/// - Consistent fallback strategy: kind:0 profile picture → agent-definition picture → initials
+/// - Configurable size and border options
+///
+/// Usage:
+/// ```swift
+/// // With pubkey (recommended - enables caching and kind:0 lookup)
+/// AgentAvatarView(agentName: "claude-code", pubkey: "abc123...")
+///
+/// // With explicit fallback URL (agent-definition picture)
+/// AgentAvatarView(agentName: "claude-code", pubkey: "abc123...", fallbackPictureUrl: agent.picture)
+///
+/// // Without pubkey (uses name-based initials only)
+/// AgentAvatarView(agentName: "claude-code")
+/// ```
+struct AgentAvatarView: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+
+    /// Agent's display name (used for initials and color if no pubkey)
     let agentName: String
-    var size: CGFloat = 24
-    var fontSize: CGFloat = 10
 
-    /// Generate a consistent color based on agent name
+    /// Agent's public key in hex format (enables profile picture lookup and deterministic color)
+    var pubkey: String? = nil
+
+    /// Fallback picture URL from agent-definition (kind:4199), used if kind:0 has no picture
+    var fallbackPictureUrl: String? = nil
+
+    /// Avatar size in points
+    var size: CGFloat = 24
+
+    /// Font size for initials (auto-scaled if not specified)
+    var fontSize: CGFloat? = nil
+
+    /// Whether to show the border stroke (for overlapping avatars)
+    var showBorder: Bool = true
+
+    /// Whether this avatar is selected (shows blue border)
+    var isSelected: Bool = false
+
+    /// Profile picture URL fetched from kind:0 or cache
+    @State private var kind0PictureUrl: String?
+
+    /// Computed font size based on avatar size if not explicitly set
+    private var effectiveFontSize: CGFloat {
+        fontSize ?? (size * 0.42)
+    }
+
+    /// The best available picture URL using consistent fallback strategy:
+    /// 1. kind:0 profile picture (from Nostr metadata)
+    /// 2. Agent-definition picture (from kind:4199)
+    /// 3. nil (will show initials)
+    private var effectivePictureUrl: String? {
+        kind0PictureUrl ?? fallbackPictureUrl
+    }
+
+    /// Generate a deterministic color using SHA-256 hash.
+    /// Uses pubkey if available (most stable), falls back to agent name.
+    /// This ensures consistent colors across app launches, unlike Swift's hashValue.
     private var avatarColor: Color {
         let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan, .mint]
-        let hash = agentName.hashValue
-        return colors[abs(hash) % colors.count]
+        let hashInput = pubkey ?? agentName
+
+        // SHA-256 produces deterministic output for the same input
+        let data = Data(hashInput.utf8)
+        let hash = SHA256.hash(data: data)
+
+        // Use first byte of hash for color selection
+        let firstByte = hash.withUnsafeBytes { $0[0] }
+        return colors[Int(firstByte) % colors.count]
     }
 
     /// Get initials from agent name
@@ -191,19 +287,98 @@ struct SharedAgentAvatar: View {
         return "?"
     }
 
-    var body: some View {
+    /// Placeholder avatar with initials
+    private var placeholderAvatar: some View {
         Circle()
             .fill(avatarColor.gradient)
             .frame(width: size, height: size)
             .overlay {
                 Text(initials)
-                    .font(.system(size: fontSize, weight: .semibold))
+                    .font(.system(size: effectiveFontSize, weight: .semibold))
                     .foregroundStyle(.white)
             }
-            .overlay {
+    }
+
+    var body: some View {
+        Group {
+            if let pictureUrl = effectivePictureUrl, let url = URL(string: pictureUrl) {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fill)
+                    case .failure, .empty:
+                        placeholderAvatar
+                    @unknown default:
+                        placeholderAvatar
+                    }
+                }
+                .frame(width: size, height: size)
+                .clipShape(Circle())
+            } else {
+                placeholderAvatar
+            }
+        }
+        .overlay {
+            if showBorder {
                 Circle()
                     .stroke(Color(.systemBackground), lineWidth: 2)
             }
+        }
+        .overlay {
+            if isSelected {
+                Circle()
+                    .strokeBorder(Color.blue, lineWidth: 2)
+            }
+        }
+        .onAppear {
+            // Fetch profile picture using cached API (prevents repeated FFI calls)
+            if let pubkey = pubkey {
+                kind0PictureUrl = coreManager.getProfilePicture(pubkey: pubkey)
+            }
+        }
+    }
+}
+
+// MARK: - Legacy Compatibility Aliases
+
+/// Legacy SharedAgentAvatar - now a thin wrapper around AgentAvatarView.
+/// Prefer using AgentAvatarView directly for new code.
+struct SharedAgentAvatar: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    let agentName: String
+    var pictureUrl: String? = nil
+    var size: CGFloat = 24
+    var fontSize: CGFloat = 10
+
+    var body: some View {
+        AgentAvatarView(
+            agentName: agentName,
+            fallbackPictureUrl: pictureUrl,
+            size: size,
+            fontSize: fontSize
+        )
+        .environmentObject(coreManager)
+    }
+}
+
+/// Legacy AgentAvatarWithPicture - now a thin wrapper around AgentAvatarView.
+/// Prefer using AgentAvatarView directly for new code.
+struct AgentAvatarWithPicture: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    let agentInfo: AgentAvatarInfo
+    var size: CGFloat = 24
+    var fontSize: CGFloat = 10
+
+    var body: some View {
+        AgentAvatarView(
+            agentName: agentInfo.name,
+            pubkey: agentInfo.pubkey,
+            size: size,
+            fontSize: fontSize
+        )
+        .environmentObject(coreManager)
     }
 }
 

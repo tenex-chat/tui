@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import CryptoKit
 
 /// A premium message composition view for both new conversations and replies.
 /// Supports project selection (for new conversations), agent selection, draft persistence, and markdown input.
@@ -719,31 +720,34 @@ struct ProjectChipView: View {
         )
     }
 
+    /// Deterministic color using SHA-256 hash (stable across app launches)
     private var projectColor: Color {
         let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
-        let hash = project.id.hashValue
-        return colors[abs(hash) % colors.count]
+        let data = Data(project.id.utf8)
+        let hash = SHA256.hash(data: data)
+        let firstByte = hash.withUnsafeBytes { $0[0] }
+        return colors[Int(firstByte) % colors.count]
     }
 }
 
 // MARK: - Agent Chip View
 
 struct AgentChipView: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
     let agent: AgentInfo
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            // Agent avatar
-            Circle()
-                .fill(agentColor.gradient)
-                .frame(width: 24, height: 24)
-                .overlay {
-                    Text(String(agent.name.prefix(1)).uppercased())
-                        .font(.caption2)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                }
+            // Agent avatar using unified component
+            AgentAvatarView(
+                agentName: agent.name,
+                pubkey: agent.pubkey,
+                fallbackPictureUrl: agent.picture,
+                size: 24,
+                showBorder: false
+            )
+            .environmentObject(coreManager)
 
             // Agent name
             Text("@\(agent.dTag)")
@@ -766,12 +770,6 @@ struct AgentChipView: View {
                 .fill(Color(.systemBackground))
                 .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
         )
-    }
-
-    private var agentColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
-        let hash = agent.pubkey.hashValue
-        return colors[abs(hash) % colors.count]
     }
 }
 
