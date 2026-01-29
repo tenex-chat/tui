@@ -51,7 +51,7 @@ use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
 use crate::models::agent_definition::AgentDefinition;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::{process_note_keys, CoreHandle};
-use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
+use crate::stats::{query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::AppDataStore;
 
 /// Get the data directory for nostrdb
@@ -487,6 +487,98 @@ pub struct StatsSnapshot {
     pub max_messages: u64,
 }
 
+// ===== Diagnostics Types (iOS Diagnostics View) =====
+
+/// Event count for a specific kind
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct KindEventCount {
+    /// Event kind number
+    pub kind: u16,
+    /// Number of events of this kind in the database
+    pub count: u64,
+    /// Human-readable name for this kind (if known)
+    pub name: String,
+}
+
+/// Database statistics for the diagnostics view
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DatabaseStats {
+    /// Database file size in bytes
+    pub db_size_bytes: u64,
+    /// Event counts by kind (sorted by count descending)
+    pub event_counts_by_kind: Vec<KindEventCount>,
+    /// Total events across all kinds
+    pub total_events: u64,
+}
+
+/// Information about a single subscription
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SubscriptionDiagnostics {
+    /// Subscription ID
+    pub sub_id: String,
+    /// Human-readable description
+    pub description: String,
+    /// Event kinds this subscription listens for
+    pub kinds: Vec<u16>,
+    /// Number of events received
+    pub events_received: u64,
+    /// Seconds since subscription was created
+    pub age_secs: u64,
+}
+
+/// Negentropy sync status for the diagnostics view
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NegentropySyncDiagnostics {
+    /// Whether negentropy sync is enabled
+    pub enabled: bool,
+    /// Current sync interval in seconds
+    pub current_interval_secs: u64,
+    /// Seconds since last full sync cycle completed (None if never completed)
+    pub seconds_since_last_cycle: Option<u64>,
+    /// Whether a sync is currently in progress
+    pub sync_in_progress: bool,
+    /// Number of successful syncs
+    pub successful_syncs: u64,
+    /// Number of failed syncs
+    pub failed_syncs: u64,
+    /// Total events reconciled
+    pub total_events_reconciled: u64,
+}
+
+/// System diagnostics information
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SystemDiagnostics {
+    /// Log file path
+    pub log_path: String,
+    /// Uptime in milliseconds since core initialization
+    pub uptime_ms: u64,
+    /// Core version
+    pub version: String,
+    /// Whether the core is initialized
+    pub is_initialized: bool,
+    /// Whether a user is logged in
+    pub is_logged_in: bool,
+}
+
+/// Full diagnostics snapshot containing all diagnostic information
+/// Each section is optional to support best-effort partial data loading:
+/// if one section fails (e.g., lock error), other sections can still be populated.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DiagnosticsSnapshot {
+    /// System information (None if system info collection failed)
+    pub system: Option<SystemDiagnostics>,
+    /// Negentropy sync status (None if sync stats unavailable)
+    pub sync: Option<NegentropySyncDiagnostics>,
+    /// Active subscriptions (None if subscription stats unavailable)
+    pub subscriptions: Option<Vec<SubscriptionDiagnostics>>,
+    /// Total events received across all subscriptions (0 if unavailable)
+    pub total_subscription_events: u64,
+    /// Database statistics (None if database stats collection failed)
+    pub database: Option<DatabaseStats>,
+    /// Error messages for sections that failed to load (for debugging)
+    pub section_errors: Vec<String>,
+}
+
 /// Errors that can occur during TENEX operations.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum TenexError {
@@ -577,6 +669,12 @@ pub struct TenexCore {
     /// Uses AtomicU64 for lock-free access. Stored as ms for precision without needing
     /// to store Instant (which isn't Send+Sync friendly for FFI).
     last_refresh_ms: AtomicU64,
+    /// Subscription stats for diagnostics (shared with worker)
+    subscription_stats: RwLock<Option<SharedSubscriptionStats>>,
+    /// Negentropy sync stats for diagnostics (shared with worker)
+    negentropy_stats: RwLock<Option<SharedNegentropySyncStats>>,
+    /// Timestamp when core was initialized (for uptime calculation)
+    init_time: RwLock<Option<std::time::Instant>>,
 }
 
 #[uniffi::export]
@@ -596,6 +694,9 @@ impl TenexCore {
             last_refresh_ms: AtomicU64::new(0),
             ndb_stream: RwLock::new(None),
             preferences: RwLock::new(None),
+            subscription_stats: RwLock::new(None),
+            negentropy_stats: RwLock::new(None),
+            init_time: RwLock::new(None),
         }
     }
 
@@ -633,6 +734,11 @@ impl TenexCore {
         let event_stats = SharedEventStats::new();
         let subscription_stats = SharedSubscriptionStats::new();
         let negentropy_stats = SharedNegentropySyncStats::new();
+
+        // Clone stats before passing to worker so we can expose them via FFI
+        let subscription_stats_clone = subscription_stats.clone();
+        let negentropy_stats_clone = negentropy_stats.clone();
+
         let worker = NostrWorker::new(
             ndb.clone(),
             data_tx,
@@ -715,6 +821,29 @@ impl TenexCore {
                 Err(_) => return false,
             };
             *prefs_guard = Some(prefs);
+        }
+
+        // Store stats references for diagnostics
+        {
+            let mut stats_guard = match self.subscription_stats.write() {
+                Ok(g) => g,
+                Err(_) => return false,
+            };
+            *stats_guard = Some(subscription_stats_clone);
+        }
+        {
+            let mut stats_guard = match self.negentropy_stats.write() {
+                Ok(g) => g,
+                Err(_) => return false,
+            };
+            *stats_guard = Some(negentropy_stats_clone);
+        }
+        {
+            let mut time_guard = match self.init_time.write() {
+                Ok(g) => g,
+                Err(_) => return false,
+            };
+            *time_guard = Some(std::time::Instant::now());
         }
 
         self.initialized.store(true, Ordering::SeqCst);
@@ -2032,6 +2161,210 @@ impl TenexCore {
         store.rebuild_from_ndb();
         ok
     }
+
+    // ===== Diagnostics Methods =====
+
+    /// Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
+    /// Returns all diagnostic information in a single batched call for efficiency.
+    ///
+    /// This function is best-effort: each section is collected independently.
+    /// If one section fails (e.g., lock error), other sections can still succeed.
+    /// Check `section_errors` for any failures.
+    ///
+    /// Set `include_database_stats` to false to skip expensive DB scanning when
+    /// the Database tab is not active.
+    pub fn get_diagnostics_snapshot(&self, include_database_stats: bool) -> DiagnosticsSnapshot {
+        let mut section_errors: Vec<String> = Vec::new();
+        let data_dir = get_data_dir();
+
+        // ===== 1. System Diagnostics (best-effort) =====
+        let system = self.collect_system_diagnostics(&data_dir)
+            .map_err(|e| section_errors.push(format!("System: {}", e)))
+            .ok();
+
+        // ===== 2. Negentropy Sync Diagnostics (best-effort) =====
+        let sync = self.collect_sync_diagnostics()
+            .map_err(|e| section_errors.push(format!("Sync: {}", e)))
+            .ok();
+
+        // ===== 3. Subscription Diagnostics (best-effort) =====
+        let (subscriptions, total_subscription_events) = match self.collect_subscription_diagnostics() {
+            Ok((subs, total)) => (Some(subs), total),
+            Err(e) => {
+                section_errors.push(format!("Subscriptions: {}", e));
+                (None, 0)
+            }
+        };
+
+        // ===== 4. Database Diagnostics (best-effort, optionally skipped) =====
+        let database = if include_database_stats {
+            self.collect_database_diagnostics(&data_dir)
+                .map_err(|e| section_errors.push(format!("Database: {}", e)))
+                .ok()
+        } else {
+            None // Intentionally skipped for performance
+        };
+
+        DiagnosticsSnapshot {
+            system,
+            sync,
+            subscriptions,
+            total_subscription_events,
+            database,
+            section_errors,
+        }
+    }
+
+}
+
+// Private implementation methods for TenexCore (not exposed via UniFFI)
+impl TenexCore {
+    /// Collect system diagnostics (uptime, version, status)
+    fn collect_system_diagnostics(&self, data_dir: &std::path::Path) -> Result<SystemDiagnostics, String> {
+        let uptime_ms = self.init_time.read()
+            .map_err(|_| "Failed to acquire init_time lock".to_string())?
+            .as_ref()
+            .map(|t| t.elapsed().as_millis() as u64)
+            .unwrap_or(0);
+
+        let is_initialized = self.initialized.load(Ordering::SeqCst);
+        let is_logged_in = self.is_logged_in();
+        let log_path = data_dir.join("tenex.log").to_string_lossy().to_string();
+
+        Ok(SystemDiagnostics {
+            log_path,
+            uptime_ms,
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            is_initialized,
+            is_logged_in,
+        })
+    }
+
+    /// Collect negentropy sync diagnostics
+    fn collect_sync_diagnostics(&self) -> Result<NegentropySyncDiagnostics, String> {
+        let stats_guard = self.negentropy_stats.read()
+            .map_err(|_| "Failed to acquire negentropy_stats lock".to_string())?;
+
+        Ok(if let Some(stats) = stats_guard.as_ref() {
+            let snapshot = stats.snapshot();
+            let seconds_since_last_cycle = snapshot.last_cycle_time()
+                .map(|t| t.elapsed().as_secs());
+
+            NegentropySyncDiagnostics {
+                enabled: snapshot.enabled,
+                current_interval_secs: snapshot.current_interval_secs,
+                seconds_since_last_cycle,
+                sync_in_progress: snapshot.sync_in_progress,
+                successful_syncs: snapshot.successful_syncs,
+                failed_syncs: snapshot.failed_syncs,
+                total_events_reconciled: snapshot.total_events_reconciled,
+            }
+        } else {
+            // No stats available yet - return default
+            NegentropySyncDiagnostics {
+                enabled: false,
+                current_interval_secs: 0,
+                seconds_since_last_cycle: None,
+                sync_in_progress: false,
+                successful_syncs: 0,
+                failed_syncs: 0,
+                total_events_reconciled: 0,
+            }
+        })
+    }
+
+    /// Collect subscription diagnostics
+    fn collect_subscription_diagnostics(&self) -> Result<(Vec<SubscriptionDiagnostics>, u64), String> {
+        let stats_guard = self.subscription_stats.read()
+            .map_err(|_| "Failed to acquire subscription_stats lock".to_string())?;
+
+        Ok(if let Some(stats) = stats_guard.as_ref() {
+            let snapshot = stats.snapshot();
+            let subs: Vec<SubscriptionDiagnostics> = snapshot.subscriptions
+                .iter()
+                .map(|(sub_id, info)| {
+                    SubscriptionDiagnostics {
+                        sub_id: sub_id.clone(),
+                        description: info.description.clone(),
+                        kinds: info.kinds.clone(),
+                        events_received: info.events_received,
+                        age_secs: info.created_at.elapsed().as_secs(),
+                    }
+                })
+                .collect();
+            let total = snapshot.total_events();
+            (subs, total)
+        } else {
+            (Vec::new(), 0)
+        })
+    }
+
+    /// Collect database diagnostics (potentially expensive - scans event kinds)
+    fn collect_database_diagnostics(&self, data_dir: &std::path::Path) -> Result<DatabaseStats, String> {
+        let ndb_guard = self.ndb.read()
+            .map_err(|_| "Failed to acquire ndb lock".to_string())?;
+
+        Ok(if let Some(ndb) = ndb_guard.as_ref() {
+            // Get event counts by kind using the existing query_ndb_stats function
+            let kind_counts = query_ndb_stats(ndb);
+
+            // Convert to Vec<KindEventCount> and sort by count descending
+            let mut event_counts: Vec<KindEventCount> = kind_counts
+                .into_iter()
+                .map(|(kind, count)| {
+                    KindEventCount {
+                        kind,
+                        count,
+                        name: get_kind_name(kind),
+                    }
+                })
+                .collect();
+            event_counts.sort_by(|a, b| b.count.cmp(&a.count));
+
+            let total_events: u64 = event_counts.iter().map(|k| k.count).sum();
+            let db_size_bytes = get_db_file_size(data_dir);
+
+            DatabaseStats {
+                db_size_bytes,
+                event_counts_by_kind: event_counts,
+                total_events,
+            }
+        } else {
+            DatabaseStats {
+                db_size_bytes: 0,
+                event_counts_by_kind: Vec::new(),
+                total_events: 0,
+            }
+        })
+    }
+}
+
+/// Get human-readable name for a Nostr event kind
+fn get_kind_name(kind: u16) -> String {
+    match kind {
+        0 => "Metadata".to_string(),
+        1 => "Text Notes".to_string(),
+        3 => "Contact List".to_string(),
+        4 => "DMs".to_string(),
+        513 => "Conversations".to_string(),
+        4129 => "Lessons".to_string(),
+        4199 => "Agent Definitions".to_string(),
+        4201 => "Nudges".to_string(),
+        24010 => "Project Status".to_string(),
+        24133 => "Operations Status".to_string(),
+        30023 => "Articles".to_string(),
+        31933 => "Projects".to_string(),
+        _ => format!("Kind {}", kind),
+    }
+}
+
+/// Get the LMDB database file size in bytes
+fn get_db_file_size(data_dir: &std::path::Path) -> u64 {
+    // LMDB stores data in a file named "data.mdb"
+    let db_file = data_dir.join("data.mdb");
+    std::fs::metadata(&db_file)
+        .map(|m| m.len())
+        .unwrap_or(0)
 }
 
 impl Drop for TenexCore {

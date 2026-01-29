@@ -416,6 +416,22 @@ fileprivate struct FfiConverterUInt8: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterUInt16: FfiConverterPrimitive {
+    typealias FfiType = UInt16
+    typealias SwiftType = UInt16
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> UInt16 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
     typealias FfiType = UInt32
     typealias SwiftType = UInt32
@@ -595,6 +611,19 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getCurrentUser()  -> UserInfo?
     
     /**
+     * Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
+     * Returns all diagnostic information in a single batched call for efficiency.
+     *
+     * This function is best-effort: each section is collected independently.
+     * If one section fails (e.g., lock error), other sections can still succeed.
+     * Check `section_errors` for any failures.
+     *
+     * Set `include_database_stats` to false to skip expensive DB scanning when
+     * the Database tab is not active.
+     */
+    func getDiagnosticsSnapshot(includeDatabaseStats: Bool)  -> DiagnosticsSnapshot
+    
+    /**
      * Get inbox items for the current user.
      */
     func getInbox()  -> [InboxItem]
@@ -603,17 +632,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Get messages for a conversation.
      */
     func getMessages(conversationId: String)  -> [MessageInfo]
-    
-    /**
-     * Get profile picture URL for a pubkey from kind:0 metadata.
-     *
-     * Returns the picture URL if the profile exists and has a picture set.
-     * This fetches from cached kind:0 events, not the network.
-     *
-     * Returns Result to allow Swift to properly handle errors (lock failures, etc.)
-     * instead of silently returning nil.
-     */
-    func getProfilePicture(pubkey: String) throws  -> String?
     
     /**
      * Get all projects with filter info (visibility, counts).
@@ -919,6 +937,25 @@ open func getCurrentUser() -> UserInfo?  {
 }
     
     /**
+     * Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
+     * Returns all diagnostic information in a single batched call for efficiency.
+     *
+     * This function is best-effort: each section is collected independently.
+     * If one section fails (e.g., lock error), other sections can still succeed.
+     * Check `section_errors` for any failures.
+     *
+     * Set `include_database_stats` to false to skip expensive DB scanning when
+     * the Database tab is not active.
+     */
+open func getDiagnosticsSnapshot(includeDatabaseStats: Bool) -> DiagnosticsSnapshot  {
+    return try!  FfiConverterTypeDiagnosticsSnapshot_lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_diagnostics_snapshot(self.uniffiClonePointer(),
+        FfiConverterBool.lower(includeDatabaseStats),$0
+    )
+})
+}
+    
+    /**
      * Get inbox items for the current user.
      */
 open func getInbox() -> [InboxItem]  {
@@ -935,23 +972,6 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
     return try!  FfiConverterSequenceTypeMessageInfo.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_messages(self.uniffiClonePointer(),
         FfiConverterString.lower(conversationId),$0
-    )
-})
-}
-    
-    /**
-     * Get profile picture URL for a pubkey from kind:0 metadata.
-     *
-     * Returns the picture URL if the profile exists and has a picture set.
-     * This fetches from cached kind:0 events, not the network.
-     *
-     * Returns Result to allow Swift to properly handle errors (lock failures, etc.)
-     * instead of silently returning nil.
-     */
-open func getProfilePicture(pubkey: String)throws  -> String?  {
-    return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(self.uniffiClonePointer(),
-        FfiConverterString.lower(pubkey),$0
     )
 })
 }
@@ -1920,13 +1940,9 @@ public struct ConversationInfo {
      */
     public var title: String
     /**
-     * Agent or user who started the conversation (display name)
+     * Agent or user who started the conversation
      */
     public var author: String
-    /**
-     * Author's public key (hex) for profile lookups
-     */
-    public var authorPubkey: String
     /**
      * Brief summary or first line of content
      */
@@ -1958,11 +1974,8 @@ public struct ConversationInfo {
          * Title/subject of the conversation
          */title: String, 
         /**
-         * Agent or user who started the conversation (display name)
+         * Agent or user who started the conversation
          */author: String, 
-        /**
-         * Author's public key (hex) for profile lookups
-         */authorPubkey: String, 
         /**
          * Brief summary or first line of content
          */summary: String?, 
@@ -1981,7 +1994,6 @@ public struct ConversationInfo {
         self.id = id
         self.title = title
         self.author = author
-        self.authorPubkey = authorPubkey
         self.summary = summary
         self.messageCount = messageCount
         self.lastActivity = lastActivity
@@ -2006,9 +2018,6 @@ extension ConversationInfo: Equatable, Hashable {
         if lhs.author != rhs.author {
             return false
         }
-        if lhs.authorPubkey != rhs.authorPubkey {
-            return false
-        }
         if lhs.summary != rhs.summary {
             return false
         }
@@ -2031,7 +2040,6 @@ extension ConversationInfo: Equatable, Hashable {
         hasher.combine(id)
         hasher.combine(title)
         hasher.combine(author)
-        hasher.combine(authorPubkey)
         hasher.combine(summary)
         hasher.combine(messageCount)
         hasher.combine(lastActivity)
@@ -2052,7 +2060,6 @@ public struct FfiConverterTypeConversationInfo: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 author: FfiConverterString.read(from: &buf), 
-                authorPubkey: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
                 messageCount: FfiConverterUInt32.read(from: &buf), 
                 lastActivity: FfiConverterUInt64.read(from: &buf), 
@@ -2065,7 +2072,6 @@ public struct FfiConverterTypeConversationInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.author, into: &buf)
-        FfiConverterString.write(value.authorPubkey, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
         FfiConverterUInt32.write(value.messageCount, into: &buf)
         FfiConverterUInt64.write(value.lastActivity, into: &buf)
@@ -2087,6 +2093,105 @@ public func FfiConverterTypeConversationInfo_lift(_ buf: RustBuffer) throws -> C
 #endif
 public func FfiConverterTypeConversationInfo_lower(_ value: ConversationInfo) -> RustBuffer {
     return FfiConverterTypeConversationInfo.lower(value)
+}
+
+
+/**
+ * Database statistics for the diagnostics view
+ */
+public struct DatabaseStats {
+    /**
+     * Database file size in bytes
+     */
+    public var dbSizeBytes: UInt64
+    /**
+     * Event counts by kind (sorted by count descending)
+     */
+    public var eventCountsByKind: [KindEventCount]
+    /**
+     * Total events across all kinds
+     */
+    public var totalEvents: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Database file size in bytes
+         */dbSizeBytes: UInt64, 
+        /**
+         * Event counts by kind (sorted by count descending)
+         */eventCountsByKind: [KindEventCount], 
+        /**
+         * Total events across all kinds
+         */totalEvents: UInt64) {
+        self.dbSizeBytes = dbSizeBytes
+        self.eventCountsByKind = eventCountsByKind
+        self.totalEvents = totalEvents
+    }
+}
+
+#if compiler(>=6)
+extension DatabaseStats: Sendable {}
+#endif
+
+
+extension DatabaseStats: Equatable, Hashable {
+    public static func ==(lhs: DatabaseStats, rhs: DatabaseStats) -> Bool {
+        if lhs.dbSizeBytes != rhs.dbSizeBytes {
+            return false
+        }
+        if lhs.eventCountsByKind != rhs.eventCountsByKind {
+            return false
+        }
+        if lhs.totalEvents != rhs.totalEvents {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(dbSizeBytes)
+        hasher.combine(eventCountsByKind)
+        hasher.combine(totalEvents)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDatabaseStats: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DatabaseStats {
+        return
+            try DatabaseStats(
+                dbSizeBytes: FfiConverterUInt64.read(from: &buf), 
+                eventCountsByKind: FfiConverterSequenceTypeKindEventCount.read(from: &buf), 
+                totalEvents: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DatabaseStats, into buf: inout [UInt8]) {
+        FfiConverterUInt64.write(value.dbSizeBytes, into: &buf)
+        FfiConverterSequenceTypeKindEventCount.write(value.eventCountsByKind, into: &buf)
+        FfiConverterUInt64.write(value.totalEvents, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDatabaseStats_lift(_ buf: RustBuffer) throws -> DatabaseStats {
+    return try FfiConverterTypeDatabaseStats.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDatabaseStats_lower(_ value: DatabaseStats) -> RustBuffer {
+    return FfiConverterTypeDatabaseStats.lower(value)
 }
 
 
@@ -2271,6 +2376,149 @@ public func FfiConverterTypeDayRuntime_lift(_ buf: RustBuffer) throws -> DayRunt
 #endif
 public func FfiConverterTypeDayRuntime_lower(_ value: DayRuntime) -> RustBuffer {
     return FfiConverterTypeDayRuntime.lower(value)
+}
+
+
+/**
+ * Full diagnostics snapshot containing all diagnostic information
+ * Each section is optional to support best-effort partial data loading:
+ * if one section fails (e.g., lock error), other sections can still be populated.
+ */
+public struct DiagnosticsSnapshot {
+    /**
+     * System information (None if system info collection failed)
+     */
+    public var system: SystemDiagnostics?
+    /**
+     * Negentropy sync status (None if sync stats unavailable)
+     */
+    public var sync: NegentropySyncDiagnostics?
+    /**
+     * Active subscriptions (None if subscription stats unavailable)
+     */
+    public var subscriptions: [SubscriptionDiagnostics]?
+    /**
+     * Total events received across all subscriptions (0 if unavailable)
+     */
+    public var totalSubscriptionEvents: UInt64
+    /**
+     * Database statistics (None if database stats collection failed)
+     */
+    public var database: DatabaseStats?
+    /**
+     * Error messages for sections that failed to load (for debugging)
+     */
+    public var sectionErrors: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * System information (None if system info collection failed)
+         */system: SystemDiagnostics?, 
+        /**
+         * Negentropy sync status (None if sync stats unavailable)
+         */sync: NegentropySyncDiagnostics?, 
+        /**
+         * Active subscriptions (None if subscription stats unavailable)
+         */subscriptions: [SubscriptionDiagnostics]?, 
+        /**
+         * Total events received across all subscriptions (0 if unavailable)
+         */totalSubscriptionEvents: UInt64, 
+        /**
+         * Database statistics (None if database stats collection failed)
+         */database: DatabaseStats?, 
+        /**
+         * Error messages for sections that failed to load (for debugging)
+         */sectionErrors: [String]) {
+        self.system = system
+        self.sync = sync
+        self.subscriptions = subscriptions
+        self.totalSubscriptionEvents = totalSubscriptionEvents
+        self.database = database
+        self.sectionErrors = sectionErrors
+    }
+}
+
+#if compiler(>=6)
+extension DiagnosticsSnapshot: Sendable {}
+#endif
+
+
+extension DiagnosticsSnapshot: Equatable, Hashable {
+    public static func ==(lhs: DiagnosticsSnapshot, rhs: DiagnosticsSnapshot) -> Bool {
+        if lhs.system != rhs.system {
+            return false
+        }
+        if lhs.sync != rhs.sync {
+            return false
+        }
+        if lhs.subscriptions != rhs.subscriptions {
+            return false
+        }
+        if lhs.totalSubscriptionEvents != rhs.totalSubscriptionEvents {
+            return false
+        }
+        if lhs.database != rhs.database {
+            return false
+        }
+        if lhs.sectionErrors != rhs.sectionErrors {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(system)
+        hasher.combine(sync)
+        hasher.combine(subscriptions)
+        hasher.combine(totalSubscriptionEvents)
+        hasher.combine(database)
+        hasher.combine(sectionErrors)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDiagnosticsSnapshot: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DiagnosticsSnapshot {
+        return
+            try DiagnosticsSnapshot(
+                system: FfiConverterOptionTypeSystemDiagnostics.read(from: &buf), 
+                sync: FfiConverterOptionTypeNegentropySyncDiagnostics.read(from: &buf), 
+                subscriptions: FfiConverterOptionSequenceTypeSubscriptionDiagnostics.read(from: &buf), 
+                totalSubscriptionEvents: FfiConverterUInt64.read(from: &buf), 
+                database: FfiConverterOptionTypeDatabaseStats.read(from: &buf), 
+                sectionErrors: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: DiagnosticsSnapshot, into buf: inout [UInt8]) {
+        FfiConverterOptionTypeSystemDiagnostics.write(value.system, into: &buf)
+        FfiConverterOptionTypeNegentropySyncDiagnostics.write(value.sync, into: &buf)
+        FfiConverterOptionSequenceTypeSubscriptionDiagnostics.write(value.subscriptions, into: &buf)
+        FfiConverterUInt64.write(value.totalSubscriptionEvents, into: &buf)
+        FfiConverterOptionTypeDatabaseStats.write(value.database, into: &buf)
+        FfiConverterSequenceString.write(value.sectionErrors, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiagnosticsSnapshot_lift(_ buf: RustBuffer) throws -> DiagnosticsSnapshot {
+    return try FfiConverterTypeDiagnosticsSnapshot.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDiagnosticsSnapshot_lower(_ value: DiagnosticsSnapshot) -> RustBuffer {
+    return FfiConverterTypeDiagnosticsSnapshot.lower(value)
 }
 
 
@@ -2585,6 +2833,105 @@ public func FfiConverterTypeInboxItem_lower(_ value: InboxItem) -> RustBuffer {
 
 
 /**
+ * Event count for a specific kind
+ */
+public struct KindEventCount {
+    /**
+     * Event kind number
+     */
+    public var kind: UInt16
+    /**
+     * Number of events of this kind in the database
+     */
+    public var count: UInt64
+    /**
+     * Human-readable name for this kind (if known)
+     */
+    public var name: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event kind number
+         */kind: UInt16, 
+        /**
+         * Number of events of this kind in the database
+         */count: UInt64, 
+        /**
+         * Human-readable name for this kind (if known)
+         */name: String) {
+        self.kind = kind
+        self.count = count
+        self.name = name
+    }
+}
+
+#if compiler(>=6)
+extension KindEventCount: Sendable {}
+#endif
+
+
+extension KindEventCount: Equatable, Hashable {
+    public static func ==(lhs: KindEventCount, rhs: KindEventCount) -> Bool {
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.count != rhs.count {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kind)
+        hasher.combine(count)
+        hasher.combine(name)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeKindEventCount: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> KindEventCount {
+        return
+            try KindEventCount(
+                kind: FfiConverterUInt16.read(from: &buf), 
+                count: FfiConverterUInt64.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: KindEventCount, into buf: inout [UInt8]) {
+        FfiConverterUInt16.write(value.kind, into: &buf)
+        FfiConverterUInt64.write(value.count, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKindEventCount_lift(_ buf: RustBuffer) throws -> KindEventCount {
+    return try FfiConverterTypeKindEventCount.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeKindEventCount_lower(_ value: KindEventCount) -> RustBuffer {
+    return FfiConverterTypeKindEventCount.lower(value)
+}
+
+
+/**
  * Result of a successful login operation.
  */
 public struct LoginResult {
@@ -2877,6 +3224,161 @@ public func FfiConverterTypeMessageInfo_lift(_ buf: RustBuffer) throws -> Messag
 #endif
 public func FfiConverterTypeMessageInfo_lower(_ value: MessageInfo) -> RustBuffer {
     return FfiConverterTypeMessageInfo.lower(value)
+}
+
+
+/**
+ * Negentropy sync status for the diagnostics view
+ */
+public struct NegentropySyncDiagnostics {
+    /**
+     * Whether negentropy sync is enabled
+     */
+    public var enabled: Bool
+    /**
+     * Current sync interval in seconds
+     */
+    public var currentIntervalSecs: UInt64
+    /**
+     * Seconds since last full sync cycle completed (None if never completed)
+     */
+    public var secondsSinceLastCycle: UInt64?
+    /**
+     * Whether a sync is currently in progress
+     */
+    public var syncInProgress: Bool
+    /**
+     * Number of successful syncs
+     */
+    public var successfulSyncs: UInt64
+    /**
+     * Number of failed syncs
+     */
+    public var failedSyncs: UInt64
+    /**
+     * Total events reconciled
+     */
+    public var totalEventsReconciled: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Whether negentropy sync is enabled
+         */enabled: Bool, 
+        /**
+         * Current sync interval in seconds
+         */currentIntervalSecs: UInt64, 
+        /**
+         * Seconds since last full sync cycle completed (None if never completed)
+         */secondsSinceLastCycle: UInt64?, 
+        /**
+         * Whether a sync is currently in progress
+         */syncInProgress: Bool, 
+        /**
+         * Number of successful syncs
+         */successfulSyncs: UInt64, 
+        /**
+         * Number of failed syncs
+         */failedSyncs: UInt64, 
+        /**
+         * Total events reconciled
+         */totalEventsReconciled: UInt64) {
+        self.enabled = enabled
+        self.currentIntervalSecs = currentIntervalSecs
+        self.secondsSinceLastCycle = secondsSinceLastCycle
+        self.syncInProgress = syncInProgress
+        self.successfulSyncs = successfulSyncs
+        self.failedSyncs = failedSyncs
+        self.totalEventsReconciled = totalEventsReconciled
+    }
+}
+
+#if compiler(>=6)
+extension NegentropySyncDiagnostics: Sendable {}
+#endif
+
+
+extension NegentropySyncDiagnostics: Equatable, Hashable {
+    public static func ==(lhs: NegentropySyncDiagnostics, rhs: NegentropySyncDiagnostics) -> Bool {
+        if lhs.enabled != rhs.enabled {
+            return false
+        }
+        if lhs.currentIntervalSecs != rhs.currentIntervalSecs {
+            return false
+        }
+        if lhs.secondsSinceLastCycle != rhs.secondsSinceLastCycle {
+            return false
+        }
+        if lhs.syncInProgress != rhs.syncInProgress {
+            return false
+        }
+        if lhs.successfulSyncs != rhs.successfulSyncs {
+            return false
+        }
+        if lhs.failedSyncs != rhs.failedSyncs {
+            return false
+        }
+        if lhs.totalEventsReconciled != rhs.totalEventsReconciled {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(enabled)
+        hasher.combine(currentIntervalSecs)
+        hasher.combine(secondsSinceLastCycle)
+        hasher.combine(syncInProgress)
+        hasher.combine(successfulSyncs)
+        hasher.combine(failedSyncs)
+        hasher.combine(totalEventsReconciled)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNegentropySyncDiagnostics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NegentropySyncDiagnostics {
+        return
+            try NegentropySyncDiagnostics(
+                enabled: FfiConverterBool.read(from: &buf), 
+                currentIntervalSecs: FfiConverterUInt64.read(from: &buf), 
+                secondsSinceLastCycle: FfiConverterOptionUInt64.read(from: &buf), 
+                syncInProgress: FfiConverterBool.read(from: &buf), 
+                successfulSyncs: FfiConverterUInt64.read(from: &buf), 
+                failedSyncs: FfiConverterUInt64.read(from: &buf), 
+                totalEventsReconciled: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NegentropySyncDiagnostics, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.enabled, into: &buf)
+        FfiConverterUInt64.write(value.currentIntervalSecs, into: &buf)
+        FfiConverterOptionUInt64.write(value.secondsSinceLastCycle, into: &buf)
+        FfiConverterBool.write(value.syncInProgress, into: &buf)
+        FfiConverterUInt64.write(value.successfulSyncs, into: &buf)
+        FfiConverterUInt64.write(value.failedSyncs, into: &buf)
+        FfiConverterUInt64.write(value.totalEventsReconciled, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNegentropySyncDiagnostics_lift(_ buf: RustBuffer) throws -> NegentropySyncDiagnostics {
+    return try FfiConverterTypeNegentropySyncDiagnostics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNegentropySyncDiagnostics_lower(_ value: NegentropySyncDiagnostics) -> RustBuffer {
+    return FfiConverterTypeNegentropySyncDiagnostics.lower(value)
 }
 
 
@@ -3703,6 +4205,260 @@ public func FfiConverterTypeStatsSnapshot_lower(_ value: StatsSnapshot) -> RustB
 
 
 /**
+ * Information about a single subscription
+ */
+public struct SubscriptionDiagnostics {
+    /**
+     * Subscription ID
+     */
+    public var subId: String
+    /**
+     * Human-readable description
+     */
+    public var description: String
+    /**
+     * Event kinds this subscription listens for
+     */
+    public var kinds: [UInt16]
+    /**
+     * Number of events received
+     */
+    public var eventsReceived: UInt64
+    /**
+     * Seconds since subscription was created
+     */
+    public var ageSecs: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Subscription ID
+         */subId: String, 
+        /**
+         * Human-readable description
+         */description: String, 
+        /**
+         * Event kinds this subscription listens for
+         */kinds: [UInt16], 
+        /**
+         * Number of events received
+         */eventsReceived: UInt64, 
+        /**
+         * Seconds since subscription was created
+         */ageSecs: UInt64) {
+        self.subId = subId
+        self.description = description
+        self.kinds = kinds
+        self.eventsReceived = eventsReceived
+        self.ageSecs = ageSecs
+    }
+}
+
+#if compiler(>=6)
+extension SubscriptionDiagnostics: Sendable {}
+#endif
+
+
+extension SubscriptionDiagnostics: Equatable, Hashable {
+    public static func ==(lhs: SubscriptionDiagnostics, rhs: SubscriptionDiagnostics) -> Bool {
+        if lhs.subId != rhs.subId {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.kinds != rhs.kinds {
+            return false
+        }
+        if lhs.eventsReceived != rhs.eventsReceived {
+            return false
+        }
+        if lhs.ageSecs != rhs.ageSecs {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(subId)
+        hasher.combine(description)
+        hasher.combine(kinds)
+        hasher.combine(eventsReceived)
+        hasher.combine(ageSecs)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SubscriptionDiagnostics {
+        return
+            try SubscriptionDiagnostics(
+                subId: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf), 
+                kinds: FfiConverterSequenceUInt16.read(from: &buf), 
+                eventsReceived: FfiConverterUInt64.read(from: &buf), 
+                ageSecs: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SubscriptionDiagnostics, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.subId, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+        FfiConverterSequenceUInt16.write(value.kinds, into: &buf)
+        FfiConverterUInt64.write(value.eventsReceived, into: &buf)
+        FfiConverterUInt64.write(value.ageSecs, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSubscriptionDiagnostics_lift(_ buf: RustBuffer) throws -> SubscriptionDiagnostics {
+    return try FfiConverterTypeSubscriptionDiagnostics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSubscriptionDiagnostics_lower(_ value: SubscriptionDiagnostics) -> RustBuffer {
+    return FfiConverterTypeSubscriptionDiagnostics.lower(value)
+}
+
+
+/**
+ * System diagnostics information
+ */
+public struct SystemDiagnostics {
+    /**
+     * Log file path
+     */
+    public var logPath: String
+    /**
+     * Uptime in milliseconds since core initialization
+     */
+    public var uptimeMs: UInt64
+    /**
+     * Core version
+     */
+    public var version: String
+    /**
+     * Whether the core is initialized
+     */
+    public var isInitialized: Bool
+    /**
+     * Whether a user is logged in
+     */
+    public var isLoggedIn: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Log file path
+         */logPath: String, 
+        /**
+         * Uptime in milliseconds since core initialization
+         */uptimeMs: UInt64, 
+        /**
+         * Core version
+         */version: String, 
+        /**
+         * Whether the core is initialized
+         */isInitialized: Bool, 
+        /**
+         * Whether a user is logged in
+         */isLoggedIn: Bool) {
+        self.logPath = logPath
+        self.uptimeMs = uptimeMs
+        self.version = version
+        self.isInitialized = isInitialized
+        self.isLoggedIn = isLoggedIn
+    }
+}
+
+#if compiler(>=6)
+extension SystemDiagnostics: Sendable {}
+#endif
+
+
+extension SystemDiagnostics: Equatable, Hashable {
+    public static func ==(lhs: SystemDiagnostics, rhs: SystemDiagnostics) -> Bool {
+        if lhs.logPath != rhs.logPath {
+            return false
+        }
+        if lhs.uptimeMs != rhs.uptimeMs {
+            return false
+        }
+        if lhs.version != rhs.version {
+            return false
+        }
+        if lhs.isInitialized != rhs.isInitialized {
+            return false
+        }
+        if lhs.isLoggedIn != rhs.isLoggedIn {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(logPath)
+        hasher.combine(uptimeMs)
+        hasher.combine(version)
+        hasher.combine(isInitialized)
+        hasher.combine(isLoggedIn)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SystemDiagnostics {
+        return
+            try SystemDiagnostics(
+                logPath: FfiConverterString.read(from: &buf), 
+                uptimeMs: FfiConverterUInt64.read(from: &buf), 
+                version: FfiConverterString.read(from: &buf), 
+                isInitialized: FfiConverterBool.read(from: &buf), 
+                isLoggedIn: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SystemDiagnostics, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.logPath, into: &buf)
+        FfiConverterUInt64.write(value.uptimeMs, into: &buf)
+        FfiConverterString.write(value.version, into: &buf)
+        FfiConverterBool.write(value.isInitialized, into: &buf)
+        FfiConverterBool.write(value.isLoggedIn, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSystemDiagnostics_lift(_ buf: RustBuffer) throws -> SystemDiagnostics {
+    return try FfiConverterTypeSystemDiagnostics.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSystemDiagnostics_lower(_ value: SystemDiagnostics) -> RustBuffer {
+    return FfiConverterTypeSystemDiagnostics.lower(value)
+}
+
+
+/**
  * Top conversation by runtime
  */
 public struct TopConversation {
@@ -4211,6 +4967,30 @@ extension TimeFilterOption: Equatable, Hashable {}
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
+    typealias SwiftType = UInt64?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt64.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt64.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionString: FfiConverterRustBuffer {
     typealias SwiftType = String?
 
@@ -4259,6 +5039,78 @@ fileprivate struct FfiConverterOptionTypeAskEventInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionTypeDatabaseStats: FfiConverterRustBuffer {
+    typealias SwiftType = DatabaseStats?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeDatabaseStats.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeDatabaseStats.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeNegentropySyncDiagnostics: FfiConverterRustBuffer {
+    typealias SwiftType = NegentropySyncDiagnostics?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeNegentropySyncDiagnostics.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeNegentropySyncDiagnostics.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionTypeSystemDiagnostics: FfiConverterRustBuffer {
+    typealias SwiftType = SystemDiagnostics?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterTypeSystemDiagnostics.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterTypeSystemDiagnostics.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionTypeUserInfo: FfiConverterRustBuffer {
     typealias SwiftType = UserInfo?
 
@@ -4277,6 +5129,55 @@ fileprivate struct FfiConverterOptionTypeUserInfo: FfiConverterRustBuffer {
         case 1: return try FfiConverterTypeUserInfo.read(from: &buf)
         default: throw UniffiInternalError.unexpectedOptionalTag
         }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterOptionSequenceTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
+    typealias SwiftType = [SubscriptionDiagnostics]?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterSequenceTypeSubscriptionDiagnostics.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterSequenceTypeSubscriptionDiagnostics.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceUInt16: FfiConverterRustBuffer {
+    typealias SwiftType = [UInt16]
+
+    public static func write(_ value: [UInt16], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterUInt16.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [UInt16] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [UInt16]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterUInt16.read(from: &buf))
+        }
+        return seq
     }
 }
 
@@ -4483,6 +5384,31 @@ fileprivate struct FfiConverterSequenceTypeInboxItem: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeKindEventCount: FfiConverterRustBuffer {
+    typealias SwiftType = [KindEventCount]
+
+    public static func write(_ value: [KindEventCount], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeKindEventCount.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [KindEventCount] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [KindEventCount]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeKindEventCount.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
     typealias SwiftType = [MessageInfo]
 
@@ -4608,6 +5534,31 @@ fileprivate struct FfiConverterSequenceTypeReportInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
+    typealias SwiftType = [SubscriptionDiagnostics]
+
+    public static func write(_ value: [SubscriptionDiagnostics], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSubscriptionDiagnostics.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SubscriptionDiagnostics] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SubscriptionDiagnostics]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSubscriptionDiagnostics.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeTopConversation: FfiConverterRustBuffer {
     typealias SwiftType = [TopConversation]
 
@@ -4694,13 +5645,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_current_user() != 48890) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_diagnostics_snapshot() != 40427) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_inbox() != 40776) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
