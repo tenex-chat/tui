@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 // MARK: - Auto-Login Result
 
@@ -14,12 +15,62 @@ enum AutoLoginResult {
     case transientError(error: String)
 }
 
+// MARK: - Profile Picture Cache
+
+/// Thread-safe cache for profile picture URLs to prevent repeated synchronous FFI calls during scroll.
+/// Each pubkey's picture URL is fetched once and cached for the session lifetime.
+final class ProfilePictureCache {
+    static let shared = ProfilePictureCache()
+
+    private var cache: [String: String?] = [:]
+    private let lock = NSLock()
+
+    private init() {}
+
+    /// Get cached profile picture URL for a pubkey.
+    /// Returns nil if not cached (call fetch to populate).
+    func getCached(_ pubkey: String) -> String?? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        if cache.keys.contains(pubkey) {
+            return cache[pubkey]
+        }
+        return nil // Not in cache (different from cached nil)
+    }
+
+    /// Store a profile picture URL in the cache.
+    /// Pass nil to cache "no picture available" for this pubkey.
+    func store(_ pubkey: String, pictureUrl: String?) {
+        lock.lock()
+        defer { lock.unlock() }
+        cache[pubkey] = pictureUrl
+    }
+
+    /// Clear the entire cache (e.g., on logout)
+    func clear() {
+        lock.lock()
+        defer { lock.unlock() }
+        cache.removeAll()
+    }
+
+    /// Get the number of cached entries (for debugging)
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return cache.count
+    }
+}
+
 /// Shared TenexCore instance wrapper for environment object
 /// Initializes the core OFF the main thread to avoid UI jank
 class TenexCoreManager: ObservableObject {
     let core: TenexCore
     @Published var isInitialized = false
     @Published var initializationError: String?
+
+    /// Cache for profile picture URLs to prevent repeated FFI calls
+    let profilePictureCache = ProfilePictureCache.shared
 
     init() {
         // Create core immediately (lightweight)
@@ -40,6 +91,54 @@ class TenexCoreManager: ObservableObject {
     func refresh() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             _ = self?.core.refresh()
+        }
+    }
+
+    // MARK: - Profile Picture API (Cached)
+
+    /// Get profile picture URL for a pubkey, using cache to prevent repeated FFI calls.
+    /// This is the primary API for avatar views - always use this instead of core.getProfilePicture directly.
+    /// - Parameter pubkey: The hex-encoded public key
+    /// - Returns: Profile picture URL if available, nil otherwise
+    func getProfilePicture(pubkey: String) -> String? {
+        // Check cache first (O(1) lookup)
+        if let cached = profilePictureCache.getCached(pubkey) {
+            return cached
+        }
+
+        // Cache miss - fetch from FFI (synchronous, but only once per pubkey)
+        // Handle Result type properly - log errors but return nil for graceful degradation
+        do {
+            let pictureUrl = try core.getProfilePicture(pubkey: pubkey)
+            profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
+            return pictureUrl
+        } catch {
+            // Log error for debugging but don't crash - graceful degradation
+            print("[TenexCoreManager] Failed to get profile picture for pubkey '\(pubkey.prefix(12))...': \(error)")
+            // Cache nil to prevent repeated failed calls
+            profilePictureCache.store(pubkey, pictureUrl: nil)
+            return nil
+        }
+    }
+
+    /// Prefetch profile pictures for multiple pubkeys in background.
+    /// Call this when loading a list of agents/conversations to warm the cache.
+    /// - Parameter pubkeys: Array of hex-encoded public keys to prefetch
+    func prefetchProfilePictures(_ pubkeys: [String]) {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            for pubkey in pubkeys {
+                // Only fetch if not already cached
+                if self?.profilePictureCache.getCached(pubkey) == nil {
+                    do {
+                        let pictureUrl = try self?.core.getProfilePicture(pubkey: pubkey)
+                        self?.profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
+                    } catch {
+                        // Log but don't crash - cache nil to prevent repeated attempts
+                        print("[TenexCoreManager] Prefetch failed for pubkey '\(pubkey.prefix(12))...': \(error)")
+                        self?.profilePictureCache.store(pubkey, pictureUrl: nil)
+                    }
+                }
+            }
         }
     }
 
@@ -106,6 +205,9 @@ class TenexCoreManager: ObservableObject {
     /// - Returns: Optional error message if clear failed
     /// - Note: Call from background thread
     func clearCredentials() -> String? {
+        // Clear profile picture cache on logout to prevent stale data
+        profilePictureCache.clear()
+
         let result = KeychainService.shared.deleteNsec()
         switch result {
         case .success:

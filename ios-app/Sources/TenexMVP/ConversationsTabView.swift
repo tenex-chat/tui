@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 /// Main tab view for Conversations - shows aggregated conversation tree from all/filtered projects
 /// with a project filter button in the toolbar
@@ -177,6 +178,7 @@ struct ConversationsTabView: View {
 /// Conversation row that uses precomputed hierarchy data for O(1) access
 /// instead of recomputing O(n²) BFS on every render
 private struct HierarchyConversationRowOptimized: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
     let conversation: ConversationInfo
     let aggregatedData: AggregatedConversationData
     let projectTitle: String?
@@ -231,19 +233,20 @@ private struct HierarchyConversationRowOptimized: View {
                     }
                 }
 
-                // Row 3: Participating agent avatars (without initiator label)
+                // Row 3: Participating agent avatars with profile pictures from kind:0 events
                 HStack(spacing: -8) {
-                    ForEach(aggregatedData.participatingAgents.prefix(6), id: \.self) { agent in
-                        SharedAgentAvatar(agentName: agent)
+                    ForEach(aggregatedData.participatingAgentInfos.prefix(6)) { agentInfo in
+                        AgentAvatarWithPicture(agentInfo: agentInfo)
+                            .environmentObject(coreManager)
                     }
 
                     // Show overflow count if more than 6 agents
-                    if aggregatedData.participatingAgents.count > 6 {
+                    if aggregatedData.participatingAgentInfos.count > 6 {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: 24, height: 24)
                             .overlay {
-                                Text("+\(aggregatedData.participatingAgents.count - 6)")
+                                Text("+\(aggregatedData.participatingAgentInfos.count - 6)")
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)
@@ -618,10 +621,13 @@ private struct ProjectFilterSheet: View {
         }
     }
 
+    /// Deterministic color using SHA-256 hash (stable across app launches)
     private func projectColor(for project: ProjectInfo) -> Color {
         let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal]
-        let hash = project.id.hashValue
-        return colors[abs(hash) % colors.count]
+        let data = Data(project.id.utf8)
+        let hash = SHA256.hash(data: data)
+        let firstByte = hash.withUnsafeBytes { $0[0] }
+        return colors[Int(firstByte) % colors.count]
     }
 }
 
