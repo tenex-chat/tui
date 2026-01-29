@@ -41,6 +41,10 @@ struct MessageComposerView: View {
     @State private var showSendError = false
     @State private var isDirty = false // Track if user has made edits before load completes
     @State private var showLoadFailedAlert = false
+    @State private var isLoadingDraft = true // Track if draft is still loading
+    @State private var isSwitchingProject = false // Track if project switch is in progress
+    @State private var showSaveFailedAlert = false
+    @State private var saveFailedError: String?
 
     // MARK: - Computed
 
@@ -60,6 +64,11 @@ struct MessageComposerView: View {
 
         // CRITICAL DATA SAFETY: Block sending if draft load failed
         guard !draftManager.loadFailed else {
+            return false
+        }
+
+        // BLOCKER #1 FIX: Block sending until draft load completes
+        guard !isLoadingDraft else {
             return false
         }
 
@@ -152,15 +161,27 @@ struct MessageComposerView: View {
                         }
 
                         Task {
-                            await draftManager.saveNow()
+                            // MEDIUM #3 FIX: Catch save errors and alert user
+                            do {
+                                try await draftManager.saveNow()
 
-                            if backgroundTaskID != .invalid {
-                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                                backgroundTaskID = .invalid
+                                if backgroundTaskID != .invalid {
+                                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                    backgroundTaskID = .invalid
+                                }
+
+                                onDismiss?()
+                                dismiss()
+                            } catch {
+                                if backgroundTaskID != .invalid {
+                                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                    backgroundTaskID = .invalid
+                                }
+
+                                // Show error alert and block dismissal
+                                saveFailedError = error.localizedDescription
+                                showSaveFailedAlert = true
                             }
-
-                            onDismiss?()
-                            dismiss()
                         }
                     }
                 }
@@ -175,8 +196,11 @@ struct MessageComposerView: View {
             }
             .onAppear {
                 loadProjects()
-                loadDraft()
-                if selectedProject != nil {
+                // BLOCKER #1 FIX: If no project selected, no draft to load - mark as not loading
+                if selectedProject == nil {
+                    isLoadingDraft = false
+                } else {
+                    loadDraft()
                     loadAgents()
                 }
             }
@@ -217,6 +241,11 @@ struct MessageComposerView: View {
             } message: {
                 Text("Failed to load existing drafts. The corrupted file has been quarantined for recovery. Editing is blocked to prevent data loss. Please fix the corrupted file or restore from backup.")
             }
+            .alert("Save Failed", isPresented: $showSaveFailedAlert) {
+                Button("OK") { }
+            } message: {
+                Text("Failed to save your draft: \(saveFailedError ?? "Unknown error"). Your changes may be lost if you dismiss now. Please try again or contact support.")
+            }
             .onChange(of: scenePhase) { oldPhase, newPhase in
                 // CRITICAL DATA SAFETY: Flush drafts immediately when app goes to background
                 // Use proper background task to guarantee completion even if app is suspended
@@ -233,8 +262,15 @@ struct MessageComposerView: View {
                     }
 
                     Task {
-                        await draftManager.saveNow()
-                        print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
+                        // MEDIUM #3 FIX: Catch save errors (but can't block backgrounding - just log)
+                        do {
+                            try await draftManager.saveNow()
+                            print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
+                        } catch {
+                            print("[MessageComposerView] ERROR: Failed to save on background: \(error)")
+                            // Note: Can't show alert here as app is backgrounding
+                            // Error will be surfaced on next foreground if critical
+                        }
 
                         // End background task after save completes
                         if backgroundTaskID != .invalid {
@@ -314,8 +350,8 @@ struct MessageComposerView: View {
         .font(.headline)
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed)
-        .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed ? 0.5 : 1.0)
+        .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject)
+        .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject ? 0.5 : 1.0)
     }
 
     private var contentEditorView: some View {
@@ -336,13 +372,13 @@ struct MessageComposerView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .scrollContentBackground(.hidden)
-            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed)
-            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed ? 0.5 : 1.0)
+            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject)
+            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject ? 0.5 : 1.0)
 
             if draft.content.isEmpty {
                 Text(isNewConversation && selectedProject == nil
                      ? "Select a project to start composing"
-                     : (isNewConversation ? "What would you like to discuss?" : "Type your reply..."))
+                     : (isLoadingDraft ? "Loading draft..." : (isSwitchingProject ? "Switching project..." : (isNewConversation ? "What would you like to discuss?" : "Type your reply..."))))
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 16)
@@ -458,6 +494,7 @@ struct MessageComposerView: View {
             // CRITICAL DATA SAFETY: Check if load failed and alert user
             if draftManager.loadFailed {
                 showLoadFailedAlert = true
+                isLoadingDraft = false
                 return
             }
 
@@ -468,6 +505,9 @@ struct MessageComposerView: View {
             } else {
                 print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
             }
+
+            // BLOCKER #1 FIX: Mark loading as complete to enable editing
+            isLoadingDraft = false
         }
     }
 
@@ -499,9 +539,25 @@ struct MessageComposerView: View {
         guard let project = selectedProject else { return }
 
         Task {
+            // BLOCKER #2 FIX: Disable editing during project switch
+            isSwitchingProject = true
+
+            // Track if user made edits during the switch operation
+            let wasDirtyAtStart = isDirty
+
             // Save any pending changes to the current draft before switching
             if !draft.projectId.isEmpty {
-                await draftManager.saveNow()
+                // MEDIUM #3 FIX: Catch save errors during project switch
+                do {
+                    try await draftManager.saveNow()
+                } catch {
+                    print("[MessageComposerView] ERROR: Failed to save before project switch: \(error)")
+                    // Show error alert and abort project switch
+                    saveFailedError = error.localizedDescription
+                    showSaveFailedAlert = true
+                    isSwitchingProject = false
+                    return
+                }
             }
 
             // Clear current in-memory state
@@ -512,7 +568,14 @@ struct MessageComposerView: View {
             // Load or create draft for the new project
             // This ensures we get fresh content for the new project, not leaked content
             let projectDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: project.id)
-            draft = projectDraft
+
+            // BLOCKER #2 FIX: Only replace draft if user didn't make edits during the switch
+            // This prevents async load from overwriting live user typing
+            if !isDirty && !wasDirtyAtStart {
+                draft = projectDraft
+            } else {
+                print("[MessageComposerView] Skipping draft replacement - user made edits during project switch (isDirty=\(isDirty), wasDirtyAtStart=\(wasDirtyAtStart))")
+            }
 
             // Validate and clear agent if it doesn't belong to this project
             // (will be validated again before sending)
@@ -521,6 +584,9 @@ struct MessageComposerView: View {
 
             // Load agents for the new project
             loadAgents()
+
+            // BLOCKER #2 FIX: Re-enable editing after project switch completes
+            isSwitchingProject = false
         }
     }
 

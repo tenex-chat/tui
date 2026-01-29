@@ -286,11 +286,12 @@ final class DraftManager {
 
     /// Force save immediately, cancelling any pending debounced save
     /// - Note: This is truly synchronous - blocks until save completes
-    func saveNow() async {
+    /// - Throws: Error if save fails (including if load failed and saves are blocked)
+    func saveNow() async throws {
         saveTask?.cancel()
         saveTask = nil
         hasPendingSave = false
-        await performSaveSync()
+        try await performSaveSyncWithThrow()
     }
 
     /// Clean up old orphaned drafts (drafts older than specified age with no content)
@@ -450,6 +451,30 @@ final class DraftManager {
         } catch {
             lastSaveError = error
             print("[DraftManager] Save failed: \(error)")
+        }
+    }
+
+    /// Perform synchronous save (blocks until complete) - throws on error
+    /// - Throws: Error if save fails (including if load failed and saves are blocked)
+    private func performSaveSyncWithThrow() async throws {
+        // CRITICAL DATA SAFETY: Block all saves if load failed
+        if loadFailed {
+            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
+            let error = DraftStore.DraftStoreError.saveForbidden(reason: "Load failed - file quarantined")
+            lastSaveError = error
+            throw error
+        }
+
+        let draftsSnapshot = drafts
+        let allowSave = !loadFailed
+
+        do {
+            try await store.saveDrafts(draftsSnapshot, allowSave: allowSave)
+            lastSaveError = nil
+        } catch {
+            lastSaveError = error
+            print("[DraftManager] Save failed: \(error)")
+            throw error
         }
     }
 }
