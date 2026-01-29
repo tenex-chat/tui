@@ -4,11 +4,13 @@
 //! - Cost per project table
 //! - Top conversations by runtime
 //! - Per-day message counts (user vs all) bar chart
+//! - Activity grid (GitHub-style) showing LLM activity by hour
 //!
-//! The Stats view has three subtabs:
+//! The Stats view has four subtabs:
 //! - Chart: Shows the 14-day LLM runtime chart (full height)
 //! - Rankings: Shows Cost by Project and Top Conversations tables side-by-side
 //! - Messages: Shows message counts per day (current user vs all project messages)
+//! - Activity: Shows GitHub-style activity grid for LLM usage per hour
 //!
 //! Uses a modern dashboard layout with bordered sections and theme colors.
 
@@ -21,6 +23,7 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
     Frame,
 };
+use std::collections::HashMap;
 
 // Unicode bar characters for charts
 const BAR_FULL: char = '█';
@@ -55,6 +58,41 @@ const RANKINGS_TABLE_ROWS: usize = 20;
 const MONTHS: [&str; 12] = [
     "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
+
+// Activity grid constants
+const HOURS_PER_DAY: usize = 24;
+const DAYS_IN_WEEK: usize = 7;
+const DAYS_IN_MONTH: usize = 30;
+
+/// View mode for the activity grid
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityViewMode {
+    Week,   // 7 days × 24 hours = 168 hours
+    Month,  // 30 days × 24 hours = 720 hours
+}
+
+impl ActivityViewMode {
+    pub fn num_hours(&self) -> usize {
+        match self {
+            ActivityViewMode::Week => DAYS_IN_WEEK * HOURS_PER_DAY,
+            ActivityViewMode::Month => DAYS_IN_MONTH * HOURS_PER_DAY,
+        }
+    }
+
+    pub fn num_days(&self) -> usize {
+        match self {
+            ActivityViewMode::Week => DAYS_IN_WEEK,
+            ActivityViewMode::Month => DAYS_IN_MONTH,
+        }
+    }
+}
+
+/// Visualization type for the activity grid
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityVisualization {
+    Tokens,   // Total tokens used per hour
+    Messages, // Number of messages generated per hour
+}
 
 /// Render the Stats tab content with a dashboard layout featuring subtabs
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
@@ -91,7 +129,7 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // 5. Messages by day (user vs all)
     let (user_messages_by_day, all_messages_by_day) = data_store.get_messages_by_day(STATS_WINDOW_DAYS);
 
-    drop(data_store); // Release borrow
+    // Note: Don't drop data_store yet - Activity tab needs it
 
     // Dashboard Layout with Subtabs:
     // ┌─────────────────────────────────────────────────────────────┐
@@ -143,7 +181,13 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
             // Messages per day bar chart (user vs all)
             render_messages_chart(f, &user_messages_by_day, &all_messages_by_day, vertical_chunks[2]);
         }
+        StatsSubtab::Activity => {
+            // GitHub-style activity grid (default to week view, tokens visualization)
+            render_activity_grid(f, &*data_store, ActivityViewMode::Week, ActivityVisualization::Tokens, vertical_chunks[2]);
+        }
     }
+
+    drop(data_store); // Release borrow
 }
 
 /// Render the subtab navigation bar with pill-shaped tabs
@@ -163,6 +207,7 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     let chart_active = active_subtab == StatsSubtab::Chart;
     let rankings_active = active_subtab == StatsSubtab::Rankings;
     let messages_active = active_subtab == StatsSubtab::Messages;
+    let activity_active = active_subtab == StatsSubtab::Activity;
 
     let mut spans = vec![Span::raw(" ")];
 
@@ -218,6 +263,26 @@ fn render_subtab_navigation(f: &mut Frame, active_subtab: StatsSubtab, area: Rec
     } else {
         spans.push(Span::styled(
             " Messages ",
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .bg(theme::BG_SECONDARY),
+        ));
+    }
+
+    spans.push(Span::raw("  "));
+
+    // Activity tab
+    if activity_active {
+        spans.push(Span::styled(
+            " Activity ",
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .bg(theme::BG_TAB_ACTIVE)
+                .add_modifier(Modifier::BOLD),
+        ));
+    } else {
+        spans.push(Span::styled(
+            " Activity ",
             Style::default()
                 .fg(theme::TEXT_MUTED)
                 .bg(theme::BG_SECONDARY),
@@ -817,6 +882,173 @@ fn format_runtime(ms: u64) -> String {
             format!("{}h {}m", hours, mins)
         } else {
             format!("{}h", hours)
+        }
+    }
+}
+
+/// Render the activity grid (GitHub-style contribution graph)
+fn render_activity_grid(
+    f: &mut Frame,
+    data_store: &tenex_core::store::AppDataStore,
+    view_mode: ActivityViewMode,
+    visualization: ActivityVisualization,
+    area: Rect,
+) {
+    let (title, data) = match visualization {
+        ActivityVisualization::Tokens => {
+            let tokens_data = data_store.get_tokens_by_hour(view_mode.num_hours());
+            ("LLM Token Usage", tokens_data)
+        }
+        ActivityVisualization::Messages => {
+            let messages_data = data_store.get_message_count_by_hour(view_mode.num_hours());
+            ("Message Activity", messages_data)
+        }
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::BORDER_INACTIVE))
+        .title(format!(" {} (Last {} days) ", title, view_mode.num_days()))
+        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    // Check minimum space requirements
+    if inner.height < 10 || inner.width < 40 {
+        render_empty_state(f, "Insufficient space for activity grid", inner);
+        return;
+    }
+
+    // Build the activity grid
+    // Layout: rows represent hours of day (0-23), columns represent calendar days
+    // Each cell shows activity for that hour on that specific calendar day
+    let num_days = view_mode.num_days();
+    let seconds_per_day: u64 = 86400;
+    let seconds_per_hour: u64 = 3600;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Calculate today's day start (UTC)
+    let today_start = (now / seconds_per_day) * seconds_per_day;
+
+    // Calculate maximum value for color scaling
+    let max_value = data.values().max().copied().unwrap_or(1).max(1);
+
+    // Build grid data structure: [day_offset][hour_of_day] = value
+    // day_offset 0 = today, 1 = yesterday, etc.
+    let mut grid: Vec<Vec<u64>> = vec![vec![0; HOURS_PER_DAY]; num_days];
+
+    // Populate grid with data using calendar day boundaries
+    for (hour_start, value) in &data {
+        // Calculate which calendar day this hour belongs to
+        let day_start = (hour_start / seconds_per_day) * seconds_per_day;
+
+        // Calculate how many days ago this was (0 = today, 1 = yesterday, etc.)
+        let days_ago = ((today_start.saturating_sub(day_start)) / seconds_per_day) as usize;
+
+        // Calculate hour-of-day (0-23) for this hour_start
+        let seconds_since_day_start = hour_start - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as usize;
+
+        // Store in grid if within range
+        if days_ago < num_days && hour_of_day < HOURS_PER_DAY {
+            grid[days_ago][hour_of_day] = *value;
+        }
+    }
+
+    // Render the grid
+    // Display format: rows are hours (0-23), columns are days (most recent on right)
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Add legend at top
+    lines.push(Line::from(vec![
+        Span::styled("    ", Style::default()),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value, max_value))),
+        Span::styled("High  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 2, max_value))),
+        Span::styled("Med  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 4, max_value))),
+        Span::styled("Low  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("█ ", Style::default().fg(get_activity_color(0, max_value))),
+        Span::styled("None", Style::default().fg(theme::TEXT_MUTED)),
+    ]));
+    lines.push(Line::from(vec![Span::raw("")])); // Spacer
+
+    // Render grid: each row is an hour, each column is a day
+    for hour in 0..HOURS_PER_DAY {
+        let mut line_spans = vec![
+            Span::styled(
+                format!("{:02}h ", hour),
+                Style::default().fg(theme::TEXT_MUTED),
+            ),
+        ];
+
+        // Days in reverse order (oldest first, newest last) - left to right
+        for day in (0..num_days).rev() {
+            let value = grid[day][hour];
+            let color = get_activity_color(value, max_value);
+            line_spans.push(Span::styled("█", Style::default().fg(color)));
+            line_spans.push(Span::raw(" ")); // Space between blocks
+        }
+
+        lines.push(Line::from(line_spans));
+    }
+
+    // Add day labels at bottom
+    lines.push(Line::from(vec![Span::raw("")])); // Spacer
+    let mut day_label_spans = vec![Span::styled("    ", Style::default())];
+
+    for day in (0..num_days).rev() {
+        let day_label = if day == 0 {
+            "T"
+        } else if day == 1 {
+            "Y"
+        } else {
+            " "
+        };
+        day_label_spans.push(Span::styled(
+            format!("{} ", day_label),
+            Style::default().fg(theme::TEXT_DIM),
+        ));
+    }
+    lines.push(Line::from(day_label_spans));
+
+    let paragraph = Paragraph::new(lines);
+    let chart_area = Rect::new(
+        inner.x + 1,
+        inner.y + 1,
+        inner.width.saturating_sub(2),
+        inner.height.saturating_sub(2),
+    );
+    f.render_widget(paragraph, chart_area);
+}
+
+/// Get color for activity cell based on value (GitHub-style gradient)
+/// Uses different shades of green to represent activity levels
+fn get_activity_color(value: u64, max_value: u64) -> ratatui::style::Color {
+    if value == 0 {
+        // No activity - dim gray
+        theme::TEXT_DIM
+    } else if max_value == 0 {
+        // Edge case: avoid division by zero
+        theme::ACCENT_SUCCESS
+    } else {
+        let ratio = value as f64 / max_value as f64;
+        if ratio >= 0.75 {
+            // High activity - bright green
+            ratatui::style::Color::Rgb(34, 197, 94) // green-500
+        } else if ratio >= 0.5 {
+            // Medium-high activity - medium green
+            ratatui::style::Color::Rgb(74, 222, 128) // green-400
+        } else if ratio >= 0.25 {
+            // Medium-low activity - light green
+            ratatui::style::Color::Rgb(134, 239, 172) // green-300
+        } else {
+            // Low activity - very light green
+            ratatui::style::Color::Rgb(187, 247, 208) // green-200
         }
     }
 }

@@ -74,6 +74,13 @@ pub struct AppDataStore {
     // Maps day_start_timestamp -> (user_count, all_count) for O(1) lookup instead of O(total_messages) per frame
     messages_by_day_counts: HashMap<u64, (u64, u64)>,
 
+    // Pre-aggregated hourly LLM activity data for Activity grid performance
+    // Maps (day_start, hour_of_day) -> (token_count, message_count)
+    // Uses calendar day boundaries (UTC) and hour-of-day (0-23)
+    // Stores only LLM messages (filtered by llm_metadata presence)
+    // Updated incrementally on new messages for O(1) lookups instead of O(total_messages) per render
+    llm_activity_by_hour: HashMap<(u64, u8), (u64, u64)>,
+
     // Real-time agent tracking - tracks active agents and estimates unconfirmed runtime.
     // In-memory only, resets on app restart. See agent_tracking.rs for details.
     pub agent_tracking: AgentTrackingState,
@@ -107,6 +114,7 @@ impl AppDataStore {
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             messages_by_day_counts: HashMap::new(),
+            llm_activity_by_hour: HashMap::new(),
             agent_tracking: AgentTrackingState::new(),
         };
         store.rebuild_from_ndb();
@@ -122,6 +130,8 @@ impl AppDataStore {
         if pubkey_changed {
             self.rebuild_messages_by_day_counts();
         }
+        // Rebuild LLM activity hourly aggregates (always, not user-dependent)
+        self.rebuild_llm_activity_by_hour();
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -285,6 +295,9 @@ impl AppDataStore {
 
         // Rebuild pre-aggregated message counts by day for Stats view
         self.rebuild_messages_by_day_counts();
+
+        // Rebuild pre-aggregated LLM activity by hour for Activity grid
+        self.rebuild_llm_activity_by_hour();
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -815,6 +828,88 @@ impl AppDataStore {
         (user_result, all_result)
     }
 
+    /// Get LLM token usage aggregated by calendar day and hour-of-day.
+    /// Returns a HashMap where key is hour_start_timestamp and value is total tokens.
+    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
+    /// Only includes LLM-generated messages (those with llm_metadata).
+    /// Covers the specified number of hours from now backwards.
+    pub fn get_tokens_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
+        let mut result: HashMap<u64, u64> = HashMap::new();
+
+        if num_hours == 0 {
+            return result;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Calculate the range of (day_start, hour_of_day) tuples we need
+        let current_day_start = (now / seconds_per_day) * seconds_per_day;
+        let earliest_timestamp = now.saturating_sub((num_hours.saturating_sub(1) as u64) * seconds_per_hour);
+        let earliest_day_start = (earliest_timestamp / seconds_per_day) * seconds_per_day;
+
+        // Iterate through the relevant day/hour tuples and extract from pre-aggregated data
+        for ((day_start, hour_of_day), (tokens, _)) in &self.llm_activity_by_hour {
+            // Check if this day/hour falls within our time window
+            if *day_start >= earliest_day_start && *day_start <= current_day_start {
+                // Convert (day_start, hour_of_day) back to hour_start_timestamp
+                let hour_start = day_start + (*hour_of_day as u64 * seconds_per_hour);
+
+                // Check if this specific hour is within the time window
+                if hour_start >= earliest_timestamp && hour_start <= now {
+                    result.insert(hour_start, *tokens);
+                }
+            }
+        }
+
+        result
+    }
+
+    /// Get LLM message count aggregated by calendar day and hour-of-day.
+    /// Returns a HashMap where key is hour_start_timestamp and value is message count.
+    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
+    /// Only includes LLM-generated messages (those with llm_metadata).
+    /// Covers the specified number of hours from now backwards.
+    pub fn get_message_count_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
+        let mut result: HashMap<u64, u64> = HashMap::new();
+
+        if num_hours == 0 {
+            return result;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Calculate the range of (day_start, hour_of_day) tuples we need
+        let current_day_start = (now / seconds_per_day) * seconds_per_day;
+        let earliest_timestamp = now.saturating_sub((num_hours.saturating_sub(1) as u64) * seconds_per_hour);
+        let earliest_day_start = (earliest_timestamp / seconds_per_day) * seconds_per_day;
+
+        // Iterate through the relevant day/hour tuples and extract from pre-aggregated data
+        for ((day_start, hour_of_day), (_, message_count)) in &self.llm_activity_by_hour {
+            // Check if this day/hour falls within our time window
+            if *day_start >= earliest_day_start && *day_start <= current_day_start {
+                // Convert (day_start, hour_of_day) back to hour_start_timestamp
+                let hour_start = day_start + (*hour_of_day as u64 * seconds_per_hour);
+
+                // Check if this specific hour is within the time window
+                if hour_start >= earliest_timestamp && hour_start <= now {
+                    result.insert(hour_start, *message_count);
+                }
+            }
+        }
+
+        result
+    }
+
     /// Rebuild message counts by day from nostrdb directly.
     /// Called during startup after messages are loaded, and when user pubkey changes.
     ///
@@ -1123,6 +1218,78 @@ impl AppDataStore {
         // Increment user count if matches current user
         if self.user_pubkey.as_deref() == Some(pubkey) {
             entry.0 += 1;
+        }
+    }
+
+    /// Increment LLM activity hourly aggregates (O(1) per message).
+    /// Only increments if the message has llm_metadata (i.e., is an LLM-generated message).
+    /// Uses calendar day boundaries (UTC) and hour-of-day (0-23) for stable bucketing.
+    fn increment_llm_activity_hour(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
+        // Only count messages with LLM metadata (actual LLM responses)
+        if llm_metadata.is_empty() {
+            return;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Calculate calendar day start (UTC)
+        let day_start = (created_at / seconds_per_day) * seconds_per_day;
+
+        // Calculate hour-of-day (0-23) by finding seconds since day start
+        let seconds_since_day_start = created_at - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+        // Extract token count from llm_metadata (default to 0 if not present)
+        let tokens = llm_metadata
+            .iter()
+            .find(|(key, _)| key == "total-tokens")
+            .and_then(|(_, value)| value.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
+        let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+        entry.0 += tokens;
+        entry.1 += 1;
+    }
+
+    /// Rebuild LLM activity hourly aggregates from messages_by_thread.
+    /// Called during startup after messages are loaded.
+    /// Only counts messages with llm_metadata (LLM-generated messages).
+    fn rebuild_llm_activity_by_hour(&mut self) {
+        // Clear existing aggregates
+        self.llm_activity_by_hour.clear();
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Iterate through all messages and aggregate by hour
+        for messages in self.messages_by_thread.values() {
+            for message in messages {
+                // Only count LLM messages (those with llm_metadata)
+                if !message.llm_metadata.is_empty() {
+                    let created_at = message.created_at;
+
+                    // Calculate calendar day start (UTC)
+                    let day_start = (created_at / seconds_per_day) * seconds_per_day;
+
+                    // Calculate hour-of-day (0-23) by finding seconds since day start
+                    let seconds_since_day_start = created_at - day_start;
+                    let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+                    // Extract token count from llm_metadata (default to 0 if not present)
+                    let tokens = message.llm_metadata
+                        .iter()
+                        .find(|(key, _)| key == "total-tokens")
+                        .and_then(|(_, value)| value.parse::<u64>().ok())
+                        .unwrap_or(0);
+
+                    // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
+                    let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+                    entry.0 += tokens;
+                    entry.1 += 1;
+                }
+            }
         }
     }
 
@@ -1534,6 +1701,7 @@ impl AppDataStore {
             if !messages.iter().any(|m| m.id == message_id) {
                 let message_created_at = message.created_at;
                 let message_pubkey = message.pubkey.clone();
+                let message_llm_metadata = message.llm_metadata.clone();
 
                 // Check if this message has llm-runtime tag (confirms runtime, resets unconfirmed timer)
                 let has_llm_runtime = message.llm_metadata.iter().any(|(key, _)| key == "runtime");
@@ -1552,6 +1720,9 @@ impl AppDataStore {
 
                 // Update pre-aggregated message counts for Stats view (O(1) per message)
                 self.increment_message_day_count(message_created_at, &message_pubkey);
+
+                // Update pre-aggregated LLM activity for Activity grid (O(1) per message)
+                self.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
