@@ -2,6 +2,9 @@ import ProjectDescription
 
 let project = Project(
     name: "TenexMVP",
+    packages: [
+        .remote(url: "https://github.com/onevcat/Kingfisher.git", requirement: .upToNextMajor(from: "8.1.0"))
+    ],
     targets: [
         .target(
             name: "TenexMVP",
@@ -18,6 +21,9 @@ let project = Project(
             ]),
             sources: ["Sources/TenexMVP/**/*.swift"],
             resources: ["Sources/TenexMVP/Resources/**"],
+            dependencies: [
+                .package(product: "Kingfisher", type: .runtime)
+            ],
             settings: .settings(
                 base: [
                     // Code signing settings
