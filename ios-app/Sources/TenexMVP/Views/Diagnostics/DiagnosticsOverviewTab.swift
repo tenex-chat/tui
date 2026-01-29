@@ -86,7 +86,7 @@ struct DiagnosticsOverviewTab: View {
                 if let db = snapshot.database {
                     DiagnosticCard(
                         title: "Total Events",
-                        value: formatNumber(db.totalEvents),
+                        value: DiagnosticsFormatters.formatNumber(db.totalEvents),
                         subtitle: "\(db.eventCountsByKind.count) kinds",
                         color: .orange,
                         icon: "doc.text.fill"
@@ -240,17 +240,6 @@ struct DiagnosticsOverviewTab: View {
         }
     }
 
-    // MARK: - Helpers
-
-    private func formatNumber(_ value: UInt64) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        } else {
-            return "\(value)"
-        }
-    }
 }
 
 // MARK: - Section Unavailable Placeholder
