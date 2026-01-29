@@ -26,8 +26,8 @@ let project = Project(
             ],
             settings: .settings(
                 base: [
-                    // Code signing settings
-                    "DEVELOPMENT_TEAM": "B3YMNJ5848",
+                    // Code signing settings - SANITY ISLAND LLC
+                    "DEVELOPMENT_TEAM": "456SHKPP26",
                     "CODE_SIGN_STYLE": "Automatic",
                     // Header search paths for the FFI header
                     "HEADER_SEARCH_PATHS": [
