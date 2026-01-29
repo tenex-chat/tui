@@ -1,0 +1,1131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>TENEX Diagnostics - iOS Wireframe</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f2f2f7;
+            color: #000;
+            max-width: 430px;
+            margin: 0 auto;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* iOS Navigation Bar */
+        .navbar {
+            background: rgba(249, 249, 249, 0.98);
+            border-bottom: 0.5px solid rgba(60, 60, 67, 0.36);
+            padding: 12px 16px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .navbar-title {
+            font-size: 17px;
+            font-weight: 600;
+            text-align: center;
+            color: #000;
+        }
+
+        /* Tab Navigation */
+        .tab-container {
+            background: #fff;
+            padding: 8px 16px;
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+        }
+
+        .tab-pill {
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            background: #e5e5ea;
+            color: #000;
+            border: none;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .tab-pill.active {
+            background: #007AFF;
+            color: #fff;
+        }
+
+        .tab-pill:hover:not(.active) {
+            background: #d1d1d6;
+        }
+
+        /* Main Content */
+        .content {
+            padding: 16px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Refresh indicator */
+        .refresh-indicator {
+            text-align: center;
+            padding: 20px;
+            color: #8e8e93;
+            font-size: 13px;
+            display: none;
+        }
+
+        .refresh-indicator.show {
+            display: block;
+        }
+
+        /* Metric Card */
+        .metric-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .metric-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .metric-title {
+            font-size: 13px;
+            color: #8e8e93;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .metric-icon {
+            font-size: 20px;
+        }
+
+        .metric-value {
+            font-size: 28px;
+            font-weight: 700;
+            color: #000;
+            margin-bottom: 4px;
+        }
+
+        .metric-subtitle {
+            font-size: 12px;
+            color: #8e8e93;
+        }
+
+        /* Status colors */
+        .status-enabled {
+            color: #34C759;
+        }
+
+        .status-disabled {
+            color: #FF3B30;
+        }
+
+        .status-working {
+            color: #007AFF;
+        }
+
+        .status-idle {
+            color: #8e8e93;
+        }
+
+        .status-error {
+            color: #FF3B30;
+        }
+
+        /* Section */
+        .section {
+            margin-bottom: 20px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            cursor: pointer;
+            background: rgba(118, 118, 128, 0.12);
+            border-radius: 10px;
+            margin-bottom: 8px;
+        }
+
+        .section-title {
+            font-size: 15px;
+            font-weight: 600;
+        }
+
+        .section-chevron {
+            font-size: 14px;
+            transition: transform 0.2s;
+        }
+
+        .section-chevron.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        .section-content {
+            display: block;
+        }
+
+        .section-content.collapsed {
+            display: none;
+        }
+
+        /* List Items */
+        .list-item {
+            background: #fff;
+            border-radius: 10px;
+            margin-bottom: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        }
+
+        .list-item-header {
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .list-item-main {
+            flex: 1;
+        }
+
+        .list-item-title {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 4px;
+        }
+
+        .list-item-subtitle {
+            font-size: 13px;
+            color: #8e8e93;
+        }
+
+        .list-item-value {
+            font-size: 17px;
+            font-weight: 600;
+            color: #007AFF;
+        }
+
+        .list-item-details {
+            padding: 12px 16px;
+            border-top: 0.5px solid rgba(60, 60, 67, 0.12);
+            background: #f9f9f9;
+            display: none;
+        }
+
+        .list-item-details.show {
+            display: block;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 13px;
+        }
+
+        .detail-label {
+            color: #8e8e93;
+        }
+
+        .detail-value {
+            color: #000;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: capitalize;
+        }
+
+        .status-badge.working {
+            background: rgba(0, 122, 255, 0.1);
+            color: #007AFF;
+        }
+
+        .status-badge.idle {
+            background: rgba(142, 142, 147, 0.1);
+            color: #8e8e93;
+        }
+
+        .status-badge.error {
+            background: rgba(255, 59, 48, 0.1);
+            color: #FF3B30;
+        }
+
+        .status-badge.enabled {
+            background: rgba(52, 199, 89, 0.1);
+            color: #34C759;
+        }
+
+        .status-badge.disabled {
+            background: rgba(255, 59, 48, 0.1);
+            color: #FF3B30;
+        }
+
+        /* Agent Status Card */
+        .agent-card {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .agent-status-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .agent-icon {
+            font-size: 24px;
+        }
+
+        .agent-status-text {
+            flex: 1;
+        }
+
+        .agent-status-main {
+            font-size: 17px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .agent-last-task {
+            font-size: 13px;
+            color: #8e8e93;
+        }
+
+        /* Kinds Chips */
+        .kinds-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-top: 8px;
+        }
+
+        .kind-chip {
+            background: rgba(0, 122, 255, 0.1);
+            color: #007AFF;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-weight: 500;
+        }
+
+        /* System Info */
+        .system-info {
+            background: #fff;
+            border-radius: 12px;
+            padding: 16px;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-size: 14px;
+            color: #8e8e93;
+        }
+
+        .info-value {
+            font-size: 14px;
+            color: #000;
+            text-align: right;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #8e8e93;
+        }
+
+        .empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .empty-state-text {
+            font-size: 15px;
+        }
+
+        /* Pull to refresh hint */
+        .pull-refresh-hint {
+            text-align: center;
+            padding: 8px;
+            color: #8e8e93;
+            font-size: 11px;
+        }
+
+        /* Bar chart styles */
+        .bar-chart-row {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: #fff;
+            border-bottom: 0.5px solid rgba(60, 60, 67, 0.12);
+        }
+
+        .bar-chart-row:last-child {
+            border-bottom: none;
+        }
+
+        .bar-chart-label {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .bar-chart-kind-name {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 2px;
+        }
+
+        .bar-chart-kind-number {
+            font-size: 12px;
+            color: #8e8e93;
+        }
+
+        .bar-chart-right {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .bar-chart-count {
+            font-size: 15px;
+            font-weight: 600;
+            color: #000;
+            min-width: 50px;
+            text-align: right;
+        }
+
+        .bar-chart-bar-container {
+            width: 80px;
+            height: 6px;
+            background: #e5e5ea;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .bar-chart-bar {
+            height: 100%;
+            background: #007AFF;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <div class="navbar-title">Diagnostics</div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tab-container">
+        <button class="tab-pill active" data-tab="overview">Overview</button>
+        <button class="tab-pill" data-tab="sync">Sync</button>
+        <button class="tab-pill" data-tab="subscriptions">Subscriptions</button>
+        <button class="tab-pill" data-tab="database">Database</button>
+    </div>
+
+    <!-- Pull to refresh hint -->
+    <div class="pull-refresh-hint">↓ Pull down to refresh</div>
+
+    <!-- Refresh indicator -->
+    <div class="refresh-indicator" id="refreshIndicator">
+        ↻ Refreshing data...
+    </div>
+
+    <!-- Main Content -->
+    <div class="content">
+        <!-- Overview Tab -->
+        <div class="tab-content active" id="tab-overview">
+            <!-- Summary Cards -->
+            <div class="section">
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Relay Sync Status</span>
+                        <span class="metric-icon">🔄</span>
+                    </div>
+                    <div class="metric-value status-enabled">Enabled</div>
+                    <div class="metric-subtitle">Interval: 300s • Last sync: 10:30 AM</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Active Subscriptions</span>
+                        <span class="metric-icon">📡</span>
+                    </div>
+                    <div class="metric-value">3</div>
+                    <div class="metric-subtitle">Monitoring 4 event kinds</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">System Uptime</span>
+                        <span class="metric-icon">⏱️</span>
+                    </div>
+                    <div class="metric-value" id="uptimeValue">2h 0m</div>
+                    <div class="metric-subtitle">Process running since 8:30 AM</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Total Events</span>
+                        <span class="metric-icon">📊</span>
+                    </div>
+                    <div class="metric-value">1,963</div>
+                    <div class="metric-subtitle">8 event kinds tracked</div>
+                </div>
+            </div>
+
+            <!-- Agent Status -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('agentStatus')">
+                    <span class="section-title">Agent Status</span>
+                    <span class="section-chevron" id="agentStatus-chevron">▼</span>
+                </div>
+                <div class="section-content" id="agentStatus-content">
+                    <div class="agent-card">
+                        <div class="agent-status-row">
+                            <span class="agent-icon">🤖</span>
+                            <div class="agent-status-text">
+                                <div class="agent-status-main">
+                                    <span class="status-badge working">Working</span>
+                                </div>
+                                <div class="agent-last-task">Processing conversation with UX Architect</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Diagnostics -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('systemDiagnostics')">
+                    <span class="section-title">System Diagnostics</span>
+                    <span class="section-chevron" id="systemDiagnostics-chevron">▼</span>
+                </div>
+                <div class="section-content" id="systemDiagnostics-content">
+                    <div class="system-info">
+                        <div class="info-row">
+                            <span class="info-label">Log Path</span>
+                            <span class="info-value">/var/mobile/.../Library/logs/tenex.log</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Uptime</span>
+                            <span class="info-value" id="uptimeDetail">2h 0m 0s</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sync Tab -->
+        <div class="tab-content" id="tab-sync">
+            <div class="section">
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Negentropy Sync</span>
+                        <span class="metric-icon">🔄</span>
+                    </div>
+                    <div class="metric-value status-enabled" id="syncStatus">Enabled</div>
+                    <div class="metric-subtitle">Sync interval: <span id="syncInterval">300s</span></div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('syncDetails')">
+                    <span class="section-title">Sync Details</span>
+                    <span class="section-chevron" id="syncDetails-chevron">▼</span>
+                </div>
+                <div class="section-content" id="syncDetails-content">
+                    <div class="system-info">
+                        <div class="info-row">
+                            <span class="info-label">Status</span>
+                            <span class="info-value status-enabled">● Enabled</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Interval</span>
+                            <span class="info-value">300 seconds (5 min)</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Last Sync</span>
+                            <span class="info-value">2026-01-29 10:30:45 UTC</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">Next Sync</span>
+                            <span class="info-value" id="nextSync">~4 min remaining</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('syncHistory')">
+                    <span class="section-title">Recent Activity</span>
+                    <span class="section-chevron collapsed" id="syncHistory-chevron">▼</span>
+                </div>
+                <div class="section-content collapsed" id="syncHistory-content">
+                    <div class="list-item">
+                        <div class="list-item-header">
+                            <div class="list-item-main">
+                                <div class="list-item-title">Sync Completed</div>
+                                <div class="list-item-subtitle">10:30:45 AM</div>
+                            </div>
+                            <span class="list-item-value">✓</span>
+                        </div>
+                    </div>
+                    <div class="list-item">
+                        <div class="list-item-header">
+                            <div class="list-item-main">
+                                <div class="list-item-title">Sync Completed</div>
+                                <div class="list-item-subtitle">10:25:45 AM</div>
+                            </div>
+                            <span class="list-item-value">✓</span>
+                        </div>
+                    </div>
+                    <div class="list-item">
+                        <div class="list-item-header">
+                            <div class="list-item-main">
+                                <div class="list-item-title">Sync Completed</div>
+                                <div class="list-item-subtitle">10:20:45 AM</div>
+                            </div>
+                            <span class="list-item-value">✓</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Subscriptions Tab -->
+        <div class="tab-content" id="tab-subscriptions">
+            <div class="section">
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Total Subscriptions</span>
+                        <span class="metric-icon">📡</span>
+                    </div>
+                    <div class="metric-value">3</div>
+                    <div class="metric-subtitle">1,678 events received</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-title" style="padding: 12px 0; font-size: 15px; font-weight: 600;">Active Subscriptions</div>
+                
+                <!-- Subscription 1 -->
+                <div class="list-item" id="sub-0">
+                    <div class="list-item-header" onclick="toggleSubscription(0)">
+                        <div class="list-item-main">
+                            <div class="list-item-title">Text notes and contact lists</div>
+                            <div class="list-item-subtitle">Created: Jan 28, 8:00 AM</div>
+                            <div class="kinds-container">
+                                <span class="kind-chip">kind:1</span>
+                                <span class="kind-chip">kind:3</span>
+                                <span class="kind-chip">kind:4</span>
+                            </div>
+                        </div>
+                        <span class="list-item-value">1,247</span>
+                    </div>
+                    <div class="list-item-details" id="sub-details-0">
+                        <div class="detail-row">
+                            <span class="detail-label">Kinds</span>
+                            <span class="detail-value">[1, 3, 4]</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Description</span>
+                            <span class="detail-value">Text notes and contact lists</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Created At</span>
+                            <span class="detail-value">2026-01-28T08:00:00Z</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Events Received</span>
+                            <span class="detail-value">1247</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subscription 2 -->
+                <div class="list-item" id="sub-1">
+                    <div class="list-item-header" onclick="toggleSubscription(1)">
+                        <div class="list-item-main">
+                            <div class="list-item-title">User metadata</div>
+                            <div class="list-item-subtitle">Created: Jan 28, 8:00 AM</div>
+                            <div class="kinds-container">
+                                <span class="kind-chip">kind:0</span>
+                            </div>
+                        </div>
+                        <span class="list-item-value">342</span>
+                    </div>
+                    <div class="list-item-details" id="sub-details-1">
+                        <div class="detail-row">
+                            <span class="detail-label">Kinds</span>
+                            <span class="detail-value">[0]</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Description</span>
+                            <span class="detail-value">User metadata</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Created At</span>
+                            <span class="detail-value">2026-01-28T08:00:00Z</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Events Received</span>
+                            <span class="detail-value">342</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subscription 3 -->
+                <div class="list-item" id="sub-2">
+                    <div class="list-item-header" onclick="toggleSubscription(2)">
+                        <div class="list-item-main">
+                            <div class="list-item-title">Project status updates</div>
+                            <div class="list-item-subtitle">Created: Jan 29, 9:15 AM</div>
+                            <div class="kinds-container">
+                                <span class="kind-chip">kind:24010</span>
+                            </div>
+                        </div>
+                        <span class="list-item-value">89</span>
+                    </div>
+                    <div class="list-item-details" id="sub-details-2">
+                        <div class="detail-row">
+                            <span class="detail-label">Kinds</span>
+                            <span class="detail-value">[24010]</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Description</span>
+                            <span class="detail-value">Project status updates</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Created At</span>
+                            <span class="detail-value">2026-01-29T09:15:00Z</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Events Received</span>
+                            <span class="detail-value">89</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Database Tab -->
+        <div class="tab-content" id="tab-database">
+            <!-- Summary Cards -->
+            <div class="section">
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Database Size</span>
+                        <span class="metric-icon">💾</span>
+                    </div>
+                    <div class="metric-value" id="dbSize">43.5 MB</div>
+                    <div class="metric-subtitle">LMDB database file</div>
+                </div>
+
+                <div class="metric-card">
+                    <div class="metric-card-header">
+                        <span class="metric-title">Total Events</span>
+                        <span class="metric-icon">📊</span>
+                    </div>
+                    <div class="metric-value" id="totalEvents">1,963</div>
+                    <div class="metric-subtitle">Across 8 event kinds</div>
+                </div>
+            </div>
+
+            <!-- Event Breakdown by Kind -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('eventBreakdown')">
+                    <span class="section-title">Events by Kind</span>
+                    <span class="section-chevron" id="eventBreakdown-chevron">▼</span>
+                </div>
+                <div class="section-content" id="eventBreakdown-content">
+                    <!-- Events will be rendered here via JavaScript -->
+                    <div id="eventBreakdownList"></div>
+                </div>
+            </div>
+
+            <!-- Per-Project Breakdown -->
+            <div class="section">
+                <div class="section-header" onclick="toggleSection('projectBreakdown')">
+                    <span class="section-title">Events by Project</span>
+                    <span class="section-chevron collapsed" id="projectBreakdown-chevron">▼</span>
+                </div>
+                <div class="section-content collapsed" id="projectBreakdown-content">
+                    <div id="projectBreakdownList"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Mock data matching the verified struct fields
+        const mockDiagnosticsData = {
+            negentropy: {
+                enabled: true,
+                current_interval_secs: 300,
+                last_cycle_completed_at: "2026-01-29T10:30:45Z"
+            },
+            
+            subscriptions: [
+                {
+                    kinds: [1, 3, 4],
+                    description: "Text notes and contact lists",
+                    created_at: "2026-01-28T08:00:00Z",
+                    events_received: 1247
+                },
+                {
+                    kinds: [0],
+                    description: "User metadata",
+                    created_at: "2026-01-28T08:00:00Z",
+                    events_received: 342
+                },
+                {
+                    kinds: [24010],
+                    description: "Project status updates",
+                    created_at: "2026-01-29T09:15:00Z",
+                    events_received: 89
+                }
+            ],
+            
+            agent_status: {
+                status: "working",
+                last_task: "Processing conversation with UX Architect"
+            },
+            
+            system: {
+                log_path: "/var/mobile/Containers/Data/Application/.../Library/logs/tenex.log",
+                uptime_ms: 7200000
+            }
+        };
+
+        // Mock database data
+        const mockDatabaseData = {
+            db_size_bytes: 45678912,  // ~43.5 MB
+            event_counts_by_kind: {
+                1: 1247,     // Text Notes
+                513: 89,     // Threads
+                4129: 23,    // Lessons
+                4199: 12,    // Agent Definitions
+                4201: 156,   // Nudges
+                24010: 89,   // Project Status
+                24133: 342,  // RAL Events
+                31933: 5     // Projects
+            },
+            kind_names: {
+                1: "Text Notes",
+                513: "Conversation Threads",
+                4129: "Lessons",
+                4199: "Agent Definitions",
+                4201: "Nudges",
+                24010: "Project Status",
+                24133: "RAL Events",
+                31933: "Projects"
+            },
+            event_counts_by_project: {
+                1: {
+                    "31933:abc123:ProjectA": 450,
+                    "31933:def456:ProjectB": 320,
+                    "(global)": 477
+                },
+                513: {
+                    "31933:abc123:ProjectA": 45,
+                    "31933:def456:ProjectB": 32,
+                    "(global)": 12
+                }
+            }
+        };
+
+        // Tab switching
+        const tabButtons = document.querySelectorAll('.tab-pill');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabId = button.getAttribute('data-tab');
+                
+                // Update button states
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                
+                // Update content visibility
+                tabContents.forEach(content => content.classList.remove('active'));
+                document.getElementById(`tab-${tabId}`).classList.add('active');
+
+                // Initialize database tab when selected
+                if (tabId === 'database') {
+                    initializeDatabaseTab();
+                }
+            });
+        });
+
+        // Section toggle
+        function toggleSection(sectionId) {
+            const content = document.getElementById(`${sectionId}-content`);
+            const chevron = document.getElementById(`${sectionId}-chevron`);
+            
+            content.classList.toggle('collapsed');
+            chevron.classList.toggle('collapsed');
+        }
+
+        // Subscription toggle
+        function toggleSubscription(index) {
+            const details = document.getElementById(`sub-details-${index}`);
+            details.classList.toggle('show');
+        }
+
+        // Uptime counter
+        function updateUptime() {
+            const uptimeMs = mockDiagnosticsData.system.uptime_ms;
+            const hours = Math.floor(uptimeMs / 3600000);
+            const minutes = Math.floor((uptimeMs % 3600000) / 60000);
+            const seconds = Math.floor((uptimeMs % 60000) / 1000);
+            
+            const uptimeValue = document.getElementById('uptimeValue');
+            const uptimeDetail = document.getElementById('uptimeDetail');
+            
+            uptimeValue.textContent = `${hours}h ${minutes}m`;
+            uptimeDetail.textContent = `${hours}h ${minutes}m ${seconds}s`;
+        }
+
+        // Pull to refresh simulation
+        let startY = 0;
+        let isPulling = false;
+
+        document.addEventListener('touchstart', (e) => {
+            if (window.scrollY === 0) {
+                startY = e.touches[0].pageY;
+                isPulling = true;
+            }
+        });
+
+        document.addEventListener('touchmove', (e) => {
+            if (!isPulling) return;
+            
+            const currentY = e.touches[0].pageY;
+            const diff = currentY - startY;
+            
+            if (diff > 100 && window.scrollY === 0) {
+                triggerRefresh();
+                isPulling = false;
+            }
+        });
+
+        document.addEventListener('touchend', () => {
+            isPulling = false;
+        });
+
+        // Mouse events for desktop testing
+        document.addEventListener('mousedown', (e) => {
+            if (window.scrollY === 0) {
+                startY = e.pageY;
+                isPulling = true;
+            }
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (!isPulling) return;
+            
+            const currentY = e.pageY;
+            const diff = currentY - startY;
+            
+            if (diff > 100 && window.scrollY === 0) {
+                triggerRefresh();
+                isPulling = false;
+            }
+        });
+
+        document.addEventListener('mouseup', () => {
+            isPulling = false;
+        });
+
+        function triggerRefresh() {
+            const indicator = document.getElementById('refreshIndicator');
+            indicator.classList.add('show');
+            
+            setTimeout(() => {
+                indicator.classList.remove('show');
+            }, 1500);
+        }
+
+        // Initialize
+        updateUptime();
+        
+        // Simulate dynamic next sync countdown
+        function updateNextSync() {
+            const nextSyncElement = document.getElementById('nextSync');
+            const lastSync = new Date(mockDiagnosticsData.negentropy.last_cycle_completed_at);
+            const interval = mockDiagnosticsData.negentropy.current_interval_secs * 1000;
+            const now = Date.now();
+            const elapsed = now - lastSync.getTime();
+            const remaining = interval - elapsed;
+            
+            if (remaining > 0) {
+                const mins = Math.floor(remaining / 60000);
+                const secs = Math.floor((remaining % 60000) / 1000);
+                nextSyncElement.textContent = `~${mins} min ${secs} sec remaining`;
+            } else {
+                nextSyncElement.textContent = 'Sync due now';
+            }
+        }
+
+        // Update every second
+        setInterval(updateNextSync, 1000);
+        updateNextSync();
+
+        // Render event breakdown by kind
+        function renderEventBreakdown() {
+            const container = document.getElementById('eventBreakdownList');
+            const data = mockDatabaseData.event_counts_by_kind;
+            const kindNames = mockDatabaseData.kind_names;
+            
+            // Find max for bar scaling
+            const maxCount = Math.max(...Object.values(data));
+            
+            // Sort by count descending
+            const sortedKinds = Object.entries(data).sort((a, b) => b[1] - a[1]);
+            
+            let html = '<div class="list-item">';
+            
+            sortedKinds.forEach(([kind, count]) => {
+                const percentage = (count / maxCount) * 100;
+                html += `
+                    <div class="bar-chart-row">
+                        <div class="bar-chart-label">
+                            <div class="bar-chart-kind-name">${kindNames[kind]}</div>
+                            <div class="bar-chart-kind-number">kind ${kind}</div>
+                        </div>
+                        <div class="bar-chart-right">
+                            <div class="bar-chart-count">${count.toLocaleString()}</div>
+                            <div class="bar-chart-bar-container">
+                                <div class="bar-chart-bar" style="width: ${percentage}%"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        // Render per-project breakdown
+        function renderProjectBreakdown() {
+            const container = document.getElementById('projectBreakdownList');
+            const data = mockDatabaseData.event_counts_by_project;
+            const kindNames = mockDatabaseData.kind_names;
+            
+            let html = '';
+            
+            Object.entries(data).forEach(([kind, projects]) => {
+                const maxCount = Math.max(...Object.values(projects));
+                
+                html += '<div class="section" style="margin-bottom: 16px;">';
+                html += `<div class="section-title" style="padding: 8px 0; font-size: 13px; color: #8e8e93;">${kindNames[kind]} (kind ${kind})</div>`;
+                html += '<div class="list-item">';
+                
+                Object.entries(projects).forEach(([project, count]) => {
+                    const percentage = (count / maxCount) * 100;
+                    html += `
+                        <div class="bar-chart-row">
+                            <div class="bar-chart-label">
+                                <div class="bar-chart-kind-name">${project}</div>
+                            </div>
+                            <div class="bar-chart-right">
+                                <div class="bar-chart-count">${count.toLocaleString()}</div>
+                                <div class="bar-chart-bar-container">
+                                    <div class="bar-chart-bar" style="width: ${percentage}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            });
+            
+            container.innerHTML = html;
+        }
+
+        // Calculate total events
+        function calculateTotalEvents() {
+            const total = Object.values(mockDatabaseData.event_counts_by_kind).reduce((sum, count) => sum + count, 0);
+            return total.toLocaleString();
+        }
+
+        // Format database size
+        function formatDbSize(bytes) {
+            const mb = bytes / (1024 * 1024);
+            if (mb >= 1024) {
+                return (mb / 1024).toFixed(1) + ' GB';
+            }
+            return mb.toFixed(1) + ' MB';
+        }
+
+        // Initialize database tab values
+        function initializeDatabaseTab() {
+            document.getElementById('dbSize').textContent = formatDbSize(mockDatabaseData.db_size_bytes);
+            document.getElementById('totalEvents').textContent = calculateTotalEvents();
+            renderEventBreakdown();
+            renderProjectBreakdown();
+        }
+    </script>
+</body>
+</html>
