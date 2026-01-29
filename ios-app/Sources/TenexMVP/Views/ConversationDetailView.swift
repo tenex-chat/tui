@@ -25,7 +25,6 @@ struct ConversationDetailView: View {
     var body: some View {
         NavigationStack {
             contentView
-                .background(Color(.systemGroupedBackground))
                 .navigationTitle("Conversation")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -74,20 +73,17 @@ struct ConversationDetailView: View {
                     // Header Section
                     headerSection
 
-                    // Agents Section
-                    agentsSection
-
-                    // Runtime Section
-                    runtimeSection
-
-                    // Latest Reply Section
-                    if let reply = viewModel.latestReply {
-                        latestReplySection(reply)
-                    }
+                    // Agents and Runtime Row
+                    agentsAndRuntimeSection
 
                     // Delegations Section
                     if !viewModel.delegations.isEmpty {
                         delegationsSection
+                    }
+
+                    // Latest Reply Section
+                    if let reply = viewModel.latestReply {
+                        latestReplySection(reply)
                     }
 
                     // Full Conversation Button
@@ -95,6 +91,7 @@ struct ConversationDetailView: View {
                 }
                 .padding(.bottom, 20)
             }
+            .background(Color(.systemBackground))
         }
     }
 
@@ -107,57 +104,32 @@ struct ConversationDetailView: View {
     // MARK: - Header Section
 
     private var headerSection: some View {
-        SharedCardView {
-            VStack(alignment: .leading, spacing: 12) {
-                // Title
-                Text(conversation.title)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 12) {
+            // Title
+            Text(conversation.title)
+                .font(.system(size: 28, weight: .bold))
+                .foregroundStyle(.primary)
+                .lineLimit(3)
 
-                // Summary
-                if let summary = conversation.summary {
-                    Text(summary)
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-                }
-
-                // Status row - uses refreshable metadata from view model
-                HStack(spacing: 12) {
-                    Text("Status:")
-                        .font(.subheadline)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-
-                    StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
-                }
-
-                // Activity row
-                if let activity = viewModel.currentActivity {
-                    HStack(spacing: 12) {
-                        Text("Activity:")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
-
-                        Text(activity)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                    }
-                }
-            }
+            // Status badge
+            StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+        .padding(.bottom, 16)
     }
 
-    // MARK: - Agents Section
+    // MARK: - Agents and Runtime Section
 
-    private var agentsSection: some View {
-        SharedCardView(title: "AGENTS") {
-            HStack(spacing: 16) {
+    private var agentsAndRuntimeSection: some View {
+        HStack(alignment: .center) {
+            // Agents
+            HStack(spacing: 12) {
                 ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
                     VStack(spacing: 6) {
-                        SharedAgentAvatar(agentName: agent, size: 44, fontSize: 14)
+                        AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
+                            .environmentObject(coreManager)
                         Text(AgentNameFormatter.format(agent))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
@@ -181,82 +153,69 @@ struct ConversationDetailView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-
-                Spacer()
             }
-        }
-    }
 
-    // MARK: - Runtime Section
+            Spacer()
 
-    private var runtimeSection: some View {
-        SharedCardView(title: "EFFECTIVE RUNTIME") {
-            RuntimeDisplayView(isActive: viewModel.currentIsActive) { currentTime in
+            // Runtime
+            RuntimeCompactView(isActive: viewModel.currentIsActive) { currentTime in
                 viewModel.formatEffectiveRuntime(currentTime: currentTime)
             }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 
     // MARK: - Latest Reply Section
 
     private func latestReplySection(_ reply: MessageInfo) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Card without header
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(AgentNameFormatter.format(reply.author))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(AgentNameFormatter.format(reply.author))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
 
-                    Spacer()
+                Spacer()
 
-                    Text(ConversationFormatters.formatRelativeTime(reply.createdAt))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Text(TextUtilities.truncate(reply.content, maxLength: 200))
-                    .font(.body)
+                Text(ConversationFormatters.formatRelativeTime(reply.createdAt))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(4)
             }
-            .padding(16)
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
+
+            Text(.init(reply.content))
+                .font(.body)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 20)
+        .overlay(alignment: .top) {
+            Divider()
         }
     }
 
     // MARK: - Delegations Section
 
     private var delegationsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            // Header
-            Text("DELEGATIONS")
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-                .padding(.top, 20)
-                .padding(.bottom, 8)
+        VStack(spacing: 0) {
+            ForEach(viewModel.delegations) { delegation in
+                DelegationRowView(delegation: delegation) {
+                    selectedDelegation = delegation
+                }
+                .environmentObject(coreManager)
 
-            // Delegation items
-            VStack(spacing: 0) {
-                ForEach(viewModel.delegations) { delegation in
-                    SharedDelegationRow(delegation: delegation) {
-                        selectedDelegation = delegation
-                    }
-
-                    if delegation.id != viewModel.delegations.last?.id {
-                        Divider()
-                            .padding(.leading, 68)
-                    }
+                if delegation.id != viewModel.delegations.last?.id {
+                    Divider()
+                        .padding(.leading, 68)
                 }
             }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) {
+            Divider()
         }
     }
 
@@ -270,10 +229,75 @@ struct ConversationDetailView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
                 .background(Color.accentColor)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 16)
+        .padding(.horizontal, 20)
+        .padding(.top, 20)
+    }
+}
+
+// MARK: - Compact Runtime View
+
+/// Compact runtime display for inline use
+struct RuntimeCompactView: View {
+    let isActive: Bool
+    let computeRuntime: (Date) -> String
+
+    var body: some View {
+        if isActive {
+            TimelineView(.periodic(from: .now, by: 1.0)) { context in
+                runtimeText(currentTime: context.date)
+            }
+        } else {
+            runtimeText(currentTime: Date())
+        }
+    }
+
+    @ViewBuilder
+    private func runtimeText(currentTime: Date) -> some View {
+        Text(computeRuntime(currentTime))
+            .font(.system(size: 32, weight: .light))
+            .monospacedDigit()
+            .foregroundStyle(.primary)
+    }
+}
+
+// MARK: - Delegation Row View
+
+/// Tappable delegation row without card styling
+struct DelegationRowView: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    let delegation: DelegationItem
+    let onTap: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AgentAvatarView(agentName: delegation.recipient, size: 40, fontSize: 13)
+                .environmentObject(coreManager)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(AgentNameFormatter.format(delegation.recipient))
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                Text(delegation.messagePreview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onTap()
+        }
     }
 }
 
