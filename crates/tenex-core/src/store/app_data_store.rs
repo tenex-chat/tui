@@ -4347,29 +4347,85 @@ mod tests {
 
         // Test 5: Verify day boundary handling by adding messages that cross midnight
         // Current base_timestamp is 2024-01-15 10:00:00 UTC
-        // Add message at 23:00 on 2024-01-14 (prior day) to verify midnight rollover
+        // Create buckets on BOTH sides of midnight to properly test rollover
         let seconds_per_day: u64 = 86400;
         let day_start = (base_timestamp / seconds_per_day) * seconds_per_day;
 
         // Prior day's 23:00 (one hour before midnight)
         let prior_day_23 = day_start - seconds_per_hour;
 
-        let mut msg = make_test_message("msg_23", "pubkey1", "thread1", "test", prior_day_23);
-        msg.llm_metadata = vec![("total-tokens".to_string(), "600".to_string())];
+        // Current day's 00:00 (midnight)
+        let current_day_00 = day_start;
+
+        // Current day's 01:00
+        let current_day_01 = day_start + seconds_per_hour;
+
+        // Current day's 02:00
+        let current_day_02 = day_start + (2 * seconds_per_hour);
+
+        // Add message at 23:00 prior day
+        let mut msg_23 = make_test_message("msg_23", "pubkey1", "thread1", "test", prior_day_23);
+        msg_23.llm_metadata = vec![("total-tokens".to_string(), "600".to_string())];
         store.messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
-            .push(msg);
+            .push(msg_23);
+
+        // Add message at 00:00 current day
+        let mut msg_00 = make_test_message("msg_00", "pubkey1", "thread1", "test", current_day_00);
+        msg_00.llm_metadata = vec![("total-tokens".to_string(), "700".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_00);
+
+        // Add message at 01:00 current day
+        let mut msg_01 = make_test_message("msg_01", "pubkey1", "thread1", "test", current_day_01);
+        msg_01.llm_metadata = vec![("total-tokens".to_string(), "800".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_01);
+
+        // Add message at 02:00 current day
+        let mut msg_02 = make_test_message("msg_02", "pubkey1", "thread1", "test", current_day_02);
+        msg_02.llm_metadata = vec![("total-tokens".to_string(), "900".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_02);
+
         store.rebuild_llm_activity_by_hour();
 
-        // Window from 01:00 current day looking back 3 hours should cross midnight
-        // Should see: 01:00, 00:00, 23:00 (prior day)
-        let hour_01_start = day_start + seconds_per_hour;
-        let result = store.get_tokens_by_hour_from(hour_01_start, 3);
+        // Window from 02:00 current day looking back 4 hours should cross midnight
+        // Should see: 02:00, 01:00, 00:00, 23:00 (prior day)
+        let result = store.get_tokens_by_hour_from(current_day_02, 4);
 
-        // We should see the 23:00 hour from the prior day in the window
-        assert!(result.contains_key(&prior_day_23), "Window should include prior day's 23:00 hour when crossing midnight");
-        assert_eq!(result.get(&prior_day_23), Some(&600_u64), "Prior day's 23:00 should have 600 tokens");
+        // Verify all four hours are present
+        assert_eq!(result.len(), 4, "Window from 02:00 looking back 4 hours should return 4 entries spanning midnight");
+
+        // Verify each hour has the correct token count
+        assert_eq!(result.get(&current_day_02), Some(&900_u64), "Current day 02:00 should have 900 tokens");
+        assert_eq!(result.get(&current_day_01), Some(&800_u64), "Current day 01:00 should have 800 tokens");
+        assert_eq!(result.get(&current_day_00), Some(&700_u64), "Current day 00:00 should have 700 tokens");
+        assert_eq!(result.get(&prior_day_23), Some(&600_u64), "Prior day 23:00 should have 600 tokens");
+
+        // Verify proper day_start bucketing: 23:00 should be on prior day, others on current day
+        let prior_day_start = day_start - seconds_per_day;
+
+        // Calculate expected day_start for each hour
+        let day_start_23 = (prior_day_23 / seconds_per_day) * seconds_per_day;
+        let day_start_00 = (current_day_00 / seconds_per_day) * seconds_per_day;
+        let day_start_01 = (current_day_01 / seconds_per_day) * seconds_per_day;
+        let day_start_02 = (current_day_02 / seconds_per_day) * seconds_per_day;
+
+        // Verify 23:00 is on prior day
+        assert_eq!(day_start_23, prior_day_start, "23:00 should be bucketed to prior day");
+
+        // Verify 00:00, 01:00, 02:00 are all on current day
+        assert_eq!(day_start_00, day_start, "00:00 should be bucketed to current day");
+        assert_eq!(day_start_01, day_start, "01:00 should be bucketed to current day");
+        assert_eq!(day_start_02, day_start, "02:00 should be bucketed to current day");
     }
 
     /// Test that get_tokens_by_hour and get_message_count_by_hour return empty results
