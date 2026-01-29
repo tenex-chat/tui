@@ -1,5 +1,6 @@
 mod clipboard;
 mod input;
+mod jaeger;
 mod render;
 mod runtime;
 mod ui;
