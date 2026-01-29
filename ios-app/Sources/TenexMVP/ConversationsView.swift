@@ -3,16 +3,23 @@ import SwiftUI
 struct ConversationsView: View {
     let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var conversations: [ConversationInfo] = []
-    @State private var hierarchy: ConversationHierarchy?
+    @State private var conversations: [ConversationFullInfo] = []
     @State private var isLoading = false
-    @State private var selectedConversation: ConversationInfo?
+    @State private var selectedConversation: ConversationFullInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
 
-    /// Root conversations from precomputed hierarchy (sorted by effective last activity)
-    private var rootConversations: [ConversationInfo] {
-        hierarchy?.getSortedRoots() ?? []
+    /// Root conversations (no parent or orphaned) sorted by effective last activity
+    private var rootConversations: [ConversationFullInfo] {
+        let allIds = Set(conversations.map { $0.id })
+        return conversations
+            .filter { conv in
+                if let parentId = conv.parentId {
+                    return !allIds.contains(parentId)
+                }
+                return true
+            }
+            .sorted { $0.effectiveLastActivity > $1.effectiveLastActivity }
     }
 
     var body: some View {
@@ -30,11 +37,10 @@ struct ConversationsView: View {
                 }
             } else {
                 List {
-                    // Root conversations - using precomputed hierarchy for O(1) data access
+                    // Root conversations sorted by effective last activity
                     ForEach(rootConversations, id: \.id) { conversation in
-                        OptimizedConversationRow(
+                        ProjectConversationRow(
                             conversation: conversation,
-                            aggregatedData: hierarchy?.getData(for: conversation.id) ?? .empty,
                             onSelect: { selected in
                                 selectedConversation = selected
                             }
@@ -69,7 +75,7 @@ struct ConversationsView: View {
             loadConversations()
         }
         .sheet(item: $selectedConversation) { conversation in
-            MessagesView(conversation: conversation, project: project)
+            ConversationDetailView(conversation: conversation)
                 .environmentObject(coreManager)
         }
         .sheet(isPresented: $showNewConversation) {
@@ -98,14 +104,133 @@ struct ConversationsView: View {
     private func loadConversations() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let fetched = coreManager.core.getConversations(projectId: project.id)
-            // Precompute hierarchy on background thread for O(1) access per row
-            let computedHierarchy = ConversationHierarchy(conversations: fetched)
+            // Use getAllConversations with filter for richer ConversationFullInfo data
+            let filter = ConversationFilter(
+                projectIds: [project.id],
+                showArchived: false,
+                hideScheduled: true,
+                timeFilter: .all
+            )
+            let fetched = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
             DispatchQueue.main.async {
                 self.conversations = fetched
-                self.hierarchy = computedHierarchy
                 self.isLoading = false
             }
+        }
+    }
+}
+
+// MARK: - Project Conversation Row (Uses ConversationFullInfo)
+
+/// Conversation row for project-specific view using ConversationFullInfo
+private struct ProjectConversationRow: View {
+    let conversation: ConversationFullInfo
+    let onSelect: (ConversationFullInfo) -> Void
+
+    private var statusColor: Color {
+        if conversation.isActive { return .green }
+        switch conversation.status?.lowercased() ?? "" {
+        case "active", "in progress": return .green
+        case "waiting", "blocked": return .orange
+        case "completed", "done": return .gray
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Status indicator with activity pulse
+            ZStack {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 10, height: 10)
+
+                if conversation.isActive {
+                    Circle()
+                        .stroke(statusColor.opacity(0.5), lineWidth: 2)
+                        .frame(width: 16, height: 16)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Row 1: Title and effective last active time
+                HStack(alignment: .top) {
+                    Text(conversation.title)
+                        .font(.headline)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    Text(ConversationFormatters.formatRelativeTime(conversation.effectiveLastActivity))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Row 2: Summary or current activity
+                HStack(alignment: .top) {
+                    if let activity = conversation.currentActivity, conversation.isActive {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                            Text(activity)
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                                .lineLimit(1)
+                        }
+                    } else if let summary = conversation.summary {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text("No summary")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .italic()
+                    }
+
+                    Spacer()
+
+                    // Show message count
+                    if conversation.messageCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "bubble.left")
+                                .font(.caption2)
+                            Text("\(conversation.messageCount)")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    }
+                }
+
+                // Row 3: Author avatar and status badge
+                HStack(spacing: -8) {
+                    SharedAgentAvatar(agentName: conversation.author)
+
+                    Spacer()
+
+                    // Status badge
+                    if let status = conversation.status {
+                        Text(status)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(statusColor.opacity(0.15))
+                            .foregroundStyle(statusColor)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(conversation)
         }
     }
 }
