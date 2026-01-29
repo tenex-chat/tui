@@ -172,13 +172,26 @@ impl AppDataStore {
         };
 
         // First, build a set of ask event IDs that the user has already replied to
-        // by checking e-tags on user's messages
+        // by checking e-tags on user's messages (not just reply_to field, but all e-tags)
         let mut answered_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for messages in self.messages_by_thread.values() {
             for message in messages {
                 if message.pubkey == user_pubkey {
-                    if let Some(ref reply_to) = message.reply_to {
-                        answered_ask_ids.insert(reply_to.clone());
+                    // Query nostrdb to get the full note and extract all e-tags
+                    let note_id_bytes = match hex::decode(&message.id) {
+                        Ok(bytes) if bytes.len() == 32 => bytes,
+                        _ => continue,
+                    };
+                    let note_id: [u8; 32] = match note_id_bytes.try_into() {
+                        Ok(arr) => arr,
+                        Err(_) => continue,
+                    };
+                    if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
+                        // Extract all e-tag IDs (includes replies with or without reply markers)
+                        let reply_to_ids = Self::extract_e_tag_ids(&note);
+                        for reply_to_id in reply_to_ids {
+                            answered_ask_ids.insert(reply_to_id);
+                        }
                     }
                 }
             }
@@ -217,6 +230,11 @@ impl AppDataStore {
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
                 // Check for inbox: ask events that p-tag the user
                 if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
+                    // Skip ask events that user has already answered
+                    if answered_ask_ids.contains(&message.id) {
+                        continue;
+                    }
+
                     // Extract project a_tag directly from the note first, fall back to thread lookup
                     let project_a_tag = Self::extract_project_a_tag(&note)
                         .or_else(|| self.find_project_for_thread(&thread_id));
@@ -224,7 +242,7 @@ impl AppDataStore {
 
                     let inbox_item = InboxItem {
                         id: message.id.clone(),
-                        event_type: InboxEventType::Mention,
+                        event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
                         title: message.content.chars().take(50).collect(),
                         project_a_tag: project_a_tag_str,
                         author_pubkey: message.pubkey.clone(),
@@ -1697,7 +1715,7 @@ impl AppDataStore {
 
                         let inbox_item = InboxItem {
                             id: message_id.clone(),
-                            event_type: InboxEventType::Mention,
+                            event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
                             title: message.content.chars().take(50).collect(),
                             project_a_tag: project_a_tag_str,
                             author_pubkey: pubkey.clone(),

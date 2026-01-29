@@ -822,10 +822,11 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
     };
     let time_str = format_relative_time(item.created_at);
 
-    // Check if this is a "Waiting For You" item (Mention type = user was p-tagged)
-    let is_waiting_for_user = matches!(item.event_type, InboxEventType::Mention) && !item.is_read;
+    // Check if this is a "Waiting For You" item (Ask or Mention type = user was p-tagged)
+    let is_waiting_for_user = matches!(item.event_type, InboxEventType::Ask | InboxEventType::Mention) && !item.is_read;
 
     let type_str = match item.event_type {
+        InboxEventType::Ask => "? Asked You",
         InboxEventType::Mention => "@ mentioned you",
         InboxEventType::Reply => "Reply",
         InboxEventType::ThreadReply => "Thread reply",
