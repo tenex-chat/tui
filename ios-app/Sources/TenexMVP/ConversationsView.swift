@@ -104,6 +104,9 @@ struct ConversationsView: View {
     private func loadConversations() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh data from relays before fetching conversations
+            // This ensures the AppDataStore is updated with latest messages from nostrdb
+            _ = coreManager.core.refresh()
             // Use getAllConversations with filter for richer ConversationFullInfo data
             let filter = ConversationFilter(
                 projectIds: [project.id],
@@ -411,6 +414,8 @@ struct MessagesView: View {
     private func loadMessages() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             let fetched = coreManager.core.getMessages(conversationId: conversation.id)
             DispatchQueue.main.async {
                 self.messages = fetched

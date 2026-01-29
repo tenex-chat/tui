@@ -483,6 +483,8 @@ struct MessageComposerView: View {
         guard isNewConversation && initialProject == nil else { return }
 
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             let projects = coreManager.core.getProjects()
             DispatchQueue.main.async {
                 availableProjects = projects
@@ -521,6 +523,8 @@ struct MessageComposerView: View {
         guard let projectId = selectedProject?.id else { return }
 
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             do {
                 let agents = try coreManager.core.getAgents(projectId: projectId)
                 DispatchQueue.main.async {
