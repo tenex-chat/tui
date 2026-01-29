@@ -829,6 +829,8 @@ private struct MessagesSheetView: View {
     private func loadMessages() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             let fetched = coreManager.core.getMessages(conversationId: conversation.id)
             DispatchQueue.main.async {
                 self.messages = fetched

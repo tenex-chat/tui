@@ -54,6 +54,8 @@ struct ReportsView: View {
     private func loadReports() {
         isLoading = true
         DispatchQueue.global(qos: .userInitiated).async {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = coreManager.core.refresh()
             let fetched = coreManager.core.getReports(projectId: project.id)
             DispatchQueue.main.async {
                 self.reports = fetched

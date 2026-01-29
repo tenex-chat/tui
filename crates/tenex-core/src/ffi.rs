@@ -4,11 +4,45 @@
 //! Keep this API as simple as possible - no async functions, only basic types.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+// =============================================================================
+// POLLING TIMING CONSTANTS
+// =============================================================================
+//
+// These constants control the adaptive polling behavior during refresh().
+// The strategy: poll until no new events arrive for QUIET_PERIOD, or until
+// MAX_POLL_TIMEOUT is reached, whichever comes first.
+//
+// Rationale:
+// - iOS calls refresh() frequently (on every view load/fetch operation)
+// - The notification handler may have just subscribed to new projects
+// - Relays are sending historical events that haven't been ingested yet
+// - Adaptive polling catches these late-arriving events without blocking too long
+
+/// Maximum total time to poll for additional events during refresh().
+/// After this time, we stop polling regardless of whether events are still arriving.
+/// Set to 1 second to balance freshness vs responsiveness.
+const REFRESH_MAX_POLL_TIMEOUT_MS: u64 = 1000;
+
+/// Quiet period threshold - if no events arrive for this duration, assume relay
+/// has finished sending and stop polling early. This allows fast exit when relay
+/// completes quickly (typical case).
+const REFRESH_QUIET_PERIOD_MS: u64 = 100;
+
+/// Sleep duration between poll iterations. Small enough for responsiveness,
+/// large enough to avoid CPU spin. 10ms = ~100 polls/sec max.
+const REFRESH_POLL_INTERVAL_MS: u64 = 10;
+
+/// Minimum interval between refresh() calls to prevent excessive relay/CPU load.
+/// If refresh() is called more frequently than this, subsequent calls return
+/// immediately without doing work. Set to 500ms based on typical UI interaction
+/// patterns (user can't meaningfully process data faster than this).
+const REFRESH_THROTTLE_INTERVAL_MS: u64 = 500;
 
 use futures::{FutureExt, StreamExt};
 use nostr_sdk::prelude::*;
@@ -55,6 +89,26 @@ fn get_core_handle(core_handle: &RwLock<Option<CoreHandle>>) -> Result<CoreHandl
     handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
         message: "Core runtime not initialized - call init() first".to_string(),
     }).cloned()
+}
+
+/// Helper to acquire a read lock on the store.
+///
+/// This eliminates the repeated pattern of:
+/// ```ignore
+/// let store_guard = self.store.read().map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+/// let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
+/// ```
+///
+/// Note: Returns a guard that must be held for the duration of store access.
+/// The returned reference is tied to the guard's lifetime.
+///
+/// This helper is available for future refactoring to reduce code duplication.
+/// Not currently used to avoid introducing regressions in existing code.
+#[allow(dead_code)]
+fn acquire_store_read<'a>(
+    store_guard: &'a std::sync::RwLockReadGuard<'a, Option<AppDataStore>>,
+) -> Result<&'a AppDataStore, TenexError> {
+    store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)
 }
 
 /// Convert an AgentDefinition to AgentInfo (shared helper to eliminate DRY violation)
@@ -519,6 +573,10 @@ pub struct TenexCore {
     ndb_stream: RwLock<Option<SubscriptionStream>>,
     /// iOS preferences storage (archive state, collapsed threads, visible projects)
     preferences: RwLock<Option<FfiPreferencesStorage>>,
+    /// Timestamp of last refresh() call for throttling (milliseconds since UNIX epoch).
+    /// Uses AtomicU64 for lock-free access. Stored as ms for precision without needing
+    /// to store Instant (which isn't Send+Sync friendly for FFI).
+    last_refresh_ms: AtomicU64,
 }
 
 #[uniffi::export]
@@ -535,6 +593,7 @@ impl TenexCore {
             core_handle: RwLock::new(None),
             data_rx: Mutex::new(None),
             worker_handle: RwLock::new(None),
+            last_refresh_ms: AtomicU64::new(0),
             ndb_stream: RwLock::new(None),
             preferences: RwLock::new(None),
         }
@@ -1824,7 +1883,26 @@ impl TenexCore {
 
     /// Refresh data from relays.
     /// Call this to fetch the latest data from relays.
+    ///
+    /// Includes throttling: if called within REFRESH_THROTTLE_INTERVAL_MS of the last
+    /// refresh, returns immediately without doing work. This prevents excessive CPU/relay
+    /// load from rapid successive calls (e.g., multiple views loading simultaneously).
     pub fn refresh(&self) -> bool {
+        // Throttle check: skip if we refreshed too recently
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let last_refresh = self.last_refresh_ms.load(Ordering::Relaxed);
+
+        if last_refresh > 0 && now_ms.saturating_sub(last_refresh) < REFRESH_THROTTLE_INTERVAL_MS {
+            // Throttled: skip this refresh call
+            return true;
+        }
+
+        // Update last refresh timestamp (atomic swap for thread safety)
+        self.last_refresh_ms.store(now_ms, Ordering::Relaxed);
+
         let ndb = {
             let ndb_guard = match self.ndb.read() {
                 Ok(g) => g,
@@ -1884,6 +1962,67 @@ impl TenexCore {
 
         let mut ok = true;
         for note_keys in note_batches {
+            if process_note_keys(ndb.as_ref(), store, &core_handle, &note_keys).is_err() {
+                ok = false;
+            }
+        }
+
+        // Release store lock before polling for more events
+        drop(store_guard);
+
+        // Poll for additional events to catch messages arriving from newly subscribed projects.
+        //
+        // Context: When iOS calls refresh(), the notification handler may have just subscribed
+        // to messages for newly discovered projects (kind:31933). The relay is sending historical
+        // messages, but they haven't been ingested into nostrdb yet. This polling loop gives
+        // time for those events to arrive.
+        //
+        // Strategy: Poll until no new events arrive for REFRESH_QUIET_PERIOD_MS, or until
+        // REFRESH_MAX_POLL_TIMEOUT_MS is reached. This is adaptive - if events keep arriving,
+        // we keep polling. If nothing arrives, we exit quickly.
+        let max_deadline = Instant::now() + Duration::from_millis(REFRESH_MAX_POLL_TIMEOUT_MS);
+        let mut additional_batches: Vec<Vec<NoteKey>> = Vec::new();
+        let mut quiet_since = Instant::now();
+
+        while Instant::now() < max_deadline {
+            let mut got_events = false;
+
+            if let Ok(mut stream_guard) = self.ndb_stream.write() {
+                if let Some(stream) = stream_guard.as_mut() {
+                    // Drain all immediately available events
+                    while let Some(note_keys) = stream.next().now_or_never().flatten() {
+                        additional_batches.push(note_keys);
+                        got_events = true;
+                    }
+                }
+            }
+
+            if got_events {
+                // Reset quiet timer - events are still arriving
+                quiet_since = Instant::now();
+            } else {
+                // No events this iteration
+                let quiet_duration = Instant::now().duration_since(quiet_since);
+                if quiet_duration >= Duration::from_millis(REFRESH_QUIET_PERIOD_MS) {
+                    // Been quiet for REFRESH_QUIET_PERIOD_MS, assume relay has finished sending
+                    break;
+                }
+                // Sleep briefly before polling again
+                std::thread::sleep(Duration::from_millis(REFRESH_POLL_INTERVAL_MS));
+            }
+        }
+
+        // Re-acquire store lock and process additional batches
+        let mut store_guard = match self.store.write() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+        let store = match store_guard.as_mut() {
+            Some(store) => store,
+            None => return false,
+        };
+
+        for note_keys in additional_batches {
             if process_note_keys(ndb.as_ref(), store, &core_handle, &note_keys).is_err() {
                 ok = false;
             }
