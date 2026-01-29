@@ -14,6 +14,9 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Child conversations (delegations)
     @Published private(set) var childConversations: [ConversationFullInfo] = []
 
+    /// All descendant conversations (for participant extraction)
+    private var allDescendants: [ConversationFullInfo] = []
+
     /// Loading state
     @Published private(set) var isLoading = false
 
@@ -93,9 +96,12 @@ final class ConversationDetailViewModel: ObservableObject {
     private func refreshMetadata() async {
         guard let coreManager = coreManager else { return }
 
+        // Extract d-tag from a-tag format "kind:pubkey:d-tag" for filter
+        let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+
         // Fetch fresh conversation data
         let filter = ConversationFilter(
-            projectIds: [conversation.projectATag],
+            projectIds: [projectId],
             showArchived: false,
             hideScheduled: true,
             timeFilter: .all
@@ -125,7 +131,7 @@ final class ConversationDetailViewModel: ObservableObject {
 
         do {
             // Perform work off the main actor for better performance
-            let (fetchedMessages, children) = try await loadDataFromCore(
+            let (fetchedMessages, directChildren, descendants) = try await loadDataFromCore(
                 coreManager: coreManager,
                 conversationId: conversation.id,
                 projectATag: conversation.projectATag
@@ -133,7 +139,8 @@ final class ConversationDetailViewModel: ObservableObject {
 
             // Update state on main actor
             self.messages = fetchedMessages
-            self.childConversations = children
+            self.childConversations = directChildren
+            self.allDescendants = descendants
 
             // Recompute cached derived state
             recomputeDerivedState()
@@ -149,7 +156,7 @@ final class ConversationDetailViewModel: ObservableObject {
     }
 
     /// Performs the actual data loading using structured concurrency for proper cancellation
-    private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo]) {
+    private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo]) {
         try Task.checkCancellation()
 
         // Use structured Task {} instead of Task.detached to honor parent cancellation
@@ -157,24 +164,34 @@ final class ConversationDetailViewModel: ObservableObject {
             coreManager.core.getMessages(conversationId: conversationId)
         }.value
 
+        // Extract d-tag from a-tag format "kind:pubkey:d-tag" for filter
+        let projectId = projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+
         let filter = ConversationFilter(
-            projectIds: [projectATag],
+            projectIds: [projectId],
             showArchived: false,
             hideScheduled: true,
             timeFilter: .all
         )
 
-        async let childrenTask: [ConversationFullInfo] = Task {
+        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo]) = Task {
+            // Get direct children (for delegations display)
             let allConversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
-            return allConversations.filter { $0.parentId == conversationId }
+            let directChildren = allConversations.filter { $0.parentId == conversationId }
+
+            // Get all descendants (for participants extraction)
+            let descendantIds = coreManager.core.getDescendantConversationIds(conversationId: conversationId)
+            let allDescendants = coreManager.core.getConversationsByIds(conversationIds: descendantIds)
+
+            return (directChildren, allDescendants)
         }.value
 
         // Await both tasks - cancellation will propagate to both
         let fetchedMessages = await messagesTask
         try Task.checkCancellation()
-        let children = await childrenTask
+        let (directChildren, allDescendants) = await childrenTask
 
-        return (fetchedMessages, children)
+        return (fetchedMessages, directChildren, allDescendants)
     }
 
     // MARK: - Derived State Computation
@@ -186,6 +203,9 @@ final class ConversationDetailViewModel: ObservableObject {
         agents.insert(conversation.author)
         for msg in messages {
             agents.insert(msg.author)
+        }
+        for descendant in allDescendants {
+            agents.insert(descendant.author)
         }
         participatingAgents = agents.sorted()
 

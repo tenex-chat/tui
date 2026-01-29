@@ -279,34 +279,6 @@ struct InboxView: View {
         .listStyle(.plain)
     }
 
-    // MARK: - Load Data (Task-based with cancellation)
-
-    private func loadInbox() {
-        // Cancel any existing load task to prevent races and stale UI
-        loadTask?.cancel()
-
-        loadTask = Task {
-            isLoading = true
-            defer { isLoading = false }
-
-            // Check for cancellation before expensive work
-            guard !Task.isCancelled else { return }
-
-            // Perform fetch on background thread
-            // Note: refresh() and getInbox() are called off-main via detached task
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            let fetched = await Task.detached(priority: .userInitiated) { [coreManager] in
-                _ = coreManager.core.refresh()
-                return coreManager.core.getInbox()
-            }.value
-
-            // Check for cancellation after fetch
-            guard !Task.isCancelled else { return }
-
-            // Items come sorted by created_at descending (newest first) from Rust
-            self.inboxItems = fetched
-        }
-    }
 }
 
 // MARK: - Inbox Item Row
