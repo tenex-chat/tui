@@ -83,7 +83,6 @@ pub enum HotkeyId {
     OpenTrace,
     StopAgent,
     GoToParent,
-    ToggleSidebar,
     EnterEditMode,
     InConversationSearch,
 
@@ -758,13 +757,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('g'),
         "Go to Parent",
         "Conversation",
-        &[HotkeyContext::ChatNormal],
-    ),
-    HotkeyBinding::shift(
-        HotkeyId::ToggleSidebar,
-        KeyCode::Char('T'),
-        "Toggle Sidebar",
-        "View",
         &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(

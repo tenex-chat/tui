@@ -22,7 +22,9 @@ pub const MODAL_PADDING_H: u16 = 2;
 pub const SIDEBAR_WIDTH_HOME: u16 = 42;
 
 /// Sidebar width for the chat view (todos + metadata)
-pub const SIDEBAR_WIDTH_CHAT: u16 = 30;
+/// Increased from 30 to 36 to accommodate longer content while maintaining
+/// minimum 40-column message area on 80-column terminals (80 - 36 = 44, minus 4 for padding = 40)
+pub const SIDEBAR_WIDTH_CHAT: u16 = 36;
 
 // =============================================================================
 // CHROME CONSTANTS - Header/footer heights
