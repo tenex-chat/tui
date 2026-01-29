@@ -333,9 +333,28 @@ struct AgentAvatarView: View {
             }
         }
         .onAppear {
-            // Fetch profile picture using cached API (prevents repeated FFI calls)
+            // Fetch profile picture asynchronously to avoid blocking UI thread during scroll.
+            // Uses cached API to prevent repeated FFI calls for the same pubkey.
             if let pubkey = pubkey {
-                kind0PictureUrl = coreManager.getProfilePicture(pubkey: pubkey)
+                Task {
+                    // Perform FFI call on background thread
+                    let pictureUrl = await fetchProfilePictureAsync(pubkey: pubkey)
+                    // Update UI on main thread
+                    await MainActor.run {
+                        kind0PictureUrl = pictureUrl
+                    }
+                }
+            }
+        }
+    }
+
+    /// Fetch profile picture asynchronously off the main thread.
+    /// This prevents FFI calls from blocking the UI during scroll.
+    private func fetchProfilePictureAsync(pubkey: String) async -> String? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = coreManager.getProfilePicture(pubkey: pubkey)
+                continuation.resume(returning: result)
             }
         }
     }
