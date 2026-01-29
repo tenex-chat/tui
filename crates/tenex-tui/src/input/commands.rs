@@ -1239,9 +1239,14 @@ fn reference_conversation(app: &mut App) {
     let approx_tokens = total_chars / 4;
 
     // Pre-fill the editor with the context message as a text attachment
+    // Use 12-character short ID format for readability
+    let short_conversation_id: String = app
+        .selected_thread()
+        .map(|t| t.id.chars().take(12).collect())
+        .unwrap_or_else(|| "unknown".to_string());
     let context_message = format!(
         "This message is in the context of conversation id {}. Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately {} tokens.",
-        app.selected_thread().map(|t| t.id.as_str()).unwrap_or("unknown"),
+        short_conversation_id,
         approx_tokens
     );
 
@@ -1288,16 +1293,20 @@ fn fork_conversation(app: &mut App) {
         return;
     };
 
-    // Get source thread ID for the context message
-    let source_thread_id_for_msg = app.selected_thread().map(|t| t.id.clone()).unwrap_or_default();
+    // Get source thread ID for the context message (use 12-character short ID format for readability)
+    let short_conversation_id: String = app
+        .selected_thread()
+        .map(|t| t.id.chars().take(12).collect())
+        .unwrap_or_default();
+    let short_fork_message_id: String = fork_message_id.chars().take(12).collect();
 
     // Pre-fill the editor with the fork context message as a text attachment
     let context_message = format!(
         "This conversation is forked from conversation id {} starting at message id {}. Your first task is to inspect that conversation slice with conversation_get(conversationId: \"{}\", sinceId: \"{}\") to understand the context we're working from.",
-        source_thread_id_for_msg,
-        fork_message_id,
-        source_thread_id_for_msg,
-        fork_message_id
+        short_conversation_id,
+        short_fork_message_id,
+        short_conversation_id,
+        short_fork_message_id
     );
 
     // Use shared helper to set up the contextual draft (with fork message ID)
