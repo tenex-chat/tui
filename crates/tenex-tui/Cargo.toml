@@ -3,6 +3,10 @@ name = "tenex-tui"
 version.workspace = true
 edition.workspace = true
 
+[lib]
+name = "tenex_tui"
+path = "src/lib.rs"
+
 [[bin]]
 name = "tenex-tui"
 path = "src/main.rs"
