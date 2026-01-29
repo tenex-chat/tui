@@ -555,7 +555,7 @@ pub static COMMANDS: &[Command] = &[
         execute: stop_agents,
     },
     Command {
-        key: 'T',
+        key: 's',
         label: "Toggle sidebar",
         section: "View",
         available: |app| app.view == View::Chat && app.input_mode == InputMode::Normal,
