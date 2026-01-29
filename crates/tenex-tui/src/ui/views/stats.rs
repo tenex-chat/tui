@@ -64,17 +64,6 @@ const HOURS_PER_DAY: usize = 24;
 const DAYS_IN_WEEK: usize = 7;
 const DAYS_IN_MONTH: usize = 30;
 
-// Hour grouping for compact display (GitHub-style landscape orientation)
-// Labels are derived programmatically in the rendering function
-const HOUR_GROUPS: [(usize, usize); 6] = [
-    (0, 4),
-    (4, 8),
-    (8, 12),
-    (12, 16),
-    (16, 20),
-    (20, 24),
-];
-
 /// View mode for the activity grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityViewMode {
@@ -932,8 +921,8 @@ fn render_activity_grid(
     }
 
     // Build the activity grid
-    // Layout: grid data structure stores [day_offset][hour_of_day] = value
-    // Display uses hour groups (rows) × days (columns) for compact landscape orientation
+    // Layout: rows represent hours of day (0-23), columns represent calendar days
+    // Each cell shows activity for that hour on that specific calendar day
     let num_days = view_mode.num_days();
     let seconds_per_day: u64 = 86400;
     let seconds_per_hour: u64 = 3600;
@@ -944,6 +933,9 @@ fn render_activity_grid(
 
     // Calculate today's day start (UTC)
     let today_start = (now / seconds_per_day) * seconds_per_day;
+
+    // Calculate maximum value for color scaling
+    let max_value = data.values().max().copied().unwrap_or(1).max(1);
 
     // Build grid data structure: [day_offset][hour_of_day] = value
     // day_offset 0 = today, 1 = yesterday, etc.
@@ -967,65 +959,37 @@ fn render_activity_grid(
         }
     }
 
-    // Calculate max_group_total from all aggregated day × hour-group combinations
-    // This ensures the color scale is based on the actual aggregated values displayed
-    let mut max_group_total = 0u64;
-    for day in 0..num_days {
-        for (hour_start, hour_end) in &HOUR_GROUPS {
-            let mut total_value = 0u64;
-            for hour in *hour_start..*hour_end {
-                total_value += grid[day][hour];
-            }
-            max_group_total = max_group_total.max(total_value);
-        }
-    }
-
-    // Handle empty state when all aggregated values are zero
-    if max_group_total == 0 {
-        render_empty_state(f, "No activity data for this period", inner);
-        return;
-    }
-
-    // Render the grid in GitHub-style landscape orientation
-    // Display format: rows are hour groups (6 rows), columns are days (stretching horizontally)
-    // This creates a WIDE and SHORT grid like GitHub's contribution graph
+    // Render the grid
+    // Display format: rows are hours (0-23), columns are days (most recent on right)
     let mut lines: Vec<Line> = Vec::new();
 
-    // Add legend at top using max_group_total for consistency with cell colors
+    // Add legend at top
     lines.push(Line::from(vec![
-        Span::styled("       ", Style::default()),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_group_total, max_group_total))),
+        Span::styled("    ", Style::default()),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value, max_value))),
         Span::styled("High  ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_group_total / 2, max_group_total))),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 2, max_value))),
         Span::styled("Med  ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_group_total / 4, max_group_total))),
+        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 4, max_value))),
         Span::styled("Low  ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("█ ", Style::default().fg(get_activity_color(0, max_group_total))),
+        Span::styled("█ ", Style::default().fg(get_activity_color(0, max_value))),
         Span::styled("None", Style::default().fg(theme::TEXT_MUTED)),
     ]));
     lines.push(Line::from(vec![Span::raw("")])); // Spacer
 
-    // Render grid: each row is a time-of-day band, each column is a day
-    // This creates the landscape orientation (6 rows × many columns)
-    for (hour_start, hour_end) in &HOUR_GROUPS {
-        // Derive label programmatically from hour range
-        let label = format!("{:02}-{:02}", hour_start, hour_end);
+    // Render grid: each row is an hour, each column is a day
+    for hour in 0..HOURS_PER_DAY {
         let mut line_spans = vec![
             Span::styled(
-                format!("{:6} ", label),
+                format!("{:02}h ", hour),
                 Style::default().fg(theme::TEXT_MUTED),
             ),
         ];
 
         // Days in reverse order (oldest first, newest last) - left to right
         for day in (0..num_days).rev() {
-            // Aggregate activity across the hour range for this day
-            let mut total_value = 0u64;
-            for hour in *hour_start..*hour_end {
-                total_value += grid[day][hour];
-            }
-
-            let color = get_activity_color(total_value, max_group_total);
+            let value = grid[day][hour];
+            let color = get_activity_color(value, max_value);
             line_spans.push(Span::styled("█", Style::default().fg(color)));
             line_spans.push(Span::raw(" ")); // Space between blocks
         }
@@ -1035,7 +999,7 @@ fn render_activity_grid(
 
     // Add day labels at bottom
     lines.push(Line::from(vec![Span::raw("")])); // Spacer
-    let mut day_label_spans = vec![Span::styled("       ", Style::default())];
+    let mut day_label_spans = vec![Span::styled("    ", Style::default())];
 
     for day in (0..num_days).rev() {
         let day_label = if day == 0 {
