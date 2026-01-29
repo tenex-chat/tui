@@ -120,28 +120,38 @@ struct ConversationDetailView: View {
         .padding(.bottom, 16)
     }
 
-    // MARK: - Agents Section
+    // MARK: - Agents and Runtime Section
 
     private var agentsAndRuntimeSection: some View {
-        HStack(alignment: .center, spacing: 12) {
-            ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
-                AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
-                    .environmentObject(coreManager)
+        HStack(alignment: .center) {
+            // Agents
+            HStack(spacing: 12) {
+                ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
+                    AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
+                        .environmentObject(coreManager)
+                }
+
+                if viewModel.participatingAgents.count > 8 {
+                    Circle()
+                        .fill(Color(.systemGray4))
+                        .frame(width: 44, height: 44)
+                        .overlay {
+                            Text("+\(viewModel.participatingAgents.count - 8)")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                        }
+                }
             }
 
-            if viewModel.participatingAgents.count > 8 {
-                Circle()
-                    .fill(Color(.systemGray4))
-                    .frame(width: 44, height: 44)
-                    .overlay {
-                        Text("+\(viewModel.participatingAgents.count - 8)")
-                            .font(.subheadline)
-                            .fontWeight(.medium)
-                            .foregroundStyle(.secondary)
-                    }
-            }
+            Spacer()
+
+            // Runtime
+            Text(viewModel.formatEffectiveRuntime())
+                .font(.system(size: 32, weight: .light))
+                .monospacedDigit()
+                .foregroundStyle(.primary)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.vertical, 16)
         .overlay(alignment: .bottom) {

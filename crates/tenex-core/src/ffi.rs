@@ -1176,6 +1176,22 @@ impl TenexCore {
             .collect()
     }
 
+    /// Get the total hierarchical LLM runtime for a conversation (includes all descendants) in milliseconds.
+    /// Returns 0 if the conversation is not found or has no runtime data.
+    pub fn get_conversation_runtime_ms(&self, conversation_id: String) -> u64 {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return 0,
+        };
+
+        store.get_hierarchical_runtime(&conversation_id)
+    }
+
     /// Get messages for a conversation.
     pub fn get_messages(&self, conversation_id: String) -> Vec<MessageInfo> {
         let store_guard = match self.store.read() {
