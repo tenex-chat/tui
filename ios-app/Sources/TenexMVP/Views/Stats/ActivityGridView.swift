@@ -10,18 +10,6 @@ struct ActivityGridView: View {
     private let hoursPerDay = 24
     private let daysToShow = 30
 
-    // Performance: Precomputed lookup dictionary for O(1) activity access
-    private var activityLookup: [UInt64: HourActivity] {
-        Dictionary(uniqueKeysWithValues: snapshot.activityByHour.map { ($0.hourStart, $0) })
-    }
-
-    // Performance: Cached today start to avoid recomputation
-    private static let todayStart: UInt64 = {
-        let now = UInt64(Date().timeIntervalSince1970)
-        let secondsPerDay: UInt64 = 86400
-        return (now / secondsPerDay) * secondsPerDay
-    }()
-
     // Performance: Cached date formatter as static
     private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -31,6 +19,11 @@ struct ActivityGridView: View {
     }()
 
     var body: some View {
+        // Performance: Compute lookup dictionary once per render (O(n) once instead of O(n) per cell)
+        let activityLookup = Dictionary(uniqueKeysWithValues: snapshot.activityByHour.map { ($0.hourStart, $0) })
+
+        // Compute todayStart once per render (not cached as static)
+        let todayStart = Self.computeTodayStart()
         VStack(alignment: .leading, spacing: 16) {
             // Header with toggle
             HStack {
@@ -77,7 +70,7 @@ struct ActivityGridView: View {
 
                                 ForEach(0..<daysToShow, id: \.self) { dayOffset in
                                     if dayOffset % 3 == 0 {
-                                        Text(dayLabel(for: dayOffset))
+                                        Text(dayLabel(for: dayOffset, todayStart: todayStart))
                                             .font(.system(size: 10))
                                             .foregroundColor(.secondary)
                                             .frame(width: CGFloat(hoursPerDay) * 12, alignment: .leading)
@@ -98,7 +91,7 @@ struct ActivityGridView: View {
                                     // Day cells for this hour
                                     ForEach((0..<daysToShow).reversed(), id: \.self) { dayOffset in
                                         ActivityCell(
-                                            activity: activityForHour(hour: hour, daysAgo: dayOffset),
+                                            activity: Self.activityForHour(hour: hour, daysAgo: dayOffset, todayStart: todayStart, lookup: activityLookup),
                                             mode: visualizationMode
                                         )
                                     }
@@ -128,20 +121,26 @@ struct ActivityGridView: View {
         )
     }
 
-    private func activityForHour(hour: Int, daysAgo: Int) -> HourActivity? {
-        // Calculate the hour_start timestamp for this cell (using cached todayStart)
+    private static func computeTodayStart() -> UInt64 {
+        let now = UInt64(Date().timeIntervalSince1970)
+        let secondsPerDay: UInt64 = 86400
+        return (now / secondsPerDay) * secondsPerDay
+    }
+
+    private static func activityForHour(hour: Int, daysAgo: Int, todayStart: UInt64, lookup: [UInt64: HourActivity]) -> HourActivity? {
+        // Calculate the hour_start timestamp for this cell
         let secondsPerDay: UInt64 = 86400
         let secondsPerHour: UInt64 = 3600
-        let dayStart = Self.todayStart - (UInt64(daysAgo) * secondsPerDay)
+        let dayStart = todayStart - (UInt64(daysAgo) * secondsPerDay)
         let hourStart = dayStart + (UInt64(hour) * secondsPerHour)
 
         // O(1) lookup instead of O(n) linear search
-        return activityLookup[hourStart]
+        return lookup[hourStart]
     }
 
-    private func dayLabel(for dayOffset: Int) -> String {
+    private func dayLabel(for dayOffset: Int, todayStart: UInt64) -> String {
         let secondsPerDay: UInt64 = 86400
-        let dayStart = Self.todayStart - (UInt64(dayOffset) * secondsPerDay)
+        let dayStart = todayStart - (UInt64(dayOffset) * secondsPerDay)
 
         let date = Date(timeIntervalSince1970: TimeInterval(dayStart))
         // Use cached formatter

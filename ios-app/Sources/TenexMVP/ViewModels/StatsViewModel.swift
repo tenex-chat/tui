@@ -1,5 +1,4 @@
 import Foundation
-import Combine
 
 /// ViewModel for Stats tab with full TUI parity
 /// Manages stats data fetching, chart state, and tab selection
@@ -37,13 +36,16 @@ class StatsViewModel: ObservableObject {
         error = nil
 
         do {
+            // Capture core before detaching to avoid actor isolation violation
+            let core = coreManager.core
+
             // Move FFI calls off main actor to prevent UI blocking
-            let fetchedSnapshot = await Task.detached {
+            let fetchedSnapshot = await Task.detached { [core] in
                 // Refresh core data first (pull latest from relays)
-                _ = self.coreManager.core.refresh()
+                _ = core.refresh()
 
                 // Fetch stats snapshot (single batched call)
-                return try self.coreManager.core.getStatsSnapshot()
+                return try core.getStatsSnapshot()
             }.value
 
             // Update UI on main actor
@@ -105,6 +107,14 @@ extension StatsSnapshot {
         }
     }
 
+    /// Cached date formatter for day labels (performance optimization)
+    private static let dayLabelFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        return formatter
+    }()
+
     /// Format a day_start timestamp as a date label ("Today", "Yest.", "Jan 27")
     static func formatDayLabel(_ dayStart: UInt64, todayStart: UInt64) -> String {
         let secondsPerDay: UInt64 = 86400
@@ -116,12 +126,9 @@ extension StatsSnapshot {
         case 1:
             return "Yest."
         default:
-            // Format as "Mon DD"
+            // Format as "MMM d" using cached formatter
             let date = Date(timeIntervalSince1970: TimeInterval(dayStart))
-            let formatter = DateFormatter()
-            formatter.dateFormat = "MMM d"
-            formatter.timeZone = TimeZone(identifier: "UTC")
-            return formatter.string(from: date)
+            return dayLabelFormatter.string(from: date)
         }
     }
 
