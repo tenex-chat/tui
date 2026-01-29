@@ -187,7 +187,7 @@ struct UserHeaderView: View {
 
     private var truncatedNpub: String {
         guard npub.count > 20 else { return npub }
-        let prefix = npub.prefix(12)
+        let prefix = npub.prefix(pubkeyDisplayPrefixLength)
         let suffix = npub.suffix(8)
         return "\(prefix)...\(suffix)"
     }
@@ -284,13 +284,9 @@ struct ProjectRowView: View {
         .padding(.vertical, 8)
     }
 
-    /// Deterministic color using SHA-256 hash (stable across app launches)
+    /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal]
-        let data = Data(project.id.utf8)
-        let hash = SHA256.hash(data: data)
-        let firstByte = hash.withUnsafeBytes { $0[0] }
-        return colors[Int(firstByte) % colors.count]
+        deterministicColor(for: project.id)
     }
 }
 
