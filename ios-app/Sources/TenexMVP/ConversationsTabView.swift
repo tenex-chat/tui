@@ -8,18 +8,43 @@ struct ConversationsTabView: View {
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
     @State private var showDiagnostics = false
+    @State private var showStats = false
+    @State private var showArchived = false
     @State private var selectedConversation: ConversationFullInfo?
 
-    /// Filtered conversations based on selected projects
+    /// Formatted runtime text for the toolbar button
+    private var runtimeText: String {
+        let totalMs = coreManager.core.getTotalRuntimeMs()
+        let totalMinutes = Double(totalMs) / 60_000.0
+        if totalMinutes >= 60.0 {
+            // Show hours with 2 decimal places (e.g., "1.35h")
+            let hours = totalMinutes / 60.0
+            return String(format: "%.2fh", hours)
+        } else {
+            // Show minutes as integer (e.g., "42m")
+            return "\(Int(totalMinutes))m"
+        }
+    }
+
+    /// Filtered conversations based on selected projects and archived status
     private var filteredConversations: [ConversationFullInfo] {
-        if selectedProjectIds.isEmpty {
-            return coreManager.conversations
+        var conversations = coreManager.conversations
+
+        // Filter by archived status
+        if !showArchived {
+            conversations = conversations.filter { !$0.isArchived }
         }
-        return coreManager.conversations.filter { conv in
-            // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
-            let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
-            return selectedProjectIds.contains(projectId)
+
+        // Filter by selected projects
+        if !selectedProjectIds.isEmpty {
+            conversations = conversations.filter { conv in
+                // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
+                let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+                return selectedProjectIds.contains(projectId)
+            }
         }
+
+        return conversations
     }
 
     /// Root conversations (no parent or orphaned) sorted by effective last activity
@@ -89,13 +114,27 @@ struct ConversationsTabView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button(action: { showDiagnostics = true }) {
-                            Label("Diagnostics", systemImage: "gauge.with.needle")
+                    HStack(spacing: 12) {
+                        Button(action: { showStats = true }) {
+                            Text(runtimeText)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(.secondary)
                         }
-                    } label: {
-                        Image(systemName: "person.circle")
-                            .font(.title3)
+                        Menu {
+                            Toggle(isOn: $showArchived) {
+                                Label("Show Archived", systemImage: "archivebox")
+                            }
+
+                            Divider()
+
+                            Button(action: { showDiagnostics = true }) {
+                                Label("Diagnostics", systemImage: "gauge.with.needle")
+                            }
+                        } label: {
+                            Image(systemName: "person.circle")
+                                .font(.title3)
+                        }
                     }
                 }
             }
@@ -111,6 +150,9 @@ struct ConversationsTabView: View {
             }
             .sheet(isPresented: $showDiagnostics) {
                 DiagnosticsView(coreManager: coreManager)
+            }
+            .sheet(isPresented: $showStats) {
+                StatsView(coreManager: coreManager)
             }
         }
     }

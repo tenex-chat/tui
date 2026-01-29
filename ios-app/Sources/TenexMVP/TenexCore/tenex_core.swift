@@ -600,7 +600,15 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns 0 if the conversation is not found or has no runtime data.
      */
     func getConversationRuntimeMs(conversationId: String)  -> UInt64
-    
+
+    /**
+     * Get total aggregated LLM runtime across all conversations (in milliseconds).
+     * Only includes conversations created after the runtime cutoff timestamp.
+     * Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
+     * Returns 0 if store is not initialized.
+     */
+    func getTotalRuntimeMs()  -> UInt64
+
     /**
      * Get conversations for a project.
      *
@@ -610,11 +618,24 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getConversations(projectId: String)  -> [ConversationInfo]
     
     /**
+     * Get conversations by their IDs.
+     * Returns ConversationFullInfo for each conversation ID that exists.
+     * Conversations that don't exist are silently skipped.
+     */
+    func getConversationsByIds(conversationIds: [String])  -> [ConversationFullInfo]
+    
+    /**
      * Get information about the currently logged-in user.
      *
      * Returns None if not logged in.
      */
     func getCurrentUser()  -> UserInfo?
+    
+    /**
+     * Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
+     * Returns empty Vec if no descendants exist or if the conversation is not found.
+     */
+    func getDescendantConversationIds(conversationId: String)  -> [String]
     
     /**
      * Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.
@@ -942,7 +963,20 @@ open func getConversationRuntimeMs(conversationId: String) -> UInt64  {
     )
 })
 }
-    
+
+    /**
+     * Get total aggregated LLM runtime across all conversations (in milliseconds).
+     * Only includes conversations created after the runtime cutoff timestamp.
+     * Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
+     * Returns 0 if store is not initialized.
+     */
+open func getTotalRuntimeMs() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_total_runtime_ms(self.uniffiClonePointer(),$0
+    )
+})
+}
+
     /**
      * Get conversations for a project.
      *
@@ -958,6 +992,19 @@ open func getConversations(projectId: String) -> [ConversationInfo]  {
 }
     
     /**
+     * Get conversations by their IDs.
+     * Returns ConversationFullInfo for each conversation ID that exists.
+     * Conversations that don't exist are silently skipped.
+     */
+open func getConversationsByIds(conversationIds: [String]) -> [ConversationFullInfo]  {
+    return try!  FfiConverterSequenceTypeConversationFullInfo.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_conversations_by_ids(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(conversationIds),$0
+    )
+})
+}
+    
+    /**
      * Get information about the currently logged-in user.
      *
      * Returns None if not logged in.
@@ -965,6 +1012,18 @@ open func getConversations(projectId: String) -> [ConversationInfo]  {
 open func getCurrentUser() -> UserInfo?  {
     return try!  FfiConverterOptionTypeUserInfo.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_current_user(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
+     * Returns empty Vec if no descendants exist or if the conversation is not found.
+     */
+open func getDescendantConversationIds(conversationId: String) -> [String]  {
+    return try!  FfiConverterSequenceString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_descendant_conversation_ids(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
     )
 })
 }
@@ -5713,7 +5772,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_conversations() != 60701) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_conversations_by_ids() != 22126) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_current_user() != 48890) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_descendant_conversation_ids() != 50389) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_diagnostics_snapshot() != 40427) {
