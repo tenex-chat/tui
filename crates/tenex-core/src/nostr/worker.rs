@@ -215,6 +215,9 @@ pub struct NostrWorker {
     negentropy_stats: SharedNegentropySyncStats,
     /// Pubkeys for which we've already requested kind:0 profiles
     requested_profiles: Arc<RwLock<HashSet<String>>>,
+    /// Project a_tags for which we've already subscribed to messages
+    /// This prevents duplicate subscriptions when projects are rediscovered
+    subscribed_projects: Arc<RwLock<HashSet<String>>>,
     /// Cancellation token sender - signals background tasks to stop on disconnect
     cancel_tx: Option<watch::Sender<bool>>,
 }
@@ -240,6 +243,7 @@ impl NostrWorker {
             subscription_stats,
             negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
+            subscribed_projects: Arc::new(RwLock::new(HashSet::new())),
             cancel_tx: None,
         }
     }
@@ -587,6 +591,14 @@ impl NostrWorker {
         if !project_atags.is_empty() {
             tlog!("CONN", "Setting up subscriptions for {} existing projects", project_atags.len());
 
+            // Mark these projects as subscribed so we don't duplicate later
+            {
+                let mut subscribed = self.subscribed_projects.write().unwrap();
+                for a_tag in &project_atags {
+                    subscribed.insert(a_tag.clone());
+                }
+            }
+
             for project_a_tag in &project_atags {
                 // Extract project name for description
                 let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
@@ -657,6 +669,7 @@ impl NostrWorker {
         let subscription_stats = self.subscription_stats.clone();
         let data_tx = self.data_tx.clone();
         let requested_profiles = self.requested_profiles.clone();
+        let subscribed_projects = self.subscribed_projects.clone();
         let mut cancel_rx = self.cancel_tx.as_ref()
             .expect("spawn_notification_handler called before cancel_tx initialized")
             .subscribe();
@@ -730,6 +743,55 @@ impl NostrWorker {
                                                     tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
                                                 } else {
                                                     debug_log(&format!("Subscribed to profile for author {}", &author_hex[..8]));
+                                                }
+                                            }
+                                        }
+
+                                        // For kind:31933 (project), immediately subscribe to its messages
+                                        // This fixes iOS connectivity where projects are discovered after initial subscriptions
+                                        if kind == 31933 {
+                                            // Extract d-tag to build the a_tag (kind:pubkey:d_tag format)
+                                            if let Some(d_tag) = event.tags.iter()
+                                                .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::D)))
+                                                .and_then(|t| t.content())
+                                            {
+                                                let a_tag = format!("31933:{}:{}", event.pubkey.to_hex(), d_tag);
+                                                let should_subscribe = {
+                                                    let projects = subscribed_projects.read().unwrap();
+                                                    !projects.contains(&a_tag)
+                                                };
+                                                if should_subscribe {
+                                                    {
+                                                        let mut projects = subscribed_projects.write().unwrap();
+                                                        projects.insert(a_tag.clone());
+                                                    }
+                                                    // Extract project name from d-tag for logging
+                                                    let project_name = d_tag.split(':').last().unwrap_or(d_tag);
+                                                    tlog!("CONN", "New project discovered: {}, subscribing to messages", project_name);
+
+                                                    // Subscribe to metadata (kind:513)
+                                                    let metadata_filter = Filter::new()
+                                                        .kind(Kind::Custom(513))
+                                                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![a_tag.clone()]);
+                                                    if let Err(e) = client.subscribe(vec![metadata_filter], None).await {
+                                                        tlog!("ERROR", "Failed to subscribe to metadata for {}: {}", project_name, e);
+                                                    }
+
+                                                    // Subscribe to messages (kind:1)
+                                                    let message_filter = Filter::new()
+                                                        .kind(Kind::from(1))
+                                                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![a_tag.clone()]);
+                                                    if let Err(e) = client.subscribe(vec![message_filter], None).await {
+                                                        tlog!("ERROR", "Failed to subscribe to messages for {}: {}", project_name, e);
+                                                    }
+
+                                                    // Subscribe to reports (kind:30023)
+                                                    let report_filter = Filter::new()
+                                                        .kind(Kind::Custom(30023))
+                                                        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![a_tag.clone()]);
+                                                    if let Err(e) = client.subscribe(vec![report_filter], None).await {
+                                                        tlog!("ERROR", "Failed to subscribe to reports for {}: {}", project_name, e);
+                                                    }
                                                 }
                                             }
                                         }
@@ -1390,6 +1452,14 @@ impl NostrWorker {
             let mut profiles = self.requested_profiles.write().unwrap();
             profiles.clear();
             tlog!("CONN", "Cleared requested_profiles");
+        }
+
+        // Clear subscribed_projects so new sessions start fresh
+        // This ensures projects will be re-subscribed on reconnect
+        {
+            let mut projects = self.subscribed_projects.write().unwrap();
+            projects.clear();
+            tlog!("CONN", "Cleared subscribed_projects");
         }
 
         self.client = None;
