@@ -600,15 +600,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns 0 if the conversation is not found or has no runtime data.
      */
     func getConversationRuntimeMs(conversationId: String)  -> UInt64
-
-    /**
-     * Get total aggregated LLM runtime across all conversations (in milliseconds).
-     * Only includes conversations created after the runtime cutoff timestamp.
-     * Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
-     * Returns 0 if store is not initialized.
-     */
-    func getTotalRuntimeMs()  -> UInt64
-
+    
     /**
      * Get conversations for a project.
      *
@@ -661,6 +653,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getMessages(conversationId: String)  -> [MessageInfo]
     
     /**
+     * Get the display name for a pubkey.
+     * Returns the profile name if available, otherwise formats the pubkey as npub.
+     */
+    func getProfileName(pubkey: String)  -> String
+    
+    /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
      * Returns the picture URL if the profile exists and has a picture set.
@@ -696,6 +694,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns Result to distinguish "no data" from "core error".
      */
     func getStatsSnapshot() throws  -> StatsSnapshot
+    
+    /**
+     * Get today's LLM runtime for statusbar display (in milliseconds).
+     * Includes today's confirmed runtime + estimated runtime from active agents.
+     * This matches exactly what the TUI statusbar shows.
+     * Returns 0 if store is not initialized.
+     */
+    func getTodayRuntimeMs()  -> UInt64
     
     /**
      * Initialize the core. Must be called before other operations.
@@ -963,20 +969,7 @@ open func getConversationRuntimeMs(conversationId: String) -> UInt64  {
     )
 })
 }
-
-    /**
-     * Get total aggregated LLM runtime across all conversations (in milliseconds).
-     * Only includes conversations created after the runtime cutoff timestamp.
-     * Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
-     * Returns 0 if store is not initialized.
-     */
-open func getTotalRuntimeMs() -> UInt64  {
-    return try!  FfiConverterUInt64.lift(try! rustCall() {
-    uniffi_tenex_core_fn_method_tenexcore_get_total_runtime_ms(self.uniffiClonePointer(),$0
-    )
-})
-}
-
+    
     /**
      * Get conversations for a project.
      *
@@ -1069,6 +1062,18 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
 }
     
     /**
+     * Get the display name for a pubkey.
+     * Returns the profile name if available, otherwise formats the pubkey as npub.
+     */
+open func getProfileName(pubkey: String) -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_profile_name(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),$0
+    )
+})
+}
+    
+    /**
      * Get profile picture URL for a pubkey from kind:0 metadata.
      *
      * Returns the picture URL if the profile exists and has a picture set.
@@ -1128,6 +1133,19 @@ open func getReports(projectId: String) -> [ReportInfo]  {
 open func getStatsSnapshot()throws  -> StatsSnapshot  {
     return try  FfiConverterTypeStatsSnapshot_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_stats_snapshot(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get today's LLM runtime for statusbar display (in milliseconds).
+     * Includes today's confirmed runtime + estimated runtime from active agents.
+     * This matches exactly what the TUI statusbar shows.
+     * Returns 0 if store is not initialized.
+     */
+open func getTodayRuntimeMs() -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_today_runtime_ms(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1790,6 +1808,10 @@ public struct ConversationFullInfo {
      */
     public var author: String
     /**
+     * Author's public key (hex) for profile lookups
+     */
+    public var authorPubkey: String
+    /**
      * Brief summary or first line of content
      */
     public var summary: String?
@@ -1851,6 +1873,9 @@ public struct ConversationFullInfo {
          * Agent or user who started the conversation
          */author: String, 
         /**
+         * Author's public key (hex) for profile lookups
+         */authorPubkey: String, 
+        /**
          * Brief summary or first line of content
          */summary: String?, 
         /**
@@ -1889,6 +1914,7 @@ public struct ConversationFullInfo {
         self.id = id
         self.title = title
         self.author = author
+        self.authorPubkey = authorPubkey
         self.summary = summary
         self.messageCount = messageCount
         self.lastActivity = lastActivity
@@ -1918,6 +1944,9 @@ extension ConversationFullInfo: Equatable, Hashable {
             return false
         }
         if lhs.author != rhs.author {
+            return false
+        }
+        if lhs.authorPubkey != rhs.authorPubkey {
             return false
         }
         if lhs.summary != rhs.summary {
@@ -1963,6 +1992,7 @@ extension ConversationFullInfo: Equatable, Hashable {
         hasher.combine(id)
         hasher.combine(title)
         hasher.combine(author)
+        hasher.combine(authorPubkey)
         hasher.combine(summary)
         hasher.combine(messageCount)
         hasher.combine(lastActivity)
@@ -1990,6 +2020,7 @@ public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
                 id: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 author: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
                 messageCount: FfiConverterUInt32.read(from: &buf), 
                 lastActivity: FfiConverterUInt64.read(from: &buf), 
@@ -2009,6 +2040,7 @@ public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.id, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.author, into: &buf)
+        FfiConverterString.write(value.authorPubkey, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
         FfiConverterUInt32.write(value.messageCount, into: &buf)
         FfiConverterUInt64.write(value.lastActivity, into: &buf)
@@ -3194,6 +3226,10 @@ public struct MessageInfo {
      */
     public var qTags: [String]
     /**
+     * P-tags (mentions) - pubkeys this message mentions/delegates to
+     */
+    public var pTags: [String]
+    /**
      * Ask event data if this message contains an ask (inline ask)
      */
     public var askEvent: AskEventInfo?
@@ -3230,6 +3266,9 @@ public struct MessageInfo {
          * Q-tags pointing to referenced events (delegation targets, ask events, etc.)
          */qTags: [String], 
         /**
+         * P-tags (mentions) - pubkeys this message mentions/delegates to
+         */pTags: [String], 
+        /**
          * Ask event data if this message contains an ask (inline ask)
          */askEvent: AskEventInfo?, 
         /**
@@ -3243,6 +3282,7 @@ public struct MessageInfo {
         self.isToolCall = isToolCall
         self.role = role
         self.qTags = qTags
+        self.pTags = pTags
         self.askEvent = askEvent
         self.toolName = toolName
     }
@@ -3279,6 +3319,9 @@ extension MessageInfo: Equatable, Hashable {
         if lhs.qTags != rhs.qTags {
             return false
         }
+        if lhs.pTags != rhs.pTags {
+            return false
+        }
         if lhs.askEvent != rhs.askEvent {
             return false
         }
@@ -3297,6 +3340,7 @@ extension MessageInfo: Equatable, Hashable {
         hasher.combine(isToolCall)
         hasher.combine(role)
         hasher.combine(qTags)
+        hasher.combine(pTags)
         hasher.combine(askEvent)
         hasher.combine(toolName)
     }
@@ -3319,6 +3363,7 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
                 isToolCall: FfiConverterBool.read(from: &buf), 
                 role: FfiConverterString.read(from: &buf), 
                 qTags: FfiConverterSequenceString.read(from: &buf), 
+                pTags: FfiConverterSequenceString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEventInfo.read(from: &buf), 
                 toolName: FfiConverterOptionString.read(from: &buf)
         )
@@ -3333,6 +3378,7 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
         FfiConverterBool.write(value.isToolCall, into: &buf)
         FfiConverterString.write(value.role, into: &buf)
         FfiConverterSequenceString.write(value.qTags, into: &buf)
+        FfiConverterSequenceString.write(value.pTags, into: &buf)
         FfiConverterOptionTypeAskEventInfo.write(value.askEvent, into: &buf)
         FfiConverterOptionString.write(value.toolName, into: &buf)
     }
@@ -3379,13 +3425,21 @@ public struct NegentropySyncDiagnostics {
      */
     public var successfulSyncs: UInt64
     /**
-     * Number of failed syncs
+     * Number of failed syncs (actual errors, not unsupported relays)
      */
     public var failedSyncs: UInt64
+    /**
+     * Number of syncs where relay didn't support negentropy
+     */
+    public var unsupportedSyncs: UInt64
     /**
      * Total events reconciled
      */
     public var totalEventsReconciled: UInt64
+    /**
+     * Recent sync results (last 20)
+     */
+    public var recentResults: [SyncResultDiagnostic]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3406,18 +3460,26 @@ public struct NegentropySyncDiagnostics {
          * Number of successful syncs
          */successfulSyncs: UInt64, 
         /**
-         * Number of failed syncs
+         * Number of failed syncs (actual errors, not unsupported relays)
          */failedSyncs: UInt64, 
         /**
+         * Number of syncs where relay didn't support negentropy
+         */unsupportedSyncs: UInt64, 
+        /**
          * Total events reconciled
-         */totalEventsReconciled: UInt64) {
+         */totalEventsReconciled: UInt64, 
+        /**
+         * Recent sync results (last 20)
+         */recentResults: [SyncResultDiagnostic]) {
         self.enabled = enabled
         self.currentIntervalSecs = currentIntervalSecs
         self.secondsSinceLastCycle = secondsSinceLastCycle
         self.syncInProgress = syncInProgress
         self.successfulSyncs = successfulSyncs
         self.failedSyncs = failedSyncs
+        self.unsupportedSyncs = unsupportedSyncs
         self.totalEventsReconciled = totalEventsReconciled
+        self.recentResults = recentResults
     }
 }
 
@@ -3446,7 +3508,13 @@ extension NegentropySyncDiagnostics: Equatable, Hashable {
         if lhs.failedSyncs != rhs.failedSyncs {
             return false
         }
+        if lhs.unsupportedSyncs != rhs.unsupportedSyncs {
+            return false
+        }
         if lhs.totalEventsReconciled != rhs.totalEventsReconciled {
+            return false
+        }
+        if lhs.recentResults != rhs.recentResults {
             return false
         }
         return true
@@ -3459,7 +3527,9 @@ extension NegentropySyncDiagnostics: Equatable, Hashable {
         hasher.combine(syncInProgress)
         hasher.combine(successfulSyncs)
         hasher.combine(failedSyncs)
+        hasher.combine(unsupportedSyncs)
         hasher.combine(totalEventsReconciled)
+        hasher.combine(recentResults)
     }
 }
 
@@ -3478,7 +3548,9 @@ public struct FfiConverterTypeNegentropySyncDiagnostics: FfiConverterRustBuffer 
                 syncInProgress: FfiConverterBool.read(from: &buf), 
                 successfulSyncs: FfiConverterUInt64.read(from: &buf), 
                 failedSyncs: FfiConverterUInt64.read(from: &buf), 
-                totalEventsReconciled: FfiConverterUInt64.read(from: &buf)
+                unsupportedSyncs: FfiConverterUInt64.read(from: &buf), 
+                totalEventsReconciled: FfiConverterUInt64.read(from: &buf), 
+                recentResults: FfiConverterSequenceTypeSyncResultDiagnostic.read(from: &buf)
         )
     }
 
@@ -3489,7 +3561,9 @@ public struct FfiConverterTypeNegentropySyncDiagnostics: FfiConverterRustBuffer 
         FfiConverterBool.write(value.syncInProgress, into: &buf)
         FfiConverterUInt64.write(value.successfulSyncs, into: &buf)
         FfiConverterUInt64.write(value.failedSyncs, into: &buf)
+        FfiConverterUInt64.write(value.unsupportedSyncs, into: &buf)
         FfiConverterUInt64.write(value.totalEventsReconciled, into: &buf)
+        FfiConverterSequenceTypeSyncResultDiagnostic.write(value.recentResults, into: &buf)
     }
 }
 
@@ -4455,6 +4529,133 @@ public func FfiConverterTypeSubscriptionDiagnostics_lift(_ buf: RustBuffer) thro
 #endif
 public func FfiConverterTypeSubscriptionDiagnostics_lower(_ value: SubscriptionDiagnostics) -> RustBuffer {
     return FfiConverterTypeSubscriptionDiagnostics.lower(value)
+}
+
+
+/**
+ * Result of a single negentropy sync operation (for diagnostics)
+ */
+public struct SyncResultDiagnostic {
+    /**
+     * Event kind label (e.g., "31933", "4199")
+     */
+    public var kindLabel: String
+    /**
+     * Number of new events received
+     */
+    public var eventsReceived: UInt64
+    /**
+     * Status: "ok", "unsupported", or "failed"
+     */
+    public var status: String
+    /**
+     * Error message if failed
+     */
+    public var error: String?
+    /**
+     * Seconds ago this sync completed
+     */
+    public var secondsAgo: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event kind label (e.g., "31933", "4199")
+         */kindLabel: String, 
+        /**
+         * Number of new events received
+         */eventsReceived: UInt64, 
+        /**
+         * Status: "ok", "unsupported", or "failed"
+         */status: String, 
+        /**
+         * Error message if failed
+         */error: String?, 
+        /**
+         * Seconds ago this sync completed
+         */secondsAgo: UInt64) {
+        self.kindLabel = kindLabel
+        self.eventsReceived = eventsReceived
+        self.status = status
+        self.error = error
+        self.secondsAgo = secondsAgo
+    }
+}
+
+#if compiler(>=6)
+extension SyncResultDiagnostic: Sendable {}
+#endif
+
+
+extension SyncResultDiagnostic: Equatable, Hashable {
+    public static func ==(lhs: SyncResultDiagnostic, rhs: SyncResultDiagnostic) -> Bool {
+        if lhs.kindLabel != rhs.kindLabel {
+            return false
+        }
+        if lhs.eventsReceived != rhs.eventsReceived {
+            return false
+        }
+        if lhs.status != rhs.status {
+            return false
+        }
+        if lhs.error != rhs.error {
+            return false
+        }
+        if lhs.secondsAgo != rhs.secondsAgo {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(kindLabel)
+        hasher.combine(eventsReceived)
+        hasher.combine(status)
+        hasher.combine(error)
+        hasher.combine(secondsAgo)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSyncResultDiagnostic: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SyncResultDiagnostic {
+        return
+            try SyncResultDiagnostic(
+                kindLabel: FfiConverterString.read(from: &buf), 
+                eventsReceived: FfiConverterUInt64.read(from: &buf), 
+                status: FfiConverterString.read(from: &buf), 
+                error: FfiConverterOptionString.read(from: &buf), 
+                secondsAgo: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SyncResultDiagnostic, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.kindLabel, into: &buf)
+        FfiConverterUInt64.write(value.eventsReceived, into: &buf)
+        FfiConverterString.write(value.status, into: &buf)
+        FfiConverterOptionString.write(value.error, into: &buf)
+        FfiConverterUInt64.write(value.secondsAgo, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncResultDiagnostic_lift(_ buf: RustBuffer) throws -> SyncResultDiagnostic {
+    return try FfiConverterTypeSyncResultDiagnostic.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSyncResultDiagnostic_lower(_ value: SyncResultDiagnostic) -> RustBuffer {
+    return FfiConverterTypeSyncResultDiagnostic.lower(value)
 }
 
 
@@ -5686,6 +5887,31 @@ fileprivate struct FfiConverterSequenceTypeSubscriptionDiagnostics: FfiConverter
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeSyncResultDiagnostic: FfiConverterRustBuffer {
+    typealias SwiftType = [SyncResultDiagnostic]
+
+    public static func write(_ value: [SyncResultDiagnostic], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSyncResultDiagnostic.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SyncResultDiagnostic] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SyncResultDiagnostic]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSyncResultDiagnostic.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeTopConversation: FfiConverterRustBuffer {
     typealias SwiftType = [TopConversation]
 
@@ -5790,6 +6016,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_name() != 48278) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -5803,6 +6032,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot() != 9826) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_today_runtime_ms() != 32729) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_init() != 15244) {

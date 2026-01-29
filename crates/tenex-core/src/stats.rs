@@ -439,11 +439,12 @@ impl NegentropySyncStats {
 
     /// Record a failed sync
     pub fn record_failure(&mut self, kind_label: &str, error: &str, is_unsupported: bool) {
-        self.failed_syncs += 1;
         let status = if is_unsupported {
+            // Unsupported relays are tracked separately, not as failures
             self.unsupported_syncs += 1;
             NegentropySyncStatus::Unsupported
         } else {
+            self.failed_syncs += 1;
             NegentropySyncStatus::Failed
         };
         self.last_filter_sync_at = Some(Instant::now());

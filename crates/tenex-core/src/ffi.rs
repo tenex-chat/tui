@@ -170,6 +170,8 @@ pub struct ConversationFullInfo {
     pub title: String,
     /// Agent or user who started the conversation
     pub author: String,
+    /// Author's public key (hex) for profile lookups
+    pub author_pubkey: String,
     /// Brief summary or first line of content
     pub summary: Option<String>,
     /// Number of messages in the thread
@@ -286,6 +288,8 @@ pub struct MessageInfo {
     pub role: String,
     /// Q-tags pointing to referenced events (delegation targets, ask events, etc.)
     pub q_tags: Vec<String>,
+    /// P-tags (mentions) - pubkeys this message mentions/delegates to
+    pub p_tags: Vec<String>,
     /// Ask event data if this message contains an ask (inline ask)
     pub ask_event: Option<AskEventInfo>,
     /// Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
@@ -526,6 +530,21 @@ pub struct SubscriptionDiagnostics {
     pub age_secs: u64,
 }
 
+/// Result of a single negentropy sync operation (for diagnostics)
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SyncResultDiagnostic {
+    /// Event kind label (e.g., "31933", "4199")
+    pub kind_label: String,
+    /// Number of new events received
+    pub events_received: u64,
+    /// Status: "ok", "unsupported", or "failed"
+    pub status: String,
+    /// Error message if failed
+    pub error: Option<String>,
+    /// Seconds ago this sync completed
+    pub seconds_ago: u64,
+}
+
 /// Negentropy sync status for the diagnostics view
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct NegentropySyncDiagnostics {
@@ -539,10 +558,14 @@ pub struct NegentropySyncDiagnostics {
     pub sync_in_progress: bool,
     /// Number of successful syncs
     pub successful_syncs: u64,
-    /// Number of failed syncs
+    /// Number of failed syncs (actual errors, not unsupported relays)
     pub failed_syncs: u64,
+    /// Number of syncs where relay didn't support negentropy
+    pub unsupported_syncs: u64,
     /// Total events reconciled
     pub total_events_reconciled: u64,
+    /// Recent sync results (last 20)
+    pub recent_results: Vec<SyncResultDiagnostic>,
 }
 
 /// System diagnostics information
@@ -987,6 +1010,22 @@ impl TenexCore {
         Ok(store.get_profile_picture(&pubkey))
     }
 
+    /// Get the display name for a pubkey.
+    /// Returns the profile name if available, otherwise formats the pubkey as npub.
+    pub fn get_profile_name(&self, pubkey: String) -> String {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return pubkey,
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return pubkey,
+        };
+
+        store.get_profile_name(&pubkey)
+    }
+
     /// Check if a user is currently logged in.
     /// Returns true only if we have stored keys.
     pub fn is_logged_in(&self) -> bool {
@@ -1265,6 +1304,7 @@ impl TenexCore {
                     id: thread.id.clone(),
                     title: thread.title.clone(),
                     author: author_name,
+                    author_pubkey: thread.pubkey.clone(),
                     summary: thread.summary.clone(),
                     message_count,
                     last_activity: thread.last_activity,
@@ -1374,6 +1414,7 @@ impl TenexCore {
                     is_tool_call: m.tool_name.is_some(),
                     role,
                     q_tags: m.q_tags.clone(),
+                    p_tags: m.p_tags.clone(),
                     ask_event,
                     tool_name: m.tool_name.clone(),
                 }
@@ -1593,6 +1634,7 @@ impl TenexCore {
                     id: thread.id.clone(),
                     title: thread.title.clone(),
                     author: author_name,
+                    author_pubkey: thread.pubkey.clone(),
                     summary: thread.summary.clone(),
                     message_count,
                     last_activity: thread.last_activity,
@@ -2350,6 +2392,8 @@ impl TenexCore {
 
     /// Collect negentropy sync diagnostics
     fn collect_sync_diagnostics(&self) -> Result<NegentropySyncDiagnostics, String> {
+        use crate::stats::NegentropySyncStatus;
+
         let stats_guard = self.negentropy_stats.read()
             .map_err(|_| "Failed to acquire negentropy_stats lock".to_string())?;
 
@@ -2358,6 +2402,21 @@ impl TenexCore {
             let seconds_since_last_cycle = snapshot.last_cycle_time()
                 .map(|t| t.elapsed().as_secs());
 
+            let recent_results: Vec<SyncResultDiagnostic> = snapshot.recent_results
+                .iter()
+                .map(|r| SyncResultDiagnostic {
+                    kind_label: r.kind_label.clone(),
+                    events_received: r.events_received,
+                    status: match r.status {
+                        NegentropySyncStatus::Ok => "ok".to_string(),
+                        NegentropySyncStatus::Unsupported => "unsupported".to_string(),
+                        NegentropySyncStatus::Failed => "failed".to_string(),
+                    },
+                    error: r.error.clone(),
+                    seconds_ago: r.completed_at.elapsed().as_secs(),
+                })
+                .collect();
+
             NegentropySyncDiagnostics {
                 enabled: snapshot.enabled,
                 current_interval_secs: snapshot.current_interval_secs,
@@ -2365,7 +2424,9 @@ impl TenexCore {
                 sync_in_progress: snapshot.sync_in_progress,
                 successful_syncs: snapshot.successful_syncs,
                 failed_syncs: snapshot.failed_syncs,
+                unsupported_syncs: snapshot.unsupported_syncs,
                 total_events_reconciled: snapshot.total_events_reconciled,
+                recent_results,
             }
         } else {
             // No stats available yet - return default
@@ -2376,7 +2437,9 @@ impl TenexCore {
                 sync_in_progress: false,
                 successful_syncs: 0,
                 failed_syncs: 0,
+                unsupported_syncs: 0,
                 total_events_reconciled: 0,
+                recent_results: Vec::new(),
             }
         })
     }

@@ -336,7 +336,9 @@ struct StatusRow: View {
                     syncInProgress: false,
                     successfulSyncs: 42,
                     failedSyncs: 2,
-                    totalEventsReconciled: 1500
+                    unsupportedSyncs: 0,
+                    totalEventsReconciled: 1500,
+                    recentResults: []
                 ),
                 subscriptions: [],
                 totalSubscriptionEvents: 1678,
