@@ -31,16 +31,87 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Cached participating agents
     @Published private(set) var participatingAgents: [String] = []
 
+    // MARK: - Refreshable Metadata
+
+    /// Current status (refreshed periodically)
+    @Published private(set) var currentStatus: String
+
+    /// Current isActive state (refreshed periodically)
+    @Published private(set) var currentIsActive: Bool
+
+    /// Current activity description (refreshed periodically)
+    @Published private(set) var currentActivity: String?
+
+    /// Current effectiveLastActivity (refreshed periodically)
+    @Published private(set) var currentEffectiveLastActivity: UInt64
+
     // MARK: - Dependencies
 
     private let conversation: ConversationFullInfo
     private weak var coreManager: TenexCoreManager?
 
+    /// Timer for periodic metadata refresh
+    private var metadataRefreshTask: Task<Void, Never>?
+
     // MARK: - Initialization
 
-    init(conversation: ConversationFullInfo, coreManager: TenexCoreManager) {
+    /// Initialize with conversation only - coreManager is set later via setCoreManager
+    init(conversation: ConversationFullInfo) {
         self.conversation = conversation
+        // Initialize refreshable metadata from conversation
+        self.currentStatus = conversation.status ?? "unknown"
+        self.currentIsActive = conversation.isActive
+        self.currentActivity = conversation.currentActivity
+        self.currentEffectiveLastActivity = conversation.effectiveLastActivity
+    }
+
+    deinit {
+        metadataRefreshTask?.cancel()
+    }
+
+    /// Sets the core manager after initialization (called from view's onAppear/task)
+    func setCoreManager(_ coreManager: TenexCoreManager) {
+        guard self.coreManager == nil else { return }
         self.coreManager = coreManager
+        startMetadataRefresh()
+    }
+
+    /// Starts periodic metadata refresh for active conversations
+    private func startMetadataRefresh() {
+        metadataRefreshTask?.cancel()
+        metadataRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                // Refresh every 30 seconds
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { break }
+                await self?.refreshMetadata()
+            }
+        }
+    }
+
+    /// Refreshes conversation metadata (status, isActive, activity)
+    private func refreshMetadata() async {
+        guard let coreManager = coreManager else { return }
+
+        // Fetch fresh conversation data
+        let filter = ConversationFilter(
+            projectIds: [conversation.projectATag],
+            showArchived: false,
+            hideScheduled: true,
+            timeFilter: .all
+        )
+
+        let freshConversation: ConversationFullInfo? = await Task {
+            let allConversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
+            return allConversations.first { $0.id == conversation.id }
+        }.value
+
+        if let fresh = freshConversation {
+            self.currentStatus = fresh.status ?? "unknown"
+            self.currentIsActive = fresh.isActive
+            self.currentActivity = fresh.currentActivity
+            self.currentEffectiveLastActivity = fresh.effectiveLastActivity
+        }
     }
 
     // MARK: - Data Loading (Async/Await)
@@ -77,16 +148,14 @@ final class ConversationDetailViewModel: ObservableObject {
         }
     }
 
-    /// Performs the actual data loading
+    /// Performs the actual data loading using structured concurrency for proper cancellation
     private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo]) {
         try Task.checkCancellation()
 
-        // Run synchronous core calls in a detached task to avoid blocking main actor
-        let fetchedMessages = await Task.detached(priority: .userInitiated) {
+        // Use structured Task {} instead of Task.detached to honor parent cancellation
+        async let messagesTask: [MessageInfo] = Task {
             coreManager.core.getMessages(conversationId: conversationId)
         }.value
-
-        try Task.checkCancellation()
 
         let filter = ConversationFilter(
             projectIds: [projectATag],
@@ -95,10 +164,15 @@ final class ConversationDetailViewModel: ObservableObject {
             timeFilter: .all
         )
 
-        let children = await Task.detached(priority: .userInitiated) {
+        async let childrenTask: [ConversationFullInfo] = Task {
             let allConversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
             return allConversations.filter { $0.parentId == conversationId }
         }.value
+
+        // Await both tasks - cancellation will propagate to both
+        let fetchedMessages = await messagesTask
+        try Task.checkCancellation()
+        let children = await childrenTask
 
         return (fetchedMessages, children)
     }
@@ -167,21 +241,23 @@ final class ConversationDetailViewModel: ObservableObject {
 
     /// Computes the effective runtime for the conversation.
     /// Returns the duration between first and last activity, with safe underflow handling.
+    /// Uses min(createdAt) instead of assuming messages are sorted.
     func computeEffectiveRuntime(currentTime: Date) -> TimeInterval {
-        // Get the first activity timestamp from messages or fallback to conversation creation
+        // Get the earliest activity timestamp using min() - don't assume sorted
         let firstActivity: UInt64
-        if let firstMessage = messages.first {
-            firstActivity = firstMessage.createdAt
+        if let earliestMessage = messages.min(by: { $0.createdAt < $1.createdAt }) {
+            firstActivity = earliestMessage.createdAt
         } else {
             // No messages, use lastActivity as both first and last
             firstActivity = conversation.lastActivity
         }
 
-        let lastActivity = conversation.effectiveLastActivity
+        // Use refreshable metadata instead of stale conversation data
+        let lastActivity = currentEffectiveLastActivity
 
         // If active, use current time as the end point
         let endTimestamp: UInt64
-        if conversation.isActive {
+        if currentIsActive {
             endTimestamp = UInt64(currentTime.timeIntervalSince1970)
         } else {
             endTimestamp = lastActivity
