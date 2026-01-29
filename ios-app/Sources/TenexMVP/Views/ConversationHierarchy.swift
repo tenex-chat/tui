@@ -1,6 +1,30 @@
 import SwiftUI
 import CryptoKit
 
+// MARK: - Shared UI Constants
+
+/// Maximum number of agent avatars to display before showing "+N" overflow badge
+let maxVisibleAvatars = 6
+
+/// Length of pubkey prefix to display in truncated form (e.g., in logs and error messages)
+let pubkeyDisplayPrefixLength = 12
+
+// MARK: - Shared Color Utilities
+
+/// Deterministic color selection using SHA-256 hash.
+/// Uses consistent color palette across the app for visual coherence.
+/// - Parameters:
+///   - identifier: The unique identifier to hash (e.g., project ID, pubkey)
+///   - colors: Optional custom color palette (defaults to standard palette)
+/// - Returns: A Color deterministically selected based on the identifier
+func deterministicColor(for identifier: String, from colors: [Color]? = nil) -> Color {
+    let palette = colors ?? [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
+    let data = Data(identifier.utf8)
+    let hash = SHA256.hash(data: data)
+    let firstByte = hash.withUnsafeBytes { $0[0] }
+    return palette[Int(firstByte) % palette.count]
+}
+
 // MARK: - Conversation Hierarchy Data Model
 
 /// Precomputed hierarchy data for efficient conversation tree operations.

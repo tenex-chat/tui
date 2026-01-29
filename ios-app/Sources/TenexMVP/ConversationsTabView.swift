@@ -235,18 +235,18 @@ private struct HierarchyConversationRowOptimized: View {
 
                 // Row 3: Participating agent avatars with profile pictures from kind:0 events
                 HStack(spacing: -8) {
-                    ForEach(aggregatedData.participatingAgentInfos.prefix(6)) { agentInfo in
+                    ForEach(aggregatedData.participatingAgentInfos.prefix(maxVisibleAvatars)) { agentInfo in
                         AgentAvatarWithPicture(agentInfo: agentInfo)
                             .environmentObject(coreManager)
                     }
 
-                    // Show overflow count if more than 6 agents
-                    if aggregatedData.participatingAgentInfos.count > 6 {
+                    // Show overflow count if more than maxVisibleAvatars agents
+                    if aggregatedData.participatingAgentInfos.count > maxVisibleAvatars {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: 24, height: 24)
                             .overlay {
-                                Text("+\(aggregatedData.participatingAgentInfos.count - 6)")
+                                Text("+\(aggregatedData.participatingAgentInfos.count - maxVisibleAvatars)")
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)
@@ -383,16 +383,16 @@ private struct HierarchyConversationRowLegacy: View {
                 }
 
                 HStack(spacing: -8) {
-                    ForEach(participatingAgents.prefix(6), id: \.self) { agent in
+                    ForEach(participatingAgents.prefix(maxVisibleAvatars), id: \.self) { agent in
                         SharedAgentAvatar(agentName: agent)
                     }
 
-                    if participatingAgents.count > 6 {
+                    if participatingAgents.count > maxVisibleAvatars {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: 24, height: 24)
                             .overlay {
-                                Text("+\(participatingAgents.count - 6)")
+                                Text("+\(participatingAgents.count - maxVisibleAvatars)")
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)
@@ -621,13 +621,9 @@ private struct ProjectFilterSheet: View {
         }
     }
 
-    /// Deterministic color using SHA-256 hash (stable across app launches)
+    /// Deterministic color using shared utility (stable across app launches)
     private func projectColor(for project: ProjectInfo) -> Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal]
-        let data = Data(project.id.utf8)
-        let hash = SHA256.hash(data: data)
-        let firstByte = hash.withUnsafeBytes { $0[0] }
-        return colors[Int(firstByte) % colors.count]
+        deterministicColor(for: project.id)
     }
 }
 

@@ -114,7 +114,7 @@ class TenexCoreManager: ObservableObject {
             return pictureUrl
         } catch {
             // Log error for debugging but don't crash - graceful degradation
-            print("[TenexCoreManager] Failed to get profile picture for pubkey '\(pubkey.prefix(12))...': \(error)")
+            print("[TenexCoreManager] Failed to get profile picture for pubkey '\(pubkey.prefix(pubkeyDisplayPrefixLength))...': \(error)")
             // Cache nil to prevent repeated failed calls
             profilePictureCache.store(pubkey, pictureUrl: nil)
             return nil
@@ -134,7 +134,7 @@ class TenexCoreManager: ObservableObject {
                         self?.profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
                     } catch {
                         // Log but don't crash - cache nil to prevent repeated attempts
-                        print("[TenexCoreManager] Prefetch failed for pubkey '\(pubkey.prefix(12))...': \(error)")
+                        print("[TenexCoreManager] Prefetch failed for pubkey '\(pubkey.prefix(pubkeyDisplayPrefixLength))...': \(error)")
                         self?.profilePictureCache.store(pubkey, pictureUrl: nil)
                     }
                 }

@@ -215,13 +215,9 @@ struct ProjectRowSelectView: View {
             )
     }
 
-    /// Deterministic color using SHA-256 hash (stable across app launches)
+    /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
-        let data = Data(project.id.utf8)
-        let hash = SHA256.hash(data: data)
-        let firstByte = hash.withUnsafeBytes { $0[0] }
-        return colors[Int(firstByte) % colors.count]
+        deterministicColor(for: project.id)
     }
 }
 
