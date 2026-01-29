@@ -3,10 +3,17 @@ import Foundation
 /// ViewModel for the Diagnostics tab
 /// Manages diagnostic data fetching from Rust core
 ///
-/// ## Concurrency Strategy (Latest-Wins + Deduplication)
+/// ## Concurrency Strategy (Latest-Wins + Deduplication + Fetch Identity)
 /// - If an in-flight request already covers the new request (includeDB=true covers includeDB=false), ignore new call
-/// - Otherwise, cancel existing task and start fresh
+/// - Otherwise, cancel existing task and start fresh with a new fetchID
+/// - All state mutations (isLoading, error, snapshot, cleanup) are gated by fetchID
+/// - This prevents stale tasks from clobbering state set by newer tasks
 /// - Error state derives from snapshot.sectionErrors (single source of truth)
+///
+/// ## Race Condition Prevention
+/// When Task A is canceled and Task B starts, Task A's completion handlers check
+/// the fetchID before mutating state. If fetchID doesn't match (Task B has a new ID),
+/// Task A skips all state mutations, preventing stale-task state clobbering.
 @MainActor
 class DiagnosticsViewModel: ObservableObject {
     // MARK: - Published Properties
@@ -46,6 +53,12 @@ class DiagnosticsViewModel: ObservableObject {
     /// Used for request deduplication (includeDB=true covers includeDB=false)
     private var currentFetchIncludesDB = false
 
+    /// Unique identifier for the current fetch operation
+    /// Used to prevent stale tasks from clobbering state set by newer tasks
+    /// When Task A is canceled and Task B starts, Task A's completion handlers
+    /// check this ID and skip state mutations if they don't match
+    private var currentFetchID: UUID?
+
     // MARK: - Initialization
 
     init(coreManager: TenexCoreManager) {
@@ -56,9 +69,10 @@ class DiagnosticsViewModel: ObservableObject {
 
     /// Load diagnostics data from Rust core
     ///
-    /// Implements latest-wins + deduplication concurrency strategy:
+    /// Implements latest-wins + deduplication concurrency strategy with fetch identity:
     /// - If in-flight request already covers new request (includeDB=true covers false), ignore new call
-    /// - Otherwise, cancel existing task and start fresh
+    /// - Otherwise, cancel existing task and start fresh with a new fetchID
+    /// - All state mutations are gated by fetchID to prevent stale tasks from clobbering newer state
     ///
     /// - Parameter includeDatabaseStats: Whether to include expensive DB stats (default: based on tab)
     func loadDiagnostics(includeDatabaseStats: Bool? = nil) async {
@@ -75,8 +89,13 @@ class DiagnosticsViewModel: ObservableObject {
 
         // CONCURRENCY: Latest-wins - cancel existing task if new request needs more data
         // Note: This doesn't stop the underlying Rust FFI work (no token support),
-        // but prevents stale results from being applied
+        // but the fetchID check prevents stale results from being applied
         currentFetchTask?.cancel()
+
+        // Generate unique identifier for this fetch operation
+        // This gates ALL state mutations to prevent stale tasks from clobbering state
+        let fetchID = UUID()
+        currentFetchID = fetchID
 
         isLoading = true
         currentFetchIncludesDB = includeDB
@@ -86,9 +105,11 @@ class DiagnosticsViewModel: ObservableObject {
 
         // Create a new cancellable task
         let task = Task { [weak self] in
-            // Use defer to ensure state cleanup on any exit path (prevents state races)
+            // Use defer to ensure state cleanup on any exit path
+            // CRITICAL: Only cleanup if this task is still the current one (fetchID matches)
             defer {
                 Task { @MainActor [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
                     self?.currentFetchTask = nil
                     self?.currentFetchIncludesDB = false
                     // Note: isLoading is set to false in the result handlers below
@@ -118,18 +139,10 @@ class DiagnosticsViewModel: ObservableObject {
                     return core.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
                 }.value
 
-                // CANCELLATION: Guard UI updates - don't apply results if cancelled
+                // IDENTITY CHECK: Guard UI updates - only apply if this is still the current fetch
                 // (The underlying Rust work completed, but we shouldn't show stale data)
-                guard !Task.isCancelled else {
-                    await MainActor.run { [weak self] in
-                        self?.isLoading = false
-                    }
-                    return
-                }
-
-                // Update UI on main actor
-                // Note: sectionErrors derive from snapshot (single source of truth)
                 await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
                     self?.snapshot = fetchedSnapshot
                     self?.error = nil  // Clear any previous error since we have data
                     self?.isLoading = false
@@ -137,13 +150,17 @@ class DiagnosticsViewModel: ObservableObject {
             } catch is CancellationError {
                 // Task was cancelled, reset loading state but don't touch data
                 // Keep last known snapshot (with its errors) until new snapshot succeeds
+                // CRITICAL: Only update state if this task is still the current one
                 await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
                     self?.isLoading = false
                 }
             } catch {
                 // Only set error if we have no snapshot at all
                 // If we have existing data, keep showing it with its errors
+                // CRITICAL: Only update state if this task is still the current one
                 await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
                     if self?.snapshot == nil {
                         self?.error = error
                     }
@@ -165,10 +182,12 @@ class DiagnosticsViewModel: ObservableObject {
     }
 
     /// Cancel any in-flight fetch operation
+    /// Resets fetchID to prevent any stale task completion handlers from updating state
     func cancelFetch() {
         currentFetchTask?.cancel()
         currentFetchTask = nil
         currentFetchIncludesDB = false
+        currentFetchID = nil  // Invalidate any in-flight fetch identity
         isLoading = false
     }
 
