@@ -143,7 +143,7 @@ class TenexCoreManager: ObservableObject {
 
             let filter = ConversationFilter(
                 projectIds: [],
-                showArchived: false,
+                showArchived: true,  // Fetch all, filter in UI
                 hideScheduled: true,
                 timeFilter: .all
             )
@@ -428,11 +428,6 @@ struct MainTabView: View {
                     Label("Projects", systemImage: "folder.fill")
                 }
                 .environmentObject(coreManager)
-
-            StatsView(coreManager: coreManager)
-                .tabItem {
-                    Label("Stats", systemImage: "chart.bar.fill")
-                }
 
             InboxView()
                 .tabItem {

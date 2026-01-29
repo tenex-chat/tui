@@ -1192,6 +1192,97 @@ impl TenexCore {
         store.get_hierarchical_runtime(&conversation_id)
     }
 
+    /// Get total aggregated LLM runtime across all conversations (in milliseconds).
+    /// Only includes conversations created after the runtime cutoff timestamp.
+    /// Each conversation's runtime is counted exactly once (flat aggregation, not hierarchical).
+    /// Returns 0 if store is not initialized.
+    pub fn get_total_runtime_ms(&self) -> u64 {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return 0,
+        };
+
+        store.get_total_unique_runtime()
+    }
+
+    /// Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
+    /// Returns empty Vec if no descendants exist or if the conversation is not found.
+    pub fn get_descendant_conversation_ids(&self, conversation_id: String) -> Vec<String> {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        store.runtime_hierarchy.get_descendants(&conversation_id)
+    }
+
+    /// Get conversations by their IDs.
+    /// Returns ConversationFullInfo for each conversation ID that exists.
+    /// Conversations that don't exist are silently skipped.
+    pub fn get_conversations_by_ids(&self, conversation_ids: Vec<String>) -> Vec<ConversationFullInfo> {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return Vec::new(),
+        };
+        let archived_ids = prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.clone())
+            .unwrap_or_default();
+
+        let mut conversations = Vec::new();
+
+        for conversation_id in conversation_ids {
+            if let Some(thread) = store.get_thread_by_id(&conversation_id) {
+                let message_count = store.get_messages(&conversation_id).len() as u32;
+                let author_name = store.get_profile_name(&thread.pubkey);
+                let has_children = store.runtime_hierarchy.has_children(&thread.id);
+                let is_active = store.is_event_busy(&thread.id);
+                let is_archived = archived_ids.contains(&thread.id);
+
+                let project_a_tag = store.get_project_a_tag_for_thread(&conversation_id).unwrap_or_default();
+
+                conversations.push(ConversationFullInfo {
+                    id: thread.id.clone(),
+                    title: thread.title.clone(),
+                    author: author_name,
+                    summary: thread.summary.clone(),
+                    message_count,
+                    last_activity: thread.last_activity,
+                    effective_last_activity: thread.effective_last_activity,
+                    parent_id: thread.parent_conversation_id.clone(),
+                    status: thread.status_label.clone(),
+                    current_activity: thread.status_current_activity.clone(),
+                    is_active,
+                    is_archived,
+                    has_children,
+                    project_a_tag,
+                    is_scheduled: thread.is_scheduled,
+                });
+            }
+        }
+
+        conversations
+    }
+
     /// Get messages for a conversation.
     pub fn get_messages(&self, conversation_id: String) -> Vec<MessageInfo> {
         let store_guard = match self.store.read() {
