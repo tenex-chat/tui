@@ -98,7 +98,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
             ("i", "Enter edit mode"),
             ("@", "Open agent selector"),
             ("%", "Open branch selector"),
-            ("t", "Toggle todo sidebar"),
+            ("Ctrl+T s", "Toggle sidebar"),
             ("o", "Open first image"),
             ("x", "Close current tab"),
             (".", "Stop agent"),
