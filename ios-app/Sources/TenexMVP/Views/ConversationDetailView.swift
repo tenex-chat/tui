@@ -175,7 +175,7 @@ struct ConversationDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text(reply.content)
+            MarkdownView(content: reply.content)
                 .font(.body)
                 .foregroundStyle(.primary)
                 .textSelection(.enabled)
