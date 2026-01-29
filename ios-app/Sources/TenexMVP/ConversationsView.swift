@@ -276,23 +276,38 @@ private struct OptimizedConversationRow: View {
                     }
                 }
 
-                // Row 3: Participating agent avatars with profile pictures from kind:0 events
-                HStack(spacing: -8) {
-                    ForEach(aggregatedData.participatingAgentInfos.prefix(maxVisibleAvatars)) { agentInfo in
-                        AgentAvatarWithPicture(agentInfo: agentInfo)
+                // Row 3: Author avatar (standalone) + delegation agents (overlapping)
+                HStack(spacing: 0) {
+                    // Author who started the conversation (standalone)
+                    if let authorInfo = aggregatedData.authorInfo {
+                        AgentAvatarView(agentName: authorInfo.name, pubkey: authorInfo.pubkey)
                             .environmentObject(coreManager)
                     }
 
-                    if aggregatedData.participatingAgentInfos.count > maxVisibleAvatars {
-                        Circle()
-                            .fill(Color(.systemGray4))
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Text("+\(aggregatedData.participatingAgentInfos.count - maxVisibleAvatars)")
-                                    .font(.caption2)
-                                    .fontWeight(.medium)
-                                    .foregroundStyle(.secondary)
+                    // Gap between author and delegation agents
+                    if !aggregatedData.delegationAgentInfos.isEmpty {
+                        Spacer()
+                            .frame(width: 12)
+
+                        // Delegation agents (overlapping)
+                        HStack(spacing: -8) {
+                            ForEach(aggregatedData.delegationAgentInfos.prefix(maxVisibleAvatars - 1)) { agentInfo in
+                                AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey)
+                                    .environmentObject(coreManager)
                             }
+
+                            if aggregatedData.delegationAgentInfos.count > maxVisibleAvatars - 1 {
+                                Circle()
+                                    .fill(Color(.systemGray4))
+                                    .frame(width: 24, height: 24)
+                                    .overlay {
+                                        Text("+\(aggregatedData.delegationAgentInfos.count - (maxVisibleAvatars - 1))")
+                                            .font(.caption2)
+                                            .fontWeight(.medium)
+                                            .foregroundStyle(.secondary)
+                                    }
+                            }
+                        }
                     }
 
                     Spacer()

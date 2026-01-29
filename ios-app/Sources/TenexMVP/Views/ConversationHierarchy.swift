@@ -98,26 +98,38 @@ final class ConversationHierarchy {
 
             // Track agent info (name + pubkey) for avatar lookups
             // Use pubkey as unique key to avoid duplicates from same agent
-            var agentInfosByPubkey: [String: AgentAvatarInfo] = [:]
-            agentInfosByPubkey[conversation.authorPubkey] = AgentAvatarInfo(
+            let authorInfo = AgentAvatarInfo(
                 name: conversation.author,
                 pubkey: conversation.authorPubkey
             )
+
+            // Collect delegation agents (descendants only, excluding the author)
+            var delegationAgentsByPubkey: [String: AgentAvatarInfo] = [:]
             for descendant in descendants {
-                agentInfosByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
-                    name: descendant.author,
-                    pubkey: descendant.authorPubkey
-                )
+                // Skip if this is the same agent as the author
+                if descendant.authorPubkey != conversation.authorPubkey {
+                    delegationAgentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                        name: descendant.author,
+                        pubkey: descendant.authorPubkey
+                    )
+                }
             }
 
-            // Sort agent infos by name for consistent display
-            let sortedAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
+            // Sort delegation agents by name for consistent display
+            let sortedDelegationAgents = delegationAgentsByPubkey.values.sorted { $0.name < $1.name }
+
+            // All participating agents (for backward compatibility)
+            var allAgentsByPubkey = delegationAgentsByPubkey
+            allAgentsByPubkey[conversation.authorPubkey] = authorInfo
+            let sortedAgentInfos = allAgentsByPubkey.values.sorted { $0.name < $1.name }
 
             aggregated[conversation.id] = AggregatedConversationData(
                 effectiveLastActivity: effectiveLastActivity,
                 activitySpan: activitySpan,
                 participatingAgents: agentNames.sorted(),
                 participatingAgentInfos: sortedAgentInfos,
+                authorInfo: authorInfo,
+                delegationAgentInfos: sortedDelegationAgents,
                 descendantCount: descendants.count
             )
         }
@@ -198,6 +210,12 @@ struct AggregatedConversationData {
     /// List of participating agents with pubkeys for avatar lookups
     let participatingAgentInfos: [AgentAvatarInfo]
 
+    /// The author who started this conversation (for standalone display)
+    let authorInfo: AgentAvatarInfo?
+
+    /// Agents from delegations only (excludes author, for overlapping display)
+    let delegationAgentInfos: [AgentAvatarInfo]
+
     /// Number of descendant conversations
     let descendantCount: Int
 
@@ -207,6 +225,8 @@ struct AggregatedConversationData {
         activitySpan: 0,
         participatingAgents: [],
         participatingAgentInfos: [],
+        authorInfo: nil,
+        delegationAgentInfos: [],
         descendantCount: 0
     )
 }

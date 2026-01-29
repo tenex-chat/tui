@@ -415,25 +415,64 @@ struct MainTabView: View {
     @Binding var isLoggedIn: Bool
     @EnvironmentObject var coreManager: TenexCoreManager
 
+    @State private var selectedTab = 0
+    @State private var showNewConversation = false
+
     var body: some View {
-        TabView {
-            ConversationsTabView()
-                .tabItem {
-                    Label("Conversations", systemImage: "bubble.left.and.bubble.right.fill")
+        NavigationStack {
+            Group {
+                switch selectedTab {
+                case 0:
+                    ConversationsTabView()
+                case 1:
+                    ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
+                case 2:
+                    InboxView()
+                default:
+                    ConversationsTabView()
                 }
-                .environmentObject(coreManager)
+            }
+            .environmentObject(coreManager)
+            .toolbar {
+                // Left glass segment: Tab buttons
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button {
+                        selectedTab = 0
+                    } label: {
+                        Image(systemName: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                    }
+                    Button {
+                        selectedTab = 1
+                    } label: {
+                        Image(systemName: selectedTab == 1 ? "folder.fill" : "folder")
+                    }
+                    Button {
+                        selectedTab = 2
+                    } label: {
+                        Image(systemName: selectedTab == 2 ? "tray.fill" : "tray")
+                    }
+                }
 
-            ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
-                .tabItem {
-                    Label("Projects", systemImage: "folder.fill")
-                }
-                .environmentObject(coreManager)
+                // Pushes segments to opposite sides
+                ToolbarSpacer(.flexible, placement: .bottomBar)
 
-            InboxView()
-                .tabItem {
-                    Label("Inbox", systemImage: "tray.fill")
+                // Right glass segment: New conversation
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        showNewConversation = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
                 }
-                .environmentObject(coreManager)
+            }
+        }
+        .sheet(isPresented: $showNewConversation) {
+            MessageComposerView(
+                project: nil,
+                conversationId: nil,
+                conversationTitle: nil
+            )
+            .environmentObject(coreManager)
         }
     }
 }

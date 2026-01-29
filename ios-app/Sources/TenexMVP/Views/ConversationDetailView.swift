@@ -124,25 +124,29 @@ struct ConversationDetailView: View {
 
     private var agentsAndRuntimeSection: some View {
         HStack(alignment: .center) {
-            // Agents
-            HStack(spacing: 12) {
-                ForEach(viewModel.participatingAgents.prefix(8), id: \.self) { agent in
-                    AgentAvatarView(agentName: agent, size: 44, fontSize: 14)
+            // Agents - overlapping avatars with profile pictures from kind:0 events
+            ZStack(alignment: .leading) {
+                ForEach(Array(viewModel.participatingAgentInfos.prefix(8).enumerated()), id: \.element.id) { index, agentInfo in
+                    AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey, size: 44, fontSize: 14)
                         .environmentObject(coreManager)
+                        .offset(x: CGFloat(index) * 28)
+                        .zIndex(Double(8 - index))
                 }
 
-                if viewModel.participatingAgents.count > 8 {
+                if viewModel.participatingAgentInfos.count > 8 {
                     Circle()
                         .fill(Color(.systemGray4))
                         .frame(width: 44, height: 44)
                         .overlay {
-                            Text("+\(viewModel.participatingAgents.count - 8)")
+                            Text("+\(viewModel.participatingAgentInfos.count - 8)")
                                 .font(.subheadline)
                                 .fontWeight(.medium)
                                 .foregroundStyle(.secondary)
                         }
+                        .offset(x: CGFloat(8) * 28)
                 }
             }
+            .frame(height: 44)
 
             Spacer()
 
@@ -338,6 +342,7 @@ extension ConversationFullInfo: Identifiable {}
         id: "test-123",
         title: "Implement User Authentication",
         author: "architect-orchestrator",
+        authorPubkey: "abc123def456",
         summary: "Add OAuth2 authentication flow with Google and GitHub providers",
         messageCount: 15,
         lastActivity: UInt64(Date().timeIntervalSince1970) - 3600,
