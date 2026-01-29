@@ -74,21 +74,29 @@ fn format_today_label(cumulative_runtime_ms: u64) -> String {
 ///
 /// # Returns
 /// A Line containing spans with dynamically calculated colors for the wave effect
-fn build_wave_runtime_line(runtime_str: &str, padding: usize, wave_offset: usize) -> Line<'static> {
+fn build_wave_runtime_line(runtime_str: &str, padding: usize, wave_offset: usize, active_agent_count: usize) -> Line<'static> {
     let mut spans = vec![Span::raw(" ".repeat(padding))];
+
+    // Dynamic parameters based on active agent count
+    // Speed: 1 agent = 0.3 (baseline), 10 agents = 3.0 (10x faster)
+    let agent_count_clamped = active_agent_count.max(1).min(10) as f32;
+    let speed_multiplier = 0.3 * agent_count_clamped;
+
+    // Brightness amplitude: 1 agent = ±0.3 (baseline), 10 agents = ±0.6 (double brightness range)
+    let brightness_amplitude = 0.3 + (0.3 * (agent_count_clamped - 1.0) / 9.0);
 
     // Create a smooth brightness wave that travels across the text
     for (i, ch) in runtime_str.chars().enumerate() {
         // Create a traveling sine wave
-        // wave_offset moves the wave, i determines position along the string
-        let phase = ((wave_offset as f32 * WAVE_PHASE_SPEED) + (i as f32 * WAVE_WAVELENGTH))
+        // wave_offset moves the wave (scaled by agent count), i determines position along the string
+        let phase = ((wave_offset as f32 * WAVE_PHASE_SPEED * speed_multiplier) + (i as f32 * WAVE_WAVELENGTH))
             * std::f32::consts::PI * 2.0 / WAVE_PERIOD;
 
         // Sine wave gives us a value between -1 and 1
         let wave_value = phase.sin();
 
-        // Map sine wave to brightness multiplier based on amplitude
-        let brightness = 1.0 + (wave_value * WAVE_BRIGHTNESS_AMPLITUDE);
+        // Map sine wave to brightness multiplier based on dynamic amplitude
+        let brightness = 1.0 + (wave_value * brightness_amplitude);
 
         // Apply brightness to base green color
         let r = ((WAVE_BASE_COLOR_R as f32 * brightness).min(255.0).max(0.0)) as u8;
@@ -122,6 +130,7 @@ pub fn render_statusbar(
     current_notification: Option<&Notification>,
     cumulative_runtime_ms: u64,
     has_active_agents: bool,
+    active_agent_count: usize,
     wave_offset: usize,
 ) {
     // Calculate dynamic width for runtime column based on actual content
@@ -173,7 +182,7 @@ pub fn render_statusbar(
 
     let runtime_line = if has_active_agents {
         // GREEN mode with wave animation
-        build_wave_runtime_line(&runtime_str, padding, wave_offset)
+        build_wave_runtime_line(&runtime_str, padding, wave_offset, active_agent_count)
     } else {
         // RED mode - no animation
         let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
