@@ -40,7 +40,7 @@ class StatsViewModel: ObservableObject {
             let core = coreManager.core
 
             // Move FFI calls off main actor to prevent UI blocking
-            let fetchedSnapshot = await Task.detached { [core] in
+            let fetchedSnapshot = try await Task.detached { [core] in
                 // Refresh core data first (pull latest from relays)
                 _ = core.refresh()
 
