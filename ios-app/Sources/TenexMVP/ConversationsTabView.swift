@@ -6,30 +6,32 @@ import CryptoKit
 struct ConversationsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var projects: [ProjectInfo] = []
-    @State private var conversationsByProject: [String: [ConversationInfo]] = [:]
+    @State private var allConversationsFull: [ConversationFullInfo] = []
     @State private var isLoading = false
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
-    @State private var selectedConversation: ConversationInfo?
+    @State private var selectedConversation: ConversationFullInfo?
 
-    /// Precomputed hierarchy data - recomputed when conversations change
-    @State private var hierarchy: ConversationHierarchy?
-
-    /// All conversations from filtered projects, flattened (sorted for determinism)
-    private var allConversations: [ConversationInfo] {
-        let projectIds = selectedProjectIds.isEmpty
-            ? Set(projects.map { $0.id })
-            : selectedProjectIds
-
-        // Flatten and sort by lastActivity descending for deterministic ordering
-        return projectIds
-            .flatMap { conversationsByProject[$0] ?? [] }
-            .sorted { $0.lastActivity > $1.lastActivity }
+    /// Filtered conversations based on selected projects
+    private var filteredConversations: [ConversationFullInfo] {
+        if selectedProjectIds.isEmpty {
+            return allConversationsFull
+        }
+        return allConversationsFull.filter { selectedProjectIds.contains($0.projectATag) }
     }
 
-    /// Root conversations from precomputed hierarchy (sorted by effective last activity)
-    private var rootConversations: [ConversationInfo] {
-        hierarchy?.getSortedRoots() ?? []
+    /// Root conversations (no parent or orphaned) sorted by effective last activity
+    private var rootConversations: [ConversationFullInfo] {
+        let allIds = Set(filteredConversations.map { $0.id })
+        return filteredConversations
+            .filter { conv in
+                // Root if no parent or parent doesn't exist in our set
+                if let parentId = conv.parentId {
+                    return !allIds.contains(parentId)
+                }
+                return true
+            }
+            .sorted { $0.effectiveLastActivity > $1.effectiveLastActivity }
     }
 
     /// Text for the filter button
@@ -46,7 +48,7 @@ struct ConversationsTabView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && conversationsByProject.isEmpty {
+                if isLoading && allConversationsFull.isEmpty {
                     VStack(spacing: 16) {
                         ProgressView()
                             .scaleEffect(1.5)
@@ -62,9 +64,8 @@ struct ConversationsTabView: View {
                 } else {
                     List {
                         ForEach(rootConversations, id: \.id) { conversation in
-                            HierarchyConversationRowOptimized(
+                            ConversationRowFull(
                                 conversation: conversation,
-                                aggregatedData: hierarchy?.getData(for: conversation.id) ?? .empty,
                                 projectTitle: projectTitle(for: conversation),
                                 onSelect: { selected in
                                     selectedConversation = selected
@@ -105,9 +106,6 @@ struct ConversationsTabView: View {
                     loadData()
                 }
             }
-            .onChange(of: selectedProjectIds) { _, _ in
-                recomputeHierarchy()
-            }
             .sheet(isPresented: $showFilterSheet) {
                 ProjectFilterSheet(
                     projects: projects,
@@ -115,20 +113,15 @@ struct ConversationsTabView: View {
                 )
             }
             .sheet(item: $selectedConversation) { conversation in
-                MessagesSheetView(conversation: conversation)
+                ConversationDetailView(conversation: conversation)
                     .environmentObject(coreManager)
             }
         }
     }
 
-    private func projectTitle(for conversation: ConversationInfo) -> String? {
-        // Find which project this conversation belongs to
-        for (projectId, conversations) in conversationsByProject {
-            if conversations.contains(where: { $0.id == conversation.id }) {
-                return projects.first { $0.id == projectId }?.title
-            }
-        }
-        return nil
+    private func projectTitle(for conversation: ConversationFullInfo) -> String? {
+        // Find project title from the conversation's projectATag
+        return projects.first { $0.id == conversation.projectATag }?.title
     }
 
     private func loadData() {
@@ -137,20 +130,18 @@ struct ConversationsTabView: View {
             _ = coreManager.core.refresh()
             let fetchedProjects = coreManager.core.getProjects()
 
-            var conversationsMap: [String: [ConversationInfo]] = [:]
-            for project in fetchedProjects {
-                let conversations = coreManager.core.getConversations(projectId: project.id)
-                conversationsMap[project.id] = conversations
-            }
-
-            // Precompute hierarchy on background thread
-            let allConvs = conversationsMap.values.flatMap { $0 }
-            let computedHierarchy = ConversationHierarchy(conversations: Array(allConvs))
+            // Use getAllConversations with ConversationFullInfo for richer data
+            let filter = ConversationFilter(
+                projectIds: [],  // Empty = all projects
+                showArchived: false,
+                hideScheduled: true,
+                timeFilter: .all
+            )
+            let conversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
 
             DispatchQueue.main.async {
                 self.projects = fetchedProjects
-                self.conversationsByProject = conversationsMap
-                self.hierarchy = computedHierarchy
+                self.allConversationsFull = conversations
                 self.isLoading = false
             }
         }
@@ -165,15 +156,136 @@ struct ConversationsTabView: View {
             }
         }
     }
+}
 
-    /// Recompute hierarchy when filter changes (uses existing conversation data)
-    private func recomputeHierarchy() {
-        let filteredConversations = allConversations
-        hierarchy = ConversationHierarchy(conversations: filteredConversations)
+// MARK: - Conversation Row for ConversationFullInfo
+
+/// Conversation row that uses ConversationFullInfo's rich data
+private struct ConversationRowFull: View {
+    let conversation: ConversationFullInfo
+    let projectTitle: String?
+    let onSelect: (ConversationFullInfo) -> Void
+
+    private var statusColor: Color {
+        if conversation.isActive { return .green }
+        switch conversation.status?.lowercased() ?? "" {
+        case "active", "in progress": return .green
+        case "waiting", "blocked": return .orange
+        case "completed", "done": return .gray
+        default: return .blue
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Status indicator with activity pulse
+            ZStack {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 10, height: 10)
+
+                if conversation.isActive {
+                    Circle()
+                        .stroke(statusColor.opacity(0.5), lineWidth: 2)
+                        .frame(width: 16, height: 16)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                // Row 1: Title and effective last active time
+                HStack(alignment: .top) {
+                    Text(conversation.title)
+                        .font(.headline)
+                        .lineLimit(2)
+
+                    Spacer()
+
+                    Text(ConversationFormatters.formatRelativeTime(conversation.effectiveLastActivity))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                // Row 2: Summary or current activity
+                HStack(alignment: .top) {
+                    if let activity = conversation.currentActivity, conversation.isActive {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.fill")
+                                .font(.caption2)
+                                .foregroundStyle(.orange)
+                            Text(activity)
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                                .lineLimit(1)
+                        }
+                    } else if let summary = conversation.summary {
+                        Text(summary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    } else {
+                        Text("No summary")
+                            .font(.subheadline)
+                            .foregroundStyle(.tertiary)
+                            .italic()
+                    }
+
+                    Spacer()
+
+                    // Show message count
+                    if conversation.messageCount > 0 {
+                        HStack(spacing: 2) {
+                            Image(systemName: "bubble.left")
+                                .font(.caption2)
+                            Text("\(conversation.messageCount)")
+                        }
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                    }
+                }
+
+                // Row 3: Author avatar and project badge
+                HStack(spacing: -8) {
+                    SharedAgentAvatar(agentName: conversation.author)
+
+                    Spacer()
+
+                    // Status badge
+                    if let status = conversation.status {
+                        Text(status)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(statusColor.opacity(0.15))
+                            .foregroundStyle(statusColor)
+                            .clipShape(Capsule())
+                    }
+
+                    // Show project title badge if available
+                    if let projectTitle = projectTitle {
+                        Text(projectTitle)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.15))
+                            .foregroundStyle(.blue)
+                            .clipShape(Capsule())
+                    }
+                }
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect(conversation)
+        }
     }
 }
 
-// MARK: - Optimized Hierarchy Conversation Row (Uses precomputed data)
+// MARK: - Legacy Optimized Hierarchy Conversation Row (Kept for backwards compatibility)
 
 /// Conversation row that uses precomputed hierarchy data for O(1) access
 /// instead of recomputing O(n²) BFS on every render
