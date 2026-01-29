@@ -15,6 +15,9 @@ struct DiagnosticsSyncTab: View {
 
             // Sync Statistics Section
             syncStatisticsSection
+
+            // Recent Results Section
+            recentResultsSection
         }
     }
 
@@ -128,6 +131,14 @@ struct DiagnosticsSyncTab: View {
                 Divider()
 
                 StatusRow(
+                    label: "Unsupported Relays",
+                    value: "\(syncData.unsupportedSyncs)",
+                    valueColor: syncData.unsupportedSyncs > 0 ? .orange : .secondary
+                )
+
+                Divider()
+
+                StatusRow(
                     label: "Total Events Reconciled",
                     value: DiagnosticsFormatters.formatNumber(syncData.totalEventsReconciled),
                     valueColor: .primary
@@ -142,6 +153,86 @@ struct DiagnosticsSyncTab: View {
                 )
             }
             .diagnosticCardStyle()
+        }
+    }
+
+    // MARK: - Recent Results Section
+
+    private var recentResultsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionHeader(title: "Recent Sync Results")
+
+            if syncData.recentResults.isEmpty {
+                Text("No sync results yet")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .diagnosticCardStyle()
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(syncData.recentResults.prefix(10).enumerated()), id: \.offset) { index, result in
+                        if index > 0 {
+                            Divider()
+                        }
+                        recentResultRow(result)
+                    }
+                }
+                .diagnosticCardStyle()
+            }
+        }
+    }
+
+    private func recentResultRow(_ result: SyncResultDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("Kind \(result.kindLabel)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                Spacer()
+                Text(statusText(result.status))
+                    .font(.caption)
+                    .foregroundColor(statusColor(result.status))
+            }
+
+            HStack {
+                if result.eventsReceived > 0 {
+                    Text("+\(result.eventsReceived) events")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+                Spacer()
+                Text("\(result.secondsAgo)s ago")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if let error = result.error {
+                Text(error)
+                    .font(.caption2)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
+            }
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+    }
+
+    private func statusText(_ status: String) -> String {
+        switch status {
+        case "ok": return "OK"
+        case "unsupported": return "Unsupported"
+        case "failed": return "Failed"
+        default: return status
+        }
+    }
+
+    private func statusColor(_ status: String) -> Color {
+        switch status {
+        case "ok": return .green
+        case "unsupported": return .orange
+        case "failed": return .red
+        default: return .secondary
         }
     }
 
@@ -174,7 +265,13 @@ struct DiagnosticsSyncTab: View {
                 syncInProgress: false,
                 successfulSyncs: 42,
                 failedSyncs: 2,
-                totalEventsReconciled: 1500
+                unsupportedSyncs: 5,
+                totalEventsReconciled: 1500,
+                recentResults: [
+                    SyncResultDiagnostic(kindLabel: "31933", eventsReceived: 3, status: "ok", error: nil, secondsAgo: 5),
+                    SyncResultDiagnostic(kindLabel: "4199", eventsReceived: 0, status: "failed", error: "Connection timeout", secondsAgo: 10),
+                    SyncResultDiagnostic(kindLabel: "513", eventsReceived: 0, status: "unsupported", error: nil, secondsAgo: 15),
+                ]
             )
         )
         .padding()
