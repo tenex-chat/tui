@@ -45,17 +45,9 @@ struct ConversationsTabView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading && allConversationsFull.isEmpty {
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .scaleEffect(1.5)
-                        Text("Loading conversations...")
-                            .foregroundStyle(.secondary)
-                    }
-                } else if rootConversations.isEmpty {
+                if rootConversations.isEmpty {
                     ConversationsEmptyState(
                         hasFilter: !selectedProjectIds.isEmpty,
-                        onRefresh: loadData,
                         onClearFilter: { selectedProjectIds.removeAll() }
                     )
                 } else {
@@ -79,7 +71,7 @@ struct ConversationsTabView: View {
                     }
                     .listStyle(.plain)
                     .refreshable {
-                        await loadDataAsync()
+                        await coreManager.manualRefresh()
                     }
                 }
             }
@@ -91,21 +83,10 @@ struct ConversationsTabView: View {
                         Label(filterButtonLabel, systemImage: selectedProjectIds.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: loadData) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(isLoading)
-                }
-            }
-            .onAppear {
-                if projects.isEmpty {
-                    loadData()
-                }
             }
             .sheet(isPresented: $showFilterSheet) {
                 ProjectFilterSheet(
-                    projects: projects,
+                    projects: coreManager.projects,
                     selectedProjectIds: $selectedProjectIds
                 )
             }
@@ -118,40 +99,7 @@ struct ConversationsTabView: View {
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {
         // Find project title from the conversation's projectATag
-        return projects.first { $0.id == conversation.projectATag }?.title
-    }
-
-    private func loadData() {
-        isLoading = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            _ = coreManager.core.refresh()
-            let fetchedProjects = coreManager.core.getProjects()
-
-            // Use getAllConversations with ConversationFullInfo for richer data
-            let filter = ConversationFilter(
-                projectIds: [],  // Empty = all projects
-                showArchived: false,
-                hideScheduled: true,
-                timeFilter: .all
-            )
-            let conversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
-
-            DispatchQueue.main.async {
-                self.projects = fetchedProjects
-                self.allConversationsFull = conversations
-                self.isLoading = false
-            }
-        }
-    }
-
-    private func loadDataAsync() async {
-        await withCheckedContinuation { continuation in
-            loadData()
-            // Simple delay to allow UI to update
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                continuation.resume()
-            }
-        }
+        return coreManager.projects.first { $0.id == conversation.projectATag }?.title
     }
 }
 
@@ -740,7 +688,6 @@ private struct ProjectFilterSheet: View {
 
 private struct ConversationsEmptyState: View {
     let hasFilter: Bool
-    let onRefresh: () -> Void
     let onClearFilter: () -> Void
 
     var body: some View {
@@ -753,19 +700,13 @@ private struct ConversationsEmptyState: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text(hasFilter ? "Try adjusting your project filter" : "Your conversations will appear here")
+            Text(hasFilter ? "Try adjusting your project filter" : "Conversations will appear automatically")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
             if hasFilter {
                 Button(action: onClearFilter) {
                     Label("Clear Filter", systemImage: "xmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .padding(.top, 8)
-            } else {
-                Button(action: onRefresh) {
-                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
                 .padding(.top, 8)

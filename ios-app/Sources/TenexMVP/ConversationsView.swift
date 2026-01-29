@@ -3,16 +3,19 @@ import SwiftUI
 struct ConversationsView: View {
     let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var conversations: [ConversationFullInfo] = []
-    @State private var isLoading = false
     @State private var selectedConversation: ConversationFullInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
 
+    /// Conversations filtered by this project from the centralized store
+    private var projectConversations: [ConversationFullInfo] {
+        coreManager.conversations.filter { $0.projectATag == project.id }
+    }
+
     /// Root conversations (no parent or orphaned) sorted by effective last activity
     private var rootConversations: [ConversationFullInfo] {
-        let allIds = Set(conversations.map { $0.id })
-        return conversations
+        let allIds = Set(projectConversations.map { $0.id })
+        return projectConversations
             .filter { conv in
                 if let parentId = conv.parentId {
                     return !allIds.contains(parentId)
@@ -24,9 +27,7 @@ struct ConversationsView: View {
 
     var body: some View {
         Group {
-            if isLoading {
-                ProgressView("Loading conversations...")
-            } else if rootConversations.isEmpty {
+            if rootConversations.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 60))
@@ -34,6 +35,9 @@ struct ConversationsView: View {
                     Text("No Conversations")
                         .font(.title2)
                         .fontWeight(.semibold)
+                    Text("Conversations will appear automatically")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 List {
@@ -48,6 +52,9 @@ struct ConversationsView: View {
                     }
                 }
                 .listStyle(.plain)
+                .refreshable {
+                    await coreManager.manualRefresh()
+                }
             }
         }
         .navigationTitle(project.title)
@@ -59,20 +66,10 @@ struct ConversationsView: View {
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 16) {
-                    Button(action: loadConversations) {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .disabled(isLoading)
-
-                    Button(action: { showNewConversation = true }) {
-                        Image(systemName: "plus")
-                    }
+                Button(action: { showNewConversation = true }) {
+                    Image(systemName: "plus")
                 }
             }
-        }
-        .onAppear {
-            loadConversations()
         }
         .sheet(item: $selectedConversation) { conversation in
             ConversationDetailView(conversation: conversation)
@@ -82,8 +79,7 @@ struct ConversationsView: View {
             MessageComposerView(
                 project: project,
                 onSend: { _ in
-                    // Refresh conversations after sending
-                    loadConversations()
+                    // Data will auto-refresh via polling
                 }
             )
             .environmentObject(coreManager)
@@ -97,27 +93,6 @@ struct ConversationsView: View {
                             Button("Done") { showReports = false }
                         }
                     }
-            }
-        }
-    }
-
-    private func loadConversations() {
-        isLoading = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Refresh data from relays before fetching conversations
-            // This ensures the AppDataStore is updated with latest messages from nostrdb
-            _ = coreManager.core.refresh()
-            // Use getAllConversations with filter for richer ConversationFullInfo data
-            let filter = ConversationFilter(
-                projectIds: [project.id],
-                showArchived: false,
-                hideScheduled: true,
-                timeFilter: .all
-            )
-            let fetched = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
-            DispatchQueue.main.async {
-                self.conversations = fetched
-                self.isLoading = false
             }
         }
     }
