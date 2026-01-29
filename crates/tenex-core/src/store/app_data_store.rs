@@ -172,13 +172,26 @@ impl AppDataStore {
         };
 
         // First, build a set of ask event IDs that the user has already replied to
-        // by checking e-tags on user's messages
+        // by checking e-tags on user's messages (not just reply_to field, but all e-tags)
         let mut answered_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
         for messages in self.messages_by_thread.values() {
             for message in messages {
                 if message.pubkey == user_pubkey {
-                    if let Some(ref reply_to) = message.reply_to {
-                        answered_ask_ids.insert(reply_to.clone());
+                    // Query nostrdb to get the full note and extract all e-tags
+                    let note_id_bytes = match hex::decode(&message.id) {
+                        Ok(bytes) if bytes.len() == 32 => bytes,
+                        _ => continue,
+                    };
+                    let note_id: [u8; 32] = match note_id_bytes.try_into() {
+                        Ok(arr) => arr,
+                        Err(_) => continue,
+                    };
+                    if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
+                        // Extract all e-tag IDs (includes replies with or without reply markers)
+                        let reply_to_ids = Self::extract_e_tag_ids(&note);
+                        for reply_to_id in reply_to_ids {
+                            answered_ask_ids.insert(reply_to_id);
+                        }
                     }
                 }
             }
