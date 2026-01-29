@@ -31,7 +31,7 @@ struct DiagnosticsDatabaseTab: View {
             // Total Events Card
             DiagnosticCard(
                 title: "Total Events",
-                value: formatNumber(dbData.totalEvents),
+                value: DiagnosticsFormatters.formatNumber(dbData.totalEvents),
                 subtitle: "\(dbData.eventCountsByKind.count) kinds",
                 color: .blue,
                 icon: "doc.text.fill"
@@ -91,17 +91,6 @@ struct DiagnosticsDatabaseTab: View {
         .padding(.vertical, 40)
     }
 
-    // MARK: - Helpers
-
-    private func formatNumber(_ value: UInt64) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        } else {
-            return "\(value)"
-        }
-    }
 }
 
 // MARK: - Event Kind Row
@@ -134,7 +123,7 @@ struct EventKindRow: View {
 
             // Count and bar
             HStack(spacing: 12) {
-                Text(formatCount(kindCount.count))
+                Text(DiagnosticsFormatters.formatNumber(kindCount.count))
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -158,15 +147,6 @@ struct EventKindRow: View {
         .padding(.vertical, 12)
     }
 
-    private func formatCount(_ count: UInt64) -> String {
-        if count >= 1_000_000 {
-            return String(format: "%.1fM", Double(count) / 1_000_000)
-        } else if count >= 1_000 {
-            return String(format: "%.1fK", Double(count) / 1_000)
-        } else {
-            return "\(count)"
-        }
-    }
 }
 
 #Preview {

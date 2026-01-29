@@ -40,7 +40,7 @@ struct DiagnosticsSubscriptionsTab: View {
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
 
-            Text("\(formatNumber(totalEvents)) events received")
+            Text("\(DiagnosticsFormatters.formatNumber(totalEvents)) events received")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
@@ -92,17 +92,6 @@ struct DiagnosticsSubscriptionsTab: View {
         .padding(.vertical, 40)
     }
 
-    // MARK: - Helpers
-
-    private func formatNumber(_ value: UInt64) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        } else {
-            return "\(value)"
-        }
-    }
 }
 
 // MARK: - Subscription Row

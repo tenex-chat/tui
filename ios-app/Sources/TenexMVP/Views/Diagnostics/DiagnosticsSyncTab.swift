@@ -142,7 +142,7 @@ struct DiagnosticsSyncTab: View {
 
                 StatusRow(
                     label: "Total Events Reconciled",
-                    value: formatNumber(syncData.totalEventsReconciled),
+                    value: DiagnosticsFormatters.formatNumber(syncData.totalEventsReconciled),
                     valueColor: .primary
                 )
 
@@ -183,15 +183,6 @@ struct DiagnosticsSyncTab: View {
         }
     }
 
-    private func formatNumber(_ value: UInt64) -> String {
-        if value >= 1_000_000 {
-            return String(format: "%.1fM", Double(value) / 1_000_000)
-        } else if value >= 1_000 {
-            return String(format: "%.1fK", Double(value) / 1_000)
-        } else {
-            return "\(value)"
-        }
-    }
 }
 
 #Preview {

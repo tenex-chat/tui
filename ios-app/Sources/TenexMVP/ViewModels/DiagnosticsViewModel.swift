@@ -2,21 +2,24 @@ import Foundation
 
 /// ViewModel for the Diagnostics tab
 /// Manages diagnostic data fetching from Rust core
+///
+/// ## Concurrency Strategy (Latest-Wins + Deduplication)
+/// - If an in-flight request already covers the new request (includeDB=true covers includeDB=false), ignore new call
+/// - Otherwise, cancel existing task and start fresh
+/// - Error state derives from snapshot.sectionErrors (single source of truth)
 @MainActor
 class DiagnosticsViewModel: ObservableObject {
     // MARK: - Published Properties
 
     /// Current diagnostics snapshot from Rust core
+    /// Note: sectionErrors are accessed directly from snapshot (single source of truth)
     @Published var snapshot: DiagnosticsSnapshot?
 
     /// Loading state
     @Published var isLoading = false
 
-    /// Error state for overall fetch failures
+    /// Error state for overall fetch failures (only set when we have NO snapshot)
     @Published var error: Error?
-
-    /// Per-section error messages from Rust (for partial failures)
-    @Published var sectionErrors: [String] = []
 
     /// Selected diagnostics subtab
     @Published var selectedTab: DiagnosticsTab = .overview {
@@ -34,10 +37,14 @@ class DiagnosticsViewModel: ObservableObject {
 
     private let coreManager: TenexCoreManager
 
-    // MARK: - Task Management (Fix race conditions)
+    // MARK: - Task Management (Concurrency + Cancellation)
 
     /// Currently running fetch task (for cancellation and in-flight tracking)
     private var currentFetchTask: Task<Void, Never>?
+
+    /// Whether the current in-flight request includes database stats
+    /// Used for request deduplication (includeDB=true covers includeDB=false)
+    private var currentFetchIncludesDB = false
 
     // MARK: - Initialization
 
@@ -48,31 +55,51 @@ class DiagnosticsViewModel: ObservableObject {
     // MARK: - Public Methods
 
     /// Load diagnostics data from Rust core
+    ///
+    /// Implements latest-wins + deduplication concurrency strategy:
+    /// - If in-flight request already covers new request (includeDB=true covers false), ignore new call
+    /// - Otherwise, cancel existing task and start fresh
+    ///
     /// - Parameter includeDatabaseStats: Whether to include expensive DB stats (default: based on tab)
     func loadDiagnostics(includeDatabaseStats: Bool? = nil) async {
-        // Cancel any in-flight task to prevent race conditions
-        currentFetchTask?.cancel()
-
-        // Don't start a new fetch if one is already running (prevents concurrent refresh calls)
-        guard !isLoading else { return }
-
-        isLoading = true
-        error = nil
-        sectionErrors = []
-
         // Determine whether to include database stats
         // Default: only include if Database tab is active (lazy loading optimization)
         let includeDB = includeDatabaseStats ?? (selectedTab == .database)
 
+        // CONCURRENCY: Deduplication check
+        // If there's an in-flight request that already includes DB stats (or we don't need them),
+        // the current request is covered - skip this call
+        if currentFetchTask != nil && (currentFetchIncludesDB || !includeDB) {
+            return
+        }
+
+        // CONCURRENCY: Latest-wins - cancel existing task if new request needs more data
+        // Note: This doesn't stop the underlying Rust FFI work (no token support),
+        // but prevents stale results from being applied
+        currentFetchTask?.cancel()
+
+        isLoading = true
+        currentFetchIncludesDB = includeDB
+
+        // Capture core before creating task to avoid actor isolation issues
+        let core = self.coreManager.core
+
         // Create a new cancellable task
         let task = Task { [weak self] in
-            guard let self = self else { return }
+            // Use defer to ensure state cleanup on any exit path (prevents state races)
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.currentFetchTask = nil
+                    self?.currentFetchIncludesDB = false
+                    // Note: isLoading is set to false in the result handlers below
+                }
+            }
 
-            // Capture core before detaching to avoid actor isolation violation
-            let core = self.coreManager.core
+            guard let self = self else { return }
 
             do {
                 // Move FFI calls off main actor to prevent UI blocking
+                // Note: Task.detached is required for FFI - synchronous calls can't be preempted
                 let fetchedSnapshot = try await Task.detached { [core, includeDB] in
                     // Check for cancellation before starting
                     try Task.checkCancellation()
@@ -91,24 +118,36 @@ class DiagnosticsViewModel: ObservableObject {
                     return core.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
                 }.value
 
-                // Check for cancellation before updating UI
-                try Task.checkCancellation()
+                // CANCELLATION: Guard UI updates - don't apply results if cancelled
+                // (The underlying Rust work completed, but we shouldn't show stale data)
+                guard !Task.isCancelled else {
+                    await MainActor.run { [weak self] in
+                        self?.isLoading = false
+                    }
+                    return
+                }
 
                 // Update UI on main actor
-                await MainActor.run {
-                    self.snapshot = fetchedSnapshot
-                    self.sectionErrors = fetchedSnapshot.sectionErrors
-                    self.isLoading = false
+                // Note: sectionErrors derive from snapshot (single source of truth)
+                await MainActor.run { [weak self] in
+                    self?.snapshot = fetchedSnapshot
+                    self?.error = nil  // Clear any previous error since we have data
+                    self?.isLoading = false
                 }
             } catch is CancellationError {
-                // Task was cancelled, don't update state
-                await MainActor.run {
-                    self.isLoading = false
+                // Task was cancelled, reset loading state but don't touch data
+                // Keep last known snapshot (with its errors) until new snapshot succeeds
+                await MainActor.run { [weak self] in
+                    self?.isLoading = false
                 }
             } catch {
-                await MainActor.run {
-                    self.error = error
-                    self.isLoading = false
+                // Only set error if we have no snapshot at all
+                // If we have existing data, keep showing it with its errors
+                await MainActor.run { [weak self] in
+                    if self?.snapshot == nil {
+                        self?.error = error
+                    }
+                    self?.isLoading = false
                 }
             }
         }
@@ -129,6 +168,7 @@ class DiagnosticsViewModel: ObservableObject {
     func cancelFetch() {
         currentFetchTask?.cancel()
         currentFetchTask = nil
+        currentFetchIncludesDB = false
         isLoading = false
     }
 
@@ -153,6 +193,22 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
         case .sync: return "arrow.triangle.2.circlepath"
         case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .database: return "cylinder"
+        }
+    }
+}
+
+// MARK: - Shared Formatting Helpers
+
+/// Centralized formatting helpers for Diagnostics views
+enum DiagnosticsFormatters {
+    /// Format large numbers with K/M suffixes for readability
+    static func formatNumber(_ value: UInt64) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.1fK", Double(value) / 1_000)
+        } else {
+            return "\(value)"
         }
     }
 }

@@ -27,8 +27,9 @@ struct DiagnosticsView: View {
                     ScrollView {
                         VStack(spacing: 0) {
                             // Show section errors banner if any sections failed
-                            if !viewModel.sectionErrors.isEmpty {
-                                DiagnosticsSectionErrorsBanner(errors: viewModel.sectionErrors)
+                            // Driven directly from snapshot.sectionErrors (single source of truth)
+                            if !snapshot.sectionErrors.isEmpty {
+                                DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
                                     .padding(.horizontal)
                                     .padding(.top, 8)
                             }
