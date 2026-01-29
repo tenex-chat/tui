@@ -138,6 +138,11 @@ pub struct ChatDraft {
     #[serde(default)]
     pub reference_conversation_id: Option<String>,
 
+    /// Fork message ID for forked conversations
+    /// (used with reference_conversation_id to create a "fork" tag)
+    #[serde(default)]
+    pub fork_message_id: Option<String>,
+
     /// Timestamp when message was confirmed published to relay (None = unpublished/pending)
     /// Drafts are ONLY cleaned up after this is set AND after a grace period
     #[serde(default)]
@@ -391,6 +396,7 @@ impl ChatDraft {
             && self.selected_agent_pubkey.is_none()
             && self.selected_branch.is_none()
             && self.reference_conversation_id.is_none()
+            && self.fork_message_id.is_none()
     }
 
     /// Check if this draft has been published (confirmed by relay)
@@ -420,6 +426,7 @@ impl ChatDraft {
             selected_branch: None,
             last_modified: now_secs(),
             reference_conversation_id: None,
+            fork_message_id: None,
             published_at: None,
             published_event_id: None,
             confirmed_at: None,
@@ -908,6 +915,7 @@ impl DraftStorage {
             draft.attachments.clear();
             draft.image_attachments.clear();
             draft.reference_conversation_id = None;
+            draft.fork_message_id = None;
             draft.send_state = SendState::Typing;
             draft.last_modified = now_secs();
 
@@ -1263,6 +1271,7 @@ mod tests {
             selected_branch: Some("main".to_string()),
             last_modified: 1234567890,
             reference_conversation_id: None,
+            fork_message_id: None,
             published_at: None,
             published_event_id: None,
             confirmed_at: None,

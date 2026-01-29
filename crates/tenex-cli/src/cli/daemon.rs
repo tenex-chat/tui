@@ -640,6 +640,7 @@ fn handle_request(
                         branch: None,
                         nudge_ids: vec![],
                         reference_conversation_id: None,
+                        fork_message_id: None,
                         response_tx: Some(response_tx),
                     }) {
                         Ok(_) => {

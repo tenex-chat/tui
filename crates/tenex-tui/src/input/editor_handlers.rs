@@ -457,9 +457,10 @@ fn handle_send_message(app: &mut App) {
                     }
                 };
 
-                // Get reference_conversation_id from current tab (if set by "Reference conversation" command)
-                let reference_conversation_id = app.tabs.active_tab()
-                    .and_then(|tab| tab.reference_conversation_id.clone());
+                // Get reference_conversation_id and fork_message_id from current tab
+                let (reference_conversation_id, fork_message_id) = app.tabs.active_tab()
+                    .map(|tab| (tab.reference_conversation_id.clone(), tab.fork_message_id.clone()))
+                    .unwrap_or((None, None));
 
                 // Create response channel for publish confirmation
                 let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
@@ -472,6 +473,7 @@ fn handle_send_message(app: &mut App) {
                     branch,
                     nudge_ids,
                     reference_conversation_id,
+                    fork_message_id,
                     response_tx: Some(response_tx),
                 }) {
                     // BULLETPROOF: Roll back the snapshot on send failure
@@ -482,9 +484,10 @@ fn handle_send_message(app: &mut App) {
                 } else {
                     app.pending_new_thread_project = Some(project_a_tag.clone());
                     app.pending_new_thread_draft_id = draft_id;
-                    // Clear the reference_conversation_id after sending
+                    // Clear the reference_conversation_id and fork_message_id after sending
                     if let Some(tab) = app.tabs.active_tab_mut() {
                         tab.reference_conversation_id = None;
+                        tab.fork_message_id = None;
                     }
 
                     // BULLETPROOF: Spawn background task for publish confirmation
