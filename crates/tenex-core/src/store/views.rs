@@ -641,4 +641,77 @@ mod tests {
         let name = get_profile_name(&db.ndb, &pubkey);
         assert_eq!(name, "cccccccc...");
     }
+
+    #[test]
+    fn test_get_profile_picture_returns_url_when_profile_exists() {
+        // Positive-path test: ingest a kind:0 event with a picture URL and verify retrieval
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let keys = Keys::generate();
+        let pubkey = keys.public_key().to_hex();
+        let expected_picture_url = "https://example.com/avatar.png";
+
+        // Create a kind:0 (profile metadata) event with a picture field
+        // NIP-01: kind:0 content is a JSON object with profile metadata
+        let profile_content = serde_json::json!({
+            "name": "Test User",
+            "about": "A test profile",
+            "picture": expected_picture_url
+        }).to_string();
+
+        let profile_event = EventBuilder::new(Kind::Metadata, profile_content)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        // Ingest the profile event
+        ingest_events(&db.ndb, &[profile_event], None).unwrap();
+
+        // Wait for nostrdb to process the profile (kind:0)
+        let filter = nostrdb::Filter::new().kinds([0]).build();
+        let found = wait_for_event_processing(&db.ndb, filter, 5000);
+        assert!(found, "Profile event was not processed within timeout");
+
+        // Small delay to ensure nostrdb profile index is updated
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        // Now retrieve the profile picture
+        let result = get_profile_picture(&db.ndb, &pubkey);
+
+        assert!(result.is_some(), "Expected profile picture URL, got None");
+        assert_eq!(result.unwrap(), expected_picture_url);
+    }
+
+    #[test]
+    fn test_get_profile_picture_returns_none_when_no_picture_field() {
+        // Edge case: profile exists but has no picture field
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let keys = Keys::generate();
+        let pubkey = keys.public_key().to_hex();
+
+        // Create a kind:0 event WITHOUT a picture field
+        let profile_content = serde_json::json!({
+            "name": "User Without Avatar",
+            "about": "A profile without a picture"
+        }).to_string();
+
+        let profile_event = EventBuilder::new(Kind::Metadata, profile_content)
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[profile_event], None).unwrap();
+
+        let filter = nostrdb::Filter::new().kinds([0]).build();
+        let found = wait_for_event_processing(&db.ndb, filter, 5000);
+        assert!(found, "Profile event was not processed within timeout");
+
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let result = get_profile_picture(&db.ndb, &pubkey);
+
+        // Should return None since there's no picture field
+        assert!(result.is_none(), "Expected None for profile without picture, got {:?}", result);
+    }
 }
