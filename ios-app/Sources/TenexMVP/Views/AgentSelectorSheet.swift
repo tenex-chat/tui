@@ -16,6 +16,7 @@ struct AgentSelectorSheet: View {
 
     // MARK: - Environment
 
+    @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - State
@@ -163,6 +164,7 @@ struct AgentSelectorSheet: View {
 // MARK: - Agent Row View
 
 struct AgentRowView: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
     let agent: AgentInfo
     let isSelected: Bool
     let onTap: () -> Void
@@ -229,43 +231,18 @@ struct AgentRowView: View {
         .buttonStyle(.plain)
     }
 
+    /// Agent avatar using the unified AgentAvatarView component.
+    /// Provides consistent appearance, caching, and deterministic colors.
     private var agentAvatar: some View {
-        Group {
-            if let pictureUrl = agent.picture, let url = URL(string: pictureUrl) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } placeholder: {
-                    placeholderAvatar
-                }
-            } else {
-                placeholderAvatar
-            }
-        }
-        .frame(width: 48, height: 48)
-        .clipShape(Circle())
-        .overlay(
-            Circle()
-                .strokeBorder(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+        AgentAvatarView(
+            agentName: agent.name,
+            pubkey: agent.pubkey,
+            fallbackPictureUrl: agent.picture,
+            size: 48,
+            showBorder: false,
+            isSelected: isSelected
         )
-    }
-
-    private var placeholderAvatar: some View {
-        Circle()
-            .fill(agentColor.gradient)
-            .overlay {
-                Text(String(agent.name.prefix(1)).uppercased())
-                    .font(.title3)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.white)
-            }
-    }
-
-    private var agentColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
-        let hash = agent.pubkey.hashValue
-        return colors[abs(hash) % colors.count]
+        .environmentObject(coreManager)
     }
 }
 
@@ -307,4 +284,5 @@ struct AgentRowView: View {
         ],
         selectedPubkey: .constant("abc123")
     )
+    .environmentObject(TenexCoreManager())
 }
