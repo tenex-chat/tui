@@ -596,6 +596,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getCollapsedThreadIds() throws  -> [String]
     
     /**
+     * Get the total hierarchical LLM runtime for a conversation (includes all descendants) in milliseconds.
+     * Returns 0 if the conversation is not found or has no runtime data.
+     */
+    func getConversationRuntimeMs(conversationId: String)  -> UInt64
+    
+    /**
      * Get conversations for a project.
      *
      * Returns conversations organized with parent/child relationships.
@@ -921,6 +927,18 @@ open func getArchivedConversationIds()throws  -> [String]  {
 open func getCollapsedThreadIds()throws  -> [String]  {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_collapsed_thread_ids(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get the total hierarchical LLM runtime for a conversation (includes all descendants) in milliseconds.
+     * Returns 0 if the conversation is not found or has no runtime data.
+     */
+open func getConversationRuntimeMs(conversationId: String) -> UInt64  {
+    return try!  FfiConverterUInt64.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_conversation_runtime_ms(self.uniffiClonePointer(),
+        FfiConverterString.lower(conversationId),$0
     )
 })
 }
@@ -5687,6 +5705,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_collapsed_thread_ids() != 51682) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_conversation_runtime_ms() != 6855) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_conversations() != 60701) {

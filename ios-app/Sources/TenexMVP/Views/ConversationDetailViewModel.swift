@@ -239,45 +239,21 @@ final class ConversationDetailViewModel: ObservableObject {
 
     // MARK: - Runtime Calculation
 
-    /// Computes the effective runtime for the conversation.
-    /// Returns the duration between first and last activity, with safe underflow handling.
-    /// Uses min(createdAt) instead of assuming messages are sorted.
-    func computeEffectiveRuntime(currentTime: Date) -> TimeInterval {
-        // Get the earliest activity timestamp using min() - don't assume sorted
-        let firstActivity: UInt64
-        if let earliestMessage = messages.min(by: { $0.createdAt < $1.createdAt }) {
-            firstActivity = earliestMessage.createdAt
-        } else {
-            // No messages, use lastActivity as both first and last
-            firstActivity = conversation.lastActivity
-        }
+    /// Gets the hierarchical LLM runtime for this conversation (includes all descendants).
+    /// Returns the total runtime in seconds by converting from milliseconds.
+    func getHierarchicalRuntime() -> TimeInterval {
+        guard let coreManager = coreManager else { return 0 }
 
-        // Use refreshable metadata instead of stale conversation data
-        let lastActivity = currentEffectiveLastActivity
+        // Get runtime in milliseconds from the FFI
+        let runtimeMs = coreManager.getConversationRuntimeMs(conversationId: conversation.id)
 
-        // If active, use current time as the end point
-        let endTimestamp: UInt64
-        if currentIsActive {
-            endTimestamp = UInt64(currentTime.timeIntervalSince1970)
-        } else {
-            endTimestamp = lastActivity
-        }
-
-        // Safe underflow handling for out-of-order timestamps
-        let totalSeconds: UInt64
-        if endTimestamp >= firstActivity {
-            totalSeconds = endTimestamp - firstActivity
-        } else {
-            // Out-of-order timestamps, return 0 to avoid underflow
-            totalSeconds = 0
-        }
-
-        return TimeInterval(totalSeconds)
+        // Convert milliseconds to seconds
+        return TimeInterval(runtimeMs) / 1000.0
     }
 
-    /// Formats effective runtime as a human-readable string
-    func formatEffectiveRuntime(currentTime: Date) -> String {
-        let totalSeconds = computeEffectiveRuntime(currentTime: currentTime)
+    /// Formats hierarchical runtime as a human-readable string
+    func formatEffectiveRuntime() -> String {
+        let totalSeconds = getHierarchicalRuntime()
         return RuntimeFormatter.format(seconds: totalSeconds)
     }
 
@@ -293,19 +269,21 @@ final class ConversationDetailViewModel: ObservableObject {
 
 /// Utility for formatting runtime durations consistently
 enum RuntimeFormatter {
-    /// Formats seconds as a human-readable duration string
+    /// Formats seconds as a human-readable duration string (matches TUI logic)
     static func format(seconds: TimeInterval) -> String {
-        let totalSeconds = Int(seconds)
-        let hours = totalSeconds / 3600
-        let minutes = (totalSeconds % 3600) / 60
-        let secs = totalSeconds % 60
-
-        if hours > 0 {
-            return String(format: "%dh %02dm", hours, minutes)
-        } else if minutes > 0 {
-            return String(format: "%dm %02ds", minutes, secs)
+        if seconds >= 3600.0 {
+            // Show as hours and minutes for longer runtimes
+            let hours = floor(seconds / 3600.0)
+            let mins = floor((seconds.truncatingRemainder(dividingBy: 3600.0)) / 60.0)
+            return String(format: "%.0fh%.0fm", hours, mins)
+        } else if seconds >= 60.0 {
+            // Show as minutes and seconds
+            let mins = floor(seconds / 60.0)
+            let secs = seconds.truncatingRemainder(dividingBy: 60.0)
+            return String(format: "%.0fm%.0fs", mins, secs)
         } else {
-            return String(format: "%ds", secs)
+            // Show seconds with one decimal place
+            return String(format: "%.1fs", seconds)
         }
     }
 }
