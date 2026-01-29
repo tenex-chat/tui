@@ -317,6 +317,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_inbox(void*_Nonnull ptr, Ru
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_messages(void*_Nonnull ptr, RustBuffer conversation_id, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROFILE_PICTURE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROFILE_PICTURE
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROJECT_FILTERS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROJECT_FILTERS
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_project_filters(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -754,6 +759,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_inbox(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_MESSAGES
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_MESSAGES
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_messages(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROFILE_PICTURE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROFILE_PICTURE
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture(void
     
 );
 #endif
