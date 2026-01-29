@@ -1383,19 +1383,55 @@ impl NostrWorker {
     async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
-        tlog!("CONN", "Adding subscriptions for project with a-tag: {}", project_a_tag);
+        // Use atomic check+insert to prevent duplicate subscriptions
+        // This is critical for iOS where refresh() and notification handler can race
+        let is_new = self.subscribed_projects.write().await.insert(project_a_tag.clone());
+        if !is_new {
+            // Already subscribed (likely by notification handler)
+            let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+            tlog!("CONN", "Skipping duplicate subscription for project: {}", project_name);
+            return Ok(());
+        }
+
+        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+        tlog!("CONN", "Adding subscriptions for project: {}", project_name);
 
         // Use the shared helper for consistent subscription behavior
-        subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await
+        match subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Subscription failed - remove from set so we can retry later
+                self.subscribed_projects.write().await.remove(&project_a_tag);
+                Err(e)
+            }
+        }
     }
 
     async fn handle_subscribe_to_project_metadata(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
-        tlog!("CONN", "Adding subscriptions for project with a-tag: {}", project_a_tag);
+        // Use atomic check+insert to prevent duplicate subscriptions
+        // This is critical for iOS where refresh() and notification handler can race
+        let is_new = self.subscribed_projects.write().await.insert(project_a_tag.clone());
+        if !is_new {
+            // Already subscribed (likely by notification handler)
+            let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+            tlog!("CONN", "Skipping duplicate subscription for project: {}", project_name);
+            return Ok(());
+        }
+
+        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+        tlog!("CONN", "Adding subscriptions for project: {}", project_name);
 
         // Use the shared helper for consistent subscription behavior
-        subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await
+        match subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                // Subscription failed - remove from set so we can retry later
+                self.subscribed_projects.write().await.remove(&project_a_tag);
+                Err(e)
+            }
+        }
     }
 
     async fn handle_disconnect(&mut self) -> Result<()> {
