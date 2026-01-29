@@ -1383,57 +1383,19 @@ impl NostrWorker {
     async fn handle_subscribe_to_project_messages(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
-        tlog!("CONN", "Adding subscription for kind:1 and kind:30023 with a-tag: {}", project_a_tag);
+        tlog!("CONN", "Adding subscriptions for project with a-tag: {}", project_a_tag);
 
-        // Extract project name for description
-        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-
-        // Messages (kind:1)
-        let message_filter = Filter::new()
-            .kind(Kind::from(1))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-
-        // Long-form content (kind:30023)
-        let longform_filter = Filter::new()
-            .kind(Kind::Custom(30023))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-
-        let output = client.subscribe(vec![message_filter, longform_filter], None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new(
-                format!("{} msgs+reports", project_name),
-                vec![1, 30023],
-                Some(project_a_tag),
-            ),
-        );
-
-        Ok(())
+        // Use the shared helper for consistent subscription behavior
+        subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await
     }
 
     async fn handle_subscribe_to_project_metadata(&self, project_a_tag: String) -> Result<()> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
 
-        tlog!("CONN", "Adding subscription for kind:513 metadata with a-tag: {}", project_a_tag);
+        tlog!("CONN", "Adding subscriptions for project with a-tag: {}", project_a_tag);
 
-        // Extract project name for description
-        let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-
-        let filter = Filter::new()
-            .kind(Kind::Custom(513))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.clone()]);
-
-        let output = client.subscribe(vec![filter], None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new(
-                format!("{} metadata", project_name),
-                vec![513],
-                Some(project_a_tag),
-            ),
-        );
-
-        Ok(())
+        // Use the shared helper for consistent subscription behavior
+        subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await
     }
 
     async fn handle_disconnect(&mut self) -> Result<()> {
