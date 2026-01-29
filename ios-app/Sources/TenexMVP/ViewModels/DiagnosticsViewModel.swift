@@ -1,4 +1,6 @@
 import Foundation
+import os.log
+import SwiftUI
 
 /// ViewModel for the Diagnostics tab
 /// Manages diagnostic data fetching from Rust core
@@ -29,9 +31,17 @@ class DiagnosticsViewModel: ObservableObject {
     @Published var error: Error?
 
     /// Selected diagnostics subtab
+    ///
+    /// **Side Effect:** When switching to the `.database` tab, this property automatically
+    /// triggers a lazy load of database statistics if they haven't been loaded yet.
+    /// This optimization avoids loading expensive DB stats until the user explicitly
+    /// navigates to the Database tab, improving initial load performance.
+    ///
+    /// The side effect is intentional for UX - database stats require a full LMDB scan
+    /// which can be slow on large databases, so we defer this work until needed.
     @Published var selectedTab: DiagnosticsTab = .overview {
         didSet {
-            // When switching to Database tab, reload with DB stats if not already loaded
+            // Lazy load database stats when user navigates to Database tab
             if selectedTab == .database && snapshot?.database == nil {
                 Task {
                     await loadDiagnostics(includeDatabaseStats: true)
@@ -129,7 +139,7 @@ class DiagnosticsViewModel: ObservableObject {
                     let refreshSuccess = core.refresh()
                     if !refreshSuccess {
                         // Log but continue - refresh failure shouldn't block diagnostics
-                        print("[DiagnosticsViewModel] Core refresh returned false, continuing with diagnostics fetch")
+                        Logger.diagnostics.warning("Core refresh returned false, continuing with diagnostics fetch")
                     }
 
                     // Check for cancellation after refresh
@@ -285,4 +295,46 @@ extension DiagnosticsSnapshot {
             return "\(hours)h ago"
         }
     }
+}
+
+// MARK: - Business Logic Extensions
+
+extension NegentropySyncDiagnostics {
+    /// Calculated success rate for sync operations
+    /// Returns 100% if no syncs have been attempted yet
+    var successRate: Double {
+        let totalSyncs = successfulSyncs + failedSyncs
+        guard totalSyncs > 0 else { return 100.0 }
+        return Double(successfulSyncs) / Double(totalSyncs) * 100
+    }
+
+    /// Color based on success rate thresholds
+    /// - >= 90%: green
+    /// - >= 70%: orange
+    /// - < 70%: red
+    var successRateColor: SwiftUI.Color {
+        if successRate >= 90 {
+            return .green
+        } else if successRate >= 70 {
+            return .orange
+        } else {
+            return .red
+        }
+    }
+}
+
+extension DiagnosticsSnapshot {
+    /// Subscriptions sorted by events received (highest first)
+    /// Returns empty array if subscriptions data is unavailable
+    var sortedSubscriptions: [SubscriptionDiagnostics] {
+        guard let subs = subscriptions else { return [] }
+        return subs.sorted { $0.eventsReceived > $1.eventsReceived }
+    }
+}
+
+// MARK: - Logging
+
+extension Logger {
+    /// Logger for diagnostics-related operations
+    static let diagnostics = Logger(subsystem: "com.tenex.app", category: "Diagnostics")
 }

@@ -52,15 +52,7 @@ struct DiagnosticsSyncTab: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
-                .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
-        )
+        .diagnosticCardStyle(withShadow: true)
     }
 
     // MARK: - Sync Details Section
@@ -108,12 +100,7 @@ struct DiagnosticsSyncTab: View {
                     valueColor: syncData.syncInProgress ? .blue : .secondary
                 )
             }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(.systemGray5), lineWidth: 1)
-            )
+            .diagnosticCardStyle()
         }
     }
 
@@ -148,21 +135,13 @@ struct DiagnosticsSyncTab: View {
 
                 Divider()
 
-                let successRate = syncData.successfulSyncs + syncData.failedSyncs > 0
-                    ? Double(syncData.successfulSyncs) / Double(syncData.successfulSyncs + syncData.failedSyncs) * 100
-                    : 100.0
                 StatusRow(
                     label: "Success Rate",
-                    value: String(format: "%.1f%%", successRate),
-                    valueColor: successRate >= 90 ? .green : (successRate >= 70 ? .orange : .red)
+                    value: String(format: "%.1f%%", syncData.successRate),
+                    valueColor: syncData.successRateColor
                 )
             }
-            .background(Color(.systemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(Color(.systemGray5), lineWidth: 1)
-            )
+            .diagnosticCardStyle()
         }
     }
 
