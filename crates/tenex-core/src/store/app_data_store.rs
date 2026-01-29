@@ -74,6 +74,13 @@ pub struct AppDataStore {
     // Maps day_start_timestamp -> (user_count, all_count) for O(1) lookup instead of O(total_messages) per frame
     messages_by_day_counts: HashMap<u64, (u64, u64)>,
 
+    // Pre-aggregated hourly LLM activity data for Activity grid performance
+    // Maps (day_start, hour_of_day) -> (token_count, message_count)
+    // Uses calendar day boundaries (UTC) and hour-of-day (0-23)
+    // Stores only LLM messages (filtered by llm_metadata presence)
+    // Updated incrementally on new messages for O(1) lookups instead of O(total_messages) per render
+    llm_activity_by_hour: HashMap<(u64, u8), (u64, u64)>,
+
     // Real-time agent tracking - tracks active agents and estimates unconfirmed runtime.
     // In-memory only, resets on app restart. See agent_tracking.rs for details.
     pub agent_tracking: AgentTrackingState,
@@ -107,6 +114,7 @@ impl AppDataStore {
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             messages_by_day_counts: HashMap::new(),
+            llm_activity_by_hour: HashMap::new(),
             agent_tracking: AgentTrackingState::new(),
         };
         store.rebuild_from_ndb();
@@ -122,6 +130,8 @@ impl AppDataStore {
         if pubkey_changed {
             self.rebuild_messages_by_day_counts();
         }
+        // Rebuild LLM activity hourly aggregates (always, not user-dependent)
+        self.rebuild_llm_activity_by_hour();
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -285,6 +295,9 @@ impl AppDataStore {
 
         // Rebuild pre-aggregated message counts by day for Stats view
         self.rebuild_messages_by_day_counts();
+
+        // Rebuild pre-aggregated LLM activity by hour for Activity grid
+        self.rebuild_llm_activity_by_hour();
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -815,6 +828,104 @@ impl AppDataStore {
         (user_result, all_result)
     }
 
+    /// Get LLM token usage aggregated by calendar day and hour-of-day.
+    /// Returns a HashMap where key is hour_start_timestamp and value is total tokens.
+    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
+    /// Only includes LLM-generated messages (those with llm_metadata).
+    /// Covers the specified number of hours from now backwards.
+    pub fn get_tokens_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let seconds_per_hour: u64 = 3600;
+        let current_hour_start = (now / seconds_per_hour) * seconds_per_hour;
+
+        self.get_tokens_by_hour_from(current_hour_start, num_hours)
+    }
+
+    /// Testable variant of get_tokens_by_hour that accepts a current_hour_start parameter.
+    /// This enables testing window slicing behavior without depending on SystemTime::now().
+    pub fn get_tokens_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
+        let mut result: HashMap<u64, u64> = HashMap::new();
+
+        if num_hours == 0 {
+            return result;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Iterate backwards through num_hours and do direct HashMap lookups
+        // This guarantees O(num_hours) complexity instead of O(total_history_buckets)
+        for i in 0..num_hours {
+            let hour_offset = i as u64 * seconds_per_hour;
+            let hour_start = current_hour_start.saturating_sub(hour_offset);
+
+            // Convert hour_start to (day_start, hour_of_day) key
+            let day_start = (hour_start / seconds_per_day) * seconds_per_day;
+            let seconds_since_day_start = hour_start - day_start;
+            let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+            // Direct HashMap lookup - O(1)
+            if let Some((tokens, _)) = self.llm_activity_by_hour.get(&(day_start, hour_of_day)) {
+                result.insert(hour_start, *tokens);
+            }
+        }
+
+        result
+    }
+
+    /// Get LLM message count aggregated by calendar day and hour-of-day.
+    /// Returns a HashMap where key is hour_start_timestamp and value is message count.
+    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
+    /// Only includes LLM-generated messages (those with llm_metadata).
+    /// Covers the specified number of hours from now backwards.
+    pub fn get_message_count_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let seconds_per_hour: u64 = 3600;
+        let current_hour_start = (now / seconds_per_hour) * seconds_per_hour;
+
+        self.get_message_count_by_hour_from(current_hour_start, num_hours)
+    }
+
+    /// Testable variant of get_message_count_by_hour that accepts a current_hour_start parameter.
+    /// This enables testing window slicing behavior without depending on SystemTime::now().
+    pub fn get_message_count_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
+        let mut result: HashMap<u64, u64> = HashMap::new();
+
+        if num_hours == 0 {
+            return result;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Iterate backwards through num_hours and do direct HashMap lookups
+        // This guarantees O(num_hours) complexity instead of O(total_history_buckets)
+        for i in 0..num_hours {
+            let hour_offset = i as u64 * seconds_per_hour;
+            let hour_start = current_hour_start.saturating_sub(hour_offset);
+
+            // Convert hour_start to (day_start, hour_of_day) key
+            let day_start = (hour_start / seconds_per_day) * seconds_per_day;
+            let seconds_since_day_start = hour_start - day_start;
+            let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+            // Direct HashMap lookup - O(1)
+            if let Some((_, message_count)) = self.llm_activity_by_hour.get(&(day_start, hour_of_day)) {
+                result.insert(hour_start, *message_count);
+            }
+        }
+
+        result
+    }
+
     /// Rebuild message counts by day from nostrdb directly.
     /// Called during startup after messages are loaded, and when user pubkey changes.
     ///
@@ -1123,6 +1234,78 @@ impl AppDataStore {
         // Increment user count if matches current user
         if self.user_pubkey.as_deref() == Some(pubkey) {
             entry.0 += 1;
+        }
+    }
+
+    /// Increment LLM activity hourly aggregates (O(1) per message).
+    /// Only increments if the message has llm_metadata (i.e., is an LLM-generated message).
+    /// Uses calendar day boundaries (UTC) and hour-of-day (0-23) for stable bucketing.
+    fn increment_llm_activity_hour(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
+        // Only count messages with LLM metadata (actual LLM responses)
+        if llm_metadata.is_empty() {
+            return;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Calculate calendar day start (UTC)
+        let day_start = (created_at / seconds_per_day) * seconds_per_day;
+
+        // Calculate hour-of-day (0-23) by finding seconds since day start
+        let seconds_since_day_start = created_at - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+        // Extract token count from llm_metadata (default to 0 if not present)
+        let tokens = llm_metadata
+            .iter()
+            .find(|(key, _)| key == "total-tokens")
+            .and_then(|(_, value)| value.parse::<u64>().ok())
+            .unwrap_or(0);
+
+        // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
+        let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+        entry.0 += tokens;
+        entry.1 += 1;
+    }
+
+    /// Rebuild LLM activity hourly aggregates from messages_by_thread.
+    /// Called during startup after messages are loaded.
+    /// Only counts messages with llm_metadata (LLM-generated messages).
+    fn rebuild_llm_activity_by_hour(&mut self) {
+        // Clear existing aggregates
+        self.llm_activity_by_hour.clear();
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+
+        // Iterate through all messages and aggregate by hour
+        for messages in self.messages_by_thread.values() {
+            for message in messages {
+                // Only count LLM messages (those with llm_metadata)
+                if !message.llm_metadata.is_empty() {
+                    let created_at = message.created_at;
+
+                    // Calculate calendar day start (UTC)
+                    let day_start = (created_at / seconds_per_day) * seconds_per_day;
+
+                    // Calculate hour-of-day (0-23) by finding seconds since day start
+                    let seconds_since_day_start = created_at - day_start;
+                    let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+
+                    // Extract token count from llm_metadata (default to 0 if not present)
+                    let tokens = message.llm_metadata
+                        .iter()
+                        .find(|(key, _)| key == "total-tokens")
+                        .and_then(|(_, value)| value.parse::<u64>().ok())
+                        .unwrap_or(0);
+
+                    // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
+                    let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+                    entry.0 += tokens;
+                    entry.1 += 1;
+                }
+            }
         }
     }
 
@@ -1534,6 +1717,7 @@ impl AppDataStore {
             if !messages.iter().any(|m| m.id == message_id) {
                 let message_created_at = message.created_at;
                 let message_pubkey = message.pubkey.clone();
+                let message_llm_metadata = message.llm_metadata.clone();
 
                 // Check if this message has llm-runtime tag (confirms runtime, resets unconfirmed timer)
                 let has_llm_runtime = message.llm_metadata.iter().any(|(key, _)| key == "runtime");
@@ -1552,6 +1736,9 @@ impl AppDataStore {
 
                 // Update pre-aggregated message counts for Stats view (O(1) per message)
                 self.increment_message_day_count(message_created_at, &message_pubkey);
+
+                // Update pre-aggregated LLM activity for Activity grid (O(1) per message)
+                self.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
@@ -3965,5 +4152,419 @@ mod tests {
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].0, "parent");
         assert_eq!(top[0].1, 50, "Parent's filtered total should only include child");
+    }
+
+    /// Test UTC day/hour boundary bucketing works correctly for LLM activity.
+    /// Verifies that messages on different sides of UTC day boundaries are bucketed separately.
+    #[test]
+    fn test_llm_activity_utc_day_hour_bucketing() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Test timestamps around UTC day boundary
+        // Day 1: 2024-01-15 23:30:00 UTC (timestamp: 1705361400)
+        // Day 2: 2024-01-16 01:30:00 UTC (timestamp: 1705368600) - crosses midnight boundary
+        let day1_timestamp = 1705361400_u64; // 23:30:00 UTC on day 1
+        let day2_timestamp = 1705368600_u64; // 01:30:00 UTC on day 2 (7200 seconds later)
+
+        // Calculate expected day_start values
+        let seconds_per_day: u64 = 86400;
+        let day1_start = (day1_timestamp / seconds_per_day) * seconds_per_day;
+        let day2_start = (day2_timestamp / seconds_per_day) * seconds_per_day;
+
+        // Verify different day boundaries
+        assert_ne!(day1_start, day2_start, "Timestamps should be in different UTC days");
+
+        // Create messages with LLM metadata on different days
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", day1_timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", day2_timestamp);
+        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+
+        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2]);
+        store.rebuild_llm_activity_by_hour();
+
+        // Verify both buckets exist with correct values
+        assert_eq!(store.llm_activity_by_hour.len(), 2, "Should have 2 separate hour buckets");
+
+        // Day 1: hour 23
+        let key1 = (day1_start, 23_u8);
+        assert_eq!(store.llm_activity_by_hour.get(&key1), Some(&(100, 1)), "Day 1 hour 23 should have 100 tokens, 1 message");
+
+        // Day 2: hour 1
+        let key2 = (day2_start, 1_u8);
+        assert_eq!(store.llm_activity_by_hour.get(&key2), Some(&(200, 1)), "Day 2 hour 1 should have 200 tokens, 1 message");
+    }
+
+    /// Test that only LLM messages (those with llm_metadata) are counted in activity tracking.
+    /// Non-LLM messages should be completely ignored.
+    #[test]
+    fn test_llm_activity_only_counts_llm_messages() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let timestamp = 1705363800_u64;
+
+        // Message WITHOUT llm_metadata (user message)
+        let user_msg = make_test_message("msg1", "pubkey1", "thread1", "user message", timestamp);
+
+        // Message WITH llm_metadata (LLM response)
+        let mut llm_msg = make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
+        llm_msg.llm_metadata = vec![("total-tokens".to_string(), "150".to_string())];
+
+        // Message WITH empty llm_metadata (should NOT be counted)
+        let mut empty_metadata_msg = make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
+        empty_metadata_msg.llm_metadata = vec![];
+
+        store.messages_by_thread.insert("thread1".to_string(), vec![user_msg, llm_msg, empty_metadata_msg]);
+        store.rebuild_llm_activity_by_hour();
+
+        // Should only have 1 bucket for the LLM message
+        assert_eq!(store.llm_activity_by_hour.len(), 1, "Should only count LLM messages");
+
+        // Verify the bucket contains only the LLM message data
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(150, 1)), "Should only have 1 LLM message with 150 tokens");
+    }
+
+    /// Test that token counts are correctly parsed and aggregated from llm_metadata.
+    /// Verifies both successful parsing and fallback to 0 for missing/invalid values.
+    #[test]
+    fn test_llm_activity_token_parsing() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let timestamp = 1705363800_u64;
+
+        // Message with valid token count
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+
+        // Message with missing total-tokens (should default to 0)
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", timestamp);
+        msg2.llm_metadata = vec![("other-key".to_string(), "value".to_string())];
+
+        // Message with invalid token count (should default to 0)
+        let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test", timestamp);
+        msg3.llm_metadata = vec![("total-tokens".to_string(), "invalid".to_string())];
+
+        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store.rebuild_llm_activity_by_hour();
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        // All 3 messages counted, but only msg1 has valid tokens (500 + 0 + 0 = 500)
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(500, 3)), "Should have 500 total tokens and 3 messages");
+    }
+
+    /// Test window slicing logic in get_tokens_by_hour and get_message_count_by_hour.
+    /// Verifies that only messages within the requested time window are returned,
+    /// and that the O(num_hours) implementation correctly uses direct HashMap lookups.
+    #[test]
+    fn test_llm_activity_window_slicing() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Create messages at specific hour boundaries for deterministic testing
+        // Use timestamps that are exact hour boundaries for easier verification
+        let seconds_per_hour: u64 = 3600;
+
+        // Base timestamp: 2024-01-15 10:00:00 UTC
+        let base_timestamp = 1705316400_u64;
+
+        // Create messages at hour boundaries: 10:00, 11:00, 12:00, 13:00, 14:00
+        for i in 0..5 {
+            let timestamp = base_timestamp + (i * seconds_per_hour);
+            let mut msg = make_test_message(
+                &format!("msg{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                timestamp
+            );
+            msg.llm_metadata = vec![("total-tokens".to_string(), format!("{}", (i + 1) * 100))];
+
+            store.messages_by_thread
+                .entry("thread1".to_string())
+                .or_insert_with(Vec::new)
+                .push(msg);
+        }
+
+        store.rebuild_llm_activity_by_hour();
+
+        // Verify all 5 buckets were created
+        assert_eq!(store.llm_activity_by_hour.len(), 5, "Should have 5 hour buckets");
+
+        // NOW TEST ACTUAL WINDOW SLICING using the testable _from variant
+        // Set "now" to be at 14:00:00 (the last hour with data)
+        let current_hour_start = base_timestamp + (4 * seconds_per_hour);
+
+        // Test 1: Window of 3 hours should return hours 14:00, 13:00, 12:00
+        let result = store.get_tokens_by_hour_from(current_hour_start, 3);
+        assert_eq!(result.len(), 3, "Window of 3 hours should return 3 entries");
+
+        // Verify each hour in the window
+        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64), "Hour 14:00 should have 500 tokens");
+        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64), "Hour 13:00 should have 400 tokens");
+        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64), "Hour 12:00 should have 300 tokens");
+
+        // Test 2: Window of 5 hours should return all 5 hours
+        let result = store.get_tokens_by_hour_from(current_hour_start, 5);
+        assert_eq!(result.len(), 5, "Window of 5 hours should return 5 entries");
+        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64));
+        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64));
+        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64));
+        assert_eq!(result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&200_u64));
+        assert_eq!(result.get(&(base_timestamp)), Some(&100_u64));
+
+        // Test 3: Window extending beyond available data should only return available hours
+        let result = store.get_tokens_by_hour_from(current_hour_start, 10);
+        assert_eq!(result.len(), 5, "Window of 10 hours should return only 5 entries (available data)");
+
+        // Test 4: Window starting at 11:00 should only see hours <= 11:00
+        let earlier_current = base_timestamp + (1 * seconds_per_hour);
+        let result = store.get_tokens_by_hour_from(earlier_current, 2);
+        assert_eq!(result.len(), 2, "Window from 11:00 looking back 2 hours should return 2 entries");
+        assert_eq!(result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&200_u64), "Hour 11:00 should have 200 tokens");
+        assert_eq!(result.get(&base_timestamp), Some(&100_u64), "Hour 10:00 should have 100 tokens");
+        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), None, "Hour 12:00 should NOT be in window");
+
+        // Test 5: Verify day boundary handling by adding messages that cross midnight
+        // Current base_timestamp is 2024-01-15 10:00:00 UTC
+        // Create buckets on BOTH sides of midnight to properly test rollover
+        let seconds_per_day: u64 = 86400;
+        let day_start = (base_timestamp / seconds_per_day) * seconds_per_day;
+
+        // Prior day's 23:00 (one hour before midnight)
+        let prior_day_23 = day_start - seconds_per_hour;
+
+        // Current day's 00:00 (midnight)
+        let current_day_00 = day_start;
+
+        // Current day's 01:00
+        let current_day_01 = day_start + seconds_per_hour;
+
+        // Current day's 02:00
+        let current_day_02 = day_start + (2 * seconds_per_hour);
+
+        // Add message at 23:00 prior day
+        let mut msg_23 = make_test_message("msg_23", "pubkey1", "thread1", "test", prior_day_23);
+        msg_23.llm_metadata = vec![("total-tokens".to_string(), "600".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_23);
+
+        // Add message at 00:00 current day
+        let mut msg_00 = make_test_message("msg_00", "pubkey1", "thread1", "test", current_day_00);
+        msg_00.llm_metadata = vec![("total-tokens".to_string(), "700".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_00);
+
+        // Add message at 01:00 current day
+        let mut msg_01 = make_test_message("msg_01", "pubkey1", "thread1", "test", current_day_01);
+        msg_01.llm_metadata = vec![("total-tokens".to_string(), "800".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_01);
+
+        // Add message at 02:00 current day
+        let mut msg_02 = make_test_message("msg_02", "pubkey1", "thread1", "test", current_day_02);
+        msg_02.llm_metadata = vec![("total-tokens".to_string(), "900".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg_02);
+
+        store.rebuild_llm_activity_by_hour();
+
+        // Window from 02:00 current day looking back 4 hours should cross midnight
+        // Should see: 02:00, 01:00, 00:00, 23:00 (prior day)
+        let result = store.get_tokens_by_hour_from(current_day_02, 4);
+
+        // Verify all four hours are present
+        assert_eq!(result.len(), 4, "Window from 02:00 looking back 4 hours should return 4 entries spanning midnight");
+
+        // Verify each hour has the correct token count
+        assert_eq!(result.get(&current_day_02), Some(&900_u64), "Current day 02:00 should have 900 tokens");
+        assert_eq!(result.get(&current_day_01), Some(&800_u64), "Current day 01:00 should have 800 tokens");
+        assert_eq!(result.get(&current_day_00), Some(&700_u64), "Current day 00:00 should have 700 tokens");
+        assert_eq!(result.get(&prior_day_23), Some(&600_u64), "Prior day 23:00 should have 600 tokens");
+
+        // Verify proper day_start bucketing: 23:00 should be on prior day, others on current day
+        let prior_day_start = day_start - seconds_per_day;
+
+        // Calculate expected day_start for each hour
+        let day_start_23 = (prior_day_23 / seconds_per_day) * seconds_per_day;
+        let day_start_00 = (current_day_00 / seconds_per_day) * seconds_per_day;
+        let day_start_01 = (current_day_01 / seconds_per_day) * seconds_per_day;
+        let day_start_02 = (current_day_02 / seconds_per_day) * seconds_per_day;
+
+        // Verify 23:00 is on prior day
+        assert_eq!(day_start_23, prior_day_start, "23:00 should be bucketed to prior day");
+
+        // Verify 00:00, 01:00, 02:00 are all on current day
+        assert_eq!(day_start_00, day_start, "00:00 should be bucketed to current day");
+        assert_eq!(day_start_01, day_start, "01:00 should be bucketed to current day");
+        assert_eq!(day_start_02, day_start, "02:00 should be bucketed to current day");
+    }
+
+    /// Test that get_tokens_by_hour and get_message_count_by_hour return empty results
+    /// when num_hours is 0, and handle the direct lookup logic correctly.
+    #[test]
+    fn test_llm_activity_zero_hours_returns_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let tokens_result = store.get_tokens_by_hour(0);
+        let messages_result = store.get_message_count_by_hour(0);
+
+        assert_eq!(tokens_result.len(), 0, "get_tokens_by_hour(0) should return empty");
+        assert_eq!(messages_result.len(), 0, "get_message_count_by_hour(0) should return empty");
+    }
+
+    /// Test that get_message_count_by_hour correctly returns message counts (not token counts)
+    /// across a time window. This ensures we're not accidentally swapping tokens and messages.
+    #[test]
+    fn test_llm_activity_message_count_window() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let seconds_per_hour: u64 = 3600;
+        let base_timestamp = 1705316400_u64; // 2024-01-15 10:00:00 UTC
+
+        // Create DIFFERENT numbers of messages per hour with DIFFERENT token counts
+        // Hour 0 (10:00): 1 message with 1000 tokens
+        // Hour 1 (11:00): 2 messages with 500 tokens each (1000 total tokens)
+        // Hour 2 (12:00): 3 messages with 333 tokens each (~1000 total tokens)
+        // This ensures we're counting messages, not tokens
+
+        // Hour 0: 1 message
+        let mut msg = make_test_message("msg0", "pubkey1", "thread1", "test", base_timestamp);
+        msg.llm_metadata = vec![("total-tokens".to_string(), "1000".to_string())];
+        store.messages_by_thread
+            .entry("thread1".to_string())
+            .or_insert_with(Vec::new)
+            .push(msg);
+
+        // Hour 1: 2 messages
+        for i in 0..2 {
+            let mut msg = make_test_message(
+                &format!("msg1_{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                base_timestamp + seconds_per_hour
+            );
+            msg.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+            store.messages_by_thread
+                .entry("thread1".to_string())
+                .or_insert_with(Vec::new)
+                .push(msg);
+        }
+
+        // Hour 2: 3 messages
+        for i in 0..3 {
+            let mut msg = make_test_message(
+                &format!("msg2_{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                base_timestamp + 2 * seconds_per_hour
+            );
+            msg.llm_metadata = vec![("total-tokens".to_string(), "333".to_string())];
+            store.messages_by_thread
+                .entry("thread1".to_string())
+                .or_insert_with(Vec::new)
+                .push(msg);
+        }
+
+        store.rebuild_llm_activity_by_hour();
+
+        // Test using the _from variant with a fixed "now" at hour 2 (12:00)
+        let current_hour_start = base_timestamp + 2 * seconds_per_hour;
+
+        // Get message counts for all 3 hours
+        let message_result = store.get_message_count_by_hour_from(current_hour_start, 3);
+        assert_eq!(message_result.len(), 3, "Should have 3 hours of message count data");
+
+        // Verify MESSAGE COUNTS (not token counts)
+        assert_eq!(message_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&3_u64), "Hour 12:00 should have 3 messages");
+        assert_eq!(message_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&2_u64), "Hour 11:00 should have 2 messages");
+        assert_eq!(message_result.get(&base_timestamp), Some(&1_u64), "Hour 10:00 should have 1 message");
+
+        // Get token counts for comparison
+        let token_result = store.get_tokens_by_hour_from(current_hour_start, 3);
+        assert_eq!(token_result.len(), 3, "Should have 3 hours of token count data");
+
+        // Verify TOKEN COUNTS are different from message counts
+        assert_eq!(token_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&999_u64), "Hour 12:00 should have 999 tokens (3*333)");
+        assert_eq!(token_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&1000_u64), "Hour 11:00 should have 1000 tokens (2*500)");
+        assert_eq!(token_result.get(&base_timestamp), Some(&1000_u64), "Hour 10:00 should have 1000 tokens");
+
+        // Critical assertion: Verify we're not swapping tokens and messages
+        assert_ne!(
+            message_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            token_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            "Message count should differ from token count for hour 12:00"
+        );
+    }
+
+    /// Test that multiple messages in the same hour are correctly aggregated.
+    /// Verifies that both token counts and message counts accumulate properly.
+    #[test]
+    fn test_llm_activity_same_hour_aggregation() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let timestamp = 1705363800_u64; // Same hour for all messages
+
+        // Create 3 messages in the same hour
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test1", timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test2", timestamp + 60);
+        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+
+        let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test3", timestamp + 120);
+        msg3.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
+
+        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store.rebuild_llm_activity_by_hour();
+
+        // Should only have 1 bucket since all messages are in the same hour
+        assert_eq!(store.llm_activity_by_hour.len(), 1, "All messages should be in same hour bucket");
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        // Total tokens: 100 + 200 + 300 = 600, Total messages: 3
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(600, 3)), "Should aggregate all tokens and count all messages");
     }
 }
