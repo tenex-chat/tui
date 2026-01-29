@@ -115,6 +115,7 @@ struct ConversationsView: View {
 /// Conversation row that uses precomputed hierarchy data for O(1) access
 /// instead of recomputing O(n²) BFS on every render
 private struct OptimizedConversationRow: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
     let conversation: ConversationInfo
     let aggregatedData: AggregatedConversationData
     let onSelect: (ConversationInfo) -> Void
@@ -168,18 +169,19 @@ private struct OptimizedConversationRow: View {
                     }
                 }
 
-                // Row 3: Participating agent avatars
+                // Row 3: Participating agent avatars with profile pictures from kind:0 events
                 HStack(spacing: -8) {
-                    ForEach(aggregatedData.participatingAgents.prefix(6), id: \.self) { agent in
-                        SharedAgentAvatar(agentName: agent)
+                    ForEach(aggregatedData.participatingAgentInfos.prefix(maxVisibleAvatars)) { agentInfo in
+                        AgentAvatarWithPicture(agentInfo: agentInfo)
+                            .environmentObject(coreManager)
                     }
 
-                    if aggregatedData.participatingAgents.count > 6 {
+                    if aggregatedData.participatingAgentInfos.count > maxVisibleAvatars {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: 24, height: 24)
                             .overlay {
-                                Text("+\(aggregatedData.participatingAgents.count - 6)")
+                                Text("+\(aggregatedData.participatingAgentInfos.count - maxVisibleAvatars)")
                                     .font(.caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)

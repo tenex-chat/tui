@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 struct ContentView: View {
     @Binding var userNpub: String
@@ -186,7 +187,7 @@ struct UserHeaderView: View {
 
     private var truncatedNpub: String {
         guard npub.count > 20 else { return npub }
-        let prefix = npub.prefix(12)
+        let prefix = npub.prefix(pubkeyDisplayPrefixLength)
         let suffix = npub.suffix(8)
         return "\(prefix)...\(suffix)"
     }
@@ -283,11 +284,9 @@ struct ProjectRowView: View {
         .padding(.vertical, 8)
     }
 
+    /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
-        // Generate consistent color based on project ID
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal]
-        let hash = project.id.hashValue
-        return colors[abs(hash) % colors.count]
+        deterministicColor(for: project.id)
     }
 }
 

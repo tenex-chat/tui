@@ -90,8 +90,10 @@ pub struct ConversationInfo {
     pub id: String,
     /// Title/subject of the conversation
     pub title: String,
-    /// Agent or user who started the conversation
+    /// Agent or user who started the conversation (display name)
     pub author: String,
+    /// Author's public key (hex) for profile lookups
+    pub author_pubkey: String,
     /// Brief summary or first line of content
     pub summary: Option<String>,
     /// Number of messages in the thread
@@ -780,6 +782,23 @@ impl TenexCore {
         })
     }
 
+    /// Get profile picture URL for a pubkey from kind:0 metadata.
+    ///
+    /// Returns the picture URL if the profile exists and has a picture set.
+    /// This fetches from cached kind:0 events, not the network.
+    ///
+    /// Returns Result to allow Swift to properly handle errors (lock failures, etc.)
+    /// instead of silently returning nil.
+    pub fn get_profile_picture(&self, pubkey: String) -> Result<Option<String>, TenexError> {
+        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
+            resource: "store".to_string(),
+        })?;
+
+        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
+
+        Ok(store.get_profile_picture(&pubkey))
+    }
+
     /// Check if a user is currently logged in.
     /// Returns true only if we have stored keys.
     pub fn is_logged_in(&self) -> bool {
@@ -958,6 +977,7 @@ impl TenexCore {
                     id: t.id.clone(),
                     title: t.title.clone(),
                     author: author_name,
+                    author_pubkey: t.pubkey.clone(),
                     summary: t.summary.clone(),
                     message_count,
                     last_activity: t.last_activity,
@@ -1972,5 +1992,103 @@ mod tests {
     fn test_get_current_user_when_not_logged_in() {
         let core = TenexCore::new();
         assert!(core.get_current_user().is_none());
+    }
+
+    // ===== get_profile_picture tests =====
+
+    #[test]
+    fn test_get_profile_picture_returns_error_when_not_initialized() {
+        // Test that get_profile_picture returns CoreNotInitialized error when store is None
+        let core = TenexCore::new();
+        // Note: Don't call init() - store should be None
+
+        let result = core.get_profile_picture("c".repeat(64));
+
+        assert!(result.is_err());
+        match result {
+            Err(TenexError::CoreNotInitialized) => {}
+            Err(e) => panic!("Expected CoreNotInitialized error, got {:?}", e),
+            Ok(_) => panic!("Expected error, got success"),
+        }
+    }
+
+    #[test]
+    fn test_get_profile_picture_invalid_pubkey_returns_none() {
+        // Test that invalid pubkey format returns Ok(None), not an error
+        let core = TenexCore::new();
+        if !core.init() {
+            // Skip test if db initialization fails (can happen in parallel test runs)
+            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            return;
+        }
+
+        // Invalid pubkey (too short, not 64 hex chars)
+        let result = core.get_profile_picture("invalid_pubkey".to_string());
+
+        // Should return Ok(None) - pubkey validation happens in store, returns None for invalid
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_profile_picture_missing_profile_returns_none() {
+        // Test that a valid pubkey with no profile returns Ok(None)
+        let core = TenexCore::new();
+        if !core.init() {
+            // Skip test if db initialization fails (can happen in parallel test runs)
+            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            return;
+        }
+
+        // Valid 64-char hex pubkey, but no profile exists
+        let valid_pubkey = "c".repeat(64);
+        let result = core.get_profile_picture(valid_pubkey);
+
+        // Should return Ok(None) - valid request, just no data
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_profile_picture_empty_pubkey_returns_none() {
+        // Test that empty pubkey returns Ok(None)
+        let core = TenexCore::new();
+        if !core.init() {
+            // Skip test if db initialization fails (can happen in parallel test runs)
+            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            return;
+        }
+
+        let result = core.get_profile_picture("".to_string());
+
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_none());
+    }
+
+    #[test]
+    fn test_get_profile_picture_various_invalid_pubkeys() {
+        // Test various malformed pubkeys
+        let core = TenexCore::new();
+        if !core.init() {
+            // Skip test if db initialization fails (can happen in parallel test runs)
+            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            return;
+        }
+
+        let invalid_pubkeys: Vec<String> = vec![
+            "not_hex_at_all!@#$".to_string(),        // Non-hex characters
+            "abc123".to_string(),                     // Too short
+            "0".repeat(65),                          // Too long
+            "g".repeat(64),                          // Invalid hex char 'g'
+            "  ".to_string(),                        // Whitespace only
+            "0123456789abcdef".to_string(),          // Valid hex but wrong length (16 chars)
+        ];
+
+        for pubkey in invalid_pubkeys {
+            let result = core.get_profile_picture(pubkey.clone());
+            // All should return Ok(None) - graceful handling of invalid input
+            assert!(result.is_ok(), "Expected Ok for pubkey '{}', got {:?}", pubkey, result);
+            assert!(result.unwrap().is_none(), "Expected None for invalid pubkey '{}'", pubkey);
+        }
     }
 }

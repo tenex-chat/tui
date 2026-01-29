@@ -1,4 +1,5 @@
 import SwiftUI
+import CryptoKit
 
 /// A sheet for selecting a project to a-tag in a new conversation.
 /// Supports search and single-select with proper cancel semantics.
@@ -214,10 +215,9 @@ struct ProjectRowSelectView: View {
             )
     }
 
+    /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
-        let colors: [Color] = [.blue, .purple, .orange, .green, .pink, .indigo, .teal, .cyan]
-        let hash = project.id.hashValue
-        return colors[abs(hash) % colors.count]
+        deterministicColor(for: project.id)
     }
 }
 
