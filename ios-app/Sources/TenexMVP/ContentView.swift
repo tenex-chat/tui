@@ -6,8 +6,6 @@ struct ContentView: View {
     @Binding var isLoggedIn: Bool
     @EnvironmentObject var coreManager: TenexCoreManager
 
-    @State private var projects: [ProjectInfo] = []
-    @State private var isLoading = false
     @State private var selectedProject: ProjectInfo?
     @State private var showLogoutError = false
     @State private var logoutErrorMessage = ""
@@ -22,20 +20,19 @@ struct ContentView: View {
 
                 Divider()
 
-                // Project list
-                if isLoading {
+                // Project list - uses centralized coreManager.projects
+                if coreManager.projects.isEmpty {
                     Spacer()
-                    ProgressView("Loading projects...")
-                    Spacer()
-                } else if projects.isEmpty {
-                    Spacer()
-                    EmptyStateView(onRefresh: loadProjects)
+                    EmptyStateView()
                     Spacer()
                 } else {
                     ProjectListView(
-                        projects: projects,
+                        projects: coreManager.projects,
                         selectedProject: $selectedProject
                     )
+                    .refreshable {
+                        await coreManager.manualRefresh()
+                    }
                 }
             }
             .navigationTitle("Projects")
@@ -46,20 +43,10 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 16) {
-                        Button(action: loadProjects) {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(isLoading)
-
-                        Button(action: { showNewConversation = true }) {
-                            Image(systemName: "plus.message")
-                        }
+                    Button(action: { showNewConversation = true }) {
+                        Image(systemName: "plus.message")
                     }
                 }
-            }
-            .onAppear {
-                loadProjects()
             }
             .alert("Logout Error", isPresented: $showLogoutError) {
                 Button("Retry") {
@@ -73,26 +60,10 @@ struct ContentView: View {
                 MessageComposerView(
                     project: nil,
                     onSend: { _ in
-                        // Optionally refresh projects or navigate somewhere
-                        loadProjects()
+                        // Data will auto-refresh via polling
                     }
                 )
                 .environmentObject(coreManager)
-            }
-        }
-    }
-
-    private func loadProjects() {
-        isLoading = true
-
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Use the shared core manager - it's already initialized
-            _ = coreManager.core.refresh()
-            let fetchedProjects = coreManager.core.getProjects()
-
-            DispatchQueue.main.async {
-                self.projects = fetchedProjects
-                self.isLoading = false
             }
         }
     }
@@ -196,8 +167,6 @@ struct UserHeaderView: View {
 // MARK: - Empty State View
 
 struct EmptyStateView: View {
-    let onRefresh: () -> Void
-
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "folder.badge.questionmark")
@@ -208,15 +177,9 @@ struct EmptyStateView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Tap refresh to load your projects")
+            Text("Projects will appear automatically")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-
-            Button(action: onRefresh) {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .buttonStyle(.bordered)
-            .padding(.top, 8)
         }
         .padding()
     }

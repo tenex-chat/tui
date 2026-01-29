@@ -5,9 +5,6 @@ import CryptoKit
 /// with a project filter button in the toolbar
 struct ConversationsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var projects: [ProjectInfo] = []
-    @State private var allConversationsFull: [ConversationFullInfo] = []
-    @State private var isLoading = false
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
     @State private var selectedConversation: ConversationFullInfo?
@@ -15,9 +12,9 @@ struct ConversationsTabView: View {
     /// Filtered conversations based on selected projects
     private var filteredConversations: [ConversationFullInfo] {
         if selectedProjectIds.isEmpty {
-            return allConversationsFull
+            return coreManager.conversations
         }
-        return allConversationsFull.filter { selectedProjectIds.contains($0.projectATag) }
+        return coreManager.conversations.filter { selectedProjectIds.contains($0.projectATag) }
     }
 
     /// Root conversations (no parent or orphaned) sorted by effective last activity
@@ -39,7 +36,7 @@ struct ConversationsTabView: View {
         if selectedProjectIds.isEmpty {
             return "All Projects"
         } else if selectedProjectIds.count == 1 {
-            return projects.first { $0.id == selectedProjectIds.first }?.title ?? "1 Project"
+            return coreManager.projects.first { $0.id == selectedProjectIds.first }?.title ?? "1 Project"
         } else {
             return "\(selectedProjectIds.count) Projects"
         }

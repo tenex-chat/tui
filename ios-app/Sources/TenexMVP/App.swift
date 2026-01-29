@@ -69,6 +69,16 @@ class TenexCoreManager: ObservableObject {
     @Published var isInitialized = false
     @Published var initializationError: String?
 
+    // MARK: - Centralized Reactive Data Store
+    @Published var projects: [ProjectInfo] = []
+    @Published var conversations: [ConversationFullInfo] = []
+    @Published var inboxItems: [InboxItem] = []
+
+    // MARK: - Polling Infrastructure
+    private var pollingTimer: Timer?
+    private let pollingInterval: TimeInterval = 2.5
+    private var isPolling = false
+
     /// Cache for profile picture URLs to prevent repeated FFI calls
     let profilePictureCache = ProfilePictureCache.shared
 
@@ -91,6 +101,73 @@ class TenexCoreManager: ObservableObject {
     func refresh() {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             _ = self?.core.refresh()
+        }
+    }
+
+    // MARK: - Polling Control
+
+    /// Starts background polling for data updates
+    func startPolling() {
+        guard !isPolling else { return }
+        isPolling = true
+
+        // Initial fetch immediately
+        pollForUpdates()
+
+        // Start timer on main thread
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.pollingTimer = Timer.scheduledTimer(withTimeInterval: self.pollingInterval, repeats: true) { [weak self] _ in
+                self?.pollForUpdates()
+            }
+        }
+    }
+
+    /// Stops background polling
+    func stopPolling() {
+        isPolling = false
+        pollingTimer?.invalidate()
+        pollingTimer = nil
+    }
+
+    /// Polls for updates and refreshes all @Published data
+    func pollForUpdates() {
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+
+            // Refresh from relays
+            _ = self.core.refresh()
+
+            // Fetch all data
+            let fetchedProjects = self.core.getProjects()
+
+            let filter = ConversationFilter(
+                projectIds: [],
+                showArchived: false,
+                hideScheduled: true,
+                timeFilter: .all
+            )
+            let fetchedConversations = (try? self.core.getAllConversations(filter: filter)) ?? []
+
+            let fetchedInbox = self.core.getInbox()
+
+            // Update @Published on main thread
+            DispatchQueue.main.async {
+                self.projects = fetchedProjects
+                self.conversations = fetchedConversations
+                self.inboxItems = fetchedInbox
+            }
+        }
+    }
+
+    /// Manual refresh for pull-to-refresh gesture
+    func manualRefresh() async {
+        await withCheckedContinuation { continuation in
+            pollForUpdates()
+            // Small delay to allow UI update
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                continuation.resume()
+            }
         }
     }
 
@@ -225,6 +302,7 @@ struct TenexMVPApp: App {
     @State private var userNpub = ""
     @State private var isAttemptingAutoLogin = false
     @State private var autoLoginError: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
         WindowGroup {
@@ -266,6 +344,27 @@ struct TenexMVPApp: App {
             .onChange(of: coreManager.isInitialized) { _, isInitialized in
                 if isInitialized {
                     attemptAutoLogin()
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                // Pause/resume polling based on app lifecycle
+                if isLoggedIn {
+                    switch newPhase {
+                    case .active:
+                        coreManager.startPolling()
+                    case .background, .inactive:
+                        coreManager.stopPolling()
+                    @unknown default:
+                        break
+                    }
+                }
+            }
+            .onChange(of: isLoggedIn) { _, loggedIn in
+                // Start/stop polling based on login state
+                if loggedIn {
+                    coreManager.startPolling()
+                } else {
+                    coreManager.stopPolling()
                 }
             }
         }

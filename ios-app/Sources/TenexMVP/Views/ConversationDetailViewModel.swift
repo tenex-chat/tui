@@ -245,7 +245,7 @@ final class ConversationDetailViewModel: ObservableObject {
         guard let coreManager = coreManager else { return 0 }
 
         // Get runtime in milliseconds from the FFI
-        let runtimeMs = coreManager.getConversationRuntimeMs(conversationId: conversation.id)
+        let runtimeMs = coreManager.core.getConversationRuntimeMs(conversationId: conversation.id)
 
         // Convert milliseconds to seconds
         return TimeInterval(runtimeMs) / 1000.0
