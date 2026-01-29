@@ -109,6 +109,7 @@ pub enum StatsSubtab {
     Chart,
     Rankings,
     Messages,
+    Activity,
 }
 
 impl StatsSubtab {
@@ -117,16 +118,18 @@ impl StatsSubtab {
         match self {
             StatsSubtab::Chart => StatsSubtab::Rankings,
             StatsSubtab::Rankings => StatsSubtab::Messages,
-            StatsSubtab::Messages => StatsSubtab::Chart,
+            StatsSubtab::Messages => StatsSubtab::Activity,
+            StatsSubtab::Activity => StatsSubtab::Chart,
         }
     }
 
     /// Get the previous subtab (wraps around)
     pub fn prev(self) -> Self {
         match self {
-            StatsSubtab::Chart => StatsSubtab::Messages,
+            StatsSubtab::Chart => StatsSubtab::Activity,
             StatsSubtab::Rankings => StatsSubtab::Chart,
             StatsSubtab::Messages => StatsSubtab::Rankings,
+            StatsSubtab::Activity => StatsSubtab::Messages,
         }
     }
 }
