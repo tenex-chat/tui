@@ -419,6 +419,7 @@ struct MainTabView: View {
 
     @State private var selectedTab = 0
     @State private var showNewConversation = false
+    @State private var showSearch = false
 
     var body: some View {
         NavigationStack {
@@ -464,7 +465,14 @@ struct MainTabView: View {
                     }
                 }
 
-                // Right glass segment: New conversation
+                // Right glass segment: Search and New conversation
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                }
                 ToolbarItem(placement: .bottomBar) {
                     Button {
                         showNewConversation = true
@@ -473,6 +481,10 @@ struct MainTabView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showSearch) {
+            SearchView()
+                .environmentObject(coreManager)
         }
         .sheet(isPresented: $showNewConversation) {
             MessageComposerView(

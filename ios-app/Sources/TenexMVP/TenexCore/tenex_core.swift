@@ -448,6 +448,22 @@ fileprivate struct FfiConverterUInt32: FfiConverterPrimitive {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterInt32: FfiConverterPrimitive {
+    typealias FfiType = Int32
+    typealias SwiftType = Int32
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> Int32 {
+        return try lift(readInt(&buf))
+    }
+
+    public static func write(_ value: Int32, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(value))
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterUInt64: FfiConverterPrimitive {
     typealias FfiType = UInt64
     typealias SwiftType = UInt64
@@ -653,6 +669,17 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getMessages(conversationId: String)  -> [MessageInfo]
     
     /**
+     * Get online agents for a project from the project status (kind:24010).
+     *
+     * These are actual agent instances with their own Nostr keypairs.
+     * Use these for agent selection in the message composer - the pubkeys
+     * can be used for profile picture lookups and p-tags.
+     *
+     * Returns empty if project not found or project is offline.
+     */
+    func getOnlineAgents(projectId: String) throws  -> [OnlineAgentInfo]
+    
+    /**
      * Get the display name for a pubkey.
      * Returns the profile name if available, otherwise formats the pubkey as npub.
      */
@@ -764,6 +791,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * load from rapid successive calls (e.g., multiple views loading simultaneously).
      */
     func refresh()  -> Bool
+    
+    /**
+     * Full-text search across all events using nostrdb.
+     * Returns search results with content snippets and context.
+     */
+    func search(query: String, limit: Int32)  -> [SearchResult]
     
     /**
      * Send a message to an existing conversation.
@@ -1062,6 +1095,23 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
 }
     
     /**
+     * Get online agents for a project from the project status (kind:24010).
+     *
+     * These are actual agent instances with their own Nostr keypairs.
+     * Use these for agent selection in the message composer - the pubkeys
+     * can be used for profile picture lookups and p-tags.
+     *
+     * Returns empty if project not found or project is offline.
+     */
+open func getOnlineAgents(projectId: String)throws  -> [OnlineAgentInfo]  {
+    return try  FfiConverterSequenceTypeOnlineAgentInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_online_agents(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
      * Get the display name for a pubkey.
      * Returns the profile name if available, otherwise formats the pubkey as npub.
      */
@@ -1255,6 +1305,19 @@ open func refresh() -> Bool  {
 }
     
     /**
+     * Full-text search across all events using nostrdb.
+     * Returns search results with content snippets and context.
+     */
+open func search(query: String, limit: Int32) -> [SearchResult]  {
+    return try!  FfiConverterSequenceTypeSearchResult.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_search(self.uniffiClonePointer(),
+        FfiConverterString.lower(query),
+        FfiConverterInt32.lower(limit),$0
+    )
+})
+}
+    
+    /**
      * Send a message to an existing conversation.
      *
      * Creates a new kind:1 event with e-tag pointing to the thread root.
@@ -1410,7 +1473,9 @@ public func FfiConverterTypeTenexCore_lower(_ value: TenexCore) -> UnsafeMutable
 
 
 /**
- * An agent definition for FFI export.
+ * An agent definition for FFI export (from kind:4199 events).
+ * Note: The pubkey here is the AUTHOR of the agent definition, not the agent instance.
+ * For agent instances with their own pubkeys, use OnlineAgentInfo from get_online_agents().
  */
 public struct AgentInfo {
     /**
@@ -1418,7 +1483,7 @@ public struct AgentInfo {
      */
     public var id: String
     /**
-     * Agent's public key (hex)
+     * Agent definition author's public key (hex) - NOT the agent instance pubkey
      */
     public var pubkey: String
     /**
@@ -1453,7 +1518,7 @@ public struct AgentInfo {
          * Unique identifier of the agent (event ID)
          */id: String, 
         /**
-         * Agent's public key (hex)
+         * Agent definition author's public key (hex) - NOT the agent instance pubkey
          */pubkey: String, 
         /**
          * Agent's d-tag (slug)
@@ -2843,6 +2908,10 @@ public struct InboxItem {
      */
     public var fromAgent: String
     /**
+     * Author pubkey (hex) for reply tagging
+     */
+    public var authorPubkey: String
+    /**
      * Priority: high, medium, low
      */
     public var priority: String
@@ -2862,6 +2931,10 @@ public struct InboxItem {
      * Related conversation ID
      */
     public var conversationId: String?
+    /**
+     * Ask event data if this inbox item is an ask
+     */
+    public var askEvent: AskEventInfo?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -2879,6 +2952,9 @@ public struct InboxItem {
          * Who it's from
          */fromAgent: String, 
         /**
+         * Author pubkey (hex) for reply tagging
+         */authorPubkey: String, 
+        /**
          * Priority: high, medium, low
          */priority: String, 
         /**
@@ -2892,16 +2968,21 @@ public struct InboxItem {
          */projectId: String?, 
         /**
          * Related conversation ID
-         */conversationId: String?) {
+         */conversationId: String?, 
+        /**
+         * Ask event data if this inbox item is an ask
+         */askEvent: AskEventInfo?) {
         self.id = id
         self.title = title
         self.content = content
         self.fromAgent = fromAgent
+        self.authorPubkey = authorPubkey
         self.priority = priority
         self.status = status
         self.createdAt = createdAt
         self.projectId = projectId
         self.conversationId = conversationId
+        self.askEvent = askEvent
     }
 }
 
@@ -2924,6 +3005,9 @@ extension InboxItem: Equatable, Hashable {
         if lhs.fromAgent != rhs.fromAgent {
             return false
         }
+        if lhs.authorPubkey != rhs.authorPubkey {
+            return false
+        }
         if lhs.priority != rhs.priority {
             return false
         }
@@ -2939,6 +3023,9 @@ extension InboxItem: Equatable, Hashable {
         if lhs.conversationId != rhs.conversationId {
             return false
         }
+        if lhs.askEvent != rhs.askEvent {
+            return false
+        }
         return true
     }
 
@@ -2947,11 +3034,13 @@ extension InboxItem: Equatable, Hashable {
         hasher.combine(title)
         hasher.combine(content)
         hasher.combine(fromAgent)
+        hasher.combine(authorPubkey)
         hasher.combine(priority)
         hasher.combine(status)
         hasher.combine(createdAt)
         hasher.combine(projectId)
         hasher.combine(conversationId)
+        hasher.combine(askEvent)
     }
 }
 
@@ -2968,11 +3057,13 @@ public struct FfiConverterTypeInboxItem: FfiConverterRustBuffer {
                 title: FfiConverterString.read(from: &buf), 
                 content: FfiConverterString.read(from: &buf), 
                 fromAgent: FfiConverterString.read(from: &buf), 
+                authorPubkey: FfiConverterString.read(from: &buf), 
                 priority: FfiConverterString.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 projectId: FfiConverterOptionString.read(from: &buf), 
-                conversationId: FfiConverterOptionString.read(from: &buf)
+                conversationId: FfiConverterOptionString.read(from: &buf), 
+                askEvent: FfiConverterOptionTypeAskEventInfo.read(from: &buf)
         )
     }
 
@@ -2981,11 +3072,13 @@ public struct FfiConverterTypeInboxItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterString.write(value.content, into: &buf)
         FfiConverterString.write(value.fromAgent, into: &buf)
+        FfiConverterString.write(value.authorPubkey, into: &buf)
         FfiConverterString.write(value.priority, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterOptionString.write(value.projectId, into: &buf)
         FfiConverterOptionString.write(value.conversationId, into: &buf)
+        FfiConverterOptionTypeAskEventInfo.write(value.askEvent, into: &buf)
     }
 }
 
@@ -3598,6 +3691,121 @@ public func FfiConverterTypeNegentropySyncDiagnostics_lower(_ value: NegentropyS
 
 
 /**
+ * An online agent from project status (kind:24010 events).
+ * These are actual agent instances with their own Nostr keypairs.
+ * Use get_online_agents() to fetch these for agent selection.
+ */
+public struct OnlineAgentInfo {
+    /**
+     * Agent's actual public key (hex) - use this for profile lookups and p-tags
+     */
+    public var pubkey: String
+    /**
+     * Display name of the agent (e.g., "claude-code", "architect")
+     */
+    public var name: String
+    /**
+     * Whether this is the PM (project manager) agent
+     */
+    public var isPm: Bool
+    /**
+     * Model used by the agent (e.g., "claude-3-opus"), if known
+     */
+    public var model: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Agent's actual public key (hex) - use this for profile lookups and p-tags
+         */pubkey: String, 
+        /**
+         * Display name of the agent (e.g., "claude-code", "architect")
+         */name: String, 
+        /**
+         * Whether this is the PM (project manager) agent
+         */isPm: Bool, 
+        /**
+         * Model used by the agent (e.g., "claude-3-opus"), if known
+         */model: String?) {
+        self.pubkey = pubkey
+        self.name = name
+        self.isPm = isPm
+        self.model = model
+    }
+}
+
+#if compiler(>=6)
+extension OnlineAgentInfo: Sendable {}
+#endif
+
+
+extension OnlineAgentInfo: Equatable, Hashable {
+    public static func ==(lhs: OnlineAgentInfo, rhs: OnlineAgentInfo) -> Bool {
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.isPm != rhs.isPm {
+            return false
+        }
+        if lhs.model != rhs.model {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(pubkey)
+        hasher.combine(name)
+        hasher.combine(isPm)
+        hasher.combine(model)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeOnlineAgentInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> OnlineAgentInfo {
+        return
+            try OnlineAgentInfo(
+                pubkey: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                isPm: FfiConverterBool.read(from: &buf), 
+                model: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: OnlineAgentInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterBool.write(value.isPm, into: &buf)
+        FfiConverterOptionString.write(value.model, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOnlineAgentInfo_lift(_ buf: RustBuffer) throws -> OnlineAgentInfo {
+    return try FfiConverterTypeOnlineAgentInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeOnlineAgentInfo_lower(_ value: OnlineAgentInfo) -> RustBuffer {
+    return FfiConverterTypeOnlineAgentInfo.lower(value)
+}
+
+
+/**
  * Cost data for a project
  */
 public struct ProjectCost {
@@ -4117,6 +4325,161 @@ public func FfiConverterTypeReportInfo_lift(_ buf: RustBuffer) throws -> ReportI
 #endif
 public func FfiConverterTypeReportInfo_lower(_ value: ReportInfo) -> RustBuffer {
     return FfiConverterTypeReportInfo.lower(value)
+}
+
+
+/**
+ * A search result from full-text search.
+ */
+public struct SearchResult {
+    /**
+     * Event ID of the matching message/report
+     */
+    public var eventId: String
+    /**
+     * Thread/conversation ID for context
+     */
+    public var threadId: String?
+    /**
+     * Content snippet with match
+     */
+    public var content: String
+    /**
+     * Event kind (1 = message, 30023 = report)
+     */
+    public var kind: UInt32
+    /**
+     * Author name/npub
+     */
+    public var author: String
+    /**
+     * Unix timestamp
+     */
+    public var createdAt: UInt64
+    /**
+     * Project a-tag if known
+     */
+    public var projectATag: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event ID of the matching message/report
+         */eventId: String, 
+        /**
+         * Thread/conversation ID for context
+         */threadId: String?, 
+        /**
+         * Content snippet with match
+         */content: String, 
+        /**
+         * Event kind (1 = message, 30023 = report)
+         */kind: UInt32, 
+        /**
+         * Author name/npub
+         */author: String, 
+        /**
+         * Unix timestamp
+         */createdAt: UInt64, 
+        /**
+         * Project a-tag if known
+         */projectATag: String?) {
+        self.eventId = eventId
+        self.threadId = threadId
+        self.content = content
+        self.kind = kind
+        self.author = author
+        self.createdAt = createdAt
+        self.projectATag = projectATag
+    }
+}
+
+#if compiler(>=6)
+extension SearchResult: Sendable {}
+#endif
+
+
+extension SearchResult: Equatable, Hashable {
+    public static func ==(lhs: SearchResult, rhs: SearchResult) -> Bool {
+        if lhs.eventId != rhs.eventId {
+            return false
+        }
+        if lhs.threadId != rhs.threadId {
+            return false
+        }
+        if lhs.content != rhs.content {
+            return false
+        }
+        if lhs.kind != rhs.kind {
+            return false
+        }
+        if lhs.author != rhs.author {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        if lhs.projectATag != rhs.projectATag {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(eventId)
+        hasher.combine(threadId)
+        hasher.combine(content)
+        hasher.combine(kind)
+        hasher.combine(author)
+        hasher.combine(createdAt)
+        hasher.combine(projectATag)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeSearchResult: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SearchResult {
+        return
+            try SearchResult(
+                eventId: FfiConverterString.read(from: &buf), 
+                threadId: FfiConverterOptionString.read(from: &buf), 
+                content: FfiConverterString.read(from: &buf), 
+                kind: FfiConverterUInt32.read(from: &buf), 
+                author: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf), 
+                projectATag: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: SearchResult, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.eventId, into: &buf)
+        FfiConverterOptionString.write(value.threadId, into: &buf)
+        FfiConverterString.write(value.content, into: &buf)
+        FfiConverterUInt32.write(value.kind, into: &buf)
+        FfiConverterString.write(value.author, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+        FfiConverterOptionString.write(value.projectATag, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchResult_lift(_ buf: RustBuffer) throws -> SearchResult {
+    return try FfiConverterTypeSearchResult.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeSearchResult_lower(_ value: SearchResult) -> RustBuffer {
+    return FfiConverterTypeSearchResult.lower(value)
 }
 
 
@@ -5776,6 +6139,31 @@ fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeOnlineAgentInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [OnlineAgentInfo]
+
+    public static func write(_ value: [OnlineAgentInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeOnlineAgentInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [OnlineAgentInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [OnlineAgentInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeOnlineAgentInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeProjectCost: FfiConverterRustBuffer {
     typealias SwiftType = [ProjectCost]
 
@@ -5868,6 +6256,31 @@ fileprivate struct FfiConverterSequenceTypeReportInfo: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeReportInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeSearchResult: FfiConverterRustBuffer {
+    typealias SwiftType = [SearchResult]
+
+    public static func write(_ value: [SearchResult], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeSearchResult.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SearchResult] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [SearchResult]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeSearchResult.read(from: &buf))
         }
         return seq
     }
@@ -6030,6 +6443,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 33315) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_name() != 48278) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6073,6 +6489,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 48105) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_search() != 30961) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
