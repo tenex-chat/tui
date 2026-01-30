@@ -11,18 +11,19 @@ struct ConversationsTabView: View {
     @State private var showStats = false
     @State private var showArchived = false
     @State private var selectedConversation: ConversationFullInfo?
+    @State private var runtimeText: String = "0m"
 
-    /// Formatted runtime text for the toolbar button
-    private var runtimeText: String {
-        let totalMs = coreManager.core.getTodayRuntimeMs()
+    /// Updates the runtime text from SafeTenexCore
+    private func updateRuntime() async {
+        let totalMs = await coreManager.safeCore.getTodayRuntimeMs()
         let totalMinutes = Double(totalMs) / 60_000.0
         if totalMinutes >= 60.0 {
             // Show hours with 2 decimal places (e.g., "1.35h")
             let hours = totalMinutes / 60.0
-            return String(format: "%.2fh", hours)
+            runtimeText = String(format: "%.2fh", hours)
         } else {
             // Show minutes as integer (e.g., "42m")
-            return "\(Int(totalMinutes))m"
+            runtimeText = "\(Int(totalMinutes))m"
         }
     }
 
@@ -155,6 +156,12 @@ struct ConversationsTabView: View {
             .sheet(isPresented: $showStats) {
                 StatsView(coreManager: coreManager)
             }
+            .task {
+                await updateRuntime()
+            }
+            .onChange(of: coreManager.conversations) { _, _ in
+                Task { await updateRuntime() }
+            }
         }
     }
 
@@ -174,11 +181,14 @@ private struct ConversationRowFull: View {
     let projectTitle: String?
     let onSelect: (ConversationFullInfo) -> Void
 
-    /// Compute delegation agent infos by finding all descendants
-    private var delegationAgentInfos: [AgentAvatarInfo] {
+    /// Delegation agent infos loaded from descendants
+    @State private var delegationAgentInfos: [AgentAvatarInfo] = []
+
+    /// Load delegation agent infos by finding all descendants
+    private func loadDelegationAgentInfos() async {
         // Get all descendants of this conversation
-        let descendantIds = coreManager.core.getDescendantConversationIds(conversationId: conversation.id)
-        let descendants = coreManager.core.getConversationsByIds(conversationIds: descendantIds)
+        let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversation.id)
+        let descendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
 
         // Collect unique agents from descendants (excluding the conversation author)
         var agentsByPubkey: [String: AgentAvatarInfo] = [:]
@@ -191,7 +201,7 @@ private struct ConversationRowFull: View {
             }
         }
 
-        return agentsByPubkey.values.sorted { $0.name < $1.name }
+        delegationAgentInfos = agentsByPubkey.values.sorted { $0.name < $1.name }
     }
 
     private var statusColor: Color {
@@ -337,6 +347,9 @@ private struct ConversationRowFull: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onSelect(conversation)
+        }
+        .task {
+            await loadDelegationAgentInfos()
         }
     }
 }
@@ -883,23 +896,18 @@ private struct MessagesSheetView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onAppear {
-                loadMessages()
+            .task {
+                await loadMessages()
             }
         }
     }
 
-    private func loadMessages() {
+    private func loadMessages() async {
         isLoading = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = coreManager.core.refresh()
-            let fetched = coreManager.core.getMessages(conversationId: conversation.id)
-            DispatchQueue.main.async {
-                self.messages = fetched
-                self.isLoading = false
-            }
-        }
+        // Refresh ensures AppDataStore is synced with latest data from nostrdb
+        _ = await coreManager.safeCore.refresh()
+        messages = await coreManager.safeCore.getMessages(conversationId: conversation.id)
+        isLoading = false
     }
 }
 
