@@ -70,11 +70,13 @@ struct ConversationDetailView: View {
         } else {
             ScrollView {
                 VStack(spacing: 0) {
-                    // Header Section
+                    // Header Section (includes status, avatars, and runtime)
                     headerSection
 
-                    // Agents and Runtime Row
-                    agentsAndRuntimeSection
+                    // Todo List Section
+                    if viewModel.todoState.hasTodos {
+                        todoListSection
+                    }
 
                     // Delegations Section
                     if !viewModel.delegations.isEmpty {
@@ -111,53 +113,45 @@ struct ConversationDetailView: View {
                 .foregroundStyle(.primary)
                 .lineLimit(3)
 
-            // Status badge
-            StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
+            // Summary (no truncation)
+            if let summary = conversation.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // Status badge, avatars, and runtime row
+            HStack(alignment: .center, spacing: 12) {
+                // Status badge
+                StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
+
+                Spacer()
+
+                // Avatar group (author + participants)
+                if let authorInfo = viewModel.authorInfo {
+                    ConversationAvatarGroup(
+                        authorInfo: authorInfo,
+                        pTaggedRecipientPubkey: viewModel.pTaggedRecipientPubkey,
+                        otherParticipants: viewModel.otherParticipantsInfo,
+                        avatarSize: 20,
+                        fontSize: 8,
+                        maxVisibleAvatars: 5
+                    )
+                    .environmentObject(coreManager)
+                }
+
+                // Runtime
+                Text(viewModel.formattedRuntime)
+                    .font(.system(size: 18, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 20)
         .padding(.top, 20)
         .padding(.bottom, 16)
-    }
-
-    // MARK: - Agents and Runtime Section
-
-    private var agentsAndRuntimeSection: some View {
-        HStack(alignment: .center) {
-            // Agents - overlapping avatars with profile pictures from kind:0 events
-            ZStack(alignment: .leading) {
-                ForEach(Array(viewModel.participatingAgentInfos.prefix(8).enumerated()), id: \.element.id) { index, agentInfo in
-                    AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey, size: 44, fontSize: 14)
-                        .environmentObject(coreManager)
-                        .offset(x: CGFloat(index) * 28)
-                        .zIndex(Double(8 - index))
-                }
-
-                if viewModel.participatingAgentInfos.count > 8 {
-                    Circle()
-                        .fill(Color(.systemGray4))
-                        .frame(width: 44, height: 44)
-                        .overlay {
-                            Text("+\(viewModel.participatingAgentInfos.count - 8)")
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.secondary)
-                        }
-                        .offset(x: CGFloat(8) * 28)
-                }
-            }
-            .frame(height: 44)
-
-            Spacer()
-
-            // Runtime
-            Text(viewModel.formatEffectiveRuntime())
-                .font(.system(size: 32, weight: .light))
-                .monospacedDigit()
-                .foregroundStyle(.primary)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 16)
         .overlay(alignment: .bottom) {
             Divider()
         }
@@ -187,6 +181,30 @@ struct ConversationDetailView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
         .overlay(alignment: .top) {
+            Divider()
+        }
+    }
+
+    // MARK: - Todo List Section
+
+    private var todoListSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header
+            Text("Todos (\(viewModel.todoState.completedCount)/\(viewModel.todoState.items.count))")
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 20)
+
+            // Todo items
+            VStack(spacing: 8) {
+                ForEach(viewModel.todoState.items) { todo in
+                    TodoRowView(todo: todo)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+        .padding(.vertical, 16)
+        .overlay(alignment: .bottom) {
             Divider()
         }
     }
@@ -230,6 +248,71 @@ struct ConversationDetailView: View {
     }
 }
 
+// MARK: - Todo Row View
+
+/// Compact todo item row
+struct TodoRowView: View {
+    let todo: TodoItem
+
+    private var statusIcon: String {
+        switch todo.status {
+        case .done, .completed:
+            return "checkmark.circle.fill"
+        case .inProgress:
+            return "circle.circle.fill"
+        case .skipped:
+            return "xmark.circle.fill"
+        case .pending:
+            return "circle"
+        }
+    }
+
+    private var statusColor: Color {
+        switch todo.status {
+        case .done, .completed:
+            return .green
+        case .inProgress:
+            return .blue
+        case .skipped:
+            return .gray
+        case .pending:
+            return .secondary
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: statusIcon)
+                .font(.system(size: 16))
+                .foregroundStyle(statusColor)
+                .frame(width: 20)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(todo.title)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let description = todo.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if let skipReason = todo.skipReason, !skipReason.isEmpty {
+                    Text("Skipped: \(skipReason)")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .italic()
+                }
+            }
+
+            Spacer()
+        }
+    }
+}
+
 // MARK: - Delegation Row View
 
 /// Tappable delegation row without card styling
@@ -239,17 +322,20 @@ struct DelegationRowView: View {
     let onTap: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            AgentAvatarView(agentName: delegation.recipient, size: 40, fontSize: 13)
+        HStack(spacing: 10) {
+            // Smaller avatar for compact look
+            AgentAvatarView(agentName: delegation.recipient, pubkey: delegation.recipientPubkey, size: 32, fontSize: 11)
                 .environmentObject(coreManager)
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
+                // Agent name - callout size
                 Text(AgentNameFormatter.format(delegation.recipient))
-                    .font(.subheadline)
+                    .font(.callout)
                     .fontWeight(.semibold)
 
+                // Preview - caption size (equivalent to text-xs)
                 Text(delegation.messagePreview)
-                    .font(.subheadline)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
@@ -257,11 +343,11 @@ struct DelegationRowView: View {
             Spacer()
 
             Image(systemName: "chevron.right")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.tertiary)
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 14)
+        .padding(.vertical, 10)
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()
