@@ -196,6 +196,8 @@ pub struct ConversationFullInfo {
     pub project_a_tag: String,
     /// Whether this is a scheduled event
     pub is_scheduled: bool,
+    /// P-tags (pubkeys mentioned in the conversation's root event)
+    pub p_tags: Vec<String>,
 }
 
 /// Time filter options for conversations
@@ -1317,6 +1319,7 @@ impl TenexCore {
                     has_children,
                     project_a_tag,
                     is_scheduled: thread.is_scheduled,
+                    p_tags: thread.p_tags.clone(),
                 });
             }
         }
@@ -1647,6 +1650,7 @@ impl TenexCore {
                     has_children,
                     project_a_tag: project_a_tag.clone(),
                     is_scheduled: thread.is_scheduled,
+                    p_tags: thread.p_tags.clone(),
                 });
             }
         }

@@ -30,23 +30,17 @@ class StatsViewModel: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Load stats data from Rust core
+    /// Load stats data from Rust core using SafeTenexCore
     func loadStats() async {
         isLoading = true
         error = nil
 
         do {
-            // Capture core before detaching to avoid actor isolation violation
-            let core = coreManager.core
+            // Refresh core data first (pull latest from relays)
+            _ = await coreManager.safeCore.refresh()
 
-            // Move FFI calls off main actor to prevent UI blocking
-            let fetchedSnapshot = try await Task.detached { [core] in
-                // Refresh core data first (pull latest from relays)
-                _ = core.refresh()
-
-                // Fetch stats snapshot (single batched call)
-                return try core.getStatsSnapshot()
-            }.value
+            // Fetch stats snapshot using SafeTenexCore with proper error handling
+            let fetchedSnapshot = try await coreManager.safeCore.getStatsSnapshot()
 
             // Update UI on main actor
             snapshot = fetchedSnapshot
