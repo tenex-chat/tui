@@ -25,6 +25,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func getMessages(conversationId: String) -> [MessageInfo]
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?) throws -> SendMessageResult
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?) throws -> SendMessageResult
+    func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws -> SendMessageResult
 
     // MARK: - Inbox
     func getInbox() -> [InboxItem]
@@ -36,6 +37,14 @@ protocol SafeTenexCoreProtocol: Actor {
     func getAgents(projectId: String) throws -> [AgentInfo]
     func getAllAgents() throws -> [AgentInfo]
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
+    func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws
+
+    // MARK: - Backend Trust
+    func setTrustedBackends(approved: [String], blocked: [String]) throws
+    func approveBackend(pubkey: String) throws
+    func blockBackend(pubkey: String) throws
+    func approveAllPendingBackends() throws -> UInt32
 
     // MARK: - Stats & Diagnostics
     func getStatsSnapshot() throws -> StatsSnapshot

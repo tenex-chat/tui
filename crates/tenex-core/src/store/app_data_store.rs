@@ -1495,12 +1495,13 @@ impl AppDataStore {
                 return;
             }
 
-            // Unknown backend - queue for approval
-            let already_pending = self.pending_backend_approvals.iter().any(|p| {
-                p.backend_pubkey == *backend_pubkey
-            });
-
-            if !already_pending {
+            // Unknown backend - queue for approval (or update existing pending with newer status)
+            if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
+                p.backend_pubkey == *backend_pubkey && p.project_a_tag == status.project_coordinate
+            }) {
+                // Update with newer status
+                existing.status = status;
+            } else {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -1510,6 +1511,7 @@ impl AppDataStore {
                     backend_pubkey: backend_pubkey.clone(),
                     project_a_tag: status.project_coordinate.clone(),
                     first_seen: now,
+                    status,
                 };
 
                 self.pending_backend_approvals.push(pending);
@@ -1542,29 +1544,29 @@ impl AppDataStore {
             return Some(event);
         }
 
-        // Unknown backend - queue for approval
-        // Only add if not already pending for this backend
-        let already_pending = self.pending_backend_approvals.iter().any(|p| {
-            p.backend_pubkey == *backend_pubkey
-        });
-
-        if !already_pending {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            let pending = PendingBackendApproval {
-                backend_pubkey: backend_pubkey.clone(),
-                project_a_tag: status.project_coordinate.clone(),
-                first_seen: now,
-            };
-
-            self.pending_backend_approvals.push(pending.clone());
-            return Some(crate::events::CoreEvent::PendingBackendApproval(pending));
+        // Unknown backend - queue for approval (or update existing pending with newer status)
+        if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
+            p.backend_pubkey == *backend_pubkey && p.project_a_tag == status.project_coordinate
+        }) {
+            // Update with newer status
+            existing.status = status;
+            return None; // Already pending, don't emit another event
         }
 
-        None
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let pending = PendingBackendApproval {
+            backend_pubkey: backend_pubkey.clone(),
+            project_a_tag: status.project_coordinate.clone(),
+            first_seen: now,
+            status,
+        };
+
+        self.pending_backend_approvals.push(pending.clone());
+        Some(crate::events::CoreEvent::PendingBackendApproval(pending))
     }
 
     fn handle_profile_event(&mut self, note: &Note) {
@@ -2995,10 +2997,21 @@ impl AppDataStore {
         // from subscriptions, ensuring trust validation is always applied.
     }
 
-    /// Add a backend to the approved list and process any pending status events
+    /// Add a backend to the approved list and apply any pending status events
     pub fn add_approved_backend(&mut self, pubkey: &str) {
         self.blocked_backends.remove(pubkey);
         self.approved_backends.insert(pubkey.to_string());
+
+        // Extract and apply pending statuses for this backend before removing them
+        let pending_statuses: Vec<_> = self.pending_backend_approvals
+            .iter()
+            .filter(|p| p.backend_pubkey == pubkey)
+            .map(|p| p.status.clone())
+            .collect();
+
+        for status in pending_statuses {
+            self.project_statuses.insert(status.project_coordinate.clone(), status);
+        }
 
         // Remove from pending approvals
         self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);

@@ -139,6 +139,15 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Answer an ask event with formatted responses.
+    func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws -> SendMessageResult {
+        do {
+            return try core.answerAsk(askEventId: askEventId, askAuthorPubkey: askAuthorPubkey, conversationId: conversationId, projectId: projectId, answers: answers)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
     // MARK: - Inbox
 
     /// Get inbox items.
@@ -180,6 +189,66 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo] {
         do {
             return try core.getOnlineAgents(projectId: projectId)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Get available configuration options for a project.
+    /// Returns all available models and tools from the project status.
+    func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions {
+        do {
+            return try core.getProjectConfigOptions(projectId: projectId)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Update an agent's configuration (model and tools).
+    /// Publishes a kind:24020 event to update the agent's config.
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws {
+        do {
+            try core.updateAgentConfig(projectId: projectId, agentPubkey: agentPubkey, model: model, tools: tools)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    // MARK: - Backend Trust
+
+    /// Set the trusted backends from preferences.
+    /// Must be called after init to enable processing of kind:24010 events.
+    func setTrustedBackends(approved: [String], blocked: [String]) throws {
+        do {
+            try core.setTrustedBackends(approved: approved, blocked: blocked)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Add a backend to the approved list.
+    func approveBackend(pubkey: String) throws {
+        do {
+            try core.approveBackend(pubkey: pubkey)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Add a backend to the blocked list.
+    func blockBackend(pubkey: String) throws {
+        do {
+            try core.blockBackend(pubkey: pubkey)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Approve all pending backends.
+    /// Useful for mobile apps without a backend approval UI.
+    func approveAllPendingBackends() throws -> UInt32 {
+        do {
+            return try core.approveAllPendingBackends()
         } catch let error as TenexError {
             throw CoreError.tenex(error)
         }

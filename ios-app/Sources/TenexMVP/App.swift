@@ -149,6 +149,19 @@ class TenexCoreManager: ObservableObject {
     func pollForUpdatesAsync() async {
         _ = await safeCore.refresh()
 
+        // Auto-approve any pending backends (iOS doesn't have approval UI yet)
+        // This allows kind:24010 status events to be processed, enabling online agents
+        do {
+            let approved = try await safeCore.approveAllPendingBackends()
+            if approved > 0 {
+                print("[TenexCoreManager] Auto-approved \(approved) backend(s)")
+                // Refresh again to process the now-approved status events
+                _ = await safeCore.refresh()
+            }
+        } catch {
+            print("[TenexCoreManager] Failed to approve pending backends: \(error)")
+        }
+
         do {
             let filter = ConversationFilter(
                 projectIds: [],
@@ -269,9 +282,8 @@ class TenexCoreManager: ObservableObject {
     /// Saves credentials to keychain after successful login
     /// - Parameter nsec: The nsec to save
     /// - Returns: Optional error message if save failed
-    /// - Note: Call from background thread
-    func saveCredential(nsec: String) -> String? {
-        let result = KeychainService.shared.saveNsec(nsec)
+    func saveCredential(nsec: String) async -> String? {
+        let result = await KeychainService.shared.saveNsecAsync(nsec)
         switch result {
         case .success:
             return nil
@@ -282,12 +294,11 @@ class TenexCoreManager: ObservableObject {
 
     /// Clears stored credentials from keychain
     /// - Returns: Optional error message if clear failed
-    /// - Note: Call from background thread
-    func clearCredentials() -> String? {
+    func clearCredentials() async -> String? {
         // Clear profile picture cache on logout to prevent stale data
         profilePictureCache.clear()
 
-        let result = KeychainService.shared.deleteNsec()
+        let result = await KeychainService.shared.deleteNsecAsync()
         switch result {
         case .success:
             return nil
@@ -395,8 +406,8 @@ struct TenexMVPApp: App {
                 case .invalidCredential(let error):
                     // Credential was provably invalid - delete it and show login
                     print("[TENEX] Stored credential invalid: \(error)")
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        _ = coreManager.clearCredentials()
+                    Task {
+                        _ = await coreManager.clearCredentials()
                     }
                     autoLoginError = "Stored credential was invalid. Please log in again."
 

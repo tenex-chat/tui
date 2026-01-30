@@ -91,6 +91,34 @@ fn get_core_handle(core_handle: &RwLock<Option<CoreHandle>>) -> Result<CoreHandl
     }).cloned()
 }
 
+/// Format ask answers into markdown response (matching TUI format).
+fn format_ask_answers(answers: &[AskAnswer]) -> String {
+    let mut response = String::new();
+
+    for answer in answers {
+        // Add question title as heading
+        response.push_str(&format!("## {}\n\n", answer.question_title));
+
+        // Format answer based on type
+        match &answer.answer_type {
+            AskAnswerType::SingleSelect { value } => {
+                response.push_str(&format!("{}\n\n", value));
+            }
+            AskAnswerType::MultiSelect { values } => {
+                for value in values {
+                    response.push_str(&format!("- {}\n", value));
+                }
+                response.push('\n');
+            }
+            AskAnswerType::CustomText { value } => {
+                response.push_str(&format!("{}\n\n", value));
+            }
+        }
+    }
+
+    response.trim().to_string()
+}
+
 /// Helper to acquire a read lock on the store.
 ///
 /// This eliminates the repeated pattern of:
@@ -269,6 +297,26 @@ pub struct AskEventInfo {
     pub context: String,
     /// List of questions to display
     pub questions: Vec<AskQuestionInfo>,
+}
+
+/// An answer to a single question in an ask event.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AskAnswer {
+    /// The question title (used to format the response)
+    pub question_title: String,
+    /// The answer type and value(s)
+    pub answer_type: AskAnswerType,
+}
+
+/// The type of answer for an ask question.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum AskAnswerType {
+    /// Single selection from suggestions
+    SingleSelect { value: String },
+    /// Multiple selections from options
+    MultiSelect { values: Vec<String> },
+    /// Custom text input (for "Other" option)
+    CustomText { value: String },
 }
 
 /// A message within a conversation.
@@ -2139,6 +2187,90 @@ impl TenexCore {
         Ok(())
     }
 
+    // =========================================================================
+    // Backend Trust Management
+    // =========================================================================
+
+    /// Set the trusted backends from preferences.
+    ///
+    /// This must be called after login to enable processing of kind:24010 (project status)
+    /// events. Status events from approved backends will populate project_statuses,
+    /// enabling get_online_agents() to return online agents.
+    ///
+    /// Call this on app startup with stored approved/blocked backend pubkeys.
+    pub fn set_trusted_backends(&self, approved: Vec<String>, blocked: Vec<String>) -> Result<(), TenexError> {
+        let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let approved_set: std::collections::HashSet<String> = approved.into_iter().collect();
+        let blocked_set: std::collections::HashSet<String> = blocked.into_iter().collect();
+        store.set_trusted_backends(approved_set, blocked_set);
+
+        Ok(())
+    }
+
+    /// Add a backend to the approved list.
+    ///
+    /// Once approved, kind:24010 events from this backend will be processed,
+    /// populating project_statuses and enabling get_online_agents().
+    pub fn approve_backend(&self, pubkey: String) -> Result<(), TenexError> {
+        let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        store.add_approved_backend(&pubkey);
+        Ok(())
+    }
+
+    /// Add a backend to the blocked list.
+    ///
+    /// Status events from blocked backends will be silently ignored.
+    pub fn block_backend(&self, pubkey: String) -> Result<(), TenexError> {
+        let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        store.add_blocked_backend(&pubkey);
+        Ok(())
+    }
+
+    /// Approve all pending backends.
+    ///
+    /// This is useful for mobile apps that don't have a UI for backend approval modals.
+    /// Approves any backends that sent kind:24010 events but weren't in the approved list.
+    /// Returns the number of backends that were approved.
+    pub fn approve_all_pending_backends(&self) -> Result<u32, TenexError> {
+        let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let pending = store.drain_pending_backend_approvals();
+        let count = pending.len() as u32;
+
+        for approval in pending {
+            store.add_approved_backend(&approval.backend_pubkey);
+        }
+
+        Ok(count)
+    }
+
     /// Send a new conversation (thread) to a project.
     ///
     /// Creates a new kind:1 event with title tag and project a-tag.
@@ -2230,6 +2362,57 @@ impl TenexCore {
             }),
         }
     }
+
+    /// Answer an ask event by sending a formatted response.
+    ///
+    /// The response is formatted as markdown with each question's title and answer,
+    /// and published as a kind:1 reply to the ask event.
+    pub fn answer_ask(
+        &self,
+        ask_event_id: String,
+        ask_author_pubkey: String,
+        conversation_id: String,
+        project_id: String,
+        answers: Vec<AskAnswer>,
+    ) -> Result<SendMessageResult, TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        // Format answers as markdown (matching TUI format)
+        let content = format_ask_answers(&answers);
+
+        // Create a channel to receive the event ID
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+        // Send the publish message command with reply_to pointing to the ask event
+        core_handle
+            .send(NostrCommand::PublishMessage {
+                thread_id: conversation_id,
+                project_a_tag,
+                content,
+                agent_pubkey: None,
+                reply_to: Some(ask_event_id),
+                branch: None,
+                nudge_ids: Vec::new(),
+                ask_author_pubkey: Some(ask_author_pubkey),
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send ask answer command: {}", e),
+            })?;
+
+        // Wait for the event ID with timeout
+        match response_rx.recv_timeout(Duration::from_secs(10)) {
+            Ok(event_id) => Ok(SendMessageResult {
+                event_id,
+                success: true,
+            }),
+            Err(_) => Err(TenexError::Internal {
+                message: "Timed out waiting for ask answer publish confirmation".to_string(),
+            }),
+        }
+    }
+
     /// Get comprehensive stats snapshot with full TUI parity.
     /// This is a single batched FFI call that returns all stats data pre-computed.
     ///

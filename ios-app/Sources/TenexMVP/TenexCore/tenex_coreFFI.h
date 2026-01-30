@@ -267,9 +267,29 @@ void*_Nonnull uniffi_tenex_core_fn_constructor_tenexcore_new(RustCallStatus *_No
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_ANSWER_ASK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_ANSWER_ASK
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_answer_ask(void*_Nonnull ptr, RustBuffer ask_event_id, RustBuffer ask_author_pubkey, RustBuffer conversation_id, RustBuffer project_id, RustBuffer answers, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_APPROVE_ALL_PENDING_BACKENDS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_APPROVE_ALL_PENDING_BACKENDS
+uint32_t uniffi_tenex_core_fn_method_tenexcore_approve_all_pending_backends(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_APPROVE_BACKEND
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_APPROVE_BACKEND
+void uniffi_tenex_core_fn_method_tenexcore_approve_backend(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_ARCHIVE_CONVERSATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_ARCHIVE_CONVERSATION
 void uniffi_tenex_core_fn_method_tenexcore_archive_conversation(void*_Nonnull ptr, RustBuffer conversation_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BLOCK_BACKEND
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BLOCK_BACKEND
+void uniffi_tenex_core_fn_method_tenexcore_block_backend(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_AGENTS
@@ -350,6 +370,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_profile_name(void*_Nonnull 
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROFILE_PICTURE
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROFILE_PICTURE
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROJECT_CONFIG_OPTIONS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROJECT_CONFIG_OPTIONS
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_project_config_options(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_PROJECT_FILTERS
@@ -437,6 +462,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, 
 void uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(void*_Nonnull ptr, RustBuffer thread_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
+void uniffi_tenex_core_fn_method_tenexcore_set_trusted_backends(void*_Nonnull ptr, RustBuffer approved, RustBuffer blocked, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_VISIBLE_PROJECTS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_VISIBLE_PROJECTS
 void uniffi_tenex_core_fn_method_tenexcore_set_visible_projects(void*_Nonnull ptr, RustBuffer project_a_tags, RustCallStatus *_Nonnull out_status
@@ -455,6 +485,11 @@ int8_t uniffi_tenex_core_fn_method_tenexcore_toggle_thread_collapsed(void*_Nonnu
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UNARCHIVE_CONVERSATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UNARCHIVE_CONVERSATION
 void uniffi_tenex_core_fn_method_tenexcore_unarchive_conversation(void*_Nonnull ptr, RustBuffer conversation_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
+void uniffi_tenex_core_fn_method_tenexcore_update_agent_config(void*_Nonnull ptr, RustBuffer project_id, RustBuffer agent_pubkey, RustBuffer model, RustBuffer tools, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
@@ -742,9 +777,33 @@ void ffi_tenex_core_rust_future_free_void(uint64_t handle
 void ffi_tenex_core_rust_future_complete_void(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_ANSWER_ASK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_ANSWER_ASK
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_answer_ask(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_APPROVE_ALL_PENDING_BACKENDS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_APPROVE_ALL_PENDING_BACKENDS
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_approve_all_pending_backends(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_APPROVE_BACKEND
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_APPROVE_BACKEND
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_approve_backend(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_ARCHIVE_CONVERSATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_ARCHIVE_CONVERSATION
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_archive_conversation(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_BLOCK_BACKEND
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_BLOCK_BACKEND
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_block_backend(void
     
 );
 #endif
@@ -841,6 +900,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_profile_name(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROFILE_PICTURE
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROFILE_PICTURE
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROJECT_CONFIG_OPTIONS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_PROJECT_CONFIG_OPTIONS
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options(void
     
 );
 #endif
@@ -946,6 +1011,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids(vo
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_VISIBLE_PROJECTS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_VISIBLE_PROJECTS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_visible_projects(void
@@ -967,6 +1038,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_toggle_thread_collapsed(voi
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UNARCHIVE_CONVERSATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UNARCHIVE_CONVERSATION
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_update_agent_config(void
     
 );
 #endif
