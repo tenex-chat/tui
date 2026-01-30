@@ -251,6 +251,21 @@ typedef void (*UniffiForeignFutureCompleteVoid)(uint64_t, UniffiForeignFutureStr
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_EVENT_CALLBACK_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_EVENT_CALLBACK_METHOD0
+typedef void (*UniffiCallbackInterfaceEventCallbackMethod0)(uint64_t, RustBuffer, void* _Nonnull, 
+        RustCallStatus *_Nonnull uniffiCallStatus
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_EVENT_CALLBACK
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_EVENT_CALLBACK
+typedef struct UniffiVTableCallbackInterfaceEventCallback {
+    UniffiCallbackInterfaceEventCallbackMethod0 _Nonnull onDataChanged;
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+} UniffiVTableCallbackInterfaceEventCallback;
+
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_CLONE_TENEXCORE
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_CLONE_TENEXCORE
 void*_Nonnull uniffi_tenex_core_fn_clone_tenexcore(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -290,6 +305,11 @@ void uniffi_tenex_core_fn_method_tenexcore_archive_conversation(void*_Nonnull pt
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BLOCK_BACKEND
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BLOCK_BACKEND
 void uniffi_tenex_core_fn_method_tenexcore_block_backend(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
+void uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_AGENTS
@@ -355,6 +375,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_inbox(void*_Nonnull ptr, Ru
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_MESSAGES
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_MESSAGES
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_messages(void*_Nonnull ptr, RustBuffer conversation_id, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_NUDGES
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_NUDGES
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_nudges(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_ONLINE_AGENTS
@@ -454,12 +479,17 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_message(void*_Nonnull ptr,
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
-RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, RustBuffer project_id, RustBuffer title, RustBuffer content, RustBuffer agent_pubkey, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, RustBuffer project_id, RustBuffer title, RustBuffer content, RustBuffer agent_pubkey, RustBuffer nudge_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_COLLAPSED_THREAD_IDS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_COLLAPSED_THREAD_IDS
 void uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(void*_Nonnull ptr, RustBuffer thread_ids, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_EVENT_CALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_EVENT_CALLBACK
+void uniffi_tenex_core_fn_method_tenexcore_set_event_callback(void*_Nonnull ptr, uint64_t callback, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
@@ -495,6 +525,11 @@ void uniffi_tenex_core_fn_method_tenexcore_update_agent_config(void*_Nonnull ptr
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_version(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_INIT_CALLBACK_VTABLE_EVENTCALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_INIT_CALLBACK_VTABLE_EVENTCALLBACK
+void uniffi_tenex_core_fn_init_callback_vtable_eventcallback(const UniffiVTableCallbackInterfaceEventCallback* _Nonnull vtable
 );
 #endif
 #ifndef UNIFFI_FFIDEF_FFI_TENEX_CORE_RUSTBUFFER_ALLOC
@@ -807,6 +842,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_block_backend(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_AGENTS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_AGENTS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_agents(void
@@ -882,6 +923,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_inbox(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_MESSAGES
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_MESSAGES
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_messages(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_NUDGES
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_NUDGES
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_nudges(void
     
 );
 #endif
@@ -1011,6 +1058,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids(vo
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_EVENT_CALLBACK
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_EVENT_CALLBACK
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_event_callback(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends(void
@@ -1056,6 +1109,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_version(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_CONSTRUCTOR_TENEXCORE_NEW
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_CONSTRUCTOR_TENEXCORE_NEW
 uint16_t uniffi_tenex_core_checksum_constructor_tenexcore_new(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_EVENTCALLBACK_ON_DATA_CHANGED
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_EVENTCALLBACK_ON_DATA_CHANGED
+uint16_t uniffi_tenex_core_checksum_method_eventcallback_on_data_changed(void
     
 );
 #endif

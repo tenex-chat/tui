@@ -131,9 +131,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
         do {
-            return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey)
+            return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds)
         } catch let error as TenexError {
             throw CoreError.tenex(error)
         }
@@ -189,6 +189,16 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo] {
         do {
             return try core.getOnlineAgents(projectId: projectId)
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Get all nudges (kind:4201 events).
+    /// Returns nudges sorted by created_at descending (most recent first).
+    func getNudges() throws -> [NudgeInfo] {
+        do {
+            return try core.getNudges()
         } catch let error as TenexError {
             throw CoreError.tenex(error)
         }

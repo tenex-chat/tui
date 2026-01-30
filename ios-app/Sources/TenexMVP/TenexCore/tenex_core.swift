@@ -395,7 +395,13 @@ fileprivate final class UniffiHandleMap<T>: @unchecked Sendable {
 
 
 // Public interface members begin here.
-
+// Magic number for the Rust proxy to call using the same mechanism as every other method,
+// to free the callback once it's dropped by Rust.
+private let IDX_CALLBACK_FREE: Int32 = 0
+// Callback return codes
+private let UNIFFI_CALLBACK_SUCCESS: Int32 = 0
+private let UNIFFI_CALLBACK_ERROR: Int32 = 1
+private let UNIFFI_CALLBACK_UNEXPECTED_ERROR: Int32 = 2
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -607,6 +613,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func blockBackend(pubkey: String) throws 
     
     /**
+     * Clear the event callback and stop the listener thread.
+     * Call this on logout to clean up resources.
+     */
+    func clearEventCallback() 
+    
+    /**
      * Get agents for a project.
      *
      * Returns agents configured for the specified project.
@@ -699,6 +711,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Get messages for a conversation.
      */
     func getMessages(conversationId: String)  -> [MessageInfo]
+    
+    /**
+     * Get all nudges (kind:4201 events).
+     *
+     * Returns all nudges sorted by created_at descending (most recent first).
+     * Used by iOS for nudge selection in new conversations.
+     */
+    func getNudges() throws  -> [NudgeInfo]
     
     /**
      * Get online agents for a project from the project status (kind:24010).
@@ -852,12 +872,27 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws  -> SendMessageResult
     
     /**
      * Set collapsed thread IDs (replace all).
      */
     func setCollapsedThreadIds(threadIds: [String]) 
+    
+    /**
+     * Register a callback to receive event notifications.
+     * Call this after login to enable push-based updates.
+     *
+     * The callback will be invoked from a background thread when:
+     * - New messages arrive for a conversation
+     * - Project status changes (kind:24010)
+     * - Streaming text chunks arrive
+     * - Any other data changes
+     *
+     * Note: Only one callback can be registered at a time.
+     * Calling this again will replace the previous callback.
+     */
+    func setEventCallback(callback: EventCallback) 
     
     /**
      * Set the trusted backends from preferences.
@@ -1044,6 +1079,16 @@ open func blockBackend(pubkey: String)throws   {try rustCallWithError(FfiConvert
 }
     
     /**
+     * Clear the event callback and stop the listener thread.
+     * Call this on logout to clean up resources.
+     */
+open func clearEventCallback()  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
      * Get agents for a project.
      *
      * Returns agents configured for the specified project.
@@ -1206,6 +1251,19 @@ open func getMessages(conversationId: String) -> [MessageInfo]  {
     return try!  FfiConverterSequenceTypeMessageInfo.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_messages(self.uniffiClonePointer(),
         FfiConverterString.lower(conversationId),$0
+    )
+})
+}
+    
+    /**
+     * Get all nudges (kind:4201 events).
+     *
+     * Returns all nudges sorted by created_at descending (most recent first).
+     * Used by iOS for nudge selection in new conversations.
+     */
+open func getNudges()throws  -> [NudgeInfo]  {
+    return try  FfiConverterSequenceTypeNudgeInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_nudges(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1470,13 +1528,14 @@ open func sendMessage(conversationId: String, projectId: String, content: String
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
+open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String])throws  -> SendMessageResult  {
     return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(title),
         FfiConverterString.lower(content),
-        FfiConverterOptionString.lower(agentPubkey),$0
+        FfiConverterOptionString.lower(agentPubkey),
+        FfiConverterSequenceString.lower(nudgeIds),$0
     )
 })
 }
@@ -1487,6 +1546,26 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
 open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(self.uniffiClonePointer(),
         FfiConverterSequenceString.lower(threadIds),$0
+    )
+}
+}
+    
+    /**
+     * Register a callback to receive event notifications.
+     * Call this after login to enable push-based updates.
+     *
+     * The callback will be invoked from a background thread when:
+     * - New messages arrive for a conversation
+     * - Project status changes (kind:24010)
+     * - Streaming text chunks arrive
+     * - Any other data changes
+     *
+     * Note: Only one callback can be registered at a time.
+     * Calling this again will replace the previous callback.
+     */
+open func setEventCallback(callback: EventCallback)  {try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_set_event_callback(self.uniffiClonePointer(),
+        FfiConverterCallbackInterfaceEventCallback_lower(callback),$0
     )
 }
 }
@@ -3953,6 +4032,120 @@ public func FfiConverterTypeNegentropySyncDiagnostics_lower(_ value: NegentropyS
 
 
 /**
+ * A nudge (kind:4201 event) for agent configuration.
+ * Used by iOS for nudge selection in new conversations.
+ */
+public struct NudgeInfo {
+    /**
+     * Event ID of the nudge
+     */
+    public var id: String
+    /**
+     * Public key of the nudge author
+     */
+    public var pubkey: String
+    /**
+     * Title of the nudge (displayed with / prefix like TUI)
+     */
+    public var title: String
+    /**
+     * Description of the nudge
+     */
+    public var description: String
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * Event ID of the nudge
+         */id: String, 
+        /**
+         * Public key of the nudge author
+         */pubkey: String, 
+        /**
+         * Title of the nudge (displayed with / prefix like TUI)
+         */title: String, 
+        /**
+         * Description of the nudge
+         */description: String) {
+        self.id = id
+        self.pubkey = pubkey
+        self.title = title
+        self.description = description
+    }
+}
+
+#if compiler(>=6)
+extension NudgeInfo: Sendable {}
+#endif
+
+
+extension NudgeInfo: Equatable, Hashable {
+    public static func ==(lhs: NudgeInfo, rhs: NudgeInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.pubkey != rhs.pubkey {
+            return false
+        }
+        if lhs.title != rhs.title {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(pubkey)
+        hasher.combine(title)
+        hasher.combine(description)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeNudgeInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> NudgeInfo {
+        return
+            try NudgeInfo(
+                id: FfiConverterString.read(from: &buf), 
+                pubkey: FfiConverterString.read(from: &buf), 
+                title: FfiConverterString.read(from: &buf), 
+                description: FfiConverterString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: NudgeInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.pubkey, into: &buf)
+        FfiConverterString.write(value.title, into: &buf)
+        FfiConverterString.write(value.description, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNudgeInfo_lift(_ buf: RustBuffer) throws -> NudgeInfo {
+    return try FfiConverterTypeNudgeInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeNudgeInfo_lower(_ value: NudgeInfo) -> RustBuffer {
+    return FfiConverterTypeNudgeInfo.lower(value)
+}
+
+
+/**
  * An online agent from project status (kind:24010 events).
  * These are actual agent instances with their own Nostr keypairs.
  * Use get_online_agents() to fetch these for agent selection.
@@ -5909,6 +6102,114 @@ extension AskQuestionInfo: Equatable, Hashable {}
 
 
 
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
+ * Type of data change for targeted UI updates.
+ * Allows views to refresh only what changed instead of full refresh.
+ */
+
+public enum DataChangeType {
+    
+    /**
+     * New messages arrived for a conversation
+     */
+    case messages(conversationId: String
+    )
+    /**
+     * Project status updated (kind:24010)
+     */
+    case projectStatus
+    /**
+     * Streaming text chunk arrived (live typing)
+     */
+    case streamChunk(agentPubkey: String, conversationId: String, textDelta: String?
+    )
+    /**
+     * General data changed - full refresh recommended
+     */
+    case general
+}
+
+
+#if compiler(>=6)
+extension DataChangeType: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
+    typealias SwiftType = DataChangeType
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> DataChangeType {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .messages(conversationId: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .projectStatus
+        
+        case 3: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 4: return .general
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: DataChangeType, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .messages(conversationId):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(conversationId, into: &buf)
+            
+        
+        case .projectStatus:
+            writeInt(&buf, Int32(2))
+        
+        
+        case let .streamChunk(agentPubkey,conversationId,textDelta):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(agentPubkey, into: &buf)
+            FfiConverterString.write(conversationId, into: &buf)
+            FfiConverterOptionString.write(textDelta, into: &buf)
+            
+        
+        case .general:
+            writeInt(&buf, Int32(4))
+        
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDataChangeType_lift(_ buf: RustBuffer) throws -> DataChangeType {
+    return try FfiConverterTypeDataChangeType.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeDataChangeType_lower(_ value: DataChangeType) -> RustBuffer {
+    return FfiConverterTypeDataChangeType.lower(value)
+}
+
+
+extension DataChangeType: Equatable, Hashable {}
+
+
+
+
+
+
 
 /**
  * Errors that can occur during TENEX operations.
@@ -6128,6 +6429,136 @@ extension TimeFilterOption: Equatable, Hashable {}
 
 
 
+
+
+
+
+/**
+ * Callback interface for event notifications to Swift/Kotlin.
+ * Implement this trait in Swift to receive push-based updates.
+ *
+ * # Thread Safety
+ * The callback will be invoked from a background thread.
+ * Swift implementations should dispatch to main thread for UI updates.
+ */
+public protocol EventCallback: AnyObject, Sendable {
+    
+    /**
+     * Called when data has changed and UI should refresh.
+     *
+     * # Arguments
+     * * `change_type` - Type of change that occurred, for targeted updates
+     */
+    func onDataChanged(changeType: DataChangeType) 
+    
+}
+
+
+// Put the implementation in a struct so we don't pollute the top-level namespace
+fileprivate struct UniffiCallbackInterfaceEventCallback {
+
+    // Create the VTable using a series of closures.
+    // Swift automatically converts these into C callback functions.
+    //
+    // This creates 1-element array, since this seems to be the only way to construct a const
+    // pointer that we can pass to the Rust code.
+    static let vtable: [UniffiVTableCallbackInterfaceEventCallback] = [UniffiVTableCallbackInterfaceEventCallback(
+        onDataChanged: { (
+            uniffiHandle: UInt64,
+            changeType: RustBuffer,
+            uniffiOutReturn: UnsafeMutableRawPointer,
+            uniffiCallStatus: UnsafeMutablePointer<RustCallStatus>
+        ) in
+            let makeCall = {
+                () throws -> () in
+                guard let uniffiObj = try? FfiConverterCallbackInterfaceEventCallback.handleMap.get(handle: uniffiHandle) else {
+                    throw UniffiInternalError.unexpectedStaleHandle
+                }
+                return uniffiObj.onDataChanged(
+                     changeType: try FfiConverterTypeDataChangeType_lift(changeType)
+                )
+            }
+
+            
+            let writeReturn = { () }
+            uniffiTraitInterfaceCall(
+                callStatus: uniffiCallStatus,
+                makeCall: makeCall,
+                writeReturn: writeReturn
+            )
+        },
+        uniffiFree: { (uniffiHandle: UInt64) -> () in
+            let result = try? FfiConverterCallbackInterfaceEventCallback.handleMap.remove(handle: uniffiHandle)
+            if result == nil {
+                print("Uniffi callback interface EventCallback: handle missing in uniffiFree")
+            }
+        }
+    )]
+}
+
+private func uniffiCallbackInitEventCallback() {
+    uniffi_tenex_core_fn_init_callback_vtable_eventcallback(UniffiCallbackInterfaceEventCallback.vtable)
+}
+
+// FfiConverter protocol for callback interfaces
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterCallbackInterfaceEventCallback {
+    fileprivate static let handleMap = UniffiHandleMap<EventCallback>()
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+extension FfiConverterCallbackInterfaceEventCallback : FfiConverter {
+    typealias SwiftType = EventCallback
+    typealias FfiType = UInt64
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lift(_ handle: UInt64) throws -> SwiftType {
+        try handleMap.get(handle: handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        let handle: UInt64 = try readInt(&buf)
+        return try lift(handle)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func lower(_ v: SwiftType) -> UInt64 {
+        return handleMap.insert(obj: v)
+    }
+
+#if swift(>=5.8)
+    @_documentation(visibility: private)
+#endif
+    public static func write(_ v: SwiftType, into buf: inout [UInt8]) {
+        writeInt(&buf, lower(v))
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceEventCallback_lift(_ handle: UInt64) throws -> EventCallback {
+    return try FfiConverterCallbackInterfaceEventCallback.lift(handle)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterCallbackInterfaceEventCallback_lower(_ v: EventCallback) -> UInt64 {
+    return FfiConverterCallbackInterfaceEventCallback.lower(v)
+}
 
 #if swift(>=5.8)
 @_documentation(visibility: private)
@@ -6624,6 +7055,31 @@ fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeNudgeInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [NudgeInfo]
+
+    public static func write(_ value: [NudgeInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeNudgeInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [NudgeInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [NudgeInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeNudgeInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeOnlineAgentInfo: FfiConverterRustBuffer {
     typealias SwiftType = [OnlineAgentInfo]
 
@@ -6901,6 +7357,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_block_backend() != 26206) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 48100) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6938,6 +7397,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_messages() != 60952) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_nudges() != 448) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_online_agents() != 33315) {
@@ -6997,10 +7459,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 26591) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 27250) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_event_callback() != 600) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 54253) {
@@ -7027,7 +7492,11 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_constructor_tenexcore_new() != 16430) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_eventcallback_on_data_changed() != 17945) {
+        return InitializationResult.apiChecksumMismatch
+    }
 
+    uniffiCallbackInitEventCallback()
     return InitializationResult.ok
 }()
 

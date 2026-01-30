@@ -71,6 +71,12 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Timer for periodic metadata refresh
     private var metadataRefreshTask: Task<Void, Never>?
 
+    /// Observer for message change notifications (push-based updates from Rust)
+    private var messagesChangedObserver: NSObjectProtocol?
+
+    /// Observer for general data change notifications
+    private var dataChangedObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     /// Initialize with conversation only - coreManager is set later via setCoreManager
@@ -85,6 +91,13 @@ final class ConversationDetailViewModel: ObservableObject {
 
     deinit {
         metadataRefreshTask?.cancel()
+        // Remove notification observers
+        if let observer = messagesChangedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = dataChangedObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     /// Sets the core manager after initialization (called from view's onAppear/task)
@@ -92,6 +105,34 @@ final class ConversationDetailViewModel: ObservableObject {
         guard self.coreManager == nil else { return }
         self.coreManager = coreManager
         startMetadataRefresh()
+        subscribeToNotifications()
+    }
+
+    /// Subscribe to push-based notifications from Rust core
+    private func subscribeToNotifications() {
+        // Subscribe to message change notifications for this specific conversation
+        messagesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .tenexMessagesChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            // Check if this notification is for our conversation
+            if let conversationId = notification.object as? String,
+               conversationId == self.conversation.id {
+                Task { await self.loadData() }
+            }
+        }
+
+        // Subscribe to general data change notifications (catch-all for kind:1 events)
+        dataChangedObserver = NotificationCenter.default.addObserver(
+            forName: .tenexDataChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            // Reload data when any data changes (new messages may have arrived)
+            Task { await self?.loadData() }
+        }
     }
 
     /// Starts periodic metadata refresh for active conversations

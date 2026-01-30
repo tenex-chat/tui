@@ -76,10 +76,9 @@ class TenexCoreManager: ObservableObject {
     @Published var conversations: [ConversationFullInfo] = []
     @Published var inboxItems: [InboxItem] = []
 
-    // MARK: - Polling Infrastructure
-    private var pollingTimer: Timer?
-    private let pollingInterval: TimeInterval = 2.5
-    private var isPolling = false
+    // MARK: - Event Callback
+    /// Event handler for push-based updates from Rust core
+    private var eventHandler: TenexEventHandler?
 
     /// Cache for profile picture URLs to prevent repeated FFI calls
     let profilePictureCache = ProfilePictureCache.shared
@@ -108,45 +107,34 @@ class TenexCoreManager: ObservableObject {
         }
     }
 
-    // MARK: - Polling Control
+    // MARK: - Event Callback Registration
 
-    /// Starts background polling for data updates
-    func startPolling() {
-        guard !isPolling else { return }
-        isPolling = true
-
-        // Initial fetch immediately using async version
-        Task { @MainActor in
-            await pollForUpdatesAsync()
-        }
-
-        // Start timer on main thread
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.pollingTimer = Timer.scheduledTimer(withTimeInterval: self.pollingInterval, repeats: true) { [weak self] _ in
-                Task { @MainActor in
-                    await self?.pollForUpdatesAsync()
-                }
-            }
-        }
+    /// Register the event callback for push-based updates.
+    /// Call this after successful login to enable real-time updates.
+    func registerEventCallback() {
+        let handler = TenexEventHandler(coreManager: self)
+        eventHandler = handler
+        core.setEventCallback(callback: handler)
+        print("[TenexCoreManager] Event callback registered")
     }
 
-    /// Stops background polling
-    func stopPolling() {
-        isPolling = false
-        pollingTimer?.invalidate()
-        pollingTimer = nil
+    /// Unregister the event callback.
+    /// Call this on logout to clean up resources.
+    func unregisterEventCallback() {
+        core.clearEventCallback()
+        eventHandler = nil
+        print("[TenexCoreManager] Event callback unregistered")
     }
 
     /// Manual refresh for pull-to-refresh gesture
     func manualRefresh() async {
-        await pollForUpdatesAsync()
+        await fetchData()
     }
 
-    /// Async polling using SafeTenexCore with proper error handling.
-    /// Unlike pollForUpdates(), this version won't crash on FFI errors.
+    /// Fetch all data from the core. Called on login and for pull-to-refresh.
+    /// Real-time updates come via push-based event callbacks, not polling.
     @MainActor
-    func pollForUpdatesAsync() async {
+    func fetchData() async {
         _ = await safeCore.refresh()
 
         // Auto-approve any pending backends (iOS doesn't have approval UI yet)
@@ -181,7 +169,7 @@ class TenexCoreManager: ObservableObject {
             conversations = c
             inboxItems = i
         } catch {
-            print("[TenexCoreManager] Poll failed: \(error)")
+            print("[TenexCoreManager] Fetch failed: \(error)")
             // Don't crash - just log and continue with stale data
         }
     }
@@ -359,25 +347,16 @@ struct TenexMVPApp: App {
                     attemptAutoLogin()
                 }
             }
-            .onChange(of: scenePhase) { _, newPhase in
-                // Pause/resume polling based on app lifecycle
-                if isLoggedIn {
-                    switch newPhase {
-                    case .active:
-                        coreManager.startPolling()
-                    case .background, .inactive:
-                        coreManager.stopPolling()
-                    @unknown default:
-                        break
-                    }
-                }
-            }
             .onChange(of: isLoggedIn) { _, loggedIn in
-                // Start/stop polling based on login state
+                // Register/unregister event callback based on login state
                 if loggedIn {
-                    coreManager.startPolling()
+                    coreManager.registerEventCallback()
+                    // Initial data fetch on login
+                    Task { @MainActor in
+                        await coreManager.fetchData()
+                    }
                 } else {
-                    coreManager.stopPolling()
+                    coreManager.unregisterEventCallback()
                 }
             }
         }

@@ -487,6 +487,20 @@ pub struct ProjectConfigOptions {
     pub all_tools: Vec<String>,
 }
 
+/// A nudge (kind:4201 event) for agent configuration.
+/// Used by iOS for nudge selection in new conversations.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct NudgeInfo {
+    /// Event ID of the nudge
+    pub id: String,
+    /// Public key of the nudge author
+    pub pubkey: String,
+    /// Title of the nudge (displayed with / prefix like TUI)
+    pub title: String,
+    /// Description of the nudge
+    pub description: String,
+}
+
 /// Information about the current logged-in user.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct UserInfo {
@@ -768,6 +782,47 @@ impl FfiPreferencesStorage {
     }
 }
 
+// =============================================================================
+// EVENT CALLBACK INTERFACE
+// =============================================================================
+//
+// Push-based event notification system for real-time UI updates.
+// Swift/Kotlin implements EventCallback trait to receive notifications when
+// data changes, eliminating the need for polling.
+
+/// Type of data change for targeted UI updates.
+/// Allows views to refresh only what changed instead of full refresh.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum DataChangeType {
+    /// New messages arrived for a conversation
+    Messages { conversation_id: String },
+    /// Project status updated (kind:24010)
+    ProjectStatus,
+    /// Streaming text chunk arrived (live typing)
+    StreamChunk {
+        agent_pubkey: String,
+        conversation_id: String,
+        text_delta: Option<String>,
+    },
+    /// General data changed - full refresh recommended
+    General,
+}
+
+/// Callback interface for event notifications to Swift/Kotlin.
+/// Implement this trait in Swift to receive push-based updates.
+///
+/// # Thread Safety
+/// The callback will be invoked from a background thread.
+/// Swift implementations should dispatch to main thread for UI updates.
+#[uniffi::export(callback_interface)]
+pub trait EventCallback: Send + Sync {
+    /// Called when data has changed and UI should refresh.
+    ///
+    /// # Arguments
+    /// * `change_type` - Type of change that occurred, for targeted updates
+    fn on_data_changed(&self, change_type: DataChangeType);
+}
+
 /// Core TENEX functionality exposed to foreign languages.
 ///
 /// This is intentionally minimal for MVP - we'll expand as needed.
@@ -802,6 +857,10 @@ pub struct TenexCore {
     negentropy_stats: RwLock<Option<SharedNegentropySyncStats>>,
     /// Timestamp when core was initialized (for uptime calculation)
     init_time: RwLock<Option<std::time::Instant>>,
+    /// Event callback for push notifications to UI (Swift/Kotlin)
+    event_callback: RwLock<Option<Arc<dyn EventCallback>>>,
+    /// Flag to signal callback listener thread to stop (Arc for sharing with thread)
+    callback_listener_running: Arc<AtomicBool>,
 }
 
 #[uniffi::export]
@@ -824,6 +883,8 @@ impl TenexCore {
             subscription_stats: RwLock::new(None),
             negentropy_stats: RwLock::new(None),
             init_time: RwLock::new(None),
+            event_callback: RwLock::new(None),
+            callback_listener_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -2083,6 +2144,30 @@ impl TenexCore {
             .collect())
     }
 
+    /// Get all nudges (kind:4201 events).
+    ///
+    /// Returns all nudges sorted by created_at descending (most recent first).
+    /// Used by iOS for nudge selection in new conversations.
+    pub fn get_nudges(&self) -> Result<Vec<NudgeInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.get_nudges()
+            .into_iter()
+            .map(|n| NudgeInfo {
+                id: n.id.clone(),
+                pubkey: n.pubkey.clone(),
+                title: n.title.clone(),
+                description: n.description.clone(),
+            })
+            .collect())
+    }
+
     /// Get online agents for a project from the project status (kind:24010).
     ///
     /// These are actual agent instances with their own Nostr keypairs.
@@ -2281,6 +2366,7 @@ impl TenexCore {
         title: String,
         content: String,
         agent_pubkey: Option<String>,
+        nudge_ids: Vec<String>,
     ) -> Result<SendMessageResult, TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -2296,7 +2382,7 @@ impl TenexCore {
                 content,
                 agent_pubkey,
                 branch: None,
-                nudge_ids: Vec::new(),
+                nudge_ids,
                 reference_conversation_id: None,
                 fork_message_id: None,
                 response_tx: Some(response_tx),
@@ -2656,16 +2742,49 @@ impl TenexCore {
             None => return false,
         };
 
-        for change in data_changes {
-            if let DataChange::ProjectStatus { json } = change {
-                store.handle_status_event_json(&json);
+        // Get callback reference before processing changes
+        let callback = self.event_callback.read().ok().and_then(|g| g.clone());
+
+        for change in &data_changes {
+            match change {
+                DataChange::ProjectStatus { json } => {
+                    store.handle_status_event_json(json);
+                    if let Some(ref cb) = callback {
+                        cb.on_data_changed(DataChangeType::ProjectStatus);
+                    }
+                }
+                DataChange::LocalStreamChunk { agent_pubkey, conversation_id, text_delta, .. } => {
+                    if let Some(ref cb) = callback {
+                        cb.on_data_changed(DataChangeType::StreamChunk {
+                            agent_pubkey: agent_pubkey.clone(),
+                            conversation_id: conversation_id.clone(),
+                            text_delta: text_delta.clone(),
+                        });
+                    }
+                }
+                DataChange::MCPToolsChanged => {
+                    if let Some(ref cb) = callback {
+                        cb.on_data_changed(DataChangeType::General);
+                    }
+                }
             }
         }
 
         let mut ok = true;
+        let mut had_notes = false;
         for note_keys in note_batches {
+            if !note_keys.is_empty() {
+                had_notes = true;
+            }
             if process_note_keys(ndb.as_ref(), store, &core_handle, &note_keys).is_err() {
                 ok = false;
+            }
+        }
+
+        // Fire callback if we processed any notes (messages, projects, etc.)
+        if had_notes {
+            if let Some(ref cb) = callback {
+                cb.on_data_changed(DataChangeType::General);
             }
         }
 
@@ -2788,6 +2907,45 @@ impl TenexCore {
         }
     }
 
+    // =========================================================================
+    // EVENT CALLBACK API
+    // =========================================================================
+
+    /// Register a callback to receive event notifications.
+    /// Call this after login to enable push-based updates.
+    ///
+    /// The callback will be invoked from a background thread when:
+    /// - New messages arrive for a conversation
+    /// - Project status changes (kind:24010)
+    /// - Streaming text chunks arrive
+    /// - Any other data changes
+    ///
+    /// Note: Only one callback can be registered at a time.
+    /// Calling this again will replace the previous callback.
+    pub fn set_event_callback(&self, callback: Box<dyn EventCallback>) {
+        let callback: Arc<dyn EventCallback> = Arc::from(callback);
+
+        // Store callback
+        if let Ok(mut guard) = self.event_callback.write() {
+            *guard = Some(callback.clone());
+        }
+
+        // Start listener thread if not already running
+        if !self.callback_listener_running.swap(true, Ordering::SeqCst) {
+            self.start_callback_listener(callback);
+        }
+    }
+
+    /// Clear the event callback and stop the listener thread.
+    /// Call this on logout to clean up resources.
+    pub fn clear_event_callback(&self) {
+        // Clear callback first to prevent new notifications
+        if let Ok(mut guard) = self.event_callback.write() {
+            *guard = None;
+        }
+        // Signal listener thread to stop
+        self.callback_listener_running.store(false, Ordering::SeqCst);
+    }
 }
 
 // Private implementation methods for TenexCore (not exposed via UniFFI)
@@ -2930,6 +3088,69 @@ impl TenexCore {
                 total_events: 0,
             }
         })
+    }
+}
+
+// Private implementation methods for TenexCore (event callback listener)
+impl TenexCore {
+    /// Start the background listener thread that monitors data channels
+    /// and fires callbacks when events arrive.
+    fn start_callback_listener(&self, callback: Arc<dyn EventCallback>) {
+        // Get references to the channels we need to monitor
+        // Note: We clone the Ndb Arc and create a fresh subscription stream
+        // because the main ndb_stream is used by refresh() and we can't share it
+        let ndb = match self.ndb.read() {
+            Ok(guard) => guard.as_ref().cloned(),
+            Err(_) => None,
+        };
+
+        // Clone the running flag for the thread
+        let running = self.callback_listener_running.clone();
+
+        // For data_rx, we need to check it in refresh() first - the listener
+        // will monitor it in parallel. Since mpsc::Receiver can only have one
+        // consumer, we'll monitor data changes via a different mechanism:
+        // We'll create a separate subscription stream for the listener thread.
+
+        std::thread::spawn(move || {
+            // Create a separate nostrdb subscription for the listener thread
+            let ndb_stream = if let Some(ref ndb) = ndb {
+                let filter = nostrdb::FilterBuilder::new()
+                    .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
+                    .build();
+                match ndb.subscribe(&[filter]) {
+                    Ok(sub) => Some(nostrdb::SubscriptionStream::new((**ndb).clone(), sub)),
+                    Err(e) => {
+                        eprintln!("[EventCallback] Failed to create ndb subscription: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
+            let mut stream = ndb_stream;
+
+            // Poll loop - check for new events and fire callbacks
+            while running.load(Ordering::Relaxed) {
+                let mut had_event = false;
+
+                // Check ndb_stream for new notes
+                if let Some(ref mut s) = stream {
+                    while let Some(_note_keys) = s.next().now_or_never().flatten() {
+                        had_event = true;
+                        // Fire general callback - views should refresh
+                        // In the future, we could parse note_keys to determine conversation_id
+                        callback.on_data_changed(DataChangeType::General);
+                    }
+                }
+
+                // Sleep if no events to avoid CPU spin
+                if !had_event {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+            }
+        });
     }
 }
 
