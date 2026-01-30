@@ -34,6 +34,18 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Cached participating agent infos with pubkeys for avatar lookups
     @Published private(set) var participatingAgentInfos: [AgentAvatarInfo] = []
 
+    /// Author info (for avatar group)
+    @Published private(set) var authorInfo: AgentAvatarInfo!
+
+    /// P-tagged recipient pubkey (first p-tag from conversation, shown first in avatar group)
+    @Published private(set) var pTaggedRecipientPubkey: String?
+
+    /// Other participants excluding author (for avatar group overlapping display)
+    @Published private(set) var otherParticipantsInfo: [AgentAvatarInfo] = []
+
+    /// Todo list state
+    @Published private(set) var todoState: TodoState = TodoState(items: [])
+
     // MARK: - Refreshable Metadata
 
     /// Current status (refreshed periodically)
@@ -47,6 +59,9 @@ final class ConversationDetailViewModel: ObservableObject {
 
     /// Current effectiveLastActivity (refreshed periodically)
     @Published private(set) var currentEffectiveLastActivity: UInt64
+
+    /// Formatted runtime string (computed async and cached)
+    @Published private(set) var formattedRuntime: String = ""
 
     // MARK: - Dependencies
 
@@ -107,10 +122,10 @@ final class ConversationDetailViewModel: ObservableObject {
             timeFilter: .all
         )
 
-        let freshConversation: ConversationFullInfo? = await Task {
-            let allConversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
+        let freshConversation: ConversationFullInfo? = await {
+            let allConversations = (try? await coreManager.safeCore.getAllConversations(filter: filter)) ?? []
             return allConversations.first { $0.id == conversation.id }
-        }.value
+        }()
 
         if let fresh = freshConversation {
             self.currentStatus = fresh.status ?? "unknown"
@@ -143,7 +158,10 @@ final class ConversationDetailViewModel: ObservableObject {
             self.allDescendants = descendants
 
             // Recompute cached derived state
-            recomputeDerivedState()
+            await recomputeDerivedState()
+
+            // Update runtime
+            formattedRuntime = await formatEffectiveRuntime()
 
             isLoading = false
         } catch is CancellationError {
@@ -159,32 +177,20 @@ final class ConversationDetailViewModel: ObservableObject {
     private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo]) {
         try Task.checkCancellation()
 
-        // Use structured Task {} instead of Task.detached to honor parent cancellation
-        async let messagesTask: [MessageInfo] = Task {
-            coreManager.core.getMessages(conversationId: conversationId)
-        }.value
+        // Fetch messages using safeCore
+        async let messagesTask: [MessageInfo] = coreManager.safeCore.getMessages(conversationId: conversationId)
 
-        // Extract d-tag from a-tag format "kind:pubkey:d-tag" for filter
-        let projectId = projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
-
-        let filter = ConversationFilter(
-            projectIds: [projectId],
-            showArchived: false,
-            hideScheduled: true,
-            timeFilter: .all
-        )
-
-        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo]) = Task {
-            // Get direct children (for delegations display)
-            let allConversations = (try? coreManager.core.getAllConversations(filter: filter)) ?? []
-            let directChildren = allConversations.filter { $0.parentId == conversationId }
-
+        // Fetch descendants using safeCore
+        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo]) = {
             // Get all descendants (for participants extraction)
-            let descendantIds = coreManager.core.getDescendantConversationIds(conversationId: conversationId)
-            let allDescendants = coreManager.core.getConversationsByIds(conversationIds: descendantIds)
+            let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
+            let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
+
+            // Get direct children from descendants (for delegations display)
+            let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
             return (directChildren, allDescendants)
-        }.value
+        }()
 
         // Await both tasks - cancellation will propagate to both
         let fetchedMessages = await messagesTask
@@ -197,16 +203,19 @@ final class ConversationDetailViewModel: ObservableObject {
     // MARK: - Derived State Computation
 
     /// Recomputes all cached derived state when messages/children change
-    private func recomputeDerivedState() {
+    private func recomputeDerivedState() async {
         // Compute participating agent infos with pubkeys for avatar lookups
         // Use pubkey as unique key to avoid duplicates from same agent
         var agentInfosByPubkey: [String: AgentAvatarInfo] = [:]
 
-        // Add conversation author
-        agentInfosByPubkey[conversation.authorPubkey] = AgentAvatarInfo(
+        // Store author info separately for avatar group
+        authorInfo = AgentAvatarInfo(
             name: conversation.author,
             pubkey: conversation.authorPubkey
         )
+
+        // Add conversation author to full list
+        agentInfosByPubkey[conversation.authorPubkey] = authorInfo
 
         // Add all descendant authors
         for descendant in allDescendants {
@@ -219,15 +228,26 @@ final class ConversationDetailViewModel: ObservableObject {
         // Sort by name for consistent display
         participatingAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
 
+        // Extract p-tagged recipient (first p-tag from conversation)
+        pTaggedRecipientPubkey = conversation.pTags.first
+
+        // Other participants excluding author (for avatar group)
+        otherParticipantsInfo = participatingAgentInfos.filter { $0.pubkey != conversation.authorPubkey }
+
         // Compute latest reply (last non-tool-call, non-empty message)
         latestReply = messages.last { !$0.isToolCall && !$0.content.isEmpty }
 
+        // Parse todos from messages
+        todoState = TodoParser.parse(messages: messages)
+
         // Compute delegations
-        delegations = extractDelegations()
+        delegations = await extractDelegations()
     }
 
     /// Extracts delegation items from messages and child conversations
-    private func extractDelegations() -> [DelegationItem] {
+    private func extractDelegations() async -> [DelegationItem] {
+        guard let coreManager = coreManager else { return [] }
+
         var result: [DelegationItem] = []
 
         for message in messages {
@@ -238,17 +258,13 @@ final class ConversationDetailViewModel: ObservableObject {
                     // Find the child conversation matching this qTag
                     if let childConv = childConversations.first(where: { $0.id == qTag }) {
                         // Get recipient from p-tag of the child conversation (who was delegated TO)
-                        // P-tags contain pubkeys, so convert to display name
-                        let recipient: String
-                        if let pTagPubkey = childConv.pTags.first, let core = coreManager?.core {
-                            recipient = core.getProfileName(pubkey: pTagPubkey)
-                        } else {
-                            recipient = childConv.author
-                        }
+                        let recipientPubkey = childConv.pTags.first ?? childConv.authorPubkey
+                        let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
 
                         let delegation = DelegationItem(
                             id: qTag,
-                            recipient: recipient,
+                            recipient: recipient.isEmpty ? childConv.author : recipient,
+                            recipientPubkey: recipientPubkey,
                             messagePreview: childConv.title,
                             conversationId: qTag,
                             timestamp: message.createdAt
@@ -263,16 +279,13 @@ final class ConversationDetailViewModel: ObservableObject {
         for child in childConversations {
             if !result.contains(where: { $0.conversationId == child.id }) {
                 // Get recipient from child's p-tag if available
-                let recipient: String
-                if let pTagPubkey = child.pTags.first, let core = coreManager?.core {
-                    recipient = core.getProfileName(pubkey: pTagPubkey)
-                } else {
-                    recipient = child.author
-                }
+                let recipientPubkey = child.pTags.first ?? child.authorPubkey
+                let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
 
                 let delegation = DelegationItem(
                     id: child.id,
-                    recipient: recipient,
+                    recipient: recipient.isEmpty ? child.author : recipient,
+                    recipientPubkey: recipientPubkey,
                     messagePreview: child.summary ?? child.title,
                     conversationId: child.id,
                     timestamp: child.lastActivity
@@ -288,19 +301,19 @@ final class ConversationDetailViewModel: ObservableObject {
 
     /// Gets the hierarchical LLM runtime for this conversation (includes all descendants).
     /// Returns the total runtime in seconds by converting from milliseconds.
-    func getHierarchicalRuntime() -> TimeInterval {
+    func getHierarchicalRuntime() async -> TimeInterval {
         guard let coreManager = coreManager else { return 0 }
 
         // Get runtime in milliseconds from the FFI
-        let runtimeMs = coreManager.core.getConversationRuntimeMs(conversationId: conversation.id)
+        let runtimeMs = await coreManager.safeCore.getConversationRuntimeMs(conversationId: conversation.id)
 
         // Convert milliseconds to seconds
         return TimeInterval(runtimeMs) / 1000.0
     }
 
     /// Formats hierarchical runtime as a human-readable string
-    func formatEffectiveRuntime() -> String {
-        let totalSeconds = getHierarchicalRuntime()
+    func formatEffectiveRuntime() async -> String {
+        let totalSeconds = await getHierarchicalRuntime()
         return RuntimeFormatter.format(seconds: totalSeconds)
     }
 
