@@ -37,8 +37,8 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Author info (for avatar group)
     @Published private(set) var authorInfo: AgentAvatarInfo!
 
-    /// P-tagged recipient pubkey (first p-tag from conversation, shown first in avatar group)
-    @Published private(set) var pTaggedRecipientPubkey: String?
+    /// P-tagged recipient info (first p-tag from conversation, shown overlapping with author)
+    @Published private(set) var pTaggedRecipientInfo: AgentAvatarInfo?
 
     /// Other participants excluding author (for avatar group overlapping display)
     @Published private(set) var otherParticipantsInfo: [AgentAvatarInfo] = []
@@ -228,11 +228,19 @@ final class ConversationDetailViewModel: ObservableObject {
         // Sort by name for consistent display
         participatingAgentInfos = agentInfosByPubkey.values.sorted { $0.name < $1.name }
 
-        // Extract p-tagged recipient (first p-tag from conversation)
-        pTaggedRecipientPubkey = conversation.pTags.first
+        // Extract p-tagged recipient info (first p-tag from conversation)
+        if let pTaggedPubkey = conversation.pTags.first, let coreManager = coreManager {
+            let name = coreManager.core.getProfileName(pubkey: pTaggedPubkey)
+            pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
+        } else {
+            pTaggedRecipientInfo = nil
+        }
 
-        // Other participants excluding author (for avatar group)
-        otherParticipantsInfo = participatingAgentInfos.filter { $0.pubkey != conversation.authorPubkey }
+        // Other participants excluding author and p-tagged (for avatar group)
+        let pTaggedPubkey = conversation.pTags.first
+        otherParticipantsInfo = participatingAgentInfos.filter {
+            $0.pubkey != conversation.authorPubkey && $0.pubkey != pTaggedPubkey
+        }
 
         // Compute latest reply (last non-tool-call, non-empty message)
         latestReply = messages.last { !$0.isToolCall && !$0.content.isEmpty }

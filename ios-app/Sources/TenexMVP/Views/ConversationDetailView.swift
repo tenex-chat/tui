@@ -114,7 +114,7 @@ struct ConversationDetailView: View {
                 if let authorInfo = viewModel.authorInfo {
                     ConversationAvatarGroup(
                         authorInfo: authorInfo,
-                        pTaggedRecipientPubkey: viewModel.pTaggedRecipientPubkey,
+                        pTaggedRecipientInfo: viewModel.pTaggedRecipientInfo,
                         otherParticipants: viewModel.otherParticipantsInfo,
                         avatarSize: 20,
                         fontSize: 8,
