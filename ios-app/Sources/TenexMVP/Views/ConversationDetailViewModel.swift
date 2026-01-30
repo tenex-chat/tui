@@ -237,10 +237,10 @@ final class ConversationDetailViewModel: ObservableObject {
                 for qTag in message.qTags {
                     // Find the child conversation matching this qTag
                     if let childConv = childConversations.first(where: { $0.id == qTag }) {
-                        // Get recipient from p-tag (who was delegated TO)
+                        // Get recipient from p-tag of the child conversation (who was delegated TO)
                         // P-tags contain pubkeys, so convert to display name
                         let recipient: String
-                        if let pTagPubkey = message.pTags.first, let core = coreManager?.core {
+                        if let pTagPubkey = childConv.pTags.first, let core = coreManager?.core {
                             recipient = core.getProfileName(pubkey: pTagPubkey)
                         } else {
                             recipient = childConv.author
@@ -262,9 +262,17 @@ final class ConversationDetailViewModel: ObservableObject {
         // Also add child conversations that might not have tool call references
         for child in childConversations {
             if !result.contains(where: { $0.conversationId == child.id }) {
+                // Get recipient from child's p-tag if available
+                let recipient: String
+                if let pTagPubkey = child.pTags.first, let core = coreManager?.core {
+                    recipient = core.getProfileName(pubkey: pTagPubkey)
+                } else {
+                    recipient = child.author
+                }
+
                 let delegation = DelegationItem(
                     id: child.id,
-                    recipient: child.author,
+                    recipient: recipient,
                     messagePreview: child.summary ?? child.title,
                     conversationId: child.id,
                     timestamp: child.lastActivity

@@ -11,6 +11,8 @@ pub enum InboxEventType {
     ThreadReply,
 }
 
+use super::message::AskEvent;
+
 #[derive(Debug, Clone)]
 pub struct InboxItem {
     pub id: String,
@@ -21,6 +23,8 @@ pub struct InboxItem {
     pub created_at: u64,
     pub is_read: bool,
     pub thread_id: Option<String>,
+    /// Ask event data if this inbox item is an ask (for interactive answering)
+    pub ask_event: Option<AskEvent>,
 }
 
 /// Agent chatter - kind:1 messages or kind:4129 lessons that reference our projects

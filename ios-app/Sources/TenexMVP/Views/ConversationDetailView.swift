@@ -354,7 +354,8 @@ extension ConversationFullInfo: Identifiable {}
         isArchived: false,
         hasChildren: true,
         projectATag: "project-123",
-        isScheduled: false
+        isScheduled: false,
+        pTags: []
     ))
     .environmentObject(TenexCoreManager())
 }
