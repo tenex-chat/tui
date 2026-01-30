@@ -37,31 +37,26 @@ struct ReportsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: loadReports) {
+                Button(action: { Task { await loadReports() } }) {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(isLoading)
             }
         }
-        .onAppear {
-            loadReports()
+        .task {
+            await loadReports()
         }
         .sheet(item: $selectedReport) { report in
             ReportDetailView(report: report)
         }
     }
 
-    private func loadReports() {
+    private func loadReports() async {
         isLoading = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = coreManager.core.refresh()
-            let fetched = coreManager.core.getReports(projectId: project.id)
-            DispatchQueue.main.async {
-                self.reports = fetched
-                self.isLoading = false
-            }
-        }
+        // Refresh ensures AppDataStore is synced with latest data from nostrdb
+        _ = await coreManager.safeCore.refresh()
+        reports = await coreManager.safeCore.getReports(projectId: project.id)
+        isLoading = false
     }
 }
 
