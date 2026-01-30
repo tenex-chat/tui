@@ -361,7 +361,7 @@ struct MessagesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: loadMessages) {
+                    Button(action: { Task { await loadMessages() } }) {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(isLoading)
@@ -370,8 +370,8 @@ struct MessagesView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .onAppear {
-                loadMessages()
+            .task {
+                await loadMessages()
             }
             .sheet(isPresented: $showReplyComposer) {
                 MessageComposerView(
@@ -380,7 +380,7 @@ struct MessagesView: View {
                     conversationTitle: conversation.title,
                     onSend: { _ in
                         // Refresh messages after sending
-                        loadMessages()
+                        Task { await loadMessages() }
                     }
                 )
                 .environmentObject(coreManager)
@@ -405,17 +405,12 @@ struct MessagesView: View {
         .buttonStyle(.plain)
     }
 
-    private func loadMessages() {
+    private func loadMessages() async {
         isLoading = true
-        DispatchQueue.global(qos: .userInitiated).async {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = coreManager.core.refresh()
-            let fetched = coreManager.core.getMessages(conversationId: conversation.id)
-            DispatchQueue.main.async {
-                self.messages = fetched
-                self.isLoading = false
-            }
-        }
+        // Refresh ensures AppDataStore is synced with latest data from nostrdb
+        _ = await coreManager.safeCore.refresh()
+        messages = await coreManager.safeCore.getMessages(conversationId: conversation.id)
+        isLoading = false
     }
 }
 
