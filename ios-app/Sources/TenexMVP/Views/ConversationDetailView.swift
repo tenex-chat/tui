@@ -25,7 +25,7 @@ struct ConversationDetailView: View {
         NavigationStack {
             contentView
                 .navigationTitle(conversation.title)
-                .navigationBarTitleDisplayMode(.inline)
+                .navigationBarTitleDisplayMode(.large)
                 .task {
                     await initializeAndLoad()
                 }
@@ -95,12 +95,6 @@ struct ConversationDetailView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Title
-            Text(conversation.title)
-                .font(.system(size: 28, weight: .bold))
-                .foregroundStyle(.primary)
-                .lineLimit(3)
-
             // Summary (no truncation)
             if let summary = conversation.summary, !summary.isEmpty {
                 Text(summary)

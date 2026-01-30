@@ -578,9 +578,33 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws  -> SendMessageResult
     
     /**
+     * Approve all pending backends.
+     *
+     * This is useful for mobile apps that don't have a UI for backend approval modals.
+     * Approves any backends that sent kind:24010 events but weren't in the approved list.
+     * Returns the number of backends that were approved.
+     */
+    func approveAllPendingBackends() throws  -> UInt32
+    
+    /**
+     * Add a backend to the approved list.
+     *
+     * Once approved, kind:24010 events from this backend will be processed,
+     * populating project_statuses and enabling get_online_agents().
+     */
+    func approveBackend(pubkey: String) throws 
+    
+    /**
      * Archive a conversation (hide from default view).
      */
     func archiveConversation(conversationId: String) 
+    
+    /**
+     * Add a backend to the blocked list.
+     *
+     * Status events from blocked backends will be silently ignored.
+     */
+    func blockBackend(pubkey: String) throws 
     
     /**
      * Get agents for a project.
@@ -836,6 +860,17 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func setCollapsedThreadIds(threadIds: [String]) 
     
     /**
+     * Set the trusted backends from preferences.
+     *
+     * This must be called after login to enable processing of kind:24010 (project status)
+     * events. Status events from approved backends will populate project_statuses,
+     * enabling get_online_agents() to return online agents.
+     *
+     * Call this on app startup with stored approved/blocked backend pubkeys.
+     */
+    func setTrustedBackends(approved: [String], blocked: [String]) throws 
+    
+    /**
      * Set which projects are visible in the Conversations tab.
      * Pass empty array to show all projects.
      */
@@ -960,11 +995,50 @@ open func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId:
 }
     
     /**
+     * Approve all pending backends.
+     *
+     * This is useful for mobile apps that don't have a UI for backend approval modals.
+     * Approves any backends that sent kind:24010 events but weren't in the approved list.
+     * Returns the number of backends that were approved.
+     */
+open func approveAllPendingBackends()throws  -> UInt32  {
+    return try  FfiConverterUInt32.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_approve_all_pending_backends(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Add a backend to the approved list.
+     *
+     * Once approved, kind:24010 events from this backend will be processed,
+     * populating project_statuses and enabling get_online_agents().
+     */
+open func approveBackend(pubkey: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_approve_backend(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),$0
+    )
+}
+}
+    
+    /**
      * Archive a conversation (hide from default view).
      */
 open func archiveConversation(conversationId: String)  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_archive_conversation(self.uniffiClonePointer(),
         FfiConverterString.lower(conversationId),$0
+    )
+}
+}
+    
+    /**
+     * Add a backend to the blocked list.
+     *
+     * Status events from blocked backends will be silently ignored.
+     */
+open func blockBackend(pubkey: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_block_backend(self.uniffiClonePointer(),
+        FfiConverterString.lower(pubkey),$0
     )
 }
 }
@@ -1413,6 +1487,23 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
 open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(self.uniffiClonePointer(),
         FfiConverterSequenceString.lower(threadIds),$0
+    )
+}
+}
+    
+    /**
+     * Set the trusted backends from preferences.
+     *
+     * This must be called after login to enable processing of kind:24010 (project status)
+     * events. Status events from approved backends will populate project_statuses,
+     * enabling get_online_agents() to return online agents.
+     *
+     * Call this on app startup with stored approved/blocked backend pubkeys.
+     */
+open func setTrustedBackends(approved: [String], blocked: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_trusted_backends(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(approved),
+        FfiConverterSequenceString.lower(blocked),$0
     )
 }
 }
@@ -6798,7 +6889,16 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_answer_ask() != 25528) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_approve_all_pending_backends() != 35645) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_approve_backend() != 12474) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_archive_conversation() != 34495) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_block_backend() != 26206) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 48100) {
@@ -6901,6 +7001,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 54253) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_visible_projects() != 3693) {
