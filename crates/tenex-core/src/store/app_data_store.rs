@@ -249,6 +249,7 @@ impl AppDataStore {
                         created_at: message.created_at,
                         is_read: false,
                         thread_id: Some(thread_id.clone()),
+                        ask_event: message.ask_event.clone(),
                     };
                     self.inbox_items.push(inbox_item);
                 }
@@ -1722,6 +1723,7 @@ impl AppDataStore {
                             created_at: message.created_at,
                             is_read: false,
                             thread_id: Some(thread_id.clone()),
+                            ask_event: message.ask_event.clone(),
                         };
                         self.add_inbox_item(inbox_item);
                     }

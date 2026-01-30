@@ -1859,6 +1859,10 @@ public struct ConversationFullInfo {
      * Whether this is a scheduled event
      */
     public var isScheduled: Bool
+    /**
+     * P-tags (pubkeys mentioned in the conversation's root event)
+     */
+    public var pTags: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -1910,7 +1914,10 @@ public struct ConversationFullInfo {
          */projectATag: String, 
         /**
          * Whether this is a scheduled event
-         */isScheduled: Bool) {
+         */isScheduled: Bool, 
+        /**
+         * P-tags (pubkeys mentioned in the conversation's root event)
+         */pTags: [String]) {
         self.id = id
         self.title = title
         self.author = author
@@ -1927,6 +1934,7 @@ public struct ConversationFullInfo {
         self.hasChildren = hasChildren
         self.projectATag = projectATag
         self.isScheduled = isScheduled
+        self.pTags = pTags
     }
 }
 
@@ -1985,6 +1993,9 @@ extension ConversationFullInfo: Equatable, Hashable {
         if lhs.isScheduled != rhs.isScheduled {
             return false
         }
+        if lhs.pTags != rhs.pTags {
+            return false
+        }
         return true
     }
 
@@ -2005,6 +2016,7 @@ extension ConversationFullInfo: Equatable, Hashable {
         hasher.combine(hasChildren)
         hasher.combine(projectATag)
         hasher.combine(isScheduled)
+        hasher.combine(pTags)
     }
 }
 
@@ -2032,7 +2044,8 @@ public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
                 isArchived: FfiConverterBool.read(from: &buf), 
                 hasChildren: FfiConverterBool.read(from: &buf), 
                 projectATag: FfiConverterString.read(from: &buf), 
-                isScheduled: FfiConverterBool.read(from: &buf)
+                isScheduled: FfiConverterBool.read(from: &buf), 
+                pTags: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -2053,6 +2066,7 @@ public struct FfiConverterTypeConversationFullInfo: FfiConverterRustBuffer {
         FfiConverterBool.write(value.hasChildren, into: &buf)
         FfiConverterString.write(value.projectATag, into: &buf)
         FfiConverterBool.write(value.isScheduled, into: &buf)
+        FfiConverterSequenceString.write(value.pTags, into: &buf)
     }
 }
 

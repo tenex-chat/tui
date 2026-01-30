@@ -332,6 +332,8 @@ pub struct InboxItem {
     pub content: String,
     /// Who it's from
     pub from_agent: String,
+    /// Author pubkey (hex) for reply tagging
+    pub author_pubkey: String,
     /// Priority: high, medium, low
     pub priority: String,
     /// Status: waiting, acknowledged, resolved
@@ -342,6 +344,8 @@ pub struct InboxItem {
     pub project_id: Option<String>,
     /// Related conversation ID
     pub conversation_id: Option<String>,
+    /// Ask event data if this inbox item is an ask
+    pub ask_event: Option<AskEventInfo>,
 }
 
 /// Result of a successful login operation.
@@ -1524,16 +1528,46 @@ impl TenexCore {
                     "waiting".to_string()
                 };
 
+                // Convert ask_event if present
+                let ask_event = item.ask_event.as_ref().map(|ae| {
+                    let questions = ae.questions.iter().map(|q| {
+                        match q {
+                            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
+                                AskQuestionInfo::SingleSelect {
+                                    title: title.clone(),
+                                    question: question.clone(),
+                                    suggestions: suggestions.clone(),
+                                }
+                            }
+                            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
+                                AskQuestionInfo::MultiSelect {
+                                    title: title.clone(),
+                                    question: question.clone(),
+                                    options: options.clone(),
+                                }
+                            }
+                        }
+                    }).collect();
+
+                    AskEventInfo {
+                        title: ae.title.clone(),
+                        context: ae.context.clone(),
+                        questions,
+                    }
+                });
+
                 InboxItem {
                     id: item.id.clone(),
                     title: item.title.clone(),
                     content: item.title.clone(), // Same as title for now
                     from_agent,
+                    author_pubkey: item.author_pubkey.clone(),
                     priority,
                     status,
                     created_at: item.created_at,
                     project_id,
                     conversation_id: item.thread_id.clone(),
+                    ask_event,
                 }
             })
             .collect()
