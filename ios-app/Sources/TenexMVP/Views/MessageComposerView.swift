@@ -34,7 +34,7 @@ struct MessageComposerView: View {
     @State private var availableProjects: [ProjectInfo] = []
     @State private var showProjectSelector = false
     @State private var draft: Draft
-    @State private var availableAgents: [AgentInfo] = []
+    @State private var availableAgents: [OnlineAgentInfo] = []
     @State private var agentsLoadError: String?
     @State private var showAgentSelector = false
     @State private var isSending = false
@@ -82,7 +82,7 @@ struct MessageComposerView: View {
         return draft.isValid && !isSending
     }
 
-    private var selectedAgent: AgentInfo? {
+    private var selectedAgent: OnlineAgentInfo? {
         guard let pubkey = draft.agentPubkey else { return nil }
         return availableAgents.first { $0.pubkey == pubkey }
     }
@@ -322,9 +322,9 @@ struct MessageComposerView: View {
         .buttonStyle(.plain)
     }
 
-    private func agentChipView(_ agent: AgentInfo) -> some View {
+    private func agentChipView(_ agent: OnlineAgentInfo) -> some View {
         HStack(spacing: 8) {
-            AgentChipView(agent: agent) {
+            OnlineAgentChipView(agent: agent) {
                 isDirty = true // Mark as dirty when user changes agent
                 draft.clearAgent()
                 if let projectId = selectedProject?.id {
@@ -482,13 +482,11 @@ struct MessageComposerView: View {
         // Only load projects if we're in new conversation mode without a project
         guard isNewConversation && initialProject == nil else { return }
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task {
             // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = coreManager.core.refresh()
-            let projects = coreManager.core.getProjects()
-            DispatchQueue.main.async {
-                availableProjects = projects
-            }
+            _ = await coreManager.safeCore.refresh()
+            let projects = await coreManager.safeCore.getProjects()
+            availableProjects = projects
         }
     }
 
@@ -522,25 +520,23 @@ struct MessageComposerView: View {
     private func loadAgents() {
         guard let projectId = selectedProject?.id else { return }
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task {
             // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = coreManager.core.refresh()
+            _ = await coreManager.safeCore.refresh()
             do {
-                let agents = try coreManager.core.getAgents(projectId: projectId)
-                DispatchQueue.main.async {
-                    availableAgents = agents
-                    agentsLoadError = nil
-                    if agents.isEmpty {
-                        print("[MessageComposerView] No agents for this project")
-                    }
+                // Use getOnlineAgents to get agents from project status (kind:24010)
+                // These have actual agent instance pubkeys for proper profile lookup
+                let agents = try await coreManager.safeCore.getOnlineAgents(projectId: projectId)
+                availableAgents = agents
+                agentsLoadError = nil
+                if agents.isEmpty {
+                    print("[MessageComposerView] No online agents for this project")
                 }
             } catch {
-                DispatchQueue.main.async {
-                    // Don't clear availableAgents on error - preserve existing data
-                    // Only update error state so UI can show warning
-                    agentsLoadError = error.localizedDescription
-                    print("[MessageComposerView] Failed to load agents: \(error)")
-                }
+                // Don't clear availableAgents on error - preserve existing data
+                // Only update error state so UI can show warning
+                agentsLoadError = error.localizedDescription
+                print("[MessageComposerView] Failed to load agents: \(error)")
             }
         }
     }
@@ -629,19 +625,19 @@ struct MessageComposerView: View {
         isSending = true
         sendError = nil
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task {
             do {
                 let result: SendMessageResult
 
                 if isNewConversation {
-                    result = try coreManager.core.sendThread(
+                    result = try await coreManager.safeCore.sendThread(
                         projectId: project.id,
                         title: draft.title,
                         content: draft.content,
                         agentPubkey: validatedAgentPubkey
                     )
                 } else {
-                    result = try coreManager.core.sendMessage(
+                    result = try await coreManager.safeCore.sendMessage(
                         conversationId: conversationId!,
                         projectId: project.id,
                         content: draft.content,
@@ -649,23 +645,17 @@ struct MessageComposerView: View {
                     )
                 }
 
-                DispatchQueue.main.async {
-                    isSending = false
+                isSending = false
 
-                    // Clear draft on success
-                    Task {
-                        await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
-                        // Notify and dismiss after delete completes
-                        onSend?(result)
-                        dismiss()
-                    }
-                }
+                // Clear draft on success
+                await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
+                // Notify and dismiss after delete completes
+                onSend?(result)
+                dismiss()
             } catch {
-                DispatchQueue.main.async {
-                    isSending = false
-                    sendError = error.localizedDescription
-                    showSendError = true
-                }
+                isSending = false
+                sendError = error.localizedDescription
+                showSendError = true
             }
         }
     }
@@ -730,27 +720,26 @@ struct ProjectChipView: View {
     }
 }
 
-// MARK: - Agent Chip View
+// MARK: - Online Agent Chip View
 
-struct AgentChipView: View {
+struct OnlineAgentChipView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    let agent: AgentInfo
+    let agent: OnlineAgentInfo
     let onRemove: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
-            // Agent avatar using unified component
+            // Agent avatar - uses actual agent pubkey for profile lookup
             AgentAvatarView(
                 agentName: agent.name,
                 pubkey: agent.pubkey,
-                fallbackPictureUrl: agent.picture,
                 size: 24,
                 showBorder: false
             )
             .environmentObject(coreManager)
 
             // Agent name
-            Text("@\(agent.dTag)")
+            Text("@\(agent.name)")
                 .font(.subheadline)
                 .fontWeight(.medium)
                 .foregroundStyle(.primary)

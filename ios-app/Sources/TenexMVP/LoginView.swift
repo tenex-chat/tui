@@ -190,58 +190,54 @@ struct LoginView: View {
             return
         }
 
-        // Perform login on background thread
-        // Note: trimmedInput is captured by the closure but will be released when closure completes
-        DispatchQueue.global(qos: .userInitiated).async {
+        // Perform login using async/await with SafeTenexCore
+        Task {
             do {
-                let result = try coreManager.core.login(nsec: trimmedInput)
+                let result = try await coreManager.safeCore.login(nsec: trimmedInput)
 
                 if result.success {
                     // Save credential to keychain (on background thread)
                     let saveError = coreManager.saveCredential(nsec: trimmedInput)
 
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-                        self.userNpub = result.npub
+                    isLoading = false
+                    userNpub = result.npub
 
-                        if let error = saveError {
-                            // Show warning if credential save failed
-                            self.credentialSaveWarning = "Could not save credentials: \(error). You'll need to log in again next time."
-                            self.showSuccess = true
-                        } else {
-                            // Auto-navigate to app on successful login
-                            self.isLoggedIn = true
-                        }
+                    if let error = saveError {
+                        // Show warning if credential save failed
+                        credentialSaveWarning = "Could not save credentials: \(error). You'll need to log in again next time."
+                        showSuccess = true
+                    } else {
+                        // Auto-navigate to app on successful login
+                        isLoggedIn = true
                     }
                 } else {
-                    DispatchQueue.main.async {
-                        self.isLoading = false
-                        self.errorMessage = "Login failed"
-                    }
+                    isLoading = false
+                    errorMessage = "Login failed"
                 }
-            } catch let error as TenexError {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    switch error {
+            } catch let error as CoreError {
+                isLoading = false
+                switch error {
+                case .tenex(let tenexError):
+                    switch tenexError {
                     case .InvalidNsec(let message):
-                        self.errorMessage = "Invalid key: \(message)"
+                        errorMessage = "Invalid key: \(message)"
                     case .NotLoggedIn:
-                        self.errorMessage = "Not logged in"
+                        errorMessage = "Not logged in"
                     case .Internal(let message):
-                        self.errorMessage = "Error: \(message)"
+                        errorMessage = "Error: \(message)"
                     case .LogoutFailed(let message):
-                        self.errorMessage = "Logout failed: \(message)"
+                        errorMessage = "Logout failed: \(message)"
                     case .LockError(let resource):
-                        self.errorMessage = "Lock error: \(resource)"
+                        errorMessage = "Lock error: \(resource)"
                     case .CoreNotInitialized:
-                        self.errorMessage = "Core not initialized"
+                        errorMessage = "Core not initialized"
                     }
+                case .notInitialized:
+                    errorMessage = "Core not initialized"
                 }
             } catch {
-                DispatchQueue.main.async {
-                    self.isLoading = false
-                    self.errorMessage = "Unexpected error: \(error.localizedDescription)"
-                }
+                isLoading = false
+                errorMessage = "Unexpected error: \(error.localizedDescription)"
             }
         }
     }

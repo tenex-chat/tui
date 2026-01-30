@@ -147,6 +147,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         core.getInbox()
     }
 
+    // MARK: - Search
+
+    /// Full-text search across all events.
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func search(query: String, limit: Int32) -> [SearchResult] {
+        core.search(query: query, limit: limit)
+    }
+
     // MARK: - Agents
 
     /// Get agents for a project.
@@ -162,6 +170,16 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func getAllAgents() throws -> [AgentInfo] {
         do {
             return try core.getAllAgents()
+        } catch let error as TenexError {
+            throw CoreError.tenex(error)
+        }
+    }
+
+    /// Get online agents from project status (kind:24010).
+    /// These are actual agent instances with their own Nostr keypairs.
+    func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo] {
+        do {
+            return try core.getOnlineAgents(projectId: projectId)
         } catch let error as TenexError {
             throw CoreError.tenex(error)
         }

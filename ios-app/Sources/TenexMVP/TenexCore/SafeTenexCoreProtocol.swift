@@ -29,9 +29,13 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Inbox
     func getInbox() -> [InboxItem]
 
+    // MARK: - Search
+    func search(query: String, limit: Int32) -> [SearchResult]
+
     // MARK: - Agents
     func getAgents(projectId: String) throws -> [AgentInfo]
     func getAllAgents() throws -> [AgentInfo]
+    func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
 
     // MARK: - Stats & Diagnostics
     func getStatsSnapshot() throws -> StatsSnapshot
