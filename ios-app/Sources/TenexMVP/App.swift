@@ -66,6 +66,8 @@ final class ProfilePictureCache {
 /// Initializes the core OFF the main thread to avoid UI jank
 class TenexCoreManager: ObservableObject {
     let core: TenexCore
+    /// Thread-safe async wrapper for FFI access with proper error handling
+    let safeCore: SafeTenexCore
     @Published var isInitialized = false
     @Published var initializationError: String?
 
@@ -84,11 +86,13 @@ class TenexCoreManager: ObservableObject {
 
     init() {
         // Create core immediately (lightweight)
-        core = TenexCore()
+        let tenexCore = TenexCore()
+        core = tenexCore
+        safeCore = SafeTenexCore(core: tenexCore)
 
         // Initialize asynchronously off the main thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let success = self?.core.`init`() ?? false
+            let success = tenexCore.`init`()
             DispatchQueue.main.async {
                 self?.isInitialized = success
                 if !success {
@@ -111,14 +115,18 @@ class TenexCoreManager: ObservableObject {
         guard !isPolling else { return }
         isPolling = true
 
-        // Initial fetch immediately
-        pollForUpdates()
+        // Initial fetch immediately using async version
+        Task { @MainActor in
+            await pollForUpdatesAsync()
+        }
 
         // Start timer on main thread
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.pollingTimer = Timer.scheduledTimer(withTimeInterval: self.pollingInterval, repeats: true) { [weak self] _ in
-                self?.pollForUpdates()
+                Task { @MainActor in
+                    await self?.pollForUpdatesAsync()
+                }
             }
         }
     }
@@ -130,44 +138,38 @@ class TenexCoreManager: ObservableObject {
         pollingTimer = nil
     }
 
-    /// Polls for updates and refreshes all @Published data
-    func pollForUpdates() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
+    /// Manual refresh for pull-to-refresh gesture
+    func manualRefresh() async {
+        await pollForUpdatesAsync()
+    }
 
-            // Refresh from relays
-            _ = self.core.refresh()
+    /// Async polling using SafeTenexCore with proper error handling.
+    /// Unlike pollForUpdates(), this version won't crash on FFI errors.
+    @MainActor
+    func pollForUpdatesAsync() async {
+        _ = await safeCore.refresh()
 
-            // Fetch all data
-            let fetchedProjects = self.core.getProjects()
-
+        do {
             let filter = ConversationFilter(
                 projectIds: [],
-                showArchived: true,  // Fetch all, filter in UI
+                showArchived: true,
                 hideScheduled: true,
                 timeFilter: .all
             )
-            let fetchedConversations = (try? self.core.getAllConversations(filter: filter)) ?? []
 
-            let fetchedInbox = self.core.getInbox()
+            // Fetch all data concurrently
+            async let fetchedProjects = safeCore.getProjects()
+            async let fetchedConversations = try safeCore.getAllConversations(filter: filter)
+            async let fetchedInbox = safeCore.getInbox()
 
-            // Update @Published on main thread
-            DispatchQueue.main.async {
-                self.projects = fetchedProjects
-                self.conversations = fetchedConversations
-                self.inboxItems = fetchedInbox
-            }
-        }
-    }
+            let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
 
-    /// Manual refresh for pull-to-refresh gesture
-    func manualRefresh() async {
-        await withCheckedContinuation { continuation in
-            pollForUpdates()
-            // Small delay to allow UI update
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                continuation.resume()
-            }
+            projects = p
+            conversations = c
+            inboxItems = i
+        } catch {
+            print("[TenexCoreManager] Poll failed: \(error)")
+            // Don't crash - just log and continue with stale data
         }
     }
 
@@ -454,7 +456,13 @@ struct MainTabView: View {
                 }
 
                 // Pushes segments to opposite sides
-                ToolbarSpacer(.flexible, placement: .bottomBar)
+                if #available(iOS 26.0, *) {
+                    ToolbarSpacer(.flexible, placement: .bottomBar)
+                } else {
+                    ToolbarItem(placement: .bottomBar) {
+                        Spacer()
+                    }
+                }
 
                 // Right glass segment: New conversation
                 ToolbarItem(placement: .bottomBar) {
