@@ -77,7 +77,7 @@ class DiagnosticsViewModel: ObservableObject {
 
     // MARK: - Public Methods
 
-    /// Load diagnostics data from Rust core
+    /// Load diagnostics data from Rust core using SafeTenexCore
     ///
     /// Implements latest-wins + deduplication concurrency strategy with fetch identity:
     /// - If in-flight request already covers new request (includeDB=true covers false), ignore new call
@@ -110,8 +110,8 @@ class DiagnosticsViewModel: ObservableObject {
         isLoading = true
         currentFetchIncludesDB = includeDB
 
-        // Capture core before creating task to avoid actor isolation issues
-        let core = self.coreManager.core
+        // Capture safeCore for actor-isolated access
+        let safeCore = self.coreManager.safeCore
 
         // Create a new cancellable task
         let task = Task { [weak self] in
@@ -129,25 +129,21 @@ class DiagnosticsViewModel: ObservableObject {
             guard let self = self else { return }
 
             do {
-                // Move FFI calls off main actor to prevent UI blocking
-                // Note: Task.detached is required for FFI - synchronous calls can't be preempted
-                let fetchedSnapshot = try await Task.detached { [core, includeDB] in
-                    // Check for cancellation before starting
-                    try Task.checkCancellation()
+                // Check for cancellation before starting
+                try Task.checkCancellation()
 
-                    // Refresh core data first and handle errors
-                    let refreshSuccess = core.refresh()
-                    if !refreshSuccess {
-                        // Log but continue - refresh failure shouldn't block diagnostics
-                        Logger.diagnostics.warning("Core refresh returned false, continuing with diagnostics fetch")
-                    }
+                // Refresh core data first using SafeTenexCore
+                let refreshSuccess = await safeCore.refresh()
+                if !refreshSuccess {
+                    // Log but continue - refresh failure shouldn't block diagnostics
+                    Logger.diagnostics.warning("Core refresh returned false, continuing with diagnostics fetch")
+                }
 
-                    // Check for cancellation after refresh
-                    try Task.checkCancellation()
+                // Check for cancellation after refresh
+                try Task.checkCancellation()
 
-                    // Fetch diagnostics snapshot (single batched call, now infallible)
-                    return core.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
-                }.value
+                // Fetch diagnostics snapshot using SafeTenexCore
+                let fetchedSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
 
                 // IDENTITY CHECK: Guard UI updates - only apply if this is still the current fetch
                 // (The underlying Rust work completed, but we shouldn't show stale data)
