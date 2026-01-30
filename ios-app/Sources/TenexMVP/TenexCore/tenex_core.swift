@@ -570,6 +570,14 @@ fileprivate struct FfiConverterString: FfiConverter {
 public protocol TenexCoreProtocol: AnyObject, Sendable {
     
     /**
+     * Answer an ask event by sending a formatted response.
+     *
+     * The response is formatted as markdown with each question's title and answer,
+     * and published as a kind:1 reply to the ask event.
+     */
+    func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws  -> SendMessageResult
+    
+    /**
      * Archive a conversation (hide from default view).
      */
     func archiveConversation(conversationId: String) 
@@ -695,6 +703,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * instead of silently returning nil.
      */
     func getProfilePicture(pubkey: String) throws  -> String?
+    
+    /**
+     * Get available configuration options for a project.
+     *
+     * Returns all available models and tools from the project status (kind:24010).
+     * Used by iOS to populate the agent config modal with available options.
+     */
+    func getProjectConfigOptions(projectId: String) throws  -> ProjectConfigOptions
     
     /**
      * Get all projects with filter info (visibility, counts).
@@ -843,6 +859,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func unarchiveConversation(conversationId: String) 
     
     /**
+     * Update an agent's configuration (model and tools).
+     *
+     * Publishes a kind:24020 event to update the agent's configuration.
+     * The backend will process this event and update the agent's config.
+     */
+    func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws 
+    
+    /**
      * Get the version of tenex-core.
      */
     func version()  -> String
@@ -916,6 +940,24 @@ public convenience init() {
 
     
 
+    
+    /**
+     * Answer an ask event by sending a formatted response.
+     *
+     * The response is formatted as markdown with each question's title and answer,
+     * and published as a kind:1 reply to the ask event.
+     */
+open func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer])throws  -> SendMessageResult  {
+    return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_answer_ask(self.uniffiClonePointer(),
+        FfiConverterString.lower(askEventId),
+        FfiConverterString.lower(askAuthorPubkey),
+        FfiConverterString.lower(conversationId),
+        FfiConverterString.lower(projectId),
+        FfiConverterSequenceTypeAskAnswer.lower(answers),$0
+    )
+})
+}
     
     /**
      * Archive a conversation (hide from default view).
@@ -1136,6 +1178,20 @@ open func getProfilePicture(pubkey: String)throws  -> String?  {
     return try  FfiConverterOptionString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_profile_picture(self.uniffiClonePointer(),
         FfiConverterString.lower(pubkey),$0
+    )
+})
+}
+    
+    /**
+     * Get available configuration options for a project.
+     *
+     * Returns all available models and tools from the project status (kind:24010).
+     * Used by iOS to populate the agent config modal with available options.
+     */
+open func getProjectConfigOptions(projectId: String)throws  -> ProjectConfigOptions  {
+    return try  FfiConverterTypeProjectConfigOptions_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_project_config_options(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
     )
 })
 }
@@ -1407,6 +1463,22 @@ open func unarchiveConversation(conversationId: String)  {try! rustCall() {
 }
     
     /**
+     * Update an agent's configuration (model and tools).
+     *
+     * Publishes a kind:24020 event to update the agent's configuration.
+     * The backend will process this event and update the agent's config.
+     */
+open func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_update_agent_config(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),
+        FfiConverterString.lower(agentPubkey),
+        FfiConverterOptionString.lower(model),
+        FfiConverterSequenceString.lower(tools),$0
+    )
+}
+}
+    
+    /**
      * Get the version of tenex-core.
      */
 open func version() -> String  {
@@ -1640,6 +1712,91 @@ public func FfiConverterTypeAgentInfo_lift(_ buf: RustBuffer) throws -> AgentInf
 #endif
 public func FfiConverterTypeAgentInfo_lower(_ value: AgentInfo) -> RustBuffer {
     return FfiConverterTypeAgentInfo.lower(value)
+}
+
+
+/**
+ * An answer to a single question in an ask event.
+ */
+public struct AskAnswer {
+    /**
+     * The question title (used to format the response)
+     */
+    public var questionTitle: String
+    /**
+     * The answer type and value(s)
+     */
+    public var answerType: AskAnswerType
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * The question title (used to format the response)
+         */questionTitle: String, 
+        /**
+         * The answer type and value(s)
+         */answerType: AskAnswerType) {
+        self.questionTitle = questionTitle
+        self.answerType = answerType
+    }
+}
+
+#if compiler(>=6)
+extension AskAnswer: Sendable {}
+#endif
+
+
+extension AskAnswer: Equatable, Hashable {
+    public static func ==(lhs: AskAnswer, rhs: AskAnswer) -> Bool {
+        if lhs.questionTitle != rhs.questionTitle {
+            return false
+        }
+        if lhs.answerType != rhs.answerType {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(questionTitle)
+        hasher.combine(answerType)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAskAnswer: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskAnswer {
+        return
+            try AskAnswer(
+                questionTitle: FfiConverterString.read(from: &buf), 
+                answerType: FfiConverterTypeAskAnswerType.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AskAnswer, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.questionTitle, into: &buf)
+        FfiConverterTypeAskAnswerType.write(value.answerType, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskAnswer_lift(_ buf: RustBuffer) throws -> AskAnswer {
+    return try FfiConverterTypeAskAnswer.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskAnswer_lower(_ value: AskAnswer) -> RustBuffer {
+    return FfiConverterTypeAskAnswer.lower(value)
 }
 
 
@@ -3344,6 +3501,10 @@ public struct MessageInfo {
      * Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
      */
     public var toolName: String?
+    /**
+     * Tool arguments as JSON string (for parsing todo_write and other tool calls)
+     */
+    public var toolArgs: String?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3380,7 +3541,10 @@ public struct MessageInfo {
          */askEvent: AskEventInfo?, 
         /**
          * Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
-         */toolName: String?) {
+         */toolName: String?, 
+        /**
+         * Tool arguments as JSON string (for parsing todo_write and other tool calls)
+         */toolArgs: String?) {
         self.id = id
         self.content = content
         self.author = author
@@ -3392,6 +3556,7 @@ public struct MessageInfo {
         self.pTags = pTags
         self.askEvent = askEvent
         self.toolName = toolName
+        self.toolArgs = toolArgs
     }
 }
 
@@ -3435,6 +3600,9 @@ extension MessageInfo: Equatable, Hashable {
         if lhs.toolName != rhs.toolName {
             return false
         }
+        if lhs.toolArgs != rhs.toolArgs {
+            return false
+        }
         return true
     }
 
@@ -3450,6 +3618,7 @@ extension MessageInfo: Equatable, Hashable {
         hasher.combine(pTags)
         hasher.combine(askEvent)
         hasher.combine(toolName)
+        hasher.combine(toolArgs)
     }
 }
 
@@ -3472,7 +3641,8 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
                 qTags: FfiConverterSequenceString.read(from: &buf), 
                 pTags: FfiConverterSequenceString.read(from: &buf), 
                 askEvent: FfiConverterOptionTypeAskEventInfo.read(from: &buf), 
-                toolName: FfiConverterOptionString.read(from: &buf)
+                toolName: FfiConverterOptionString.read(from: &buf), 
+                toolArgs: FfiConverterOptionString.read(from: &buf)
         )
     }
 
@@ -3488,6 +3658,7 @@ public struct FfiConverterTypeMessageInfo: FfiConverterRustBuffer {
         FfiConverterSequenceString.write(value.pTags, into: &buf)
         FfiConverterOptionTypeAskEventInfo.write(value.askEvent, into: &buf)
         FfiConverterOptionString.write(value.toolName, into: &buf)
+        FfiConverterOptionString.write(value.toolArgs, into: &buf)
     }
 }
 
@@ -3712,6 +3883,10 @@ public struct OnlineAgentInfo {
      * Model used by the agent (e.g., "claude-3-opus"), if known
      */
     public var model: String?
+    /**
+     * Tools assigned to this agent
+     */
+    public var tools: [String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3727,11 +3902,15 @@ public struct OnlineAgentInfo {
          */isPm: Bool, 
         /**
          * Model used by the agent (e.g., "claude-3-opus"), if known
-         */model: String?) {
+         */model: String?, 
+        /**
+         * Tools assigned to this agent
+         */tools: [String]) {
         self.pubkey = pubkey
         self.name = name
         self.isPm = isPm
         self.model = model
+        self.tools = tools
     }
 }
 
@@ -3754,6 +3933,9 @@ extension OnlineAgentInfo: Equatable, Hashable {
         if lhs.model != rhs.model {
             return false
         }
+        if lhs.tools != rhs.tools {
+            return false
+        }
         return true
     }
 
@@ -3762,6 +3944,7 @@ extension OnlineAgentInfo: Equatable, Hashable {
         hasher.combine(name)
         hasher.combine(isPm)
         hasher.combine(model)
+        hasher.combine(tools)
     }
 }
 
@@ -3777,7 +3960,8 @@ public struct FfiConverterTypeOnlineAgentInfo: FfiConverterRustBuffer {
                 pubkey: FfiConverterString.read(from: &buf), 
                 name: FfiConverterString.read(from: &buf), 
                 isPm: FfiConverterBool.read(from: &buf), 
-                model: FfiConverterOptionString.read(from: &buf)
+                model: FfiConverterOptionString.read(from: &buf), 
+                tools: FfiConverterSequenceString.read(from: &buf)
         )
     }
 
@@ -3786,6 +3970,7 @@ public struct FfiConverterTypeOnlineAgentInfo: FfiConverterRustBuffer {
         FfiConverterString.write(value.name, into: &buf)
         FfiConverterBool.write(value.isPm, into: &buf)
         FfiConverterOptionString.write(value.model, into: &buf)
+        FfiConverterSequenceString.write(value.tools, into: &buf)
     }
 }
 
@@ -3802,6 +3987,92 @@ public func FfiConverterTypeOnlineAgentInfo_lift(_ buf: RustBuffer) throws -> On
 #endif
 public func FfiConverterTypeOnlineAgentInfo_lower(_ value: OnlineAgentInfo) -> RustBuffer {
     return FfiConverterTypeOnlineAgentInfo.lower(value)
+}
+
+
+/**
+ * Available configuration options for a project.
+ * Used by iOS to populate the agent config modal.
+ */
+public struct ProjectConfigOptions {
+    /**
+     * All available models for the project
+     */
+    public var allModels: [String]
+    /**
+     * All available tools for the project
+     */
+    public var allTools: [String]
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(
+        /**
+         * All available models for the project
+         */allModels: [String], 
+        /**
+         * All available tools for the project
+         */allTools: [String]) {
+        self.allModels = allModels
+        self.allTools = allTools
+    }
+}
+
+#if compiler(>=6)
+extension ProjectConfigOptions: Sendable {}
+#endif
+
+
+extension ProjectConfigOptions: Equatable, Hashable {
+    public static func ==(lhs: ProjectConfigOptions, rhs: ProjectConfigOptions) -> Bool {
+        if lhs.allModels != rhs.allModels {
+            return false
+        }
+        if lhs.allTools != rhs.allTools {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(allModels)
+        hasher.combine(allTools)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeProjectConfigOptions: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ProjectConfigOptions {
+        return
+            try ProjectConfigOptions(
+                allModels: FfiConverterSequenceString.read(from: &buf), 
+                allTools: FfiConverterSequenceString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ProjectConfigOptions, into buf: inout [UInt8]) {
+        FfiConverterSequenceString.write(value.allModels, into: &buf)
+        FfiConverterSequenceString.write(value.allTools, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectConfigOptions_lift(_ buf: RustBuffer) throws -> ProjectConfigOptions {
+    return try FfiConverterTypeProjectConfigOptions.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeProjectConfigOptions_lower(_ value: ProjectConfigOptions) -> RustBuffer {
+    return FfiConverterTypeProjectConfigOptions.lower(value)
 }
 
 
@@ -5363,6 +5634,104 @@ public func FfiConverterTypeUserInfo_lower(_ value: UserInfo) -> RustBuffer {
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
+ * The type of answer for an ask question.
+ */
+
+public enum AskAnswerType {
+    
+    /**
+     * Single selection from suggestions
+     */
+    case singleSelect(value: String
+    )
+    /**
+     * Multiple selections from options
+     */
+    case multiSelect(values: [String]
+    )
+    /**
+     * Custom text input (for "Other" option)
+     */
+    case customText(value: String
+    )
+}
+
+
+#if compiler(>=6)
+extension AskAnswerType: Sendable {}
+#endif
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAskAnswerType: FfiConverterRustBuffer {
+    typealias SwiftType = AskAnswerType
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AskAnswerType {
+        let variant: Int32 = try readInt(&buf)
+        switch variant {
+        
+        case 1: return .singleSelect(value: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 2: return .multiSelect(values: try FfiConverterSequenceString.read(from: &buf)
+        )
+        
+        case 3: return .customText(value: try FfiConverterString.read(from: &buf)
+        )
+        
+        default: throw UniffiInternalError.unexpectedEnumCase
+        }
+    }
+
+    public static func write(_ value: AskAnswerType, into buf: inout [UInt8]) {
+        switch value {
+        
+        
+        case let .singleSelect(value):
+            writeInt(&buf, Int32(1))
+            FfiConverterString.write(value, into: &buf)
+            
+        
+        case let .multiSelect(values):
+            writeInt(&buf, Int32(2))
+            FfiConverterSequenceString.write(values, into: &buf)
+            
+        
+        case let .customText(value):
+            writeInt(&buf, Int32(3))
+            FfiConverterString.write(value, into: &buf)
+            
+        }
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskAnswerType_lift(_ buf: RustBuffer) throws -> AskAnswerType {
+    return try FfiConverterTypeAskAnswerType.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAskAnswerType_lower(_ value: AskAnswerType) -> RustBuffer {
+    return FfiConverterTypeAskAnswerType.lower(value)
+}
+
+
+extension AskAnswerType: Equatable, Hashable {}
+
+
+
+
+
+
+// Note that we don't yet support `indirect` for enums.
+// See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
+/**
  * A single question in an ask event.
  */
 
@@ -5939,6 +6308,31 @@ fileprivate struct FfiConverterSequenceTypeAgentInfo: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAskAnswer: FfiConverterRustBuffer {
+    typealias SwiftType = [AskAnswer]
+
+    public static func write(_ value: [AskAnswer], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAskAnswer.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AskAnswer] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AskAnswer]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAskAnswer.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeConversationFullInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ConversationFullInfo]
 
@@ -6401,6 +6795,9 @@ private let initializationResult: InitializationResult = {
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_answer_ask() != 25528) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_archive_conversation() != 34495) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -6450,6 +6847,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_profile_picture() != 63726) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_project_config_options() != 13106) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_project_filters() != 42390) {
@@ -6513,6 +6913,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation() != 48686) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_update_agent_config() != 13571) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_version() != 63230) {

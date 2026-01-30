@@ -296,6 +296,8 @@ pub struct MessageInfo {
     pub ask_event: Option<AskEventInfo>,
     /// Tool name if this is a tool call (e.g., "mcp__tenex__ask", "mcp__tenex__delegate")
     pub tool_name: Option<String>,
+    /// Tool arguments as JSON string (for parsing todo_write and other tool calls)
+    pub tool_args: Option<String>,
 }
 
 /// A report/article in a project (kind 30023 NIP-23 long-form content).
@@ -348,6 +350,25 @@ pub struct InboxItem {
     pub ask_event: Option<AskEventInfo>,
 }
 
+/// A search result from full-text search.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchResult {
+    /// Event ID of the matching message/report
+    pub event_id: String,
+    /// Thread/conversation ID for context
+    pub thread_id: Option<String>,
+    /// Content snippet with match
+    pub content: String,
+    /// Event kind (1 = message, 30023 = report)
+    pub kind: u32,
+    /// Author name/npub
+    pub author: String,
+    /// Unix timestamp
+    pub created_at: u64,
+    /// Project a-tag if known
+    pub project_a_tag: Option<String>,
+}
+
 /// Result of a successful login operation.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct LoginResult {
@@ -368,12 +389,14 @@ pub struct SendMessageResult {
     pub success: bool,
 }
 
-/// An agent definition for FFI export.
+/// An agent definition for FFI export (from kind:4199 events).
+/// Note: The pubkey here is the AUTHOR of the agent definition, not the agent instance.
+/// For agent instances with their own pubkeys, use OnlineAgentInfo from get_online_agents().
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AgentInfo {
     /// Unique identifier of the agent (event ID)
     pub id: String,
-    /// Agent's public key (hex)
+    /// Agent definition author's public key (hex) - NOT the agent instance pubkey
     pub pubkey: String,
     /// Agent's d-tag (slug)
     pub d_tag: String,
@@ -387,6 +410,33 @@ pub struct AgentInfo {
     pub picture: Option<String>,
     /// Model used by the agent (e.g., "claude-3-opus")
     pub model: Option<String>,
+}
+
+/// An online agent from project status (kind:24010 events).
+/// These are actual agent instances with their own Nostr keypairs.
+/// Use get_online_agents() to fetch these for agent selection.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct OnlineAgentInfo {
+    /// Agent's actual public key (hex) - use this for profile lookups and p-tags
+    pub pubkey: String,
+    /// Display name of the agent (e.g., "claude-code", "architect")
+    pub name: String,
+    /// Whether this is the PM (project manager) agent
+    pub is_pm: bool,
+    /// Model used by the agent (e.g., "claude-3-opus"), if known
+    pub model: Option<String>,
+    /// Tools assigned to this agent
+    pub tools: Vec<String>,
+}
+
+/// Available configuration options for a project.
+/// Used by iOS to populate the agent config modal.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ProjectConfigOptions {
+    /// All available models for the project
+    pub all_models: Vec<String>,
+    /// All available tools for the project
+    pub all_tools: Vec<String>,
 }
 
 /// Information about the current logged-in user.
@@ -746,9 +796,9 @@ impl TenexCore {
             return false;
         }
 
-        // Initialize nostrdb with mobile-appropriate mapsize
-        // iOS has memory constraints, so use 512MB instead of default
-        let config = nostrdb::Config::new().set_mapsize(512 * 1024 * 1024);
+        // Initialize nostrdb with appropriate mapsize for iOS
+        // Use 2GB to avoid MDB_MAP_FULL errors with larger datasets
+        let config = nostrdb::Config::new().set_mapsize(2 * 1024 * 1024 * 1024);
         let ndb = match Ndb::new(data_dir.to_str().unwrap_or("tenex_data"), &config) {
             Ok(ndb) => Arc::new(ndb),
             Err(e) => {
@@ -1424,6 +1474,7 @@ impl TenexCore {
                     p_tags: m.p_tags.clone(),
                     ask_event,
                     tool_name: m.tool_name.clone(),
+                    tool_args: m.tool_args.clone(),
                 }
             })
             .collect()
@@ -1569,6 +1620,53 @@ impl TenexCore {
                     conversation_id: item.thread_id.clone(),
                     ask_event,
                 }
+            })
+            .collect()
+    }
+
+    // ===== Search Methods =====
+
+    /// Full-text search across all events using nostrdb.
+    /// Returns search results with content snippets and context.
+    pub fn search(&self, query: String, limit: i32) -> Vec<SearchResult> {
+        eprintln!("[FFI search] query='{}', limit={}", query, limit);
+
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => {
+                eprintln!("[FFI search] Failed to acquire store read lock");
+                return Vec::new();
+            }
+        };
+
+        let store = match store_guard.as_ref() {
+            Some(s) => s,
+            None => {
+                eprintln!("[FFI search] Store is None (not initialized)");
+                return Vec::new();
+            }
+        };
+
+        // Use nostrdb text_search
+        let results = store.text_search(&query, limit);
+        eprintln!("[FFI search] text_search returned {} results", results.len());
+
+        results
+            .into_iter()
+            .filter_map(|(event_id, thread_id, content, kind)| {
+                // Look up the author info from the event
+                let (author, created_at, project_a_tag) = store.get_event_metadata(&event_id)
+                    .unwrap_or_else(|| ("Unknown".to_string(), 0, None));
+
+                Some(SearchResult {
+                    event_id,
+                    thread_id,
+                    content,
+                    kind,
+                    author,
+                    created_at,
+                    project_a_tag,
+                })
             })
             .collect()
     }
@@ -1935,6 +2033,110 @@ impl TenexCore {
             .into_iter()
             .map(agent_to_info)
             .collect())
+    }
+
+    /// Get online agents for a project from the project status (kind:24010).
+    ///
+    /// These are actual agent instances with their own Nostr keypairs.
+    /// Use these for agent selection in the message composer - the pubkeys
+    /// can be used for profile picture lookups and p-tags.
+    ///
+    /// Returns empty if project not found or project is offline.
+    pub fn get_online_agents(&self, project_id: String) -> Result<Vec<OnlineAgentInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        // Find the project by ID
+        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let project = match project {
+            Some(p) => p,
+            None => return Ok(Vec::new()), // Project not found = empty agents
+        };
+
+        // Get agents from project status (kind:24010)
+        let agents = store.get_online_agents(&project.a_tag())
+            .map(|agents| {
+                agents.iter().map(|a| OnlineAgentInfo {
+                    pubkey: a.pubkey.clone(),
+                    name: a.name.clone(),
+                    is_pm: a.is_pm,
+                    model: a.model.clone(),
+                    tools: a.tools.clone(),
+                }).collect()
+            })
+            .unwrap_or_default();
+
+        Ok(agents)
+    }
+
+    /// Get available configuration options for a project.
+    ///
+    /// Returns all available models and tools from the project status (kind:24010).
+    /// Used by iOS to populate the agent config modal with available options.
+    pub fn get_project_config_options(&self, project_id: String) -> Result<ProjectConfigOptions, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        // Find the project by ID
+        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let project = match project {
+            Some(p) => p,
+            None => return Err(TenexError::Internal {
+                message: format!("Project not found: {}", project_id),
+            }),
+        };
+
+        // Get project status to extract all_models and all_tools
+        let status = store.get_project_status(&project.a_tag());
+        match status {
+            Some(s) => Ok(ProjectConfigOptions {
+                all_models: s.all_models.clone(),
+                all_tools: s.all_tools.iter().cloned().collect(),
+            }),
+            None => Ok(ProjectConfigOptions {
+                all_models: Vec::new(),
+                all_tools: Vec::new(),
+            }),
+        }
+    }
+
+    /// Update an agent's configuration (model and tools).
+    ///
+    /// Publishes a kind:24020 event to update the agent's configuration.
+    /// The backend will process this event and update the agent's config.
+    pub fn update_agent_config(
+        &self,
+        project_id: String,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+    ) -> Result<(), TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        // Send the update agent config command
+        core_handle
+            .send(NostrCommand::UpdateAgentConfig {
+                project_a_tag,
+                agent_pubkey,
+                model,
+                tools,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send update agent config command: {}", e),
+            })?;
+
+        Ok(())
     }
 
     /// Send a new conversation (thread) to a project.

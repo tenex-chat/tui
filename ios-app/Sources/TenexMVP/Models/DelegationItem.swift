@@ -11,6 +11,9 @@ struct DelegationItem: Identifiable {
     /// The recipient agent of the delegation
     let recipient: String
 
+    /// The recipient's pubkey (for avatar lookup)
+    let recipientPubkey: String
+
     /// Preview of the delegation message/task
     let messagePreview: String
 

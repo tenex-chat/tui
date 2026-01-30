@@ -7,7 +7,6 @@ import SwiftUI
 struct ConversationDetailView: View {
     let conversation: ConversationFullInfo
     @EnvironmentObject var coreManager: TenexCoreManager
-    @Environment(\.dismiss) private var dismiss
 
     @StateObject private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
@@ -25,19 +24,8 @@ struct ConversationDetailView: View {
     var body: some View {
         NavigationStack {
             contentView
-                .navigationTitle("Conversation")
+                .navigationTitle(conversation.title)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Back") { dismiss() }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button(action: { Task { await viewModel.loadData() } }) {
-                            Image(systemName: "arrow.clockwise")
-                        }
-                        .disabled(viewModel.isLoading)
-                    }
-                }
                 .task {
                     await initializeAndLoad()
                 }
