@@ -184,16 +184,26 @@ private struct ConversationRowFull: View {
     /// Delegation agent infos loaded from descendants
     @State private var delegationAgentInfos: [AgentAvatarInfo] = []
 
+    /// P-tagged recipient info (first p-tag from conversation root event)
+    @State private var pTaggedRecipientInfo: AgentAvatarInfo?
+
     /// Load delegation agent infos by finding all descendants
     private func loadDelegationAgentInfos() async {
+        // Load p-tagged recipient (first p-tag from conversation root event)
+        if let pTaggedPubkey = conversation.pTags.first {
+            let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
+            pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
+        }
+
         // Get all descendants of this conversation
         let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversation.id)
         let descendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
 
-        // Collect unique agents from descendants (excluding the conversation author)
+        // Collect unique agents from descendants (excluding the conversation author and p-tagged recipient)
+        let pTaggedPubkey = conversation.pTags.first
         var agentsByPubkey: [String: AgentAvatarInfo] = [:]
         for descendant in descendants {
-            if descendant.authorPubkey != conversation.authorPubkey {
+            if descendant.authorPubkey != conversation.authorPubkey && descendant.authorPubkey != pTaggedPubkey {
                 agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
                     name: descendant.author,
                     pubkey: descendant.authorPubkey
@@ -281,37 +291,15 @@ private struct ConversationRowFull: View {
                     }
                 }
 
-                // Row 3: Author avatar (standalone) + delegation agents (overlapping) + badges
+                // Row 3: Avatars (author + p-tagged overlapping, then delegation agents) + badges
                 HStack(spacing: 0) {
-                    // Author who started the conversation (standalone)
-                    AgentAvatarView(agentName: conversation.author, pubkey: conversation.authorPubkey)
-                        .environmentObject(coreManager)
-
-                    // Gap and delegation agents
-                    if !delegationAgentInfos.isEmpty {
-                        Spacer()
-                            .frame(width: 12)
-
-                        // Delegation agents (overlapping)
-                        HStack(spacing: -8) {
-                            ForEach(delegationAgentInfos.prefix(maxVisibleAvatars - 1)) { agentInfo in
-                                AgentAvatarView(agentName: agentInfo.name, pubkey: agentInfo.pubkey)
-                                    .environmentObject(coreManager)
-                            }
-
-                            if delegationAgentInfos.count > maxVisibleAvatars - 1 {
-                                Circle()
-                                    .fill(Color(.systemGray4))
-                                    .frame(width: 24, height: 24)
-                                    .overlay {
-                                        Text("+\(delegationAgentInfos.count - (maxVisibleAvatars - 1))")
-                                            .font(.caption2)
-                                            .fontWeight(.medium)
-                                            .foregroundStyle(.secondary)
-                                    }
-                            }
-                        }
-                    }
+                    ConversationAvatarGroup(
+                        authorInfo: AgentAvatarInfo(name: conversation.author, pubkey: conversation.authorPubkey),
+                        pTaggedRecipientInfo: pTaggedRecipientInfo,
+                        otherParticipants: delegationAgentInfos,
+                        maxVisibleAvatars: maxVisibleAvatars
+                    )
+                    .environmentObject(coreManager)
 
                     Spacer()
 

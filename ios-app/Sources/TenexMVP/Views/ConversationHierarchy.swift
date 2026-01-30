@@ -409,16 +409,17 @@ struct AgentAvatarView: View {
 /// - Other participants (overlapping group)
 ///
 /// Used in both conversation list and conversation detail views for consistent avatar display.
+/// Shows author + p-tagged recipient overlapping, then a gap, then other participants overlapping.
 struct ConversationAvatarGroup: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
-    /// Author who started the conversation (shown standalone)
+    /// Author who started the conversation
     let authorInfo: AgentAvatarInfo
 
-    /// P-tagged recipient (shown first in overlapping group if available)
-    let pTaggedRecipientPubkey: String?
+    /// P-tagged recipient info (shown overlapping with author)
+    let pTaggedRecipientInfo: AgentAvatarInfo?
 
-    /// Other participants (shown overlapping after p-tagged recipient)
+    /// Other participants (shown overlapping after gap, excluding author and p-tagged)
     let otherParticipants: [AgentAvatarInfo]
 
     /// Avatar size (default 24 for conversation list, smaller for detail header)
@@ -427,43 +428,49 @@ struct ConversationAvatarGroup: View {
     /// Font size for initials (auto-scaled if not specified)
     var fontSize: CGFloat? = nil
 
-    /// Maximum visible avatars in overlapping group (excluding author)
+    /// Maximum visible avatars in the other participants group
     var maxVisibleAvatars: Int = 8
 
-    /// Computed participants sorted with p-tagged recipient first
-    private var sortedParticipants: [AgentAvatarInfo] {
-        guard let pTaggedPubkey = pTaggedRecipientPubkey else {
-            return otherParticipants
-        }
-
-        // Move p-tagged recipient to front
-        var sorted: [AgentAvatarInfo] = []
-        if let pTagged = otherParticipants.first(where: { $0.pubkey == pTaggedPubkey }) {
-            sorted.append(pTagged)
-        }
-        sorted.append(contentsOf: otherParticipants.filter { $0.pubkey != pTaggedPubkey })
-        return sorted
-    }
+    /// Overlap offset for avatars (default: avatarSize * 0.67)
+    private var overlapOffset: CGFloat { avatarSize * 0.67 }
 
     var body: some View {
         HStack(spacing: 0) {
-            // Author avatar (standalone)
-            AgentAvatarView(
-                agentName: authorInfo.name,
-                pubkey: authorInfo.pubkey,
-                size: avatarSize,
-                fontSize: fontSize
-            )
-            .environmentObject(coreManager)
+            // Author + p-tagged recipient overlapping
+            ZStack(alignment: .leading) {
+                // Author avatar
+                AgentAvatarView(
+                    agentName: authorInfo.name,
+                    pubkey: authorInfo.pubkey,
+                    size: avatarSize,
+                    fontSize: fontSize
+                )
+                .environmentObject(coreManager)
+                .zIndex(1)
 
-            // Gap between author and delegation agents
-            if !sortedParticipants.isEmpty {
+                // P-tagged recipient overlapping with author
+                if let pTagged = pTaggedRecipientInfo {
+                    AgentAvatarView(
+                        agentName: pTagged.name,
+                        pubkey: pTagged.pubkey,
+                        size: avatarSize,
+                        fontSize: fontSize
+                    )
+                    .environmentObject(coreManager)
+                    .offset(x: overlapOffset)
+                    .zIndex(0)
+                }
+            }
+            .frame(width: pTaggedRecipientInfo != nil ? avatarSize + overlapOffset : avatarSize, height: avatarSize)
+
+            // Gap and other participants
+            if !otherParticipants.isEmpty {
                 Spacer()
                     .frame(width: 12)
 
-                // Overlapping participant avatars with p-tagged recipient first
+                // Overlapping other participant avatars
                 ZStack(alignment: .leading) {
-                    ForEach(Array(sortedParticipants.prefix(maxVisibleAvatars).enumerated()), id: \.element.id) { index, agentInfo in
+                    ForEach(Array(otherParticipants.prefix(maxVisibleAvatars).enumerated()), id: \.element.id) { index, agentInfo in
                         AgentAvatarView(
                             agentName: agentInfo.name,
                             pubkey: agentInfo.pubkey,
@@ -476,12 +483,12 @@ struct ConversationAvatarGroup: View {
                     }
 
                     // +N indicator
-                    if sortedParticipants.count > maxVisibleAvatars {
+                    if otherParticipants.count > maxVisibleAvatars {
                         Circle()
                             .fill(Color(.systemGray4))
                             .frame(width: avatarSize, height: avatarSize)
                             .overlay {
-                                Text("+\(sortedParticipants.count - maxVisibleAvatars)")
+                                Text("+\(otherParticipants.count - maxVisibleAvatars)")
                                     .font(fontSize != nil ? .system(size: fontSize! * 0.8) : .caption2)
                                     .fontWeight(.medium)
                                     .foregroundStyle(.secondary)
