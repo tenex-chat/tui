@@ -401,6 +401,100 @@ struct AgentAvatarView: View {
     }
 }
 
+// MARK: - Conversation Avatar Group
+
+/// Reusable avatar group component that displays:
+/// - Author avatar (standalone on left)
+/// - Gap (12pt)
+/// - Other participants (overlapping group)
+///
+/// Used in both conversation list and conversation detail views for consistent avatar display.
+struct ConversationAvatarGroup: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+
+    /// Author who started the conversation (shown standalone)
+    let authorInfo: AgentAvatarInfo
+
+    /// P-tagged recipient (shown first in overlapping group if available)
+    let pTaggedRecipientPubkey: String?
+
+    /// Other participants (shown overlapping after p-tagged recipient)
+    let otherParticipants: [AgentAvatarInfo]
+
+    /// Avatar size (default 24 for conversation list, smaller for detail header)
+    var avatarSize: CGFloat = 24
+
+    /// Font size for initials (auto-scaled if not specified)
+    var fontSize: CGFloat? = nil
+
+    /// Maximum visible avatars in overlapping group (excluding author)
+    var maxVisibleAvatars: Int = 8
+
+    /// Computed participants sorted with p-tagged recipient first
+    private var sortedParticipants: [AgentAvatarInfo] {
+        guard let pTaggedPubkey = pTaggedRecipientPubkey else {
+            return otherParticipants
+        }
+
+        // Move p-tagged recipient to front
+        var sorted: [AgentAvatarInfo] = []
+        if let pTagged = otherParticipants.first(where: { $0.pubkey == pTaggedPubkey }) {
+            sorted.append(pTagged)
+        }
+        sorted.append(contentsOf: otherParticipants.filter { $0.pubkey != pTaggedPubkey })
+        return sorted
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            // Author avatar (standalone)
+            AgentAvatarView(
+                agentName: authorInfo.name,
+                pubkey: authorInfo.pubkey,
+                size: avatarSize,
+                fontSize: fontSize
+            )
+            .environmentObject(coreManager)
+
+            // Gap between author and delegation agents
+            if !sortedParticipants.isEmpty {
+                Spacer()
+                    .frame(width: 12)
+
+                // Overlapping participant avatars with p-tagged recipient first
+                ZStack(alignment: .leading) {
+                    ForEach(Array(sortedParticipants.prefix(maxVisibleAvatars).enumerated()), id: \.element.id) { index, agentInfo in
+                        AgentAvatarView(
+                            agentName: agentInfo.name,
+                            pubkey: agentInfo.pubkey,
+                            size: avatarSize,
+                            fontSize: fontSize
+                        )
+                        .environmentObject(coreManager)
+                        .offset(x: CGFloat(index) * (avatarSize - 8))
+                        .zIndex(Double(maxVisibleAvatars - index))
+                    }
+
+                    // +N indicator
+                    if sortedParticipants.count > maxVisibleAvatars {
+                        Circle()
+                            .fill(Color(.systemGray4))
+                            .frame(width: avatarSize, height: avatarSize)
+                            .overlay {
+                                Text("+\(sortedParticipants.count - maxVisibleAvatars)")
+                                    .font(fontSize != nil ? .system(size: fontSize! * 0.8) : .caption2)
+                                    .fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                            }
+                            .offset(x: CGFloat(maxVisibleAvatars) * (avatarSize - 8))
+                    }
+                }
+                .frame(height: avatarSize)
+            }
+        }
+    }
+}
+
 // MARK: - Legacy Compatibility Aliases
 
 /// Legacy SharedAgentAvatar - now a thin wrapper around AgentAvatarView.

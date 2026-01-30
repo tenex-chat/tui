@@ -94,7 +94,7 @@ pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
             }
         };
 
-        // Handle todo_write (lowercase) - also accept TodoWrite for backwards compatibility
+        // Handle both todo_write and TodoWrite (different agent types use different casing)
         if tool_name == "todo_write" || tool_name == "todowrite" {
             // todo_write replaces the entire list
             if let Some(todos) = parameters.get("todos") {
@@ -200,8 +200,8 @@ mod tests {
     }
 
     #[test]
-    fn test_todo_write_backwards_compat() {
-        // Test backwards compatibility with TodoWrite (PascalCase)
+    fn test_todo_write_pascal_case() {
+        // Test TodoWrite (PascalCase) - used by different agent types
         let msg = make_message(r#"{"name": "TodoWrite", "parameters": {"todos": [{"content": "Task", "status": "pending"}]}}"#);
 
         let state = aggregate_todo_state(&[msg]);

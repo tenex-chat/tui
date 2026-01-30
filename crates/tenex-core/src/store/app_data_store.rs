@@ -2683,13 +2683,23 @@ impl AppDataStore {
     /// Returns (event_id, thread_id, content, kind) for matching events.
     /// thread_id is extracted from e-tags (root marker) or is the event itself if it's a thread root.
     pub fn text_search(&self, query: &str, limit: i32) -> Vec<(String, Option<String>, String, u32)> {
+        eprintln!("[text_search] Starting search for query='{}', limit={}", query, limit);
+
         let Ok(txn) = Transaction::new(&self.ndb) else {
+            eprintln!("[text_search] Failed to create transaction");
             return vec![];
         };
 
         // nostrdb only fulltext indexes kind:1 and kind:30023, so no need to filter
-        let Ok(notes) = self.ndb.text_search(&txn, query, None, limit) else {
-            return vec![];
+        let notes = match self.ndb.text_search(&txn, query, None, limit) {
+            Ok(n) => {
+                eprintln!("[text_search] ndb.text_search returned {} notes", n.len());
+                n
+            }
+            Err(e) => {
+                eprintln!("[text_search] ndb.text_search failed: {:?}", e);
+                return vec![];
+            }
         };
         notes
             .iter()
@@ -2704,6 +2714,36 @@ impl AppDataStore {
                 (event_id, thread_id, content, kind)
             })
             .collect()
+    }
+
+    /// Get metadata for an event by ID.
+    /// Returns (author_name, created_at, project_a_tag) if found.
+    pub fn get_event_metadata(&self, event_id: &str) -> Option<(String, u64, Option<String>)> {
+        let Ok(txn) = Transaction::new(&self.ndb) else {
+            return None;
+        };
+
+        let Ok(id_bytes) = hex::decode(event_id) else {
+            return None;
+        };
+
+        if id_bytes.len() != 32 {
+            return None;
+        }
+
+        let mut id_arr = [0u8; 32];
+        id_arr.copy_from_slice(&id_bytes);
+
+        let Ok(note) = self.ndb.get_note_by_id(&txn, &id_arr) else {
+            return None;
+        };
+
+        let pubkey = hex::encode(note.pubkey());
+        let author_name = self.get_profile_name(&pubkey);
+        let created_at = note.created_at() as u64;
+        let project_a_tag = Self::extract_project_a_tag(&note);
+
+        Some((author_name, created_at, project_a_tag))
     }
 
     /// Search for kind:1 messages sent by a specific pubkey.
