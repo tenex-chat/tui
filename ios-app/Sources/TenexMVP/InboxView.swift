@@ -562,10 +562,8 @@ struct InboxConversationView: View {
             guard !Task.isCancelled else { return }
 
             // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            let fetched = await Task.detached(priority: .userInitiated) { [coreManager, conversationId] in
-                _ = coreManager.core.refresh()
-                return coreManager.core.getMessages(conversationId: conversationId)
-            }.value
+            _ = await coreManager.safeCore.refresh()
+            let fetched = await coreManager.safeCore.getMessages(conversationId: conversationId)
 
             guard !Task.isCancelled else { return }
 
