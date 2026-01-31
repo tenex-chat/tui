@@ -337,7 +337,24 @@ struct MessagesView: View {
     @State private var messages: [MessageInfo] = []
     @State private var isLoading = false
     @State private var showReplyComposer = false
+    @State private var availableAgents: [OnlineAgentInfo] = []
     @Environment(\.dismiss) private var dismiss
+
+    /// Find the last agent that spoke in the conversation
+    private var lastAgentPubkey: String? {
+        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
+        var latestAgentPubkey: String?
+        var latestTimestamp: UInt64 = 0
+
+        for msg in messages {
+            if msg.role == "user" { continue }
+            if agentPubkeys.contains(msg.authorNpub) && msg.createdAt >= latestTimestamp {
+                latestTimestamp = msg.createdAt
+                latestAgentPubkey = msg.authorNpub
+            }
+        }
+        return latestAgentPubkey
+    }
 
     var body: some View {
         NavigationStack {
@@ -372,12 +389,14 @@ struct MessagesView: View {
             }
             .task {
                 await loadMessages()
+                await loadAgents()
             }
             .sheet(isPresented: $showReplyComposer) {
                 MessageComposerView(
                     project: project,
                     conversationId: conversation.id,
                     conversationTitle: conversation.title,
+                    initialAgentPubkey: lastAgentPubkey,
                     onSend: { _ in
                         // Refresh messages after sending
                         Task { await loadMessages() }
@@ -411,6 +430,14 @@ struct MessagesView: View {
         _ = await coreManager.safeCore.refresh()
         messages = await coreManager.safeCore.getMessages(conversationId: conversation.id)
         isLoading = false
+    }
+
+    private func loadAgents() async {
+        do {
+            availableAgents = try await coreManager.safeCore.getOnlineAgents(projectId: project.id)
+        } catch {
+            print("[MessagesView] Failed to load agents: \(error)")
+        }
     }
 }
 

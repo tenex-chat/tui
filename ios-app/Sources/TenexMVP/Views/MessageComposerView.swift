@@ -16,6 +16,9 @@ struct MessageComposerView: View {
     /// Optional conversation title for display
     let conversationTitle: String?
 
+    /// Initial agent pubkey to pre-select (e.g., last agent that spoke in conversation)
+    let initialAgentPubkey: String?
+
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
 
@@ -31,12 +34,13 @@ struct MessageComposerView: View {
     // MARK: - State
 
     @State private var selectedProject: ProjectInfo?
-    @State private var availableProjects: [ProjectInfo] = []
     @State private var showProjectSelector = false
     @State private var draft: Draft
     @State private var availableAgents: [OnlineAgentInfo] = []
     @State private var agentsLoadError: String?
     @State private var showAgentSelector = false
+    @State private var availableNudges: [NudgeInfo] = []
+    @State private var showNudgeSelector = false
     @State private var isSending = false
     @State private var sendError: String?
     @State private var showSendError = false
@@ -46,6 +50,8 @@ struct MessageComposerView: View {
     @State private var isSwitchingProject = false // Track if project switch is in progress
     @State private var showSaveFailedAlert = false
     @State private var saveFailedError: String?
+    @State private var dictationManager = DictationManager()
+    @State private var showDictationOverlay = false
 
     // MARK: - Computed
 
@@ -87,18 +93,37 @@ struct MessageComposerView: View {
         return availableAgents.first { $0.pubkey == pubkey }
     }
 
+    private var selectedNudges: [NudgeInfo] {
+        availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
+    }
+
+    /// Find the project with the most recent conversation activity
+    private func projectWithMostRecentActivity() -> ProjectInfo? {
+        guard !coreManager.conversations.isEmpty else { return nil }
+
+        let mostRecentConv = coreManager.conversations
+            .max(by: { $0.effectiveLastActivity < $1.effectiveLastActivity })
+
+        guard let conv = mostRecentConv else { return nil }
+        // projectATag is "kind:pubkey:d-tag", extract d-tag to match project.id
+        let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+        return coreManager.projects.first { $0.id == projectId }
+    }
+
     // MARK: - Initialization
 
     init(
         project: ProjectInfo? = nil,
         conversationId: String? = nil,
         conversationTitle: String? = nil,
+        initialAgentPubkey: String? = nil,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
         self.initialProject = project
         self.conversationId = conversationId
         self.conversationTitle = conversationTitle
+        self.initialAgentPubkey = initialAgentPubkey
         self.onSend = onSend
         self.onDismiss = onDismiss
 
@@ -121,23 +146,47 @@ struct MessageComposerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Project chip (for new conversations)
+                // Project and Agent row (for new conversations)
                 if isNewConversation {
-                    if let project = selectedProject {
-                        projectChipView(project)
-                    } else {
-                        projectPromptView
+                    HStack(spacing: 12) {
+                        if let project = selectedProject {
+                            ProjectChipView(project: project) {
+                                showProjectSelector = true
+                            }
+                        } else {
+                            projectPromptButton
+                        }
+
+                        if selectedProject != nil {
+                            if let agent = selectedAgent {
+                                OnlineAgentChipView(agent: agent) {
+                                    showAgentSelector = true
+                                }
+                                .environmentObject(coreManager)
+                            } else {
+                                agentPromptButton
+                            }
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(Color(.systemGray6))
+                }
+
+                // Agent chip for replies (not new conversations)
+                if !isNewConversation {
+                    if let agent = selectedAgent {
+                        agentChipView(agent)
+                    } else if selectedProject != nil {
+                        agentPromptView
                     }
                 }
 
-                // Agent chip (if selected)
-                if let agent = selectedAgent {
-                    agentChipView(agent)
-                }
-
-                // Title field (only for new conversations)
-                if isNewConversation {
-                    titleFieldView
+                // Nudge chips (for new conversations)
+                if isNewConversation && selectedProject != nil {
+                    nudgeChipsView
                 }
 
                 Divider()
@@ -149,6 +198,27 @@ struct MessageComposerView: View {
 
                 // Toolbar
                 toolbarView
+            }
+            .overlay {
+                if showDictationOverlay {
+                    DictationOverlayView(
+                        manager: dictationManager,
+                        onComplete: { text in
+                            draft.updateContent(draft.content + (draft.content.isEmpty ? "" : " ") + text)
+                            if let projectId = selectedProject?.id {
+                                Task {
+                                    await draftManager.updateContent(draft.content, conversationId: conversationId, projectId: projectId)
+                                }
+                            }
+                            showDictationOverlay = false
+                            dictationManager.reset()
+                        },
+                        onCancel: {
+                            dictationManager.cancelRecording()
+                            showDictationOverlay = false
+                        }
+                    )
+                }
             }
             .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
@@ -201,18 +271,26 @@ struct MessageComposerView: View {
                 }
             }
             .onAppear {
-                loadProjects()
+                // Auto-select project with most recent activity if none provided
+                if selectedProject == nil && initialProject == nil {
+                    if let mostActiveProject = projectWithMostRecentActivity() {
+                        selectedProject = mostActiveProject
+                        draft = Draft(projectId: mostActiveProject.id)
+                    }
+                }
+
                 // BLOCKER #1 FIX: If no project selected, no draft to load - mark as not loading
                 if selectedProject == nil {
                     isLoadingDraft = false
                 } else {
                     loadDraft()
                     loadAgents()
+                    loadNudges()
                 }
             }
             .sheet(isPresented: $showProjectSelector) {
                 ProjectSelectorSheet(
-                    projects: availableProjects,
+                    projects: coreManager.projects,
                     selectedProject: $selectedProject,
                     onDone: {
                         projectChanged()
@@ -222,6 +300,7 @@ struct MessageComposerView: View {
             .sheet(isPresented: $showAgentSelector) {
                 AgentSelectorSheet(
                     agents: availableAgents,
+                    projectId: selectedProject?.id ?? "",
                     selectedPubkey: $draft.agentPubkey,
                     onDone: {
                         isDirty = true // Mark as dirty when user selects agent
@@ -230,6 +309,15 @@ struct MessageComposerView: View {
                                 await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
                             }
                         }
+                    }
+                )
+            }
+            .sheet(isPresented: $showNudgeSelector) {
+                NudgeSelectorSheet(
+                    nudges: availableNudges,
+                    selectedNudgeIds: $draft.selectedNudgeIds,
+                    onDone: {
+                        isDirty = true // Mark as dirty when user selects nudges
                     }
                 )
             }
@@ -322,16 +410,71 @@ struct MessageComposerView: View {
         .buttonStyle(.plain)
     }
 
+    private var agentPromptView: some View {
+        Button(action: { showAgentSelector = true }) {
+            HStack(spacing: 12) {
+                Image(systemName: "person")
+                    .foregroundStyle(.blue)
+                Text("Select an agent (optional)")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(.systemGray6))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Compact project prompt button for horizontal layout
+    private var projectPromptButton: some View {
+        Button(action: { showProjectSelector = true }) {
+            HStack(spacing: 6) {
+                Image(systemName: "folder")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                Text("Select project")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Compact agent prompt button for horizontal layout
+    private var agentPromptButton: some View {
+        Button(action: { showAgentSelector = true }) {
+            HStack(spacing: 6) {
+                Image(systemName: "person")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                Text("Select agent")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private func agentChipView(_ agent: OnlineAgentInfo) -> some View {
         HStack(spacing: 8) {
             OnlineAgentChipView(agent: agent) {
-                isDirty = true // Mark as dirty when user changes agent
-                draft.clearAgent()
-                if let projectId = selectedProject?.id {
-                    Task {
-                        await draftManager.updateAgent(nil, conversationId: conversationId, projectId: projectId)
-                    }
-                }
+                showAgentSelector = true
             }
             Spacer()
         }
@@ -340,24 +483,39 @@ struct MessageComposerView: View {
         .background(Color(.systemGray6))
     }
 
-    private var titleFieldView: some View {
-        TextField("Conversation Title", text: Binding(
-            get: { draft.title },
-            set: { newValue in
-                isDirty = true // Mark as dirty when user edits
-                draft.updateTitle(newValue)
-                if let projectId = selectedProject?.id {
-                    Task {
-                        await draftManager.updateTitle(newValue, projectId: projectId)
+    private var nudgeChipsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Selected nudge chips
+                ForEach(selectedNudges, id: \.id) { nudge in
+                    NudgeChipView(nudge: nudge) {
+                        isDirty = true
+                        draft.removeNudge(nudge.id)
                     }
                 }
+
+                // Add nudge button
+                Button(action: { showNudgeSelector = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.caption)
+                        Text("Add Nudge")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-        ))
-        .font(.headline)
-        .padding(.horizontal, 16)
+            .padding(.horizontal, 16)
+        }
         .padding(.vertical, 12)
-        .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject)
-        .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject ? 0.5 : 1.0)
+        .background(Color(.systemGray6))
     }
 
     private var contentEditorView: some View {
@@ -396,62 +554,25 @@ struct MessageComposerView: View {
 
     private var toolbarView: some View {
         HStack(spacing: 16) {
-            // Project selector button (only for new conversations)
-            if isNewConversation {
-                Button(action: { showProjectSelector = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder.fill")
-                        if selectedProject != nil {
-                            Image(systemName: "checkmark")
-                                .font(.caption)
-                                .fontWeight(.medium)
-                        }
-                    }
-                    .foregroundColor(selectedProject == nil ? .secondary : .blue)
-                }
-                .buttonStyle(.plain)
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selectedProject == nil ? Color.clear : Color.blue.opacity(0.1))
-                )
-            }
-
-            // Agent selector button (disabled if no project selected for new conversations)
-            Button(action: {
-                if isNewConversation && selectedProject == nil {
-                    // Show project selector first
-                    showProjectSelector = true
-                } else {
-                    showAgentSelector = true
-                }
-            }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.fill")
-                    if selectedAgent != nil {
-                        Image(systemName: "checkmark")
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                }
-                .foregroundColor(selectedAgent == nil ? .secondary : .blue)
-            }
-            .buttonStyle(.plain)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(selectedAgent == nil ? Color.clear : Color.blue.opacity(0.1))
-            )
-            .opacity(isNewConversation && selectedProject == nil ? 0.5 : 1.0)
-
             // Show error indicator if agents failed to load
             if agentsLoadError != nil {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.orange)
                     .font(.caption)
             }
+
+            // Voice dictation button
+            Button {
+                Task {
+                    showDictationOverlay = true
+                    try? await dictationManager.startRecording()
+                }
+            } label: {
+                Image(systemName: "mic.fill")
+                    .foregroundStyle(.blue)
+            }
+            .buttonStyle(.plain)
+            .disabled(!dictationManager.state.isIdle || selectedProject == nil)
 
             Spacer()
 
@@ -477,18 +598,6 @@ struct MessageComposerView: View {
     }
 
     // MARK: - Actions
-
-    private func loadProjects() {
-        // Only load projects if we're in new conversation mode without a project
-        guard isNewConversation && initialProject == nil else { return }
-
-        Task {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = await coreManager.safeCore.refresh()
-            let projects = await coreManager.safeCore.getProjects()
-            availableProjects = projects
-        }
-    }
 
     private func loadDraft() {
         guard let projectId = selectedProject?.id else { return }
@@ -529,6 +638,22 @@ struct MessageComposerView: View {
                 let agents = try await coreManager.safeCore.getOnlineAgents(projectId: projectId)
                 availableAgents = agents
                 agentsLoadError = nil
+
+                // Auto-select agent if none currently selected
+                // Priority: 1) initialAgentPubkey (last agent in conversation), 2) PM agent
+                if draft.agentPubkey == nil {
+                    if let initialPubkey = initialAgentPubkey,
+                       agents.contains(where: { $0.pubkey == initialPubkey }) {
+                        // Use the initial agent (e.g., last agent that spoke in conversation)
+                        draft.setAgent(initialPubkey)
+                        await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
+                    } else if let pmAgent = agents.first(where: { $0.isPm }) {
+                        // Fall back to PM agent
+                        draft.setAgent(pmAgent.pubkey)
+                        await draftManager.updateAgent(pmAgent.pubkey, conversationId: conversationId, projectId: projectId)
+                    }
+                }
+
                 if agents.isEmpty {
                     print("[MessageComposerView] No online agents for this project")
                 }
@@ -541,18 +666,27 @@ struct MessageComposerView: View {
         }
     }
 
+    private func loadNudges() {
+        Task {
+            // Refresh ensures AppDataStore is synced with latest data from nostrdb
+            _ = await coreManager.safeCore.refresh()
+            do {
+                availableNudges = try await coreManager.safeCore.getNudges()
+            } catch {
+                print("[MessageComposerView] Failed to load nudges: \(error)")
+            }
+        }
+    }
+
     private func projectChanged() {
         guard let project = selectedProject else { return }
 
         Task {
             // HIGH #1 FIX: Store previous project to revert on save failure
-            let previousProject = availableProjects.first { $0.id == draft.projectId }
+            let previousProject = coreManager.projects.first { $0.id == draft.projectId }
 
             // BLOCKER #2 FIX: Disable editing during project switch
             isSwitchingProject = true
-
-            // Track if user made edits during the switch operation
-            let wasDirtyAtStart = isDirty
 
             // Save any pending changes to the current draft before switching
             if !draft.projectId.isEmpty {
@@ -581,7 +715,7 @@ struct MessageComposerView: View {
             // Load or create draft for the new project
             let projectDraft = await draftManager.getOrCreateDraft(conversationId: conversationId, projectId: project.id)
 
-            // Always replace draft with project-specific draft (no wasDirtyAtStart check)
+            // Always replace draft with project-specific draft
             // This ensures content from Project A never persists under Project B
             draft = projectDraft
             print("[MessageComposerView] Loaded draft for project '\(project.id)' (absolute data safety: no cross-project content leakage)")
@@ -632,9 +766,10 @@ struct MessageComposerView: View {
                 if isNewConversation {
                     result = try await coreManager.safeCore.sendThread(
                         projectId: project.id,
-                        title: draft.title,
+                        title: "",
                         content: draft.content,
-                        agentPubkey: validatedAgentPubkey
+                        agentPubkey: validatedAgentPubkey,
+                        nudgeIds: Array(draft.selectedNudgeIds)
                     )
                 } else {
                     result = try await coreManager.safeCore.sendMessage(
@@ -725,7 +860,7 @@ struct ProjectChipView: View {
 struct OnlineAgentChipView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     let agent: OnlineAgentInfo
-    let onRemove: () -> Void
+    let onChange: () -> Void
 
     var body: some View {
         HStack(spacing: 6) {
@@ -744,9 +879,9 @@ struct OnlineAgentChipView: View {
                 .fontWeight(.medium)
                 .foregroundStyle(.primary)
 
-            // Remove button
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
+            // Change button
+            Button(action: onChange) {
+                Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
