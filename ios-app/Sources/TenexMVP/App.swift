@@ -447,13 +447,7 @@ struct MainTabView: View {
                 }
 
                 // Pushes segments to opposite sides
-                if #available(iOS 26.0, *) {
-                    ToolbarSpacer(.flexible, placement: .bottomBar)
-                } else {
-                    ToolbarItem(placement: .bottomBar) {
-                        Spacer()
-                    }
-                }
+                ToolbarSpacer(.flexible, placement: .bottomBar)
 
                 // Right glass segment: Search and New conversation
                 ToolbarItem(placement: .bottomBar) {

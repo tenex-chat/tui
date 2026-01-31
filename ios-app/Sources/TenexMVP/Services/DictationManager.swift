@@ -1,0 +1,372 @@
+import Speech
+import AVFoundation
+import Observation
+import FoundationModels
+
+/// Manages voice dictation with live transcription using iOS 26's SpeechAnalyzer API.
+/// Provides real-time streaming transcription and post-transcription correction using Foundation Models.
+@MainActor
+@Observable
+final class DictationManager {
+    enum State: Equatable {
+        case idle
+        case recording(partialText: String)
+        case processing
+        case awaitingCorrection(original: String, suggested: String, explanation: String)
+
+        var isIdle: Bool {
+            if case .idle = self { return true }
+            return false
+        }
+
+        var isRecording: Bool {
+            if case .recording = self { return true }
+            return false
+        }
+    }
+
+    private(set) var state: State = .idle
+    private(set) var finalText: String = ""
+    private(set) var error: String?
+
+    private var audioEngine: AVAudioEngine?
+    private var transcriptionTask: Task<Void, Never>?
+    private var analyzer: SpeechAnalyzer?
+    private var transcriber: SpeechTranscriber?
+    private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
+
+    let phoneticLearner = PhoneticLearner()
+
+    // MARK: - Recording Control
+
+    func startRecording() async throws {
+        guard state.isIdle else { return }
+
+        error = nil
+
+        // Request permissions
+        let audioPermission = await requestMicrophonePermission()
+        guard audioPermission else {
+            error = "Microphone access denied"
+            return
+        }
+
+        let speechPermission = await requestSpeechRecognitionPermission()
+        guard speechPermission else {
+            error = "Speech recognition access denied"
+            return
+        }
+
+        state = .recording(partialText: "")
+
+        try await startTranscription()
+    }
+
+    func stopRecording() async {
+        print("[DictationManager] stopRecording() called, current state: \(state)")
+        guard case .recording(let partialText) = state else {
+            print("[DictationManager] stopRecording() - NOT in recording state, returning early")
+            return
+        }
+
+        // Capture the partial text before stopping - transcriber may not produce a final result
+        let capturedPartialText = partialText
+        print("[DictationManager] Captured partial text: '\(capturedPartialText)'")
+
+        // Stop audio engine
+        print("[DictationManager] Stopping audio engine...")
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+
+        // Signal end of audio stream
+        print("[DictationManager] Finishing input stream...")
+        inputBuilder?.finish()
+
+        // Cancel the transcription task - the results stream doesn't complete on its own
+        print("[DictationManager] Cancelling transcription task...")
+        transcriptionTask?.cancel()
+        print("[DictationManager] Transcription task cancelled. finalText='\(finalText)'")
+        transcriptionTask = nil
+
+        // Cleanup
+        audioEngine = nil
+        inputBuilder = nil
+        analyzer = nil
+        transcriber = nil
+
+        // If finalText is empty but we had partial text, use that
+        if finalText.isEmpty && !capturedPartialText.isEmpty {
+            print("[DictationManager] finalText was empty, using captured partial text")
+            finalText = capturedPartialText
+        }
+
+        print("[DictationManager] Final text after processing: '\(finalText)'")
+
+        // If we have text, analyze for corrections
+        if !finalText.isEmpty {
+            print("[DictationManager] Setting state to .processing")
+            state = .processing
+            print("[DictationManager] Calling analyzeForCorrections()...")
+            await analyzeForCorrections()
+            print("[DictationManager] analyzeForCorrections() completed, state is now: \(state)")
+        } else {
+            print("[DictationManager] No text, setting state to .idle")
+            state = .idle
+        }
+        print("[DictationManager] stopRecording() finished")
+    }
+
+    func cancelRecording() {
+        audioEngine?.stop()
+        audioEngine?.inputNode.removeTap(onBus: 0)
+        audioEngine = nil
+
+        inputBuilder?.finish()
+        inputBuilder = nil
+        analyzer = nil
+        transcriber = nil
+
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        finalText = ""
+        state = .idle
+    }
+
+    // MARK: - Correction Handling
+
+    func acceptCorrection() {
+        guard case .awaitingCorrection(_, let suggested, _) = state else { return }
+
+        // Learn from this correction
+        let words = finalText.split(separator: " ").map(String.init)
+        let suggestedWords = suggested.split(separator: " ").map(String.init)
+
+        for (original, replacement) in zip(words, suggestedWords) where original != replacement {
+            phoneticLearner.recordCorrection(original: original, replacement: replacement)
+        }
+
+        finalText = suggested
+        state = .idle
+    }
+
+    func rejectCorrection() {
+        guard case .awaitingCorrection = state else { return }
+        state = .idle
+    }
+
+    /// Called when user manually edits a word in the transcription
+    func userEditedWord(original: String, replacement: String) {
+        phoneticLearner.recordCorrection(original: original, replacement: replacement)
+    }
+
+    func reset() {
+        finalText = ""
+        state = .idle
+        error = nil
+    }
+
+    // MARK: - Private Methods
+
+    private func requestMicrophonePermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            AVAudioApplication.requestRecordPermission { granted in
+                continuation.resume(returning: granted)
+            }
+        }
+    }
+
+    private func requestSpeechRecognitionPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    // MARK: - Transcription
+
+    private func startTranscription() async throws {
+        // Create transcriber with explicit options for real-time results
+        let newTranscriber = SpeechTranscriber(
+            locale: Locale.current,
+            transcriptionOptions: [],
+            reportingOptions: [.volatileResults],
+            attributeOptions: []
+        )
+        transcriber = newTranscriber
+
+        // Get the best audio format for this transcriber
+        guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [newTranscriber]) else {
+            throw DictationError.audioEngineSetupFailed
+        }
+
+        // Create analyzer with the transcriber module
+        let newAnalyzer = SpeechAnalyzer(modules: [newTranscriber])
+        analyzer = newAnalyzer
+
+        // Create async stream for audio input
+        let (inputSequence, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        inputBuilder = continuation
+
+        // Start the analyzer
+        try await newAnalyzer.start(inputSequence: inputSequence)
+
+        // Setup audio engine
+        try await setupAudioEngine(targetFormat: analyzerFormat)
+
+        // Start listening for results
+        transcriptionTask = Task { [weak self] in
+            guard let self = self else {
+                print("[DictationManager] transcriptionTask - self is nil, returning")
+                return
+            }
+            var lastText = ""
+            print("[DictationManager] transcriptionTask started, waiting for results...")
+            do {
+                for try await result in newTranscriber.results {
+                    let text = String(result.text.characters)
+                    lastText = text
+                    print("[DictationManager] Got result - isFinal: \(result.isFinal), text: '\(text)'")
+                    await MainActor.run {
+                        if result.isFinal {
+                            print("[DictationManager] Setting finalText from final result")
+                            self.finalText = text
+                        } else {
+                            // Volatile/partial result
+                            self.state = .recording(partialText: text)
+                        }
+                    }
+                }
+                // Stream ended - if no final result was produced, use the last text we saw
+                print("[DictationManager] Results stream ended. lastText='\(lastText)', finalText='\(await MainActor.run { self.finalText })'")
+                await MainActor.run {
+                    if self.finalText.isEmpty && !lastText.isEmpty {
+                        print("[DictationManager] Setting finalText from lastText since no final result")
+                        self.finalText = lastText
+                    }
+                }
+                print("[DictationManager] transcriptionTask completing normally")
+            } catch {
+                print("[DictationManager] transcriptionTask error: \(error)")
+                await MainActor.run {
+                    self.error = error.localizedDescription
+                    // Also capture last text on error
+                    if self.finalText.isEmpty && !lastText.isEmpty {
+                        self.finalText = lastText
+                    }
+                }
+            }
+        }
+    }
+
+    private func setupAudioEngine(targetFormat: AVAudioFormat) async throws {
+        let audioSession = AVAudioSession.sharedInstance()
+        try audioSession.setCategory(.record, mode: .measurement, options: .duckOthers)
+        try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+
+        audioEngine = AVAudioEngine()
+
+        guard let audioEngine = audioEngine else {
+            throw DictationError.audioEngineSetupFailed
+        }
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        // Create converter if formats don't match
+        var converter: AVAudioConverter?
+        if inputFormat != targetFormat {
+            converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+        }
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { [weak self] buffer, _ in
+            guard let self = self else { return }
+
+            if let converter = converter {
+                // Convert buffer to target format
+                let frameCount = AVAudioFrameCount(targetFormat.sampleRate * Double(buffer.frameLength) / inputFormat.sampleRate)
+                guard let convertedBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCount) else { return }
+
+                var error: NSError?
+                converter.convert(to: convertedBuffer, error: &error) { inNumPackets, outStatus in
+                    outStatus.pointee = .haveData
+                    return buffer
+                }
+
+                if error == nil {
+                    self.inputBuilder?.yield(AnalyzerInput(buffer: convertedBuffer))
+                }
+            } else {
+                self.inputBuilder?.yield(AnalyzerInput(buffer: buffer))
+            }
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+    }
+
+    // MARK: - Correction Analysis
+
+    private func analyzeForCorrections() async {
+        print("[DictationManager] analyzeForCorrections() started with finalText: '\(finalText)'")
+        // First apply known corrections
+        let textWithKnownCorrections = phoneticLearner.applyCorrections(to: finalText)
+        print("[DictationManager] After applying known corrections: '\(textWithKnownCorrections)'")
+
+        print("[DictationManager] Using CorrectionEngine with Foundation Models")
+        do {
+            let engine = CorrectionEngine()
+            print("[DictationManager] Calling engine.analyzeTranscription...")
+            if let suggestion = try await engine.analyzeTranscription(
+                textWithKnownCorrections,
+                knownCorrections: phoneticLearner.corrections
+            ) {
+                print("[DictationManager] Got correction suggestion: '\(suggestion.correctedText)'")
+                state = .awaitingCorrection(
+                    original: finalText,
+                    suggested: suggestion.correctedText,
+                    explanation: suggestion.explanation
+                )
+                return
+            } else {
+                print("[DictationManager] No correction suggestion returned")
+            }
+        } catch {
+            // LLM analysis failed, fall through to use text with known corrections
+            print("[DictationManager] LLM correction analysis failed: \(error)")
+        }
+
+        // If we applied known corrections, update final text
+        if textWithKnownCorrections != finalText {
+            print("[DictationManager] Known corrections were applied, setting awaitingCorrection state")
+            state = .awaitingCorrection(
+                original: finalText,
+                suggested: textWithKnownCorrections,
+                explanation: "Applied known corrections"
+            )
+        } else {
+            print("[DictationManager] No corrections needed, setting state to .idle")
+            state = .idle
+        }
+        print("[DictationManager] analyzeForCorrections() finished, state: \(state)")
+    }
+}
+
+// MARK: - Errors
+
+enum DictationError: LocalizedError {
+    case audioEngineSetupFailed
+    case speechRecognitionFailed
+    case permissionDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .audioEngineSetupFailed:
+            return "Failed to setup audio engine"
+        case .speechRecognitionFailed:
+            return "Speech recognition failed"
+        case .permissionDenied:
+            return "Permission denied"
+        }
+    }
+}

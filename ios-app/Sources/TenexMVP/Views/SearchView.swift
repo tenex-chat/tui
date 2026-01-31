@@ -1,5 +1,18 @@
 import SwiftUI
 
+// MARK: - Data Structures
+
+/// A group of search results within the same conversation
+struct ConversationSearchGroup: Identifiable {
+    let id: String  // threadId
+    let title: String
+    let projectName: String?
+    let projectId: String?
+    let matches: [SearchResult]
+
+    var matchCount: Int { matches.count }
+}
+
 // MARK: - Search View
 
 struct SearchView: View {
@@ -7,7 +20,7 @@ struct SearchView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var searchText = ""
-    @State private var results: [SearchResult] = []
+    @State private var groupedResults: [ConversationSearchGroup] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
     @State private var navigateToConversation: SearchNavigationData?
@@ -15,31 +28,48 @@ struct SearchView: View {
     var body: some View {
         NavigationStack {
             List {
-                if results.isEmpty && !searchText.isEmpty && !isSearching {
+                if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
                     ContentUnavailableView(
                         "No Results",
                         systemImage: "magnifyingglass",
                         description: Text("No messages found matching \"\(searchText)\"")
                     )
-                } else if results.isEmpty && searchText.isEmpty {
+                } else if groupedResults.isEmpty && searchText.isEmpty {
                     ContentUnavailableView(
                         "Search Messages",
                         systemImage: "magnifyingglass",
                         description: Text("Enter a search term to find messages across all conversations")
                     )
                 } else {
-                    ForEach(results, id: \.eventId) { result in
-                        Button {
-                            if let threadId = result.threadId {
+                    ForEach(groupedResults) { group in
+                        Section {
+                            // Conversation header - tappable to navigate
+                            Button {
                                 navigateToConversation = SearchNavigationData(
-                                    conversationId: threadId,
-                                    projectId: result.projectATag?.components(separatedBy: ":").last
+                                    conversationId: group.id,
+                                    projectId: group.projectId
                                 )
+                            } label: {
+                                ConversationGroupHeader(group: group)
                             }
-                        } label: {
-                            SearchResultRow(result: result)
+                            .buttonStyle(.plain)
+
+                            // Matching messages (indented)
+                            ForEach(group.matches, id: \.eventId) { result in
+                                Button {
+                                    if let threadId = result.threadId {
+                                        navigateToConversation = SearchNavigationData(
+                                            conversationId: threadId,
+                                            projectId: result.projectATag?.components(separatedBy: ":").last
+                                        )
+                                    }
+                                } label: {
+                                    MatchingMessageRow(result: result, searchTerm: searchText)
+                                        .padding(.leading, 16)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -78,7 +108,7 @@ struct SearchView: View {
         searchTask?.cancel()
 
         guard query.count >= 2 else {
-            results = []
+            groupedResults = []
             return
         }
 
@@ -94,60 +124,155 @@ struct SearchView: View {
 
             guard !Task.isCancelled else { return }
 
+            // Group results by threadId
+            var grouped: [String: [SearchResult]] = [:]
+            for result in searchResults {
+                if let threadId = result.threadId {
+                    grouped[threadId, default: []].append(result)
+                }
+            }
+
+            // Fetch conversation info for titles
+            let conversationIds = Array(grouped.keys)
+            let conversations = await coreManager.safeCore.getConversationsByIds(conversationIds: conversationIds)
+            let conversationMap = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
+
+            // Get projects for project name lookup
+            let projects = await coreManager.safeCore.getProjects()
+            let projectMap = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0.title) })
+
+            // Build grouped results
+            let groups = grouped.compactMap { threadId, matches -> ConversationSearchGroup? in
+                let conv = conversationMap[threadId]
+                let projectId = matches.first?.projectATag?.components(separatedBy: ":").last
+                let projectName = projectId.flatMap { projectMap[$0] }
+
+                return ConversationSearchGroup(
+                    id: threadId,
+                    title: conv?.title ?? "Unknown Conversation",
+                    projectName: projectName,
+                    projectId: projectId,
+                    matches: matches.sorted { $0.createdAt > $1.createdAt }
+                )
+            }.sorted { $0.matches.first?.createdAt ?? 0 > $1.matches.first?.createdAt ?? 0 }
+
+            guard !Task.isCancelled else { return }
+
             await MainActor.run {
-                results = searchResults
+                groupedResults = groups
             }
         }
     }
 }
 
-// MARK: - Search Result Row
+// MARK: - Conversation Group Header
 
-struct SearchResultRow: View {
-    let result: SearchResult
+struct ConversationGroupHeader: View {
+    let group: ConversationSearchGroup
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // Author and time
-            HStack {
-                Text(result.author)
-                    .font(.caption)
-                    .fontWeight(.medium)
+        HStack(spacing: 12) {
+            // Conversation icon
+            Image(systemName: "bubble.left.and.bubble.right.fill")
+                .font(.title2)
+                .foregroundStyle(.blue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Title
+                Text(group.title)
+                    .font(.headline)
                     .foregroundStyle(.primary)
+                    .lineLimit(2)
 
-                Spacer()
-
-                Text(relativeTime(from: result.createdAt))
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
+                // Project name
+                if let projectName = group.projectName {
+                    Text(projectName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
-            // Content snippet
-            Text(result.content)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .lineLimit(3)
+            Spacer()
 
-            // Thread context indicator
-            if result.threadId != nil {
-                HStack(spacing: 4) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.caption2)
-                    Text("In conversation")
-                        .font(.caption2)
-                }
+            // Match count badge
+            Text("\(group.matchCount) \(group.matchCount == 1 ? "match" : "matches")")
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.2))
+                .foregroundStyle(.orange)
+                .clipShape(Capsule())
+
+            // Navigation chevron
+            Image(systemName: "chevron.right")
+                .font(.caption)
                 .foregroundStyle(.tertiary)
-            }
+        }
+        .padding(.vertical, 8)
+    }
+}
 
-            // Kind indicator (message vs report)
-            if result.kind == 30023 {
-                HStack(spacing: 4) {
-                    Image(systemName: "doc.text")
+// MARK: - Matching Message Row
+
+struct MatchingMessageRow: View {
+    let result: SearchResult
+    let searchTerm: String
+
+    private var isUser: Bool {
+        // Heuristic: agent names typically include specific keywords
+        let author = result.author.lowercased()
+        return !author.contains("agent") && !author.contains("claude") && !author.contains("gpt")
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            // Vertical indent line
+            Rectangle()
+                .fill(Color.secondary.opacity(0.3))
+                .frame(width: 2)
+
+            // Author avatar
+            Circle()
+                .fill(isUser ? Color.green.gradient : Color.blue.gradient)
+                .frame(width: 28, height: 28)
+                .overlay {
+                    Image(systemName: isUser ? "person.fill" : "sparkle")
                         .font(.caption2)
-                    Text("Report")
-                        .font(.caption2)
+                        .foregroundStyle(.white)
                 }
-                .foregroundStyle(.blue.opacity(0.8))
+
+            VStack(alignment: .leading, spacing: 4) {
+                // Author and timestamp
+                HStack {
+                    Text(result.author)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+
+                    Spacer()
+
+                    Text(relativeTime(from: result.createdAt))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
+                // Content with highlighted search term
+                highlightedText(result.content, searchTerm: searchTerm)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+
+                // Kind indicator (report)
+                if result.kind == 30023 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "doc.text")
+                            .font(.caption2)
+                        Text("Report")
+                            .font(.caption2)
+                    }
+                    .foregroundStyle(.blue.opacity(0.8))
+                }
             }
         }
         .padding(.vertical, 6)
@@ -158,6 +283,35 @@ struct SearchResultRow: View {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
+    }
+
+    /// Build highlighted text with search term emphasized using AttributedString
+    private func highlightedText(_ text: String, searchTerm: String) -> Text {
+        guard !searchTerm.isEmpty else {
+            return Text(text)
+        }
+
+        var result = AttributedString(text)
+        let lowercasedText = text.lowercased()
+        let lowercasedTerm = searchTerm.lowercased()
+
+        // Find all occurrences and apply highlighting
+        var searchStart = lowercasedText.startIndex
+        while let range = lowercasedText.range(of: lowercasedTerm, range: searchStart..<lowercasedText.endIndex) {
+            // Map to AttributedString range
+            let startOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.lowerBound)
+            let endOffset = lowercasedText.distance(from: lowercasedText.startIndex, to: range.upperBound)
+
+            let attrStart = result.index(result.startIndex, offsetByCharacters: startOffset)
+            let attrEnd = result.index(result.startIndex, offsetByCharacters: endOffset)
+
+            result[attrStart..<attrEnd].font = .body.bold()
+            result[attrStart..<attrEnd].foregroundColor = .orange
+
+            searchStart = range.upperBound
+        }
+
+        return Text(result)
     }
 }
 

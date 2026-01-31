@@ -139,7 +139,7 @@ struct MarkdownView: View {
     }
 
     private func parseInlineMarkdown(_ text: String) -> Text {
-        var result = Text("")
+        var result = AttributedString()
 
         // Simple parsing for bold and inline code
         var current = text
@@ -149,24 +149,29 @@ struct MarkdownView: View {
                 let match = String(current[boldRange])
                 let inner = String(match.dropFirst(2).dropLast(2))
 
-                result = result + Text(before) + Text(inner).bold()
+                result.append(AttributedString(before))
+                var boldPart = AttributedString(inner)
+                boldPart.font = .body.bold()
+                result.append(boldPart)
                 current = String(current[boldRange.upperBound...])
             } else if let codeRange = current.range(of: "`(.+?)`", options: .regularExpression) {
                 let before = String(current[..<codeRange.lowerBound])
                 let match = String(current[codeRange])
                 let inner = String(match.dropFirst(1).dropLast(1))
 
-                result = result + Text(before) + Text(inner)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.orange)
+                result.append(AttributedString(before))
+                var codePart = AttributedString(inner)
+                codePart.font = .system(.body, design: .monospaced)
+                codePart.foregroundColor = .orange
+                result.append(codePart)
                 current = String(current[codeRange.upperBound...])
             } else {
-                result = result + Text(current)
+                result.append(AttributedString(current))
                 break
             }
         }
 
-        return result
+        return Text(result)
     }
 }
 

@@ -63,7 +63,7 @@ final class ConversationHierarchy {
 
         // Step 2: Identify root conversations (no parent OR orphaned)
         // Orphaned = has parentId but that parent doesn't exist in our set
-        var roots = conversations.filter { conversation in
+        let roots = conversations.filter { conversation in
             if let parentId = conversation.parentId {
                 // Orphaned: parent doesn't exist - treat as root
                 return !conversationIds.contains(parentId)
@@ -324,7 +324,7 @@ struct AgentAvatarView: View {
         if parts.count >= 2 {
             // For names like "claude-code" -> "CC"
             return String(parts.prefix(2).compactMap { $0.first }.map { String($0).uppercased() }.joined())
-        } else if let first = agentName.first {
+        } else if !agentName.isEmpty {
             // Single word -> first two chars
             let chars = agentName.prefix(2)
             return String(chars).uppercased()
