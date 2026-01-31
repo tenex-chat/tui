@@ -1,12 +1,16 @@
 import SwiftUI
 
 /// A sheet for selecting an agent to p-tag in a message.
-/// Supports search and single-select with proper cancel semantics.
+/// Uses OnlineAgentInfo from project status (kind:24010) which contains
+/// actual agent instance pubkeys for proper profile picture lookup.
 struct AgentSelectorSheet: View {
     // MARK: - Properties
 
-    /// Available agents to choose from
-    let agents: [AgentInfo]
+    /// Available agents to choose from (from project status)
+    let agents: [OnlineAgentInfo]
+
+    /// Project ID for agent configuration
+    let projectId: String
 
     /// Currently selected agent pubkey (binding for single-select)
     @Binding var selectedPubkey: String?
@@ -24,24 +28,22 @@ struct AgentSelectorSheet: View {
     /// Local copy of selection - only committed on Done, discarded on Cancel
     @State private var localSelectedPubkey: String?
     @State private var searchText = ""
+    @State private var agentToConfig: OnlineAgentInfo?
 
     // MARK: - Computed
 
-    private var filteredAgents: [AgentInfo] {
+    private var filteredAgents: [OnlineAgentInfo] {
         if searchText.isEmpty {
             return agents
         }
 
         let lowercasedSearch = searchText.lowercased()
         return agents.filter { agent in
-            agent.name.lowercased().contains(lowercasedSearch) ||
-            agent.dTag.lowercased().contains(lowercasedSearch) ||
-            agent.role.lowercased().contains(lowercasedSearch) ||
-            agent.description.lowercased().contains(lowercasedSearch)
+            agent.name.lowercased().contains(lowercasedSearch)
         }
     }
 
-    private var selectedAgent: AgentInfo? {
+    private var selectedAgent: OnlineAgentInfo? {
         agents.first { $0.pubkey == localSelectedPubkey }
     }
 
@@ -60,17 +62,22 @@ struct AgentSelectorSheet: View {
                     if filteredAgents.isEmpty {
                         emptyStateView
                     } else {
-                        ForEach(filteredAgents, id: \.id) { agent in
-                            AgentRowView(
+                        ForEach(filteredAgents, id: \.pubkey) { agent in
+                            OnlineAgentRowView(
                                 agent: agent,
-                                isSelected: localSelectedPubkey == agent.pubkey
-                            ) {
-                                selectAgent(agent)
-                            }
+                                isSelected: localSelectedPubkey == agent.pubkey,
+                                onTap: {
+                                    selectAgent(agent)
+                                },
+                                onConfig: {
+                                    agentToConfig = agent
+                                }
+                            )
                         }
                     }
                 }
                 .listStyle(.plain)
+                .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search agents...")
             .navigationTitle("Select Agent")
@@ -97,14 +104,18 @@ struct AgentSelectorSheet: View {
                 // Initialize local state from parent binding
                 localSelectedPubkey = selectedPubkey
             }
+            .sheet(item: $agentToConfig) { agent in
+                AgentConfigSheet(agent: agent, projectId: projectId)
+                    .environmentObject(coreManager)
+            }
         }
     }
 
     // MARK: - Subviews
 
-    private func selectedAgentBar(_ agent: AgentInfo) -> some View {
+    private func selectedAgentBar(_ agent: OnlineAgentInfo) -> some View {
         HStack(spacing: 8) {
-            Text("@\(agent.dTag)")
+            Text("@\(agent.name)")
                 .font(.subheadline)
                 .fontWeight(.medium)
 
@@ -130,9 +141,9 @@ struct AgentSelectorSheet: View {
                 .foregroundStyle(.secondary)
 
             if searchText.isEmpty {
-                Text("No Agents Available")
+                Text("No Agents Online")
                     .font(.headline)
-                Text("This project has no agents configured.")
+                Text("This project has no online agents.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             } else {
@@ -151,7 +162,7 @@ struct AgentSelectorSheet: View {
 
     // MARK: - Actions
 
-    private func selectAgent(_ agent: AgentInfo) {
+    private func selectAgent(_ agent: OnlineAgentInfo) {
         // Toggle selection (single-select)
         if localSelectedPubkey == agent.pubkey {
             localSelectedPubkey = nil
@@ -161,88 +172,101 @@ struct AgentSelectorSheet: View {
     }
 }
 
-// MARK: - Agent Row View
+// MARK: - OnlineAgentInfo Identifiable
 
-struct AgentRowView: View {
+extension OnlineAgentInfo: Identifiable {
+    public var id: String { pubkey }
+}
+
+// MARK: - Online Agent Row View
+
+struct OnlineAgentRowView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    let agent: AgentInfo
+    let agent: OnlineAgentInfo
     let isSelected: Bool
     let onTap: () -> Void
+    var onConfig: (() -> Void)?
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Agent avatar
-                agentAvatar
+        HStack(spacing: 12) {
+            // Tappable main content for selection
+            Button(action: onTap) {
+                HStack(spacing: 12) {
+                    // Agent avatar - uses actual agent pubkey for profile lookup
+                    AgentAvatarView(
+                        agentName: agent.name,
+                        pubkey: agent.pubkey,
+                        size: 48,
+                        showBorder: false,
+                        isSelected: isSelected
+                    )
+                    .environmentObject(coreManager)
 
-                // Agent info
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack {
-                        Text(agent.name)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+                    // Agent info
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text(agent.name)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
 
-                        if !agent.role.isEmpty {
-                            Text("•")
-                                .foregroundStyle(.secondary)
-                            Text(agent.role)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
+                            if agent.isPm {
+                                Text("PM")
+                                    .font(.caption2)
+                                    .fontWeight(.semibold)
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        Capsule()
+                                            .fill(Color.blue)
+                                    )
+                            }
+                        }
+
+                        Text("@\(agent.name)")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+
+                        if let model = agent.model, !model.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "cpu")
+                                    .font(.caption2)
+                                Text(model)
+                                    .font(.caption2)
+                            }
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule()
+                                    .fill(Color(.systemGray5))
+                            )
                         }
                     }
 
-                    Text("@\(agent.dTag)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Spacer()
 
-                    if !agent.description.isEmpty {
-                        Text(agent.description)
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(2)
-                    }
-
-                    if let model = agent.model, !model.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "cpu")
-                                .font(.caption2)
-                            Text(model)
-                                .font(.caption2)
-                        }
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(Color(.systemGray5))
-                        )
-                    }
+                    // Selection indicator
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .foregroundStyle(isSelected ? .blue : .secondary)
                 }
-
-                Spacer()
-
-                // Selection indicator
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? .blue : .secondary)
             }
-            .padding(.vertical, 8)
-        }
-        .buttonStyle(.plain)
-    }
+            .buttonStyle(.plain)
 
-    /// Agent avatar using the unified AgentAvatarView component.
-    /// Provides consistent appearance, caching, and deterministic colors.
-    private var agentAvatar: some View {
-        AgentAvatarView(
-            agentName: agent.name,
-            pubkey: agent.pubkey,
-            fallbackPictureUrl: agent.picture,
-            size: 48,
-            showBorder: false,
-            isSelected: isSelected
-        )
-        .environmentObject(coreManager)
+            // Config gear button (separate from selection)
+            if let onConfig = onConfig {
+                Button(action: onConfig) {
+                    Image(systemName: "gearshape")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                        .padding(8)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 8)
     }
 }
 
@@ -251,38 +275,30 @@ struct AgentRowView: View {
 #Preview {
     AgentSelectorSheet(
         agents: [
-            AgentInfo(
-                id: "1",
-                pubkey: "abc123",
-                dTag: "architect",
-                name: "Architect Agent",
-                description: "Designs system architecture and makes high-level decisions",
-                role: "Developer",
-                picture: nil,
-                model: "claude-3-opus"
+            OnlineAgentInfo(
+                pubkey: "abc123def456",
+                name: "claude-code",
+                isPm: true,
+                model: "claude-3-opus",
+                tools: ["Read", "Write", "Bash"]
             ),
-            AgentInfo(
-                id: "2",
-                pubkey: "def456",
-                dTag: "code-reviewer",
-                name: "Code Review Agent",
-                description: "Reviews code for quality and best practices",
-                role: "Reviewer",
-                picture: nil,
-                model: "claude-3-sonnet"
+            OnlineAgentInfo(
+                pubkey: "def456ghi789",
+                name: "architect",
+                isPm: false,
+                model: "claude-3-sonnet",
+                tools: ["Read", "Edit"]
             ),
-            AgentInfo(
-                id: "3",
-                pubkey: "ghi789",
-                dTag: "test-writer",
-                name: "Test Writer",
-                description: "Writes comprehensive test suites",
-                role: "QA",
-                picture: nil,
-                model: nil
+            OnlineAgentInfo(
+                pubkey: "ghi789jkl012",
+                name: "test-writer",
+                isPm: false,
+                model: nil,
+                tools: []
             )
         ],
-        selectedPubkey: .constant("abc123")
+        projectId: "test-project",
+        selectedPubkey: .constant("abc123def456")
     )
     .environmentObject(TenexCoreManager())
 }
