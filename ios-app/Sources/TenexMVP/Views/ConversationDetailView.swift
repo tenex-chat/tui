@@ -486,6 +486,7 @@ struct FullConversationSheet: View {
 
     @State private var selectedDelegation: String?
     @State private var showComposer = false
+    @State private var availableAgents: [OnlineAgentInfo] = []
 
     /// Compute consecutive message flags for each message
     private var messagesWithConsecutive: [(message: MessageInfo, isConsecutive: Bool)] {
@@ -505,26 +506,71 @@ struct FullConversationSheet: View {
         coreManager.safeCore.getProjects().first { $0.id == conversation.projectATag }
     }
 
+    /// Find the last agent that spoke in the conversation (like TUI's get_most_recent_agent_from_conversation)
+    private var lastAgentPubkey: String? {
+        // Get set of agent pubkeys for quick lookup
+        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
+
+        // Find the most recent message from an agent (not the user)
+        // Messages are sorted by createdAt, iterate to find the latest agent message
+        var latestAgentPubkey: String?
+        var latestTimestamp: UInt64 = 0
+
+        for msg in messages {
+            // Skip user messages
+            if msg.role == "user" {
+                continue
+            }
+
+            // Check if this message is from a known agent (authorNpub is actually hex pubkey)
+            if agentPubkeys.contains(msg.authorNpub) && msg.createdAt >= latestTimestamp {
+                latestTimestamp = msg.createdAt
+                latestAgentPubkey = msg.authorNpub
+            }
+        }
+
+        return latestAgentPubkey
+    }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(messagesWithConsecutive, id: \.message.id) { item in
-                            SlackMessageRow(
-                                message: item.message,
-                                isConsecutive: item.isConsecutive,
-                                conversationId: conversation.id,
-                                projectId: projectId,
-                                onDelegationTap: { delegationId in
-                                    selectedDelegation = delegationId
-                                }
-                            )
-                            .environmentObject(coreManager)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(messagesWithConsecutive, id: \.message.id) { item in
+                                SlackMessageRow(
+                                    message: item.message,
+                                    isConsecutive: item.isConsecutive,
+                                    conversationId: conversation.id,
+                                    projectId: projectId,
+                                    onDelegationTap: { delegationId in
+                                        selectedDelegation = delegationId
+                                    }
+                                )
+                                .environmentObject(coreManager)
+                                .id(item.message.id)
+                            }
+                        }
+                        .padding()
+                        .padding(.bottom, 80) // Space for compose button
+                    }
+                    .onAppear {
+                        // Scroll to the last message
+                        if let lastMessage = messages.last {
+                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
-                    .padding()
-                    .padding(.bottom, 80) // Space for compose button
+                    .task {
+                        // Load available agents for the project to determine last agent
+                        if let projectId = project?.id {
+                            do {
+                                availableAgents = try await coreManager.safeCore.getOnlineAgents(projectId: projectId)
+                            } catch {
+                                print("[FullConversationSheet] Failed to load agents: \(error)")
+                            }
+                        }
+                    }
                 }
 
                 // Floating compose button
@@ -560,7 +606,8 @@ struct FullConversationSheet: View {
                 MessageComposerView(
                     project: project,
                     conversationId: conversation.id,
-                    conversationTitle: conversation.title
+                    conversationTitle: conversation.title,
+                    initialAgentPubkey: lastAgentPubkey
                 )
                 .environmentObject(coreManager)
             }
