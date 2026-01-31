@@ -613,22 +613,14 @@ impl NostrWorker {
         );
         tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
 
-        // 4. Nudges (kind:4201) - user's own nudges AND inbound nudges p-tagging user
-        // Two filters: nudges authored by user OR nudges targeting user via p-tag
-        let user_pk = PublicKey::from_hex(user_pubkey)
-            .map_err(|e| anyhow::anyhow!("Invalid user pubkey: {}", e))?;
-        let nudge_filter_owned = Filter::new()
-            .kind(Kind::Custom(4201))
-            .author(user_pk);
-        let nudge_filter_inbound = Filter::new()
-            .kind(Kind::Custom(4201))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
-        let output = client.subscribe(vec![nudge_filter_owned, nudge_filter_inbound], None).await?;
+        // 4. Nudges (kind:4201) - global, like agent definitions
+        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+        let output = client.subscribe(vec![nudge_filter], None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Nudges (owned + inbound)".to_string(), vec![4201], None),
+            SubscriptionInfo::new("Nudges".to_string(), vec![4201], None),
         );
-        tlog!("CONN", "Subscribed to nudges (kind:4201) - owned and p-tagged for user {}", &user_pubkey[..8]);
+        tlog!("CONN", "Subscribed to nudges (kind:4201)");
 
         // 5. Agent lessons (kind:4129)
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
@@ -1762,17 +1754,9 @@ async fn sync_all_filters(
     let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
     total_new += sync_filter(client, mcp_tool_filter, "4200", stats).await;
 
-    // Nudges (kind 4201) - authored by user
-    let nudge_authored_filter = Filter::new()
-        .kind(Kind::Custom(4201))
-        .author(*user_pubkey);
-    total_new += sync_filter(client, nudge_authored_filter, "4201-authored", stats).await;
-
-    // Nudges (kind 4201) - targeting user via p-tag (inbound nudges)
-    let nudge_p_filter = Filter::new()
-        .kind(Kind::Custom(4201))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey_hex]);
-    total_new += sync_filter(client, nudge_p_filter, "4201-p-tagged", stats).await;
+    // Nudges (kind 4201) - global, like agent definitions
+    let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+    total_new += sync_filter(client, nudge_filter, "4201", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
     if let Ok(projects) = get_projects(ndb) {

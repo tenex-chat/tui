@@ -1,0 +1,130 @@
+import SwiftUI
+
+// MARK: - Inline Ask View
+
+/// Wrapper for inline ask event UI within a conversation.
+/// Shows interactive AskAnswerView when unanswered, collapses to summary when answered.
+struct InlineAskView: View {
+    let askEvent: AskEventInfo
+    let askEventId: String
+    let askAuthorPubkey: String
+    let conversationId: String
+    let projectId: String
+
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @State private var isAnswered = false
+    @State private var answerSummary: String = ""
+
+    var body: some View {
+        if isAnswered {
+            answeredView
+        } else {
+            AskAnswerView(
+                askEvent: askEvent,
+                askEventId: askEventId,
+                askAuthorPubkey: askAuthorPubkey,
+                conversationId: conversationId,
+                projectId: projectId
+            ) {
+                // On submit callback
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    answerSummary = generateAnswerSummary()
+                    isAnswered = true
+                }
+            }
+            .environmentObject(coreManager)
+        }
+    }
+
+    // MARK: - Answered View
+
+    private var answeredView: some View {
+        HStack(spacing: 10) {
+            // Checkmark indicator
+            Image(systemName: "checkmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.green)
+
+            VStack(alignment: .leading, spacing: 2) {
+                // Title
+                if let title = askEvent.title {
+                    Text(title)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                } else {
+                    Text("Questions Answered")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+
+                // Answer summary
+                if !answerSummary.isEmpty {
+                    Text(answerSummary)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            Spacer()
+
+            // Expand button to view full answers
+            Button {
+                withAnimation {
+                    isAnswered = false
+                }
+            } label: {
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(12)
+        .background(Color.green.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Helpers
+
+    private func generateAnswerSummary() -> String {
+        // Generate a brief summary of the questions
+        let questionCount = askEvent.questions.count
+        if questionCount == 1 {
+            return "1 question answered"
+        } else {
+            return "\(questionCount) questions answered"
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    VStack(spacing: 20) {
+        // Unanswered state
+        InlineAskView(
+            askEvent: AskEventInfo(
+                title: "Project Setup",
+                context: "Please answer the following questions.",
+                questions: [
+                    .singleSelect(
+                        title: "Language",
+                        question: "What language?",
+                        suggestions: ["Swift", "Rust", "TypeScript"]
+                    )
+                ]
+            ),
+            askEventId: "test-id",
+            askAuthorPubkey: "test-pubkey",
+            conversationId: "test-conv",
+            projectId: "test-project"
+        )
+        .environmentObject(TenexCoreManager())
+    }
+    .padding()
+}

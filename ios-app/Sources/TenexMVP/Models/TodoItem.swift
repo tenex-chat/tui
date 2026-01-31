@@ -44,6 +44,31 @@ struct TodoState {
     var inProgressItem: TodoItem? {
         items.first { $0.status == .inProgress }
     }
+
+    var isComplete: Bool {
+        !items.isEmpty && completedCount == items.count
+    }
+}
+
+/// Aggregate todo statistics across a conversation tree
+struct AggregateTodoStats {
+    var completedCount: Int
+    var totalCount: Int
+
+    var isComplete: Bool { totalCount > 0 && completedCount == totalCount }
+    var hasTodos: Bool { totalCount > 0 }
+
+    static let empty = AggregateTodoStats(completedCount: 0, totalCount: 0)
+
+    mutating func add(_ other: AggregateTodoStats) {
+        completedCount += other.completedCount
+        totalCount += other.totalCount
+    }
+
+    mutating func add(_ state: TodoState) {
+        completedCount += state.completedCount
+        totalCount += state.items.count
+    }
 }
 
 // MARK: - Todo Parsing

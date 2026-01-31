@@ -1,18 +1,15 @@
 import Speech
 import AVFoundation
 import Observation
-import FoundationModels
 
 /// Manages voice dictation with live transcription using iOS 26's SpeechAnalyzer API.
-/// Provides real-time streaming transcription and post-transcription correction using Foundation Models.
+/// Provides real-time streaming transcription with simplified edit-and-insert flow.
 @MainActor
 @Observable
 final class DictationManager {
     enum State: Equatable {
         case idle
         case recording(partialText: String)
-        case processing
-        case awaitingCorrection(original: String, suggested: String, explanation: String)
 
         var isIdle: Bool {
             if case .idle = self { return true }
@@ -102,17 +99,9 @@ final class DictationManager {
 
         print("[DictationManager] Final text after processing: '\(finalText)'")
 
-        // If we have text, analyze for corrections
-        if !finalText.isEmpty {
-            print("[DictationManager] Setting state to .processing")
-            state = .processing
-            print("[DictationManager] Calling analyzeForCorrections()...")
-            await analyzeForCorrections()
-            print("[DictationManager] analyzeForCorrections() completed, state is now: \(state)")
-        } else {
-            print("[DictationManager] No text, setting state to .idle")
-            state = .idle
-        }
+        // Go directly to idle - let user edit in FinalTranscriptionView
+        print("[DictationManager] Setting state to .idle")
+        state = .idle
         print("[DictationManager] stopRecording() finished")
     }
 
@@ -130,33 +119,6 @@ final class DictationManager {
         transcriptionTask = nil
         finalText = ""
         state = .idle
-    }
-
-    // MARK: - Correction Handling
-
-    func acceptCorrection() {
-        guard case .awaitingCorrection(_, let suggested, _) = state else { return }
-
-        // Learn from this correction
-        let words = finalText.split(separator: " ").map(String.init)
-        let suggestedWords = suggested.split(separator: " ").map(String.init)
-
-        for (original, replacement) in zip(words, suggestedWords) where original != replacement {
-            phoneticLearner.recordCorrection(original: original, replacement: replacement)
-        }
-
-        finalText = suggested
-        state = .idle
-    }
-
-    func rejectCorrection() {
-        guard case .awaitingCorrection = state else { return }
-        state = .idle
-    }
-
-    /// Called when user manually edits a word in the transcription
-    func userEditedWord(original: String, replacement: String) {
-        phoneticLearner.recordCorrection(original: original, replacement: replacement)
     }
 
     func reset() {
@@ -305,51 +267,6 @@ final class DictationManager {
         try audioEngine.start()
     }
 
-    // MARK: - Correction Analysis
-
-    private func analyzeForCorrections() async {
-        print("[DictationManager] analyzeForCorrections() started with finalText: '\(finalText)'")
-        // First apply known corrections
-        let textWithKnownCorrections = phoneticLearner.applyCorrections(to: finalText)
-        print("[DictationManager] After applying known corrections: '\(textWithKnownCorrections)'")
-
-        print("[DictationManager] Using CorrectionEngine with Foundation Models")
-        do {
-            let engine = CorrectionEngine()
-            print("[DictationManager] Calling engine.analyzeTranscription...")
-            if let suggestion = try await engine.analyzeTranscription(
-                textWithKnownCorrections,
-                knownCorrections: phoneticLearner.corrections
-            ) {
-                print("[DictationManager] Got correction suggestion: '\(suggestion.correctedText)'")
-                state = .awaitingCorrection(
-                    original: finalText,
-                    suggested: suggestion.correctedText,
-                    explanation: suggestion.explanation
-                )
-                return
-            } else {
-                print("[DictationManager] No correction suggestion returned")
-            }
-        } catch {
-            // LLM analysis failed, fall through to use text with known corrections
-            print("[DictationManager] LLM correction analysis failed: \(error)")
-        }
-
-        // If we applied known corrections, update final text
-        if textWithKnownCorrections != finalText {
-            print("[DictationManager] Known corrections were applied, setting awaitingCorrection state")
-            state = .awaitingCorrection(
-                original: finalText,
-                suggested: textWithKnownCorrections,
-                explanation: "Applied known corrections"
-            )
-        } else {
-            print("[DictationManager] No corrections needed, setting state to .idle")
-            state = .idle
-        }
-        print("[DictationManager] analyzeForCorrections() finished, state: \(state)")
-    }
 }
 
 // MARK: - Errors

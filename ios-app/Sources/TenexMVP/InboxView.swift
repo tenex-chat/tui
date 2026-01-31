@@ -185,6 +185,7 @@ struct InboxView: View {
                     )
                     selectedItem = nil
                 })
+                .environmentObject(coreManager)
             }
             .navigationDestination(item: $navigateToConversation) { navData in
                 InboxConversationView(
@@ -355,6 +356,7 @@ struct InboxItemRow: View {
 struct InboxDetailView: View {
     let item: InboxItem
     let onNavigateToConversation: (String, String?) -> Void
+    @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -450,9 +452,28 @@ struct InboxDetailView: View {
 
     // MARK: - Content Section
 
+    @ViewBuilder
     private var contentSection: some View {
-        Text(item.content)
-            .font(.body)
+        if let askEvent = item.askEvent,
+           let conversationId = item.conversationId,
+           let projectId = item.projectId {
+            // Interactive ask answering view
+            AskAnswerView(
+                askEvent: askEvent,
+                askEventId: item.id,
+                askAuthorPubkey: item.authorPubkey,
+                conversationId: conversationId,
+                projectId: projectId
+            ) {
+                // Dismiss after successful submit
+                dismiss()
+            }
+            .environmentObject(coreManager)
+        } else {
+            // Regular text content
+            Text(item.content)
+                .font(.body)
+        }
     }
 
     // MARK: - Related Section (Navigation to Conversation)

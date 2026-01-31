@@ -53,6 +53,7 @@ struct SearchView: View {
                                 ConversationGroupHeader(group: group)
                             }
                             .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
 
                             // Matching messages (indented)
                             ForEach(group.matches, id: \.eventId) { result in
@@ -65,12 +66,13 @@ struct SearchView: View {
                                     }
                                 } label: {
                                     MatchingMessageRow(result: result, searchTerm: searchText)
-                                        .padding(.leading, 16)
                                 }
                                 .buttonStyle(.plain)
+                                .listRowInsets(EdgeInsets(top: 0, leading: 28, bottom: 2, trailing: 16))
                             }
                         }
                     }
+                    .listSectionSpacing(4)
                 }
             }
             .listStyle(.plain)
@@ -209,7 +211,6 @@ struct ConversationGroupHeader: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
-        .padding(.vertical, 8)
     }
 }
 
@@ -226,7 +227,7 @@ struct MatchingMessageRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             // Vertical indent line
             Rectangle()
                 .fill(Color.secondary.opacity(0.3))
@@ -235,14 +236,14 @@ struct MatchingMessageRow: View {
             // Author avatar
             Circle()
                 .fill(isUser ? Color.green.gradient : Color.blue.gradient)
-                .frame(width: 28, height: 28)
+                .frame(width: 22, height: 22)
                 .overlay {
                     Image(systemName: isUser ? "person.fill" : "sparkle")
-                        .font(.caption2)
+                        .font(.system(size: 10))
                         .foregroundStyle(.white)
                 }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 2) {
                 // Author and timestamp
                 HStack {
                     Text(result.author)
@@ -275,7 +276,6 @@ struct MatchingMessageRow: View {
                 }
             }
         }
-        .padding(.vertical, 6)
     }
 
     private func relativeTime(from timestamp: UInt64) -> String {

@@ -46,6 +46,18 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Todo list state
     @Published private(set) var todoState: TodoState = TodoState(items: [])
 
+    /// Aggregated todo stats (includes current + all descendants)
+    @Published private(set) var aggregatedTodoStats: AggregateTodoStats = .empty
+
+    /// Messages for descendant conversations (for todo parsing)
+    private var descendantMessages: [String: [MessageInfo]] = [:]
+
+    /// Cached parsed todo states per conversation (avoid re-parsing)
+    private var parsedTodoStates: [String: TodoState] = [:]
+
+    /// Children lookup map for efficient subtree traversal
+    private var childrenByParentId: [String: [String]] = [:]
+
     // MARK: - Refreshable Metadata
 
     /// Current status (refreshed periodically)
@@ -187,7 +199,7 @@ final class ConversationDetailViewModel: ObservableObject {
 
         do {
             // Perform work off the main actor for better performance
-            let (fetchedMessages, directChildren, descendants) = try await loadDataFromCore(
+            let (fetchedMessages, directChildren, descendants, descendantMsgs) = try await loadDataFromCore(
                 coreManager: coreManager,
                 conversationId: conversation.id,
                 projectATag: conversation.projectATag
@@ -197,6 +209,7 @@ final class ConversationDetailViewModel: ObservableObject {
             self.messages = fetchedMessages
             self.childConversations = directChildren
             self.allDescendants = descendants
+            self.descendantMessages = descendantMsgs
 
             // Recompute cached derived state
             await recomputeDerivedState()
@@ -215,14 +228,14 @@ final class ConversationDetailViewModel: ObservableObject {
     }
 
     /// Performs the actual data loading using structured concurrency for proper cancellation
-    private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo]) {
+    private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
         try Task.checkCancellation()
 
         // Fetch messages using safeCore
         async let messagesTask: [MessageInfo] = coreManager.safeCore.getMessages(conversationId: conversationId)
 
         // Fetch descendants using safeCore
-        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo]) = {
+        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) = {
             // Get all descendants (for participants extraction)
             let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
             let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
@@ -230,15 +243,22 @@ final class ConversationDetailViewModel: ObservableObject {
             // Get direct children from descendants (for delegations display)
             let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
-            return (directChildren, allDescendants)
+            // Fetch messages for all descendants (for todo aggregation)
+            var descendantMsgs: [String: [MessageInfo]] = [:]
+            for descendant in allDescendants {
+                let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
+                descendantMsgs[descendant.id] = msgs
+            }
+
+            return (directChildren, allDescendants, descendantMsgs)
         }()
 
         // Await both tasks - cancellation will propagate to both
         let fetchedMessages = await messagesTask
         try Task.checkCancellation()
-        let (directChildren, allDescendants) = await childrenTask
+        let (directChildren, allDescendants, descendantMsgs) = await childrenTask
 
-        return (fetchedMessages, directChildren, allDescendants)
+        return (fetchedMessages, directChildren, allDescendants, descendantMsgs)
     }
 
     // MARK: - Derived State Computation
@@ -286,11 +306,61 @@ final class ConversationDetailViewModel: ObservableObject {
         // Compute latest reply (last non-tool-call, non-empty message)
         latestReply = messages.last { !$0.isToolCall && !$0.content.isEmpty }
 
-        // Parse todos from messages
+        // Build children lookup map for efficient subtree traversal
+        childrenByParentId = [:]
+        for descendant in allDescendants {
+            if let parentId = descendant.parentId {
+                childrenByParentId[parentId, default: []].append(descendant.id)
+            }
+        }
+
+        // Parse and cache todos for all conversations (parse once, use many times)
+        parsedTodoStates = [:]
+        for (convId, msgs) in descendantMessages {
+            parsedTodoStates[convId] = TodoParser.parse(messages: msgs)
+        }
+
+        // Parse todos from current conversation's messages
         todoState = TodoParser.parse(messages: messages)
 
-        // Compute delegations
+        // Compute aggregated todo stats (current + all descendants)
+        var stats = AggregateTodoStats.empty
+        stats.add(todoState)
+        for (_, todos) in parsedTodoStates {
+            stats.add(todos)
+        }
+        aggregatedTodoStats = stats
+
+        // Compute delegations with their subtree todo stats
         delegations = await extractDelegations()
+    }
+
+    /// Computes todo stats for a conversation and all its descendants using cached data
+    private func computeSubtreeTodoStats(forConversationId conversationId: String) -> AggregateTodoStats {
+        var stats = AggregateTodoStats.empty
+
+        // Add todos from this conversation (from cache)
+        if let todos = parsedTodoStates[conversationId] {
+            stats.add(todos)
+        }
+
+        // Recursively add todos from all children
+        collectSubtreeTodos(parentId: conversationId, into: &stats)
+
+        return stats
+    }
+
+    /// Recursively collects todos from all descendants of a parent
+    private func collectSubtreeTodos(parentId: String, into stats: inout AggregateTodoStats) {
+        guard let childIds = childrenByParentId[parentId] else { return }
+
+        for childId in childIds {
+            if let todos = parsedTodoStates[childId] {
+                stats.add(todos)
+            }
+            // Recurse into children
+            collectSubtreeTodos(parentId: childId, into: &stats)
+        }
     }
 
     /// Extracts delegation items from messages and child conversations
@@ -310,7 +380,10 @@ final class ConversationDetailViewModel: ObservableObject {
                         let recipientPubkey = childConv.pTags.first ?? childConv.authorPubkey
                         let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
 
-                        let delegation = DelegationItem(
+                        // Compute subtree todo stats for this delegation
+                        let todoStats = computeSubtreeTodoStats(forConversationId: qTag)
+
+                        var delegation = DelegationItem(
                             id: qTag,
                             recipient: recipient.isEmpty ? childConv.author : recipient,
                             recipientPubkey: recipientPubkey,
@@ -318,6 +391,7 @@ final class ConversationDetailViewModel: ObservableObject {
                             conversationId: qTag,
                             timestamp: message.createdAt
                         )
+                        delegation.todoStats = todoStats.hasTodos ? todoStats : nil
                         result.append(delegation)
                     }
                 }
@@ -331,7 +405,10 @@ final class ConversationDetailViewModel: ObservableObject {
                 let recipientPubkey = child.pTags.first ?? child.authorPubkey
                 let recipient = await coreManager.safeCore.getProfileName(pubkey: recipientPubkey)
 
-                let delegation = DelegationItem(
+                // Compute subtree todo stats for this delegation
+                let todoStats = computeSubtreeTodoStats(forConversationId: child.id)
+
+                var delegation = DelegationItem(
                     id: child.id,
                     recipient: recipient.isEmpty ? child.author : recipient,
                     recipientPubkey: recipientPubkey,
@@ -339,6 +416,7 @@ final class ConversationDetailViewModel: ObservableObject {
                     conversationId: child.id,
                     timestamp: child.lastActivity
                 )
+                delegation.todoStats = todoStats.hasTodos ? todoStats : nil
                 result.append(delegation)
             }
         }

@@ -1051,8 +1051,8 @@ impl TenexCore {
     /// Login with an nsec (Nostr secret key in bech32 format).
     ///
     /// The nsec should be in the format `nsec1...`.
-    /// On success, connects to relays and starts subscriptions, THEN stores the keys.
-    /// If relay connection fails, login fails and no state is changed.
+    /// On success, stores the keys and triggers async relay connection.
+    /// Login succeeds immediately even if relays are unreachable.
     pub fn login(&self, nsec: String) -> Result<LoginResult, TenexError> {
         // Parse the nsec into a SecretKey
         let secret_key = SecretKey::parse(&nsec).map_err(|e| TenexError::InvalidNsec {
@@ -1071,42 +1071,7 @@ impl TenexCore {
                 message: format!("Failed to encode npub: {}", e),
             })?;
 
-        let core_handle = {
-            let handle_guard = self.core_handle.read().map_err(|e| TenexError::Internal {
-                message: format!("Failed to acquire core handle lock: {}", e),
-            })?;
-            handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
-                message: "Core runtime not initialized - call init() first".to_string(),
-            })?.clone()
-        };
-
-        // Connect to relays FIRST - if this fails, we don't commit any state
-        let (response_tx, response_rx) = mpsc::channel::<Result<(), String>>();
-        core_handle
-            .send(NostrCommand::Connect {
-                keys: keys.clone(),
-                user_pubkey: pubkey.clone(),
-                response_tx: Some(response_tx),
-            })
-            .map_err(|e| TenexError::Internal {
-                message: format!("Failed to send connect command: {}", e),
-            })?;
-
-        match response_rx.recv_timeout(Duration::from_secs(15)) {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                return Err(TenexError::Internal {
-                    message: format!("Failed to connect: {}", e),
-                });
-            }
-            Err(_) => {
-                return Err(TenexError::Internal {
-                    message: "Timed out waiting for relay connection".to_string(),
-                });
-            }
-        }
-
-        // Store the keys
+        // Store the keys immediately (authentication is local)
         {
             let mut keys_guard = self.keys.write().map_err(|e| TenexError::Internal {
                 message: format!("Failed to acquire write lock: {}", e),
@@ -1133,6 +1098,22 @@ impl TenexCore {
                 store.rebuild_from_ndb();
             }
         }
+
+        // Trigger async relay connection (non-blocking, fire-and-forget)
+        let core_handle = {
+            let handle_guard = self.core_handle.read().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire core handle lock: {}", e),
+            })?;
+            handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
+                message: "Core runtime not initialized - call init() first".to_string(),
+            })?.clone()
+        };
+
+        let _ = core_handle.send(NostrCommand::Connect {
+            keys,
+            user_pubkey: pubkey.clone(),
+            response_tx: None,  // Don't wait for response
+        });
 
         Ok(LoginResult {
             pubkey,
@@ -1735,15 +1716,13 @@ impl TenexCore {
 
     // ===== Search Methods =====
 
-    /// Full-text search across all events using nostrdb.
+    /// Full-text search across threads and messages.
+    /// Uses in-memory store data (same approach as TUI search).
     /// Returns search results with content snippets and context.
     pub fn search(&self, query: String, limit: i32) -> Vec<SearchResult> {
-        eprintln!("[FFI search] query='{}', limit={}", query, limit);
-
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => {
-                eprintln!("[FFI search] Failed to acquire store read lock");
                 return Vec::new();
             }
         };
@@ -1751,33 +1730,82 @@ impl TenexCore {
         let store = match store_guard.as_ref() {
             Some(s) => s,
             None => {
-                eprintln!("[FFI search] Store is None (not initialized)");
                 return Vec::new();
             }
         };
 
-        // Use nostrdb text_search
-        let results = store.text_search(&query, limit);
-        eprintln!("[FFI search] text_search returned {} results", results.len());
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+        let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // 1. Search thread titles and content (in-memory)
+        for project in store.get_projects() {
+            let project_a_tag = project.a_tag();
+
+            for thread in store.get_threads(&project_a_tag) {
+                let title_matches = thread.title.to_lowercase().contains(&query_lower);
+                let content_matches = thread.content.to_lowercase().contains(&query_lower);
+
+                if (title_matches || content_matches) && !seen_ids.contains(&thread.id) {
+                    seen_ids.insert(thread.id.clone());
+
+                    let author = store.get_profile_name(&thread.pubkey);
+                    let content = if title_matches {
+                        thread.title.clone()
+                    } else {
+                        thread.content.clone()
+                    };
+
+                    results.push(SearchResult {
+                        event_id: thread.id.clone(),
+                        thread_id: Some(thread.id.clone()),
+                        content,
+                        kind: 1, // Thread roots are kind:1
+                        author,
+                        created_at: thread.last_activity,
+                        project_a_tag: Some(project_a_tag.clone()),
+                    });
+
+                    if results.len() >= limit as usize {
+                        return results;
+                    }
+                }
+            }
+        }
+
+        // 2. Search message content (in-memory)
+        for project in store.get_projects() {
+            let project_a_tag = project.a_tag();
+
+            for thread in store.get_threads(&project_a_tag) {
+                for message in store.get_messages(&thread.id) {
+                    if message.content.to_lowercase().contains(&query_lower) && !seen_ids.contains(&message.id) {
+                        seen_ids.insert(message.id.clone());
+
+                        let author = store.get_profile_name(&message.pubkey);
+
+                        results.push(SearchResult {
+                            event_id: message.id.clone(),
+                            thread_id: Some(thread.id.clone()),
+                            content: message.content.clone(),
+                            kind: 1, // Messages are kind:1
+                            author,
+                            created_at: message.created_at as u64,
+                            project_a_tag: Some(project_a_tag.clone()),
+                        });
+
+                        if results.len() >= limit as usize {
+                            return results;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort by created_at descending (most recent first)
+        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         results
-            .into_iter()
-            .filter_map(|(event_id, thread_id, content, kind)| {
-                // Look up the author info from the event
-                let (author, created_at, project_a_tag) = store.get_event_metadata(&event_id)
-                    .unwrap_or_else(|| ("Unknown".to_string(), 0, None));
-
-                Some(SearchResult {
-                    event_id,
-                    thread_id,
-                    content,
-                    kind,
-                    author,
-                    created_at,
-                    project_a_tag,
-                })
-            })
-            .collect()
     }
 
     // ===== Conversations Tab Methods (Full-featured) =====
