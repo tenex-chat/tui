@@ -824,8 +824,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
-     * On success, connects to relays and starts subscriptions, THEN stores the keys.
-     * If relay connection fails, login fails and no state is changed.
+     * On success, stores the keys and triggers async relay connection.
+     * Login succeeds immediately even if relays are unreachable.
      */
     func login(nsec: String) throws  -> LoginResult
     
@@ -853,7 +853,8 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func refresh()  -> Bool
     
     /**
-     * Full-text search across all events using nostrdb.
+     * Full-text search across threads and messages.
+     * Uses in-memory store data (same approach as TUI search).
      * Returns search results with content snippets and context.
      */
     func search(query: String, limit: Int32)  -> [SearchResult]
@@ -1449,8 +1450,8 @@ open func isThreadCollapsed(threadId: String) -> Bool  {
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
-     * On success, connects to relays and starts subscriptions, THEN stores the keys.
-     * If relay connection fails, login fails and no state is changed.
+     * On success, stores the keys and triggers async relay connection.
+     * Login succeeds immediately even if relays are unreachable.
      */
 open func login(nsec: String)throws  -> LoginResult  {
     return try  FfiConverterTypeLoginResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
@@ -1493,7 +1494,8 @@ open func refresh() -> Bool  {
 }
     
     /**
-     * Full-text search across all events using nostrdb.
+     * Full-text search across threads and messages.
+     * Uses in-memory store data (same approach as TUI search).
      * Returns search results with content snippets and context.
      */
 open func search(query: String, limit: Int32) -> [SearchResult]  {
@@ -7444,7 +7446,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_login() != 22769) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_login() != 8995) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 20996) {
@@ -7453,7 +7455,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 48105) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_search() != 30961) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_search() != 189) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {

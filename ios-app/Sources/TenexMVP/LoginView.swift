@@ -196,8 +196,8 @@ struct LoginView: View {
                 let result = try await coreManager.safeCore.login(nsec: trimmedInput)
 
                 if result.success {
-                    // Save credential to keychain (on background thread)
-                    let saveError = coreManager.saveCredential(nsec: trimmedInput)
+                    // Save credential to keychain
+                    let saveError = await coreManager.saveCredential(nsec: trimmedInput)
 
                     isLoading = false
                     userNpub = result.npub

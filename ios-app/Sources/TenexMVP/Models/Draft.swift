@@ -12,6 +12,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case title
         case content
         case agentPubkey
+        case selectedNudgeIds
         case isNewConversation
         case lastEdited
     }
@@ -24,7 +25,7 @@ struct Draft: Codable, Identifiable, Equatable {
     /// The project ID this draft belongs to
     var projectId: String
 
-    /// Title of the conversation (required for new threads)
+    /// Title of the conversation (kept for compatibility but auto-generated)
     var title: String
 
     /// The message content being composed
@@ -32,6 +33,9 @@ struct Draft: Codable, Identifiable, Equatable {
 
     /// Pubkey of agent to p-tag in the message (single-select)
     var agentPubkey: String?
+
+    /// Selected nudge IDs for this conversation (multi-select)
+    var selectedNudgeIds: Set<String>
 
     /// Whether this is for a new conversation (thread)
     var isNewConversation: Bool
@@ -42,25 +46,27 @@ struct Draft: Codable, Identifiable, Equatable {
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
-    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil) {
+    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = []) {
         self.id = UUID().uuidString
         self.conversationId = nil
         self.projectId = projectId
         self.title = title
         self.content = content
         self.agentPubkey = agentPubkey
+        self.selectedNudgeIds = selectedNudgeIds
         self.isNewConversation = true
         self.lastEdited = Date()
     }
 
     /// Create a new draft for an existing conversation
-    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil) {
+    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = []) {
         self.id = UUID().uuidString
         self.conversationId = conversationId
         self.projectId = projectId
         self.title = "" // Not used for existing conversations
         self.content = content
         self.agentPubkey = agentPubkey
+        self.selectedNudgeIds = selectedNudgeIds
         self.isNewConversation = false
         self.lastEdited = Date()
     }
@@ -68,7 +74,7 @@ struct Draft: Codable, Identifiable, Equatable {
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId was added
+    /// Handles drafts from before projectId and selectedNudgeIds were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -82,6 +88,8 @@ struct Draft: Codable, Identifiable, Equatable {
         self.title = try container.decode(String.self, forKey: .title)
         self.content = try container.decode(String.self, forKey: .content)
         self.agentPubkey = try container.decodeIfPresent(String.self, forKey: .agentPubkey)
+        // Migration: selectedNudgeIds is new, default to empty set
+        self.selectedNudgeIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedNudgeIds) ?? []
         self.isNewConversation = try container.decode(Bool.self, forKey: .isNewConversation)
         self.lastEdited = try container.decode(Date.self, forKey: .lastEdited)
     }
@@ -90,25 +98,15 @@ struct Draft: Codable, Identifiable, Equatable {
 
     /// Whether the draft has meaningful content
     var hasContent: Bool {
-        if isNewConversation {
-            return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
-                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        } else {
-            return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        // Only check content - titles are auto-generated from 513 events
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// Whether the draft is valid for sending
     var isValid: Bool {
-        if isNewConversation {
-            // New conversation needs both title AND content
-            // Empty content-only conversations are not useful
-            return !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        } else {
-            // Reply needs content
-            return !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        // Both new conversations and replies just need content
+        // Titles are auto-generated from 513 events
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     // MARK: - Mutation
@@ -148,6 +146,25 @@ struct Draft: Codable, Identifiable, Equatable {
         title = ""
         content = ""
         agentPubkey = nil
+        selectedNudgeIds = []
+        lastEdited = Date()
+    }
+
+    /// Add a nudge to the selection
+    mutating func addNudge(_ nudgeId: String) {
+        selectedNudgeIds.insert(nudgeId)
+        lastEdited = Date()
+    }
+
+    /// Remove a nudge from the selection
+    mutating func removeNudge(_ nudgeId: String) {
+        selectedNudgeIds.remove(nudgeId)
+        lastEdited = Date()
+    }
+
+    /// Clear all selected nudges
+    mutating func clearNudges() {
+        selectedNudgeIds = []
         lastEdited = Date()
     }
 }

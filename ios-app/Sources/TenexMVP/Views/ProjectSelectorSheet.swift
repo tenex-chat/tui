@@ -66,6 +66,7 @@ struct ProjectSelectorSheet: View {
                     }
                 }
                 .listStyle(.plain)
+                .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search projects...")
             .navigationTitle("Select Project")

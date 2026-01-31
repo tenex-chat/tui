@@ -22,4 +22,7 @@ struct DelegationItem: Identifiable {
 
     /// Timestamp of the delegation (Unix seconds)
     let timestamp: UInt64
+
+    /// Aggregate todo stats for this delegation's subtree
+    var todoStats: AggregateTodoStats?
 }

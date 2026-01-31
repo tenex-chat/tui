@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>iOS Search Mockup</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
+            background: #f2f2f7;
+            min-height: 100vh;
+        }
+
+        .phone-frame {
+            width: 402px;
+            margin: 20px auto;
+            background: white;
+            border-radius: 40px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+
+        .status-bar {
+            height: 54px;
+            background: #f8f8f8;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 8px;
+        }
+
+        .dynamic-island {
+            width: 126px;
+            height: 37px;
+            background: black;
+            border-radius: 20px;
+        }
+
+        .header {
+            background: #f8f8f8;
+            padding: 10px 16px 16px;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .cancel-btn {
+            color: #007aff;
+            font-size: 17px;
+        }
+
+        .title {
+            font-size: 17px;
+            font-weight: 600;
+        }
+
+        .spacer {
+            width: 50px;
+        }
+
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background: #e5e5e7;
+            border-radius: 10px;
+            padding: 8px 12px;
+            gap: 8px;
+        }
+
+        .search-icon {
+            color: #8e8e93;
+            font-size: 16px;
+        }
+
+        .search-input {
+            flex: 1;
+            font-size: 17px;
+            color: #000;
+        }
+
+        .clear-btn {
+            width: 18px;
+            height: 18px;
+            background: #8e8e93;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+
+        .results {
+            padding: 0;
+            max-height: 700px;
+            overflow-y: auto;
+        }
+
+        .conversation-group {
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .conversation-header {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            background: #fafafa;
+            gap: 10px;
+        }
+
+        .conversation-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #5856d6, #af52de);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+        }
+
+        .conversation-info {
+            flex: 1;
+        }
+
+        .conversation-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #000;
+        }
+
+        .conversation-project {
+            font-size: 12px;
+            color: #8e8e93;
+            margin-top: 2px;
+        }
+
+        .match-count {
+            font-size: 13px;
+            color: #8e8e93;
+            background: #e5e5e7;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .chevron {
+            color: #c7c7cc;
+            font-size: 14px;
+        }
+
+        .message-list {
+            padding-left: 16px;
+        }
+
+        .message-item {
+            display: flex;
+            padding: 10px 16px 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+            gap: 10px;
+        }
+
+        .message-item:last-child {
+            border-bottom: none;
+        }
+
+        .indent-line {
+            width: 2px;
+            background: #e5e5e7;
+            margin-left: 14px;
+            border-radius: 1px;
+        }
+
+        .message-content {
+            flex: 1;
+        }
+
+        .message-author {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 4px;
+        }
+
+        .author-avatar {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: white;
+        }
+
+        .author-avatar.user {
+            background: linear-gradient(135deg, #34c759, #30d158);
+        }
+
+        .author-avatar.agent {
+            background: linear-gradient(135deg, #007aff, #5ac8fa);
+        }
+
+        .author-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #000;
+        }
+
+        .message-time {
+            font-size: 12px;
+            color: #8e8e93;
+        }
+
+        .message-text {
+            font-size: 14px;
+            color: #3c3c43;
+            line-height: 1.4;
+        }
+
+        .highlight {
+            background: #fff3cd;
+            color: #856404;
+            padding: 1px 4px;
+            border-radius: 3px;
+            font-weight: 500;
+        }
+
+        .tab-bar {
+            display: flex;
+            justify-content: space-around;
+            padding: 8px 0 30px;
+            background: #f8f8f8;
+            border-top: 1px solid #e5e5e5;
+        }
+
+        .tab-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            color: #8e8e93;
+            font-size: 10px;
+        }
+
+        .tab-item.active {
+            color: #007aff;
+        }
+
+        .tab-icon {
+            font-size: 22px;
+        }
+
+        /* Comparison labels */
+        .comparison {
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+
+        .comparison h1 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            align-items: start;
+        }
+
+        .comparison-item {
+            text-align: center;
+        }
+
+        .comparison-item h2 {
+            margin-bottom: 15px;
+            color: #666;
+            font-size: 18px;
+        }
+
+        .improvements {
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .improvements h2 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .improvements ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .improvements li {
+            padding: 10px 0;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .improvements li:last-child {
+            border-bottom: none;
+        }
+
+        .check {
+            color: #34c759;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="comparison">
+        <h1>iOS Search UI Improvement Mockup</h1>
+
+        <div class="comparison-grid">
+            <div class="comparison-item">
+                <h2>Current (Flat List)</h2>
+                <!-- Current design would go here -->
+            </div>
+
+            <div class="comparison-item">
+                <h2>Proposed (Grouped + Highlighted)</h2>
+            </div>
+        </div>
+    </div>
+
+    <div style="display: flex; justify-content: center;">
+        <div class="phone-frame">
+            <div class="status-bar">
+                <div class="dynamic-island"></div>
+            </div>
+
+            <div class="header">
+                <div class="header-top">
+                    <span class="cancel-btn">Cancel</span>
+                    <span class="title">Search</span>
+                    <span class="spacer"></span>
+                </div>
+                <div class="search-bar">
+                    <span class="search-icon">🔍</span>
+                    <span class="search-input">Another</span>
+                    <div class="clear-btn">×</div>
+                </div>
+            </div>
+
+            <div class="results">
+                <!-- Conversation Group 1 -->
+                <div class="conversation-group">
+                    <div class="conversation-header">
+                        <div class="conversation-icon">💬</div>
+                        <div class="conversation-info">
+                            <div class="conversation-title">Testing Conversation</div>
+                            <div class="conversation-project">DDD</div>
+                        </div>
+                        <span class="match-count">2 matches</span>
+                        <span class="chevron">›</span>
+                    </div>
+                    <div class="message-list">
+                        <div class="message-item">
+                            <div class="indent-line"></div>
+                            <div class="message-content">
+                                <div class="message-author">
+                                    <div class="author-avatar user">👤</div>
+                                    <span class="author-name">Pablo Testing Pubkey</span>
+                                    <span class="message-time">1d ago</span>
+                                </div>
+                                <div class="message-text">
+                                    <span class="highlight">another</span> test
+                                </div>
+                            </div>
+                        </div>
+                        <div class="message-item">
+                            <div class="indent-line"></div>
+                            <div class="message-content">
+                                <div class="message-author">
+                                    <div class="author-avatar agent">✨</div>
+                                    <span class="author-name">Transparent</span>
+                                    <span class="message-time">1d ago</span>
+                                </div>
+                                <div class="message-text">
+                                    Ah, <span class="highlight">another</span> test! The thrill of it all is just overwhelming. I'm on the edge of my seat here...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversation Group 2 -->
+                <div class="conversation-group">
+                    <div class="conversation-header">
+                        <div class="conversation-icon">💬</div>
+                        <div class="conversation-info">
+                            <div class="conversation-title">iOS Conversation Detail Testing</div>
+                            <div class="conversation-project">TENEX TUI Client</div>
+                        </div>
+                        <span class="match-count">1 match</span>
+                        <span class="chevron">›</span>
+                    </div>
+                    <div class="message-list">
+                        <div class="message-item">
+                            <div class="indent-line"></div>
+                            <div class="message-content">
+                                <div class="message-author">
+                                    <div class="author-avatar agent">✨</div>
+                                    <span class="author-name">iOS Tester</span>
+                                    <span class="message-time">2d ago</span>
+                                </div>
+                                <div class="message-text">
+                                    Good! Now let me try a more robust approach using Python and `pyautogui` or <span class="highlight">another</span> automation tool...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversation Group 3 -->
+                <div class="conversation-group">
+                    <div class="conversation-header">
+                        <div class="conversation-icon">💬</div>
+                        <div class="conversation-info">
+                            <div class="conversation-title">Clean Master Branch Restoration</div>
+                            <div class="conversation-project">TENEX TUI Client</div>
+                        </div>
+                        <span class="match-count">1 match</span>
+                        <span class="chevron">›</span>
+                    </div>
+                    <div class="message-list">
+                        <div class="message-item">
+                            <div class="indent-line"></div>
+                            <div class="message-content">
+                                <div class="message-author">
+                                    <div class="author-avatar agent">✨</div>
+                                    <span class="author-name">Claude Code</span>
+                                    <span class="message-time">3d ago</span>
+                                </div>
+                                <div class="message-text">
+                                    Interesting! There was <span class="highlight">another</span> merge commit (`32d7e75`) created that I didn't see before...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Conversation Group 4 -->
+                <div class="conversation-group">
+                    <div class="conversation-header">
+                        <div class="conversation-icon">💬</div>
+                        <div class="conversation-info">
+                            <div class="conversation-title">iOS App Data Subscription Issue</div>
+                            <div class="conversation-project">TENEX TUI Client</div>
+                        </div>
+                        <span class="match-count">2 matches</span>
+                        <span class="chevron">›</span>
+                    </div>
+                    <div class="message-list">
+                        <div class="message-item">
+                            <div class="indent-line"></div>
+                            <div class="message-content">
+                                <div class="message-author">
+                                    <div class="author-avatar agent">✨</div>
+                                    <span class="author-name">Claude Code</span>
+                                    <span class="message-time">4d ago</span>
+                                </div>
+                                <div class="message-text">
+                                    Now I see a critical difference: <span class="highlight">another</span> subscription pattern is being used...
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-bar">
+                <div class="tab-item">
+                    <span class="tab-icon">💬</span>
+                    <span>Chats</span>
+                </div>
+                <div class="tab-item">
+                    <span class="tab-icon">📁</span>
+                    <span>Projects</span>
+                </div>
+                <div class="tab-item">
+                    <span class="tab-icon">📥</span>
+                    <span>Inbox</span>
+                </div>
+                <div class="tab-item active">
+                    <span class="tab-icon">🔍</span>
+                    <span>Search</span>
+                </div>
+                <div class="tab-item">
+                    <span class="tab-icon">➕</span>
+                    <span>New</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="improvements">
+        <h2>Key Improvements</h2>
+        <ul>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Grouped by Conversation</strong><br>
+                    Results are grouped under their parent conversation, making it easy to see context
+                </div>
+            </li>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Highlighted Matching Text</strong><br>
+                    The search term is visually highlighted with a yellow background
+                </div>
+            </li>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Shows Conversation Name</strong><br>
+                    Each group shows the actual conversation title, not just "In conversation"
+                </div>
+            </li>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Project Context</strong><br>
+                    Shows which project each conversation belongs to
+                </div>
+            </li>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Match Count</strong><br>
+                    Shows how many matches exist in each conversation
+                </div>
+            </li>
+            <li>
+                <span class="check">✓</span>
+                <div>
+                    <strong>Visual Hierarchy</strong><br>
+                    Indent lines and nested layout clearly show the relationship between conversations and messages
+                </div>
+            </li>
+        </ul>
+    </div>
+</body>
+</html>

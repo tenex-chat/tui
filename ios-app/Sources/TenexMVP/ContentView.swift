@@ -71,24 +71,24 @@ struct ContentView: View {
     private func logout() {
         isLoggingOut = true
 
-        DispatchQueue.global(qos: .userInitiated).async {
+        Task.detached(priority: .userInitiated) {
             // First perform core logout - only clear credentials if logout succeeds
             do {
-                try coreManager.core.logout()
+                try await coreManager.safeCore.logout()
 
                 // Logout succeeded - now clear credentials from keychain
-                let clearError = coreManager.clearCredentials()
+                let clearError = await coreManager.clearCredentials()
                 if let error = clearError {
                     // Log warning but don't fail - logout already succeeded
                     print("[TENEX] Warning: Failed to clear credentials after logout: \(error)")
                 }
 
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.isLoggingOut = false
                     self.isLoggedIn = false
                 }
             } catch TenexError.LogoutFailed(let message) {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.isLoggingOut = false
                     // Keep isLoggedIn = true to stay synced with core state (still connected)
                     // DO NOT clear credentials - user is still logged in
@@ -97,7 +97,7 @@ struct ContentView: View {
                     self.showLogoutError = true
                 }
             } catch {
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.isLoggingOut = false
                     // For other unexpected errors, also keep state synced
                     // DO NOT clear credentials - user may still be logged in

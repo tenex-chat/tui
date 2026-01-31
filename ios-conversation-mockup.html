@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TENEX iOS Conversation View - Slack Style Mockup</title>
+    <style>
+        :root {
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2a2a2a;
+            --bg-card: #333333;
+            --bg-code: #0d1117;
+            --text-primary: #ffffff;
+            --text-secondary: #888888;
+            --text-muted: #666666;
+            --accent-primary: #7c3aed;
+            --accent-success: #22c55e;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            --border-color: #404040;
+            --agent-color-1: #f472b6;
+            --agent-color-2: #60a5fa;
+            --agent-color-3: #34d399;
+            --user-color: #a78bfa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.5;
+            padding: 20px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: var(--accent-primary);
+            margin-bottom: 8px;
+            font-size: 24px;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .section-title {
+            color: var(--accent-warning);
+            font-size: 18px;
+            margin: 32px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .explanation {
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--accent-info);
+            padding: 12px 16px;
+            margin: 16px 0;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .explanation strong {
+            color: var(--accent-info);
+        }
+
+        /* ========================================
+           MESSAGE LAYOUT (Slack-style)
+           ======================================== */
+
+        .message {
+            display: flex;
+            gap: 12px;
+            padding: 8px 0;
+        }
+
+        .message + .message {
+            border-top: none;
+        }
+
+        .message.consecutive {
+            padding-top: 2px;
+        }
+
+        .avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 8px;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            color: white;
+        }
+
+        .avatar.placeholder {
+            visibility: hidden;
+        }
+
+        .message-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+
+        .author-name {
+            font-weight: 600;
+            font-size: 15px;
+        }
+
+        .timestamp {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .message-body {
+            font-size: 15px;
+            color: var(--text-primary);
+        }
+
+        /* ========================================
+           MARKDOWN RENDERING
+           ======================================== */
+
+        .message-body p {
+            margin-bottom: 8px;
+        }
+
+        .message-body p:last-child {
+            margin-bottom: 0;
+        }
+
+        .message-body code {
+            background: var(--bg-code);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            color: var(--accent-success);
+        }
+
+        .message-body pre {
+            background: var(--bg-code);
+            padding: 12px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 8px 0;
+        }
+
+        .message-body pre code {
+            background: none;
+            padding: 0;
+            font-size: 13px;
+        }
+
+        .message-body strong {
+            font-weight: 600;
+        }
+
+        .message-body em {
+            font-style: italic;
+            color: var(--text-secondary);
+        }
+
+        .message-body a {
+            color: var(--accent-info);
+            text-decoration: underline;
+        }
+
+        .message-body ul, .message-body ol {
+            margin: 8px 0;
+            padding-left: 24px;
+        }
+
+        .message-body blockquote {
+            border-left: 3px solid var(--border-color);
+            padding-left: 12px;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin: 8px 0;
+        }
+
+        /* ========================================
+           TOOL CALL RENDERING (Compact single-line)
+           ======================================== */
+
+        .tool-call {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 14px;
+            color: var(--text-muted);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .tool-icon {
+            font-size: 14px;
+            width: 20px;
+            text-align: center;
+        }
+
+        .tool-target {
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tool-call.bash .tool-target {
+            color: var(--accent-success);
+        }
+
+        /* ========================================
+           DELEGATION CARD (Q-tagged delegation)
+           ======================================== */
+
+        .delegation-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            cursor: pointer;
+        }
+
+        .delegation-card:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .delegation-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .delegation-title {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        .delegation-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .delegation-agents {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .agent-from {
+            color: var(--text-secondary);
+        }
+
+        .agent-arrow {
+            color: var(--text-muted);
+        }
+
+        .agent-to {
+            color: var(--accent-primary);
+            font-weight: 500;
+        }
+
+        .delegation-meta {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            font-size: 12px;
+        }
+
+        .status-badge {
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .status-badge.done {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--accent-success);
+        }
+
+        .status-badge.pending {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--accent-warning);
+        }
+
+        .status-badge.working {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--accent-info);
+        }
+
+        .branch-name {
+            color: var(--text-muted);
+            font-family: 'SF Mono', Monaco, monospace;
+        }
+
+        .delegation-activity {
+            font-size: 13px;
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-top: 8px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* ========================================
+           ASK EVENT - UNANSWERED
+           ======================================== */
+
+        .ask-card {
+            background: var(--bg-card);
+            border: 1px solid var(--accent-warning);
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+
+        .ask-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .ask-icon {
+            font-size: 16px;
+        }
+
+        .ask-agent {
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .ask-title {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .ask-context {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            padding: 8px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }
+
+        .ask-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .ask-tab {
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+        }
+
+        .ask-tab.current {
+            background: var(--accent-warning);
+            color: var(--bg-primary);
+            font-weight: 500;
+        }
+
+        .ask-tab.answered {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--accent-success);
+        }
+
+        .ask-question {
+            font-size: 15px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .ask-options {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .ask-option {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            cursor: pointer;
+            border: 1px solid transparent;
+        }
+
+        .ask-option:hover {
+            border-color: var(--accent-primary);
+        }
+
+        .ask-option.selected {
+            border-color: var(--accent-success);
+            background: rgba(34, 197, 94, 0.1);
+        }
+
+        .option-number {
+            font-weight: 600;
+            color: var(--accent-primary);
+            font-size: 14px;
+            width: 20px;
+        }
+
+        .option-content {
+            flex: 1;
+        }
+
+        .option-label {
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .option-description {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .ask-custom-input {
+            margin-top: 12px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .ask-custom-input input {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 12px;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .ask-custom-input input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        /* ========================================
+           ASK EVENT - ANSWERED
+           ======================================== */
+
+        .ask-card.answered {
+            border-color: var(--accent-success);
+        }
+
+        .ask-response {
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            padding: 12px;
+            margin-top: 12px;
+        }
+
+        .ask-response-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--accent-success);
+            margin-bottom: 8px;
+        }
+
+        .ask-response-content {
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+
+        /* ========================================
+           REASONING/THINKING MESSAGES
+           ======================================== */
+
+        .message.reasoning .message-body {
+            color: var(--text-muted);
+            font-style: italic;
+            font-size: 13px;
+        }
+
+        .reasoning-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+
+        /* ========================================
+           STREAMING INDICATOR
+           ======================================== */
+
+        .streaming-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 12px;
+            color: var(--accent-info);
+            margin-left: 8px;
+        }
+
+        .streaming-dot {
+            width: 6px;
+            height: 6px;
+            background: var(--accent-info);
+            border-radius: 50%;
+            animation: pulse 1s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+
+        .cursor {
+            display: inline-block;
+            width: 2px;
+            height: 1em;
+            background: var(--accent-primary);
+            animation: blink 1s step-end infinite;
+            margin-left: 2px;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* ========================================
+           MULTI-SELECT OPTIONS (CHECKBOXES)
+           ======================================== */
+
+        .checkbox {
+            width: 18px;
+            height: 18px;
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .checkbox.checked {
+            background: var(--accent-success);
+            border-color: var(--accent-success);
+            color: white;
+        }
+
+        /* ========================================
+           TOOL CALL RESULT (COLLAPSED)
+           ======================================== */
+
+        .tool-result {
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin: 4px 0;
+            font-size: 13px;
+        }
+
+        .tool-result-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+
+        .tool-result-icon {
+            color: var(--accent-success);
+        }
+
+        .tool-result-summary {
+            color: var(--text-secondary);
+            flex: 1;
+        }
+
+        .tool-result-expand {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        /* ========================================
+           TODO WRITE COLLAPSED VIEW
+           ======================================== */
+
+        .todo-summary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 0;
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        .todo-count {
+            background: var(--bg-card);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        /* Demo spacing */
+        .demo-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>TENEX iOS Conversation View</h1>
+    <p class="subtitle">Slack-style message rendering with inline components</p>
+
+    <!-- ========================================
+         SECTION 1: BASIC MESSAGE LAYOUT
+         ======================================== -->
+
+    <h2 class="section-title">1. Basic Message Layout (Slack-style)</h2>
+
+    <div class="explanation">
+        <strong>Key differences from iMessage:</strong>
+        <ul>
+            <li>All messages left-aligned (not left/right based on sender)</li>
+            <li>Avatar always on left side</li>
+            <li>Author name + timestamp in header</li>
+            <li>Author name colored by pubkey (each agent gets unique color)</li>
+            <li>Consecutive messages from same author hide avatar/header</li>
+        </ul>
+    </div>
+
+    <div class="explanation">
+        <strong>Consecutive Message Logic (from grouping.rs):</strong>
+        <ul>
+            <li><code>is_consecutive</code>: True if <strong>previous</strong> item has the same pubkey</li>
+            <li><code>has_next_consecutive</code>: True if <strong>next</strong> item has the same pubkey</li>
+            <li>When <code>is_consecutive=true</code>: Hide avatar and header (show only content)</li>
+            <li>Avatar placeholder maintains alignment when hidden</li>
+            <li>This applies to both SingleMessage and DelegationPreview items</li>
+        </ul>
+        <strong>Algorithm:</strong>
+        <ol>
+            <li>Collect pubkeys from all display items (messages + q-tag previews)</li>
+            <li>For each item, compare pubkey with previous and next neighbors</li>
+            <li>Set flags accordingly for rendering decisions</li>
+        </ol>
+    </div>
+
+    <div class="demo-section">
+        <!-- First message from user -->
+        <div class="message">
+            <div class="avatar" style="background: var(--user-color);">P</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--user-color);">Pablo</span>
+                    <span class="timestamp">10:32 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>Can you help me refactor the authentication module?</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Response from Claude -->
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:32 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>I'll analyze the current authentication structure. Let me check the relevant files.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Consecutive message (same author) -->
+        <div class="message consecutive">
+            <div class="avatar placeholder"></div>
+            <div class="message-content">
+                <div class="message-body">
+                    <p>Found the main auth module at <code>src/auth/index.ts</code>. Here's what I recommend:</p>
+                    <ul>
+                        <li>Extract JWT validation into a separate service</li>
+                        <li>Move session management to Redis</li>
+                        <li>Add proper error handling</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 2: TOOL CALL RENDERING
+         ======================================== -->
+
+    <h2 class="section-title">2. Tool Call Rendering (Compact)</h2>
+
+    <div class="explanation">
+        <strong>Tool rendering algorithm:</strong>
+        <ul>
+            <li><strong>Bash:</strong> <code>$ {command}</code></li>
+            <li><strong>Read:</strong> <code>📖 {file_path}</code></li>
+            <li><strong>Write/Edit:</strong> <code>✏️ {file_path}</code></li>
+            <li><strong>Glob/Grep/Search:</strong> <code>🔍 {pattern}</code></li>
+            <li><strong>Task/Agent:</strong> <code>▶ {description}</code></li>
+            <li><strong>Todo_write:</strong> <code>▸ {count} tasks</code> (collapsed)</li>
+            <li><strong>Ask:</strong> <code>❓ "{title}" [questions...]</code></li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:33 AM</span>
+                </div>
+
+                <!-- Tool calls rendered compactly -->
+                <div class="tool-call">
+                    <span class="tool-icon">📖</span>
+                    <span class="tool-target">src/auth/index.ts</span>
+                </div>
+                <div class="tool-call">
+                    <span class="tool-icon">📖</span>
+                    <span class="tool-target">src/auth/jwt.ts</span>
+                </div>
+                <div class="tool-call">
+                    <span class="tool-icon">🔍</span>
+                    <span class="tool-target">**/*.ts → "validateToken"</span>
+                </div>
+                <div class="tool-call bash">
+                    <span class="tool-icon">$</span>
+                    <span class="tool-target">npm test -- --grep "auth"</span>
+                </div>
+                <div class="tool-call">
+                    <span class="tool-icon">✏️</span>
+                    <span class="tool-target">src/auth/session.ts</span>
+                </div>
+                <div class="tool-call">
+                    <span class="tool-icon">▶</span>
+                    <span class="tool-target">Analyze error handling patterns</span>
+                </div>
+
+                <!-- Todo write collapsed -->
+                <div class="todo-summary">
+                    <span class="tool-icon">▸</span>
+                    <span>Updated todos</span>
+                    <span class="todo-count">4 tasks</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 3: DELEGATION CARD (Q-TAGGED)
+         ======================================== -->
+
+    <h2 class="section-title">3. Inline Delegation (Q-tagged)</h2>
+
+    <div class="explanation">
+        <strong>Q-tag rendering logic:</strong>
+        <ol>
+            <li>Message has q-tags AND passes <code>should_render_q_tags()</code> check</li>
+            <li>Fetch the q-tagged event from store</li>
+            <li>If it's an ask event → render Ask UI (see section 4)</li>
+            <li>Otherwise → render Delegation card</li>
+        </ol>
+        <strong>Denylist (skip q-tag rendering):</strong> report_write, report_read, report_delete, lesson_learn, lesson_get
+    </div>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:34 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>I'm delegating the database migration to a specialized agent.</p>
+                </div>
+
+                <!-- Inline delegation card -->
+                <div class="delegation-card">
+                    <div class="delegation-header">
+                        <span class="delegation-title">Migrate user table to new schema</span>
+                        <span class="delegation-hint">Tap to open →</span>
+                    </div>
+                    <div class="delegation-agents">
+                        <span class="agent-from">@claude</span>
+                        <span class="agent-arrow">→</span>
+                        <span class="agent-to">@db-specialist</span>
+                    </div>
+                    <div class="delegation-meta">
+                        <span class="status-badge working">Working</span>
+                        <span class="branch-name">feature/user-migration</span>
+                    </div>
+                    <div class="delegation-activity">Running database schema validation...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Completed delegation example -->
+        <div class="message">
+            <div class="avatar placeholder"></div>
+            <div class="message-content">
+                <div class="delegation-card">
+                    <div class="delegation-header">
+                        <span class="delegation-title">Add unit tests for JWT validation</span>
+                        <span class="delegation-hint">Tap to open →</span>
+                    </div>
+                    <div class="delegation-agents">
+                        <span class="agent-from">@claude</span>
+                        <span class="agent-arrow">→</span>
+                        <span class="agent-to">@test-writer</span>
+                    </div>
+                    <div class="delegation-meta">
+                        <span class="status-badge done">Done</span>
+                        <span class="branch-name">feature/auth-tests</span>
+                    </div>
+                    <div class="delegation-activity">Added 12 test cases, all passing ✓</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 4: ASK EVENT - UNANSWERED
+         ======================================== -->
+
+    <h2 class="section-title">4. Ask Event - Unanswered (Interactive)</h2>
+
+    <div class="explanation">
+        <strong>Ask event structure:</strong>
+        <ul>
+            <li><strong>title:</strong> Short description of what's being asked</li>
+            <li><strong>context:</strong> Markdown content providing background</li>
+            <li><strong>questions:</strong> Array of questions, each with options</li>
+        </ul>
+        <strong>UI elements:</strong>
+        <ul>
+            <li>Tabs for multiple questions (green=answered, orange=current, gray=pending)</li>
+            <li>Options with labels + descriptions</li>
+            <li>Multi-select uses checkboxes</li>
+            <li>"Other" option for custom input</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-2);">D</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-2);">db-specialist</span>
+                    <span class="timestamp">10:35 AM</span>
+                </div>
+
+                <!-- Ask event card - unanswered -->
+                <div class="ask-card">
+                    <div class="ask-header">
+                        <span class="ask-icon">❓</span>
+                        <span class="ask-agent">@pablo</span>
+                        <span class="ask-title">Database Migration Strategy</span>
+                    </div>
+
+                    <div class="ask-context">
+                        I found that the users table has 2.3M rows. The migration could be done in different ways depending on your tolerance for downtime.
+                    </div>
+
+                    <!-- Question tabs (for multi-question asks) -->
+                    <div class="ask-tabs">
+                        <div class="ask-tab answered">Downtime</div>
+                        <div class="ask-tab current">Backup</div>
+                        <div class="ask-tab">Rollback</div>
+                    </div>
+
+                    <div class="ask-question">How should we handle backups during migration?</div>
+
+                    <div class="ask-options">
+                        <div class="ask-option">
+                            <span class="option-number">1</span>
+                            <div class="option-content">
+                                <div class="option-label">Full backup before start (Recommended)</div>
+                                <div class="option-description">Creates a complete snapshot, takes ~15 minutes</div>
+                            </div>
+                        </div>
+                        <div class="ask-option selected">
+                            <span class="option-number">2</span>
+                            <div class="option-content">
+                                <div class="option-label">Incremental backup with WAL</div>
+                                <div class="option-description">Faster but requires more storage</div>
+                            </div>
+                        </div>
+                        <div class="ask-option">
+                            <span class="option-number">3</span>
+                            <div class="option-content">
+                                <div class="option-label">No backup (risky)</div>
+                                <div class="option-description">Skip backup entirely, fastest but no recovery option</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ask-custom-input">
+                        <input type="text" placeholder="Or type a custom response...">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 5: ASK EVENT - MULTI-SELECT
+         ======================================== -->
+
+    <h2 class="section-title">5. Ask Event - Multi-Select</h2>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:36 AM</span>
+                </div>
+
+                <div class="ask-card">
+                    <div class="ask-header">
+                        <span class="ask-icon">❓</span>
+                        <span class="ask-agent">@pablo</span>
+                        <span class="ask-title">Feature Selection</span>
+                    </div>
+
+                    <div class="ask-question">Which features should we implement? (Select all that apply)</div>
+
+                    <div class="ask-options">
+                        <div class="ask-option selected">
+                            <div class="checkbox checked">✓</div>
+                            <div class="option-content">
+                                <div class="option-label">OAuth integration</div>
+                                <div class="option-description">Google, GitHub, Apple Sign-In</div>
+                            </div>
+                        </div>
+                        <div class="ask-option selected">
+                            <div class="checkbox checked">✓</div>
+                            <div class="option-content">
+                                <div class="option-label">Two-factor authentication</div>
+                                <div class="option-description">TOTP and SMS verification</div>
+                            </div>
+                        </div>
+                        <div class="ask-option">
+                            <div class="checkbox"></div>
+                            <div class="option-content">
+                                <div class="option-label">Passkey support</div>
+                                <div class="option-description">WebAuthn/FIDO2 passwordless login</div>
+                            </div>
+                        </div>
+                        <div class="ask-option">
+                            <div class="checkbox"></div>
+                            <div class="option-content">
+                                <div class="option-label">Enterprise SSO</div>
+                                <div class="option-description">SAML 2.0 integration</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 6: ASK EVENT - ANSWERED
+         ======================================== -->
+
+    <h2 class="section-title">6. Ask Event - Answered</h2>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-2);">D</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-2);">db-specialist</span>
+                    <span class="timestamp">10:35 AM</span>
+                </div>
+
+                <!-- Answered ask event -->
+                <div class="ask-card answered">
+                    <div class="ask-header">
+                        <span class="ask-icon">✓</span>
+                        <span class="ask-agent">@pablo</span>
+                        <span class="ask-title">Database Migration Strategy</span>
+                    </div>
+
+                    <div class="ask-context">
+                        I found that the users table has 2.3M rows. The migration could be done in different ways depending on your tolerance for downtime.
+                    </div>
+
+                    <div class="ask-response">
+                        <div class="ask-response-header">
+                            <span>✓</span>
+                            <span>Response submitted</span>
+                        </div>
+                        <div class="ask-response-content">
+                            <strong>Downtime:</strong> Zero-downtime migration<br>
+                            <strong>Backup:</strong> Incremental backup with WAL<br>
+                            <strong>Rollback:</strong> Keep shadow table for 7 days
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 7: REASONING/THINKING MESSAGES
+         ======================================== -->
+
+    <h2 class="section-title">7. Reasoning/Thinking Messages</h2>
+
+    <div class="explanation">
+        <strong>Rendering rules:</strong>
+        <ul>
+            <li>Muted color + italic style</li>
+            <li>No background</li>
+            <li>"(thinking)" label</li>
+            <li>Usually collapsed/hidden by default, expandable</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <div class="message reasoning">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:37 AM</span>
+                </div>
+                <div class="reasoning-label">(thinking)</div>
+                <div class="message-body">
+                    Let me analyze the authentication flow. The user is asking about refactoring, so I should first understand the current structure. I'll need to check the jwt.ts file and look for any security issues...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 8: STREAMING MESSAGE
+         ======================================== -->
+
+    <h2 class="section-title">8. Streaming Message</h2>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="streaming-indicator">
+                        <span class="streaming-dot"></span>
+                        streaming
+                    </span>
+                </div>
+                <div class="message-body">
+                    <p>I've analyzed the authentication module and here are my recommendations:</p>
+                    <p>First, we should extract the JWT validation logic into<span class="cursor"></span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 9: MARKDOWN RENDERING EXAMPLES
+         ======================================== -->
+
+    <h2 class="section-title">9. Markdown Rendering Examples</h2>
+
+    <div class="demo-section">
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:38 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>Here's a code example:</p>
+                    <pre><code>async function validateToken(token: string): Promise&lt;User&gt; {
+    const decoded = jwt.verify(token, SECRET);
+    return await User.findById(decoded.userId);
+}</code></pre>
+
+                    <p>Key points to note:</p>
+                    <ul>
+                        <li>The <code>jwt.verify()</code> call can throw</li>
+                        <li>We should add proper <strong>error handling</strong></li>
+                        <li>Consider using <em>refresh tokens</em></li>
+                    </ul>
+
+                    <blockquote>
+                        Important: Never store JWTs in localStorage for production apps.
+                    </blockquote>
+
+                    <p>See the <a href="#">JWT Best Practices</a> guide for more details.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================================
+         SECTION 10: COMPLETE CONVERSATION FLOW
+         ======================================== -->
+
+    <h2 class="section-title">10. Complete Conversation Flow</h2>
+
+    <div class="explanation">
+        <strong>This shows a realistic conversation with:</strong>
+        <ul>
+            <li>User message</li>
+            <li>Agent response with tool calls</li>
+            <li>Inline delegation</li>
+            <li>Ask event interaction</li>
+            <li>Final summary</li>
+        </ul>
+    </div>
+
+    <div class="demo-section">
+        <!-- User request -->
+        <div class="message">
+            <div class="avatar" style="background: var(--user-color);">P</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--user-color);">Pablo</span>
+                    <span class="timestamp">10:40 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>Deploy the new authentication system to production</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Claude analyzing -->
+        <div class="message">
+            <div class="avatar" style="background: var(--agent-color-1);">C</div>
+            <div class="message-content">
+                <div class="message-header">
+                    <span class="author-name" style="color: var(--agent-color-1);">Claude</span>
+                    <span class="timestamp">10:40 AM</span>
+                </div>
+                <div class="message-body">
+                    <p>I'll prepare the deployment. Let me check the current state first.</p>
+                </div>
+
+                <!-- Tool calls -->
+                <div class="tool-call bash">
+                    <span class="tool-icon">$</span>
+                    <span class="tool-target">git status</span>
+                </div>
+                <div class="tool-call bash">
+                    <span class="tool-icon">$</span>
+                    <span class="tool-target">npm run test:ci</span>
+                </div>
+                <div class="tool-call">
+                    <span class="tool-icon">📖</span>
+                    <span class="tool-target">deploy/production.yaml</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Ask event for confirmation -->
+        <div class="message">
+            <div class="avatar placeholder"></div>
+            <div class="message-content">
+                <div class="ask-card">
+                    <div class="ask-header">
+                        <span class="ask-icon">❓</span>
+                        <span class="ask-agent">@pablo</span>
+                        <span class="ask-title">Deployment Confirmation</span>
+                    </div>
+
+                    <div class="ask-context">
+                        All tests pass. Ready to deploy <code>v2.3.0</code> to production. This will affect 12K active users.
+                    </div>
+
+                    <div class="ask-question">How should we proceed with the deployment?</div>
+
+                    <div class="ask-options">
+                        <div class="ask-option">
+                            <span class="option-number">1</span>
+                            <div class="option-content">
+                                <div class="option-label">Blue-green deployment (Recommended)</div>
+                                <div class="option-description">Zero downtime, instant rollback capability</div>
+                            </div>
+                        </div>
+                        <div class="ask-option">
+                            <span class="option-number">2</span>
+                            <div class="option-content">
+                                <div class="option-label">Canary release (10% → 50% → 100%)</div>
+                                <div class="option-description">Gradual rollout over 2 hours</div>
+                            </div>
+                        </div>
+                        <div class="ask-option">
+                            <span class="option-number">3</span>
+                            <div class="option-content">
+                                <div class="option-label">Direct deployment</div>
+                                <div class="option-description">Fastest but ~30s downtime</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Delegation to deployment agent -->
+        <div class="message">
+            <div class="avatar placeholder"></div>
+            <div class="message-content">
+                <div class="delegation-card">
+                    <div class="delegation-header">
+                        <span class="delegation-title">Execute blue-green deployment</span>
+                        <span class="delegation-hint">Tap to open →</span>
+                    </div>
+                    <div class="delegation-agents">
+                        <span class="agent-from">@claude</span>
+                        <span class="agent-arrow">→</span>
+                        <span class="agent-to">@deploy-agent</span>
+                    </div>
+                    <div class="delegation-meta">
+                        <span class="status-badge done">Done</span>
+                        <span class="branch-name">release/v2.3.0</span>
+                    </div>
+                    <div class="delegation-activity">Deployment complete. Green environment active.</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Final summary -->
+        <div class="message">
+            <div class="avatar placeholder"></div>
+            <div class="message-content">
+                <div class="message-body">
+                    <p>✅ <strong>Deployment complete!</strong></p>
+                    <ul>
+                        <li>Version: <code>v2.3.0</code></li>
+                        <li>Strategy: Blue-green</li>
+                        <li>Downtime: 0s</li>
+                        <li>Health checks: All passing</li>
+                    </ul>
+                    <p>The new authentication system is now live.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

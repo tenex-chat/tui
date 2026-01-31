@@ -17,7 +17,9 @@ let project = Project(
                     "UIColorName": "",
                     "UIImageName": ""
                 ],
-                "CFBundleDisplayName": "TENEX MVP"
+                "CFBundleDisplayName": "TENEX MVP",
+                "NSMicrophoneUsageDescription": "TENEX needs microphone access for voice dictation",
+                "NSSpeechRecognitionUsageDescription": "TENEX uses speech recognition for voice-to-text dictation"
             ]),
             sources: ["Sources/TenexMVP/**/*.swift"],
             resources: ["Sources/TenexMVP/Resources/**"],
