@@ -31,5 +31,9 @@ uniffi = { workspace = true, features = ["cli"] }
 name = "uniffi-bindgen"
 path = "src/bin/uniffi-bindgen.rs"
 
+[[bin]]
+name = "test_negentropy"
+path = "src/bin/test_negentropy.rs"
+
 [dev-dependencies]
 tempfile.workspace = true
