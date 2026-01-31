@@ -1662,7 +1662,9 @@ impl NostrWorker {
 }
 
 /// Run negentropy sync loop with adaptive timing
-/// Syncs non-ephemeral kinds: 31933, 4199, 513, 4129, 4201, and kind:1 messages
+/// Syncs project-scoped kinds: 31933 (projects), 513 (conversation metadata),
+/// 1 (messages), and 30023 (long-form content).
+/// Global event types (4199, 4129, 4200, 4201) are handled via real-time subscriptions only.
 async fn run_negentropy_sync(
     client: Client,
     ndb: Arc<Ndb>,
