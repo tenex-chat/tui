@@ -22,32 +22,32 @@ struct ConversationDetailView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            contentView
-                .navigationTitle(conversation.title)
-                .navigationBarTitleDisplayMode(.large)
-                .task {
-                    await initializeAndLoad()
-                }
-                .refreshable {
-                    await viewModel.loadData()
-                }
-                .sheet(item: $selectedDelegation) { delegation in
-                    if let childConv = viewModel.childConversation(for: delegation.conversationId) {
+        contentView
+            .navigationTitle(conversation.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .task {
+                await initializeAndLoad()
+            }
+            .refreshable {
+                await viewModel.loadData()
+            }
+            .sheet(item: $selectedDelegation) { delegation in
+                if let childConv = viewModel.childConversation(for: delegation.conversationId) {
+                    NavigationStack {
                         ConversationDetailView(conversation: childConv)
                             .environmentObject(coreManager)
-                    } else {
-                        DelegationPreviewSheet(delegation: delegation)
                     }
+                } else {
+                    DelegationPreviewSheet(delegation: delegation)
                 }
-                .sheet(isPresented: $showFullConversation) {
-                    FullConversationSheet(
-                        conversation: conversation,
-                        messages: viewModel.messages
-                    )
-                    .environmentObject(coreManager)
-                }
-        }
+            }
+            .sheet(isPresented: $showFullConversation) {
+                FullConversationSheet(
+                    conversation: conversation,
+                    messages: viewModel.messages
+                )
+                .environmentObject(coreManager)
+            }
     }
 
     @ViewBuilder
@@ -171,11 +171,17 @@ struct ConversationDetailView: View {
 
     private var todoListSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Header
-            Text("Todos (\(viewModel.todoState.completedCount)/\(viewModel.todoState.items.count))")
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 20)
+            // Header with progress indicator
+            HStack {
+                Text("Todos")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                TodoProgressView(stats: viewModel.aggregatedTodoStats)
+            }
+            .padding(.horizontal, 20)
 
             // Todo items
             VStack(spacing: 8) {
@@ -275,13 +281,6 @@ struct TodoRowView: View {
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if let description = todo.description, !description.isEmpty {
-                    Text(description)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
                 if let skipReason = todo.skipReason, !skipReason.isEmpty {
                     Text("Skipped: \(skipReason)")
                         .font(.caption)
@@ -291,6 +290,86 @@ struct TodoRowView: View {
             }
 
             Spacer()
+        }
+    }
+}
+
+// MARK: - Todo Progress View
+
+/// Shows todo progress as a bar (incomplete) or completion pill (complete)
+struct TodoProgressView: View {
+    let stats: AggregateTodoStats
+
+    var body: some View {
+        if stats.isComplete {
+            // Completion pill
+            TodoCompletionPill(count: stats.totalCount, style: .large)
+        } else {
+            // Progress bar with fraction
+            HStack(spacing: 8) {
+                // Progress bar
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        // Background
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.secondary.opacity(0.2))
+
+                        // Progress
+                        RoundedRectangle(cornerRadius: 4)
+                            .fill(Color.accentColor)
+                            .frame(width: geometry.size.width * CGFloat(stats.completedCount) / CGFloat(max(1, stats.totalCount)))
+                    }
+                }
+                .frame(width: 60, height: 8)
+
+                // Fraction label
+                Text("\(stats.completedCount)/\(stats.totalCount)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        }
+    }
+}
+
+/// Reusable completion pill showing checkmark and count
+struct TodoCompletionPill: View {
+    let count: Int
+    let style: Style
+
+    enum Style {
+        case large  // For section headers
+        case small  // For inline badges
+    }
+
+    var body: some View {
+        HStack(spacing: style == .large ? 4 : 2) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: style == .large ? 12 : 10))
+            Text("\(count)")
+                .font(style == .large ? .caption : .caption2)
+                .fontWeight(style == .large ? .medium : .regular)
+        }
+        .foregroundStyle(.green)
+        .if(style == .large) { view in
+            view
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.green.opacity(0.15))
+                .clipShape(Capsule())
+        }
+    }
+}
+
+// MARK: - View Extension for Conditional Modifiers
+
+extension View {
+    @ViewBuilder
+    func `if`<Content: View>(_ condition: Bool, transform: (Self) -> Content) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
         }
     }
 }
@@ -316,10 +395,17 @@ struct DelegationRowView: View {
                     .fontWeight(.semibold)
 
                 // Preview - caption size (equivalent to text-xs)
-                Text(delegation.messagePreview)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    Text(delegation.messagePreview)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+
+                    // Todo badge if delegation has todos
+                    if let stats = delegation.todoStats {
+                        TodoBadgeView(stats: stats)
+                    }
+                }
             }
 
             Spacer()
@@ -333,6 +419,24 @@ struct DelegationRowView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             onTap()
+        }
+    }
+}
+
+// MARK: - Todo Badge View
+
+/// Small badge showing todo progress for delegations
+struct TodoBadgeView: View {
+    let stats: AggregateTodoStats
+
+    var body: some View {
+        if stats.isComplete {
+            TodoCompletionPill(count: stats.totalCount, style: .small)
+        } else {
+            Text("\(stats.completedCount)/\(stats.totalCount)")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
         }
     }
 }
@@ -373,22 +477,73 @@ struct DelegationPreviewSheet: View {
     }
 }
 
-/// Full conversation chat view sheet
+/// Full conversation chat view sheet with Slack-style messages
 struct FullConversationSheet: View {
     let conversation: ConversationFullInfo
     let messages: [MessageInfo]
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
+    @State private var selectedDelegation: String?
+    @State private var showComposer = false
+
+    /// Compute consecutive message flags for each message
+    private var messagesWithConsecutive: [(message: MessageInfo, isConsecutive: Bool)] {
+        messages.enumerated().map { index, msg in
+            let isConsecutive = index > 0 && messages[index - 1].authorNpub == msg.authorNpub
+            return (msg, isConsecutive)
+        }
+    }
+
+    /// Extract project ID from projectATag
+    private var projectId: String {
+        conversation.projectATag.isEmpty ? conversation.id : conversation.projectATag
+    }
+
+    /// Find the project for this conversation
+    private var project: ProjectInfo? {
+        coreManager.safeCore.getProjects().first { $0.id == conversation.projectATag }
+    }
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
-                    ForEach(messages, id: \.id) { message in
-                        SharedMessageBubble(message: message)
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(messagesWithConsecutive, id: \.message.id) { item in
+                            SlackMessageRow(
+                                message: item.message,
+                                isConsecutive: item.isConsecutive,
+                                conversationId: conversation.id,
+                                projectId: projectId,
+                                onDelegationTap: { delegationId in
+                                    selectedDelegation = delegationId
+                                }
+                            )
+                            .environmentObject(coreManager)
+                        }
                     }
+                    .padding()
+                    .padding(.bottom, 80) // Space for compose button
                 }
-                .padding()
+
+                // Floating compose button
+                Button {
+                    showComposer = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.pencil")
+                        Text("Reply")
+                    }
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(Color.accentColor)
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
+                }
+                .padding(.bottom, 16)
             }
             .navigationTitle("Full Conversation")
             .navigationBarTitleDisplayMode(.inline)
@@ -397,8 +552,75 @@ struct FullConversationSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            .sheet(item: $selectedDelegation) { delegationId in
+                DelegationSheetFromId(delegationId: delegationId)
+                    .environmentObject(coreManager)
+            }
+            .sheet(isPresented: $showComposer) {
+                MessageComposerView(
+                    project: project,
+                    conversationId: conversation.id,
+                    conversationTitle: conversation.title
+                )
+                .environmentObject(coreManager)
+            }
         }
     }
+}
+
+// MARK: - Delegation Sheet From ID
+
+/// Helper view to load and display a delegation conversation by ID
+private struct DelegationSheetFromId: View {
+    let delegationId: String
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var conversation: ConversationFullInfo?
+    @State private var isLoading = true
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isLoading {
+                    ProgressView("Loading...")
+                } else if let conv = conversation {
+                    ConversationDetailView(conversation: conv)
+                        .environmentObject(coreManager)
+                } else {
+                    ContentUnavailableView(
+                        "Conversation Not Found",
+                        systemImage: "doc.questionmark",
+                        description: Text("Unable to load delegation details.")
+                    )
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
+        .task {
+            await loadConversation()
+        }
+    }
+
+    private func loadConversation() async {
+        isLoading = true
+        let convs = await coreManager.safeCore.getConversationsByIds(conversationIds: [delegationId])
+        await MainActor.run {
+            conversation = convs.first
+            isLoading = false
+        }
+    }
+}
+
+// MARK: - String Identifiable for Sheet
+
+extension String: @retroactive Identifiable {
+    public var id: String { self }
 }
 
 // MARK: - ConversationFullInfo Identifiable
