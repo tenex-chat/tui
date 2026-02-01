@@ -214,7 +214,12 @@ struct ProjectRowView: View {
     @State private var isBooting = false
     @State private var bootError: String?
     @State private var showBootError = false
-    @State private var isOnline = false
+
+    /// Reactive online status from TenexCoreManager.
+    /// This is automatically updated when kind:24010 events arrive from any source.
+    private var isOnline: Bool {
+        coreManager.projectOnlineStatus[project.id] ?? false
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -297,9 +302,6 @@ struct ProjectRowView: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
-        .task {
-            await refreshOnlineStatus()
-        }
         .alert("Boot Failed", isPresented: $showBootError) {
             Button("OK") {
                 bootError = nil
@@ -311,15 +313,9 @@ struct ProjectRowView: View {
         }
     }
 
-    /// Refresh the online status from the thread-safe SafeTenexCore actor
-    private func refreshOnlineStatus() async {
-        let status = await coreManager.safeCore.isProjectOnline(projectId: project.id)
-        await MainActor.run {
-            isOnline = status
-        }
-    }
-
-    /// Boot the project
+    /// Boot the project.
+    /// The UI will update automatically when the backend publishes a kind:24010
+    /// status event - no polling or manual refresh needed.
     private func bootProject() {
         isBooting = true
         bootError = nil
@@ -327,12 +323,9 @@ struct ProjectRowView: View {
         Task {
             do {
                 try await coreManager.safeCore.bootProject(projectId: project.id)
-                // Allow time for the backend to process the boot request and publish
-                // a kind:24010 status event before checking online status. The 1-second
-                // delay accounts for relay propagation and backend response time.
-                try? await Task.sleep(for: .seconds(1))
-                await coreManager.manualRefresh()
-                await refreshOnlineStatus()
+                // No delay or manual refresh needed - the Rust core will receive
+                // the kind:24010 status event and push it via EventCallback,
+                // which updates coreManager.projectOnlineStatus reactively.
             } catch {
                 await MainActor.run {
                     bootError = error.localizedDescription

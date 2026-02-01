@@ -32,6 +32,24 @@ final class TenexEventHandler: EventCallback {
         self.coreManager = coreManager
     }
 
+    /// Refresh projectOnlineStatus for all known projects.
+    /// Called when Rust pushes a projectStatus change event.
+    /// Must be called from main thread.
+    private func refreshProjectOnlineStatuses(coreManager: TenexCoreManager) {
+        // Get current projects and update their online status
+        let projects = coreManager.projects
+        var newStatus: [String: Bool] = [:]
+
+        for project in projects {
+            // Use the synchronous core API directly (we're already on main thread,
+            // and this is a quick in-memory lookup in the Rust layer)
+            newStatus[project.id] = coreManager.core.isProjectOnline(projectId: project.id)
+        }
+
+        // Update the published dictionary - SwiftUI will react automatically
+        coreManager.projectOnlineStatus = newStatus
+    }
+
     /// Called by Rust when data has changed.
     /// Dispatches to main thread and calls targeted refresh methods on TenexCoreManager.
     ///
@@ -55,7 +73,11 @@ final class TenexEventHandler: EventCallback {
                 }
 
             case .projectStatus:
-                // Post project status notification
+                // Update the reactive projectOnlineStatus dictionary
+                // This is called from main thread already, so safe to update @Published
+                self?.refreshProjectOnlineStatuses(coreManager: coreManager)
+
+                // Post project status notification for any other subscribers
                 NotificationCenter.default.post(
                     name: .tenexProjectStatusChanged,
                     object: nil
