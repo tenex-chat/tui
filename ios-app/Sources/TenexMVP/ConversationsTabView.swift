@@ -179,9 +179,16 @@ struct ConversationsTabView: View {
             }
             .task {
                 await updateRuntime()
+                // PERFORMANCE: Preload hierarchy data for all visible conversations
+                // This prevents N+1 FFI calls when each row tries to load its own data
+                await coreManager.hierarchyCache.preloadForConversations(rootConversations)
             }
             .onChange(of: coreManager.conversations) { _, _ in
-                Task { await updateRuntime() }
+                Task {
+                    await updateRuntime()
+                    // Preload hierarchy for new conversations
+                    await coreManager.hierarchyCache.preloadForConversations(rootConversations)
+                }
             }
         }
     }
@@ -195,44 +202,28 @@ struct ConversationsTabView: View {
 
 // MARK: - Conversation Row for ConversationFullInfo
 
-/// Conversation row that uses ConversationFullInfo's rich data
+/// Conversation row that uses ConversationFullInfo's rich data.
+/// PERFORMANCE: Uses cached hierarchy data instead of per-row FFI calls.
+/// The cache is preloaded in ConversationsTabView.task for all visible conversations.
 private struct ConversationRowFull: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     let conversation: ConversationFullInfo
     let projectTitle: String?
     let onSelect: (ConversationFullInfo) -> Void
 
-    /// Delegation agent infos loaded from descendants
-    @State private var delegationAgentInfos: [AgentAvatarInfo] = []
+    /// Get cached hierarchy data (O(1) lookup, no FFI calls)
+    private var cachedHierarchy: ConversationHierarchyCache.ConversationHierarchy? {
+        coreManager.hierarchyCache.getHierarchy(for: conversation.id)
+    }
 
-    /// P-tagged recipient info (first p-tag from conversation root event)
-    @State private var pTaggedRecipientInfo: AgentAvatarInfo?
+    /// Delegation agent infos from cache (or empty if not yet loaded)
+    private var delegationAgentInfos: [AgentAvatarInfo] {
+        cachedHierarchy?.delegationAgentInfos ?? []
+    }
 
-    /// Load delegation agent infos by finding all descendants
-    private func loadDelegationAgentInfos() async {
-        // Load p-tagged recipient (first p-tag from conversation root event)
-        if let pTaggedPubkey = conversation.pTags.first {
-            let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
-            pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
-        }
-
-        // Get all descendants of this conversation
-        let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversation.id)
-        let descendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
-
-        // Collect unique agents from descendants (excluding the conversation author and p-tagged recipient)
-        let pTaggedPubkey = conversation.pTags.first
-        var agentsByPubkey: [String: AgentAvatarInfo] = [:]
-        for descendant in descendants {
-            if descendant.authorPubkey != conversation.authorPubkey && descendant.authorPubkey != pTaggedPubkey {
-                agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
-                    name: descendant.author,
-                    pubkey: descendant.authorPubkey
-                )
-            }
-        }
-
-        delegationAgentInfos = agentsByPubkey.values.sorted { $0.name < $1.name }
+    /// P-tagged recipient info from cache
+    private var pTaggedRecipientInfo: AgentAvatarInfo? {
+        cachedHierarchy?.pTaggedRecipientInfo
     }
 
     private var statusColor: Color {
@@ -357,9 +348,8 @@ private struct ConversationRowFull: View {
         .onTapGesture {
             onSelect(conversation)
         }
-        .task {
-            await loadDelegationAgentInfos()
-        }
+        // PERFORMANCE: Removed per-row .task that called loadDelegationAgentInfos()
+        // Hierarchy data is now preloaded in batch by ConversationsTabView
     }
 }
 

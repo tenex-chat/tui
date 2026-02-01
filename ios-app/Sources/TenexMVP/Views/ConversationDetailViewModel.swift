@@ -228,6 +228,7 @@ final class ConversationDetailViewModel: ObservableObject {
     }
 
     /// Performs the actual data loading using structured concurrency for proper cancellation
+    /// Performance optimization: Uses TaskGroup for concurrent descendant message fetching
     private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
         try Task.checkCancellation()
 
@@ -243,11 +244,24 @@ final class ConversationDetailViewModel: ObservableObject {
             // Get direct children from descendants (for delegations display)
             let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
-            // Fetch messages for all descendants (for todo aggregation)
-            var descendantMsgs: [String: [MessageInfo]] = [:]
-            for descendant in allDescendants {
-                let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
-                descendantMsgs[descendant.id] = msgs
+            // PERFORMANCE: Fetch messages for all descendants CONCURRENTLY using TaskGroup
+            // This reduces O(n) sequential FFI calls to parallel execution
+            let descendantMsgs = await withTaskGroup(
+                of: (String, [MessageInfo]).self,
+                returning: [String: [MessageInfo]].self
+            ) { group in
+                for descendant in allDescendants {
+                    group.addTask {
+                        let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
+                        return (descendant.id, msgs)
+                    }
+                }
+
+                var results: [String: [MessageInfo]] = [:]
+                for await (id, msgs) in group {
+                    results[id] = msgs
+                }
+                return results
             }
 
             return (directChildren, allDescendants, descendantMsgs)
