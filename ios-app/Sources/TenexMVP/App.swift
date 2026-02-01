@@ -72,9 +72,19 @@ class TenexCoreManager: ObservableObject {
     @Published var initializationError: String?
 
     // MARK: - Centralized Reactive Data Store
+    // These granular @Published properties enable targeted updates without full UI refresh.
+    // Views that observe specific properties only re-render when those properties change.
     @Published var projects: [ProjectInfo] = []
     @Published var conversations: [ConversationFullInfo] = []
     @Published var inboxItems: [InboxItem] = []
+
+    /// Tracks which conversation IDs have pending message updates.
+    /// ConversationDetailView observes this to know when to reload.
+    @Published var conversationMessageUpdates: Set<String> = []
+
+    /// Project status update counter - incremented when agent status changes.
+    /// Views showing agent online/offline status can observe this.
+    @Published var projectStatusVersion: Int = 0
 
     // MARK: - Event Callback
     /// Event handler for push-based updates from Rust core
@@ -138,6 +148,70 @@ class TenexCoreManager: ObservableObject {
     /// Manual refresh for pull-to-refresh gesture
     func manualRefresh() async {
         await fetchData()
+    }
+
+    // MARK: - Targeted Refresh Methods
+    // These methods update specific @Published properties instead of triggering full UI refresh.
+    // Called by TenexEventHandler in response to push-based events from Rust core.
+
+    /// Called when messages change for a specific conversation.
+    /// Updates conversationMessageUpdates to notify ConversationDetailView.
+    @MainActor
+    func onMessagesChanged(conversationId: String) async {
+        // Signal that this conversation has new messages
+        conversationMessageUpdates.insert(conversationId)
+
+        // Also refresh the conversations list to update last message preview
+        await refreshConversations()
+
+        // Clear the signal after a short delay (allows observers to react)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            conversationMessageUpdates.remove(conversationId)
+        }
+    }
+
+    /// Called when project status changes (agent online/offline).
+    /// Increments projectStatusVersion to trigger targeted updates.
+    @MainActor
+    func onProjectStatusChanged() async {
+        projectStatusVersion += 1
+        await refreshProjects()
+    }
+
+    /// Called for general data changes.
+    /// Refreshes all data stores but via @Published properties, not objectWillChange.
+    @MainActor
+    func onGeneralDataChanged() async {
+        await fetchData()
+    }
+
+    /// Refresh only the conversations list
+    @MainActor
+    private func refreshConversations() async {
+        do {
+            let filter = ConversationFilter(
+                projectIds: [],
+                showArchived: true,
+                hideScheduled: true,
+                timeFilter: .all
+            )
+            conversations = try await safeCore.getAllConversations(filter: filter)
+        } catch {
+            print("[TenexCoreManager] Conversations refresh failed: \(error)")
+        }
+    }
+
+    /// Refresh only the projects list
+    @MainActor
+    private func refreshProjects() async {
+        projects = await safeCore.getProjects()
+    }
+
+    /// Refresh only the inbox
+    @MainActor
+    private func refreshInbox() async {
+        inboxItems = await safeCore.getInbox()
     }
 
     /// Fetch all data from the core. Called on login and for pull-to-refresh.
