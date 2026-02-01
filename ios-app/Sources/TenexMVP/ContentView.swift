@@ -30,6 +30,7 @@ struct ContentView: View {
                         projects: coreManager.projects,
                         selectedProject: $selectedProject
                     )
+                    .environmentObject(coreManager)
                     .refreshable {
                         await coreManager.manualRefresh()
                     }
@@ -190,12 +191,14 @@ struct EmptyStateView: View {
 struct ProjectListView: View {
     let projects: [ProjectInfo]
     @Binding var selectedProject: ProjectInfo?
+    @EnvironmentObject var coreManager: TenexCoreManager
 
     var body: some View {
         List {
             ForEach(projects, id: \.id) { project in
                 NavigationLink(value: project) {
                     ProjectRowView(project: project)
+                        .environmentObject(coreManager)
                 }
             }
         }
@@ -207,23 +210,54 @@ struct ProjectListView: View {
 
 struct ProjectRowView: View {
     let project: ProjectInfo
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @State private var isBooting = false
+    @State private var bootError: String?
+    @State private var showBootError = false
+    @State private var isOnline = false
 
     var body: some View {
         HStack(spacing: 12) {
-            // Project icon
-            RoundedRectangle(cornerRadius: 10)
-                .fill(projectColor.gradient)
-                .frame(width: 44, height: 44)
-                .overlay {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(.white)
-                        .font(.title3)
-                }
+            // Project icon with online indicator
+            ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(projectColor.gradient)
+                    .frame(width: 44, height: 44)
+                    .overlay {
+                        Image(systemName: "folder.fill")
+                            .foregroundStyle(.white)
+                            .font(.title3)
+                    }
+
+                // Online/Offline indicator dot
+                Circle()
+                    .fill(isOnline ? Color.green : Color.gray)
+                    .frame(width: 12, height: 12)
+                    .overlay {
+                        Circle()
+                            .stroke(Color(.systemBackground), lineWidth: 2)
+                    }
+                    .offset(x: 2, y: 2)
+            }
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(project.title)
-                    .font(.headline)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(project.title)
+                        .font(.headline)
+                        .lineLimit(1)
+
+                    // Status badge
+                    Text(isOnline ? "Online" : "Offline")
+                        .font(.caption2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(isOnline ? Color.green : Color.gray)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isOnline ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
+                        )
+                }
 
                 if let description = project.description {
                     Text(description)
@@ -240,11 +274,75 @@ struct ProjectRowView: View {
 
             Spacer()
 
+            // Boot button for offline projects
+            if !isOnline {
+                Button {
+                    bootProject()
+                } label: {
+                    if isBooting {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                    } else {
+                        Image(systemName: "power")
+                            .font(.body)
+                            .foregroundStyle(.blue)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(isBooting)
+            }
+
             Image(systemName: "chevron.right")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         }
         .padding(.vertical, 8)
+        .task {
+            await refreshOnlineStatus()
+        }
+        .alert("Boot Failed", isPresented: $showBootError) {
+            Button("OK") {
+                bootError = nil
+            }
+        } message: {
+            if let error = bootError {
+                Text(error)
+            }
+        }
+    }
+
+    /// Refresh the online status from the thread-safe SafeTenexCore actor
+    private func refreshOnlineStatus() async {
+        let status = await coreManager.safeCore.isProjectOnline(projectId: project.id)
+        await MainActor.run {
+            isOnline = status
+        }
+    }
+
+    /// Boot the project
+    private func bootProject() {
+        isBooting = true
+        bootError = nil
+
+        Task {
+            do {
+                try await coreManager.safeCore.bootProject(projectId: project.id)
+                // Allow time for the backend to process the boot request and publish
+                // a kind:24010 status event before checking online status. The 1-second
+                // delay accounts for relay propagation and backend response time.
+                try? await Task.sleep(for: .seconds(1))
+                await coreManager.manualRefresh()
+                await refreshOnlineStatus()
+            } catch {
+                await MainActor.run {
+                    bootError = error.localizedDescription
+                    showBootError = true
+                }
+            }
+            await MainActor.run {
+                isBooting = false
+            }
+        }
     }
 
     /// Deterministic color using shared utility (stable across app launches)
