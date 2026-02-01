@@ -14,6 +14,7 @@ use tokio::sync::watch;
 use tokio::sync::RwLock;
 
 use crate::constants::RELAY_URL;
+use crate::models::ProjectStatus;
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
 use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
@@ -602,6 +603,8 @@ impl NostrWorker {
         tlog!("CONN", "Subscribed to projects (kind:31933) - owned and p-tagged");
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
+        // kind:24010 is the GLOBAL subscription that tells us which projects are online.
+        // When we receive these events, we create per-project subscriptions for kind:1, 513, 30023.
         let since_time = Timestamp::now() - 45;
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
@@ -661,34 +664,18 @@ impl NostrWorker {
         tlog!("CONN", "Subscribed to MCP tools (kind:4200)");
 
         // 7. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
-        let project_atags: Vec<String> = get_projects(&self.ndb)
-            .unwrap_or_default()
-            .iter()
-            .map(|p| p.a_tag())
-            .collect();
-
-        if !project_atags.is_empty() {
-            tlog!("CONN", "Setting up subscriptions for {} existing projects", project_atags.len());
-
-            for project_a_tag in &project_atags {
-                let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-
-                // Subscribe to all project filters atomically (all-or-nothing)
-                match subscribe_project_filters(client, &self.subscription_stats, project_a_tag).await {
-                    Ok(()) => {
-                        // Only mark as subscribed AFTER all subscriptions succeed
-                        self.subscribed_projects.write().await.insert(project_a_tag.clone());
-                    }
-                    Err(e) => {
-                        // Log but continue - don't fail the whole connect for one project
-                        tlog!("ERROR", "Failed to subscribe to project {}: {}", project_name, e);
-                    }
-                }
-            }
-            tlog!("CONN", "Subscribed to kind:513, kind:1, and kind:30023 for {} projects", project_atags.len());
-        } else {
-            tlog!("CONN", "No projects found, skipping kind:513 and kind:1 subscriptions");
-        }
+        // OPTIMIZATION: We no longer subscribe to ALL projects at startup.
+        // Instead, we subscribe only to projects that are:
+        // a) Online (discovered via kind:24010 status events)
+        // b) Explicitly requested by user (via SubscribeToProjectMessages command)
+        //
+        // This dramatically reduces subscription count from 3*N (where N is total projects)
+        // to 3*M (where M is online/active projects).
+        //
+        // The notification handler will create subscriptions when:
+        // - kind:24010 status events arrive for new online projects
+        // - kind:31933 project events arrive (user discovers/adds project)
+        tlog!("CONN", "Skipping bulk project subscriptions - will subscribe to projects on-demand when they come online or are explicitly requested");
 
         tlog!("CONN", "All subscriptions set up in {:?}", sub_start.elapsed());
 
@@ -755,7 +742,29 @@ impl NostrWorker {
                                     // Ephemeral events (24010, 24133) go through DataChange channel
                                     if kind == 24010 || kind == 24133 {
                                         if let Ok(json) = serde_json::to_string(&*event) {
-                                            let _ = data_tx.send(DataChange::ProjectStatus { json });
+                                            let _ = data_tx.send(DataChange::ProjectStatus { json: json.clone() });
+                                        }
+
+                                        // For kind:24010 (project status), subscribe to project if it's newly online
+                                        if kind == 24010 {
+                                            if let Ok(json) = serde_json::to_string(&*event) {
+                                                if let Some(status) = ProjectStatus::from_json(&json) {
+                                                    let a_tag = status.project_coordinate.clone();
+                                                    // Atomic check+insert: if insert returns true, we're the first to subscribe to this project
+                                                    let is_new = subscribed_projects.write().await.insert(a_tag.clone());
+                                                    if is_new {
+                                                        let project_name = a_tag.split(':').nth(2).unwrap_or("unknown");
+                                                        tlog!("CONN", "Project came online: {}, subscribing to messages", project_name);
+
+                                                        // Use helper function for all-or-nothing subscriptions with stats registration
+                                                        if let Err(e) = subscribe_project_filters(&client, &subscription_stats, &a_tag).await {
+                                                            // Subscription failed - remove from set so we can retry later
+                                                            subscribed_projects.write().await.remove(&a_tag);
+                                                            tlog!("ERROR", "Failed to subscribe to online project {}: {}", project_name, e);
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else {
                                         // All other events go through nostrdb
