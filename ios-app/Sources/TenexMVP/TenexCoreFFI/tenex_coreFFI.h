@@ -307,6 +307,11 @@ void uniffi_tenex_core_fn_method_tenexcore_archive_conversation(void*_Nonnull pt
 void uniffi_tenex_core_fn_method_tenexcore_block_backend(void*_Nonnull ptr, RustBuffer pubkey, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BOOT_PROJECT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_BOOT_PROJECT
+void uniffi_tenex_core_fn_method_tenexcore_boot_project(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 void uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -445,6 +450,11 @@ int8_t uniffi_tenex_core_fn_method_tenexcore_is_initialized(void*_Nonnull ptr, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_IS_LOGGED_IN
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_IS_LOGGED_IN
 int8_t uniffi_tenex_core_fn_method_tenexcore_is_logged_in(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_IS_PROJECT_ONLINE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_IS_PROJECT_ONLINE
+int8_t uniffi_tenex_core_fn_method_tenexcore_is_project_online(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_IS_THREAD_COLLAPSED
@@ -842,6 +852,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_block_backend(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_BOOT_PROJECT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_BOOT_PROJECT
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_boot_project(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback(void
@@ -1007,6 +1023,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_is_initialized(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_IS_LOGGED_IN
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_IS_LOGGED_IN
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_is_logged_in(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_IS_PROJECT_ONLINE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_IS_PROJECT_ONLINE
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_is_project_online(void
     
 );
 #endif
