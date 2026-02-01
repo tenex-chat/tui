@@ -83,11 +83,20 @@ class TenexCoreManager: ObservableObject {
     /// Cache for profile picture URLs to prevent repeated FFI calls
     let profilePictureCache = ProfilePictureCache.shared
 
+    // MARK: - Performance Caches
+
+    /// Cache for conversation hierarchy data to prevent N+1 FFI calls in list views
+    let hierarchyCache = ConversationHierarchyCache()
+
     init() {
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()
         core = tenexCore
         safeCore = SafeTenexCore(core: tenexCore)
+
+        // Set up hierarchy cache with reference to self
+        // Note: This creates a retain cycle that we break on logout
+        hierarchyCache.setCoreManager(self)
 
         // Initialize asynchronously off the main thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
