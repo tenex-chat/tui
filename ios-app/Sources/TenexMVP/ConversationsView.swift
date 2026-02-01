@@ -76,8 +76,19 @@ struct ConversationsView: View {
             }
         }
         .sheet(item: $selectedConversation) { conversation in
-            ConversationDetailView(conversation: conversation)
-                .environmentObject(coreManager)
+            NavigationStack {
+                ConversationDetailView(conversation: conversation)
+                    .environmentObject(coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                selectedConversation = nil
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showNewConversation) {
             MessageComposerView(
