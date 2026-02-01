@@ -36,9 +36,20 @@ struct ConversationDetailView: View {
                     NavigationStack {
                         ConversationDetailView(conversation: childConv)
                             .environmentObject(coreManager)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") {
+                                        selectedDelegation = nil
+                                    }
+                                }
+                            }
                     }
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
                 } else {
                     DelegationPreviewSheet(delegation: delegation)
+                        .presentationDetents([.medium, .large])
+                        .presentationDragIndicator(.visible)
                 }
             }
             .sheet(isPresented: $showFullConversation) {
@@ -47,6 +58,8 @@ struct ConversationDetailView: View {
                     messages: viewModel.messages
                 )
                 .environmentObject(coreManager)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
     }
 
@@ -601,6 +614,8 @@ struct FullConversationSheet: View {
             .sheet(item: $selectedDelegation) { delegationId in
                 DelegationSheetFromId(delegationId: delegationId)
                     .environmentObject(coreManager)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showComposer) {
                 MessageComposerView(
