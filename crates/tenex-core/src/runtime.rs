@@ -107,7 +107,6 @@ impl CoreRuntime {
         let negentropy_stats = SharedNegentropySyncStats::new();
         let worker = NostrWorker::new(
             ndb.clone(),
-            config.data_dir.clone(),
             data_tx,
             command_rx,
             event_stats.clone(),
