@@ -272,8 +272,6 @@ pub struct NostrWorker {
     keys: Option<Keys>,
     user_pubkey: Option<String>,
     ndb: Arc<Ndb>,
-    /// Path to nostrdb database directory - used for NdbDatabase integration with nostr-sdk Client
-    ndb_path: PathBuf,
     data_tx: Sender<DataChange>,
     command_rx: Receiver<NostrCommand>,
     rt_handle: Option<tokio::runtime::Handle>,
@@ -294,7 +292,6 @@ pub struct NostrWorker {
 impl NostrWorker {
     pub fn new(
         ndb: Arc<Ndb>,
-        ndb_path: PathBuf,
         data_tx: Sender<DataChange>,
         command_rx: Receiver<NostrCommand>,
         event_stats: SharedEventStats,
@@ -306,7 +303,6 @@ impl NostrWorker {
             keys: None,
             user_pubkey: None,
             ndb,
-            ndb_path,
             data_tx,
             command_rx,
             rt_handle: None,
@@ -486,17 +482,14 @@ impl NostrWorker {
     }
 
     async fn handle_connect(&mut self, keys: Keys, user_pubkey: String) -> Result<()> {
-        // Initialize NdbDatabase for nostr-sdk Client to enable proper negentropy delta syncing
-        // This is the key fix for the CPU pegging issue - without a database backend,
-        // the Client re-downloads all events on every negentropy sync cycle
-        let ndb_path_str = self.ndb_path.to_str()
-            .ok_or_else(|| anyhow::anyhow!("Invalid ndb path: contains non-UTF8 characters"))?;
-        let ndb_database = nostr_ndb::NdbDatabase::open(ndb_path_str)
-            .map_err(|e| anyhow::anyhow!("Failed to open NdbDatabase for nostr-sdk: {}", e))?;
+        // NOTE: NdbDatabase was causing LMDB concurrency issues due to opening a second
+        // database handle to the same file. Disabled for now to fix iOS crashes during login.
+        // The existing Ndb handle in self.ndb is already managing the database.
+        // TODO: Integrate NdbDatabase properly by wrapping the existing Arc<Ndb>
+        // or finding another way to pass it to nostr-sdk Client without opening it again.
 
         let client = Client::builder()
             .signer(keys.clone())
-            .database(ndb_database)
             .build();
 
         client.add_relay(RELAY_URL).await?;
