@@ -40,6 +40,10 @@ protocol SafeTenexCoreProtocol: Actor {
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws
 
+    // MARK: - Project Status
+    func isProjectOnline(projectId: String) -> Bool
+    func bootProject(projectId: String) throws
+
     // MARK: - Nudges
     func getNudges() throws -> [NudgeInfo]
 

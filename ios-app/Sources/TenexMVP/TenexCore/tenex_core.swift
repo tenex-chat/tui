@@ -613,6 +613,17 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func blockBackend(pubkey: String) throws 
     
     /**
+     * Boot/start a project (sends kind:24000 event).
+     *
+     * This sends a boot request to wake up the project's backend.
+     * The backend will then start publishing kind:24010 status events,
+     * making the project "online" and its agents available.
+     *
+     * Use this when a project is offline and you want to start it.
+     */
+    func bootProject(projectId: String) throws 
+    
+    /**
      * Clear the event callback and stop the listener thread.
      * Call this on logout to clean up resources.
      */
@@ -814,6 +825,17 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns true only if we have stored keys.
      */
     func isLoggedIn()  -> Bool
+    
+    /**
+     * Check if a project is online (has a recent kind:24010 status event).
+     *
+     * A project is considered online if:
+     * 1. It has a status event from an approved backend
+     * 2. The status event is not stale (within the staleness threshold)
+     *
+     * Returns true if the project is online, false otherwise.
+     */
+    func isProjectOnline(projectId: String)  -> Bool
     
     /**
      * Check if a thread is collapsed.
@@ -1075,6 +1097,22 @@ open func archiveConversation(conversationId: String)  {try! rustCall() {
 open func blockBackend(pubkey: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_block_backend(self.uniffiClonePointer(),
         FfiConverterString.lower(pubkey),$0
+    )
+}
+}
+    
+    /**
+     * Boot/start a project (sends kind:24000 event).
+     *
+     * This sends a boot request to wake up the project's backend.
+     * The backend will then start publishing kind:24010 status events,
+     * making the project "online" and its agents available.
+     *
+     * Use this when a project is offline and you want to start it.
+     */
+open func bootProject(projectId: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_boot_project(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
     )
 }
 }
@@ -1431,6 +1469,23 @@ open func isInitialized() -> Bool  {
 open func isLoggedIn() -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_is_logged_in(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Check if a project is online (has a recent kind:24010 status event).
+     *
+     * A project is considered online if:
+     * 1. It has a status event from an approved backend
+     * 2. The status event is not stale (within the staleness threshold)
+     *
+     * Returns true if the project is online, false otherwise.
+     */
+open func isProjectOnline(projectId: String) -> Bool  {
+    return try!  FfiConverterBool.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_is_project_online(self.uniffiClonePointer(),
+        FfiConverterString.lower(projectId),$0
     )
 })
 }
@@ -7359,6 +7414,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_block_backend() != 26206) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_boot_project() != 56755) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7441,6 +7499,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_logged_in() != 37564) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_is_project_online() != 37678) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
