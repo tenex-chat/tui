@@ -287,16 +287,20 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     /// A project is considered online if it has a non-stale status from an approved backend.
     /// Note: Internal `try!` in FFI - can crash on error.
     func isProjectOnline(projectId: String) -> Bool {
-        core.isProjectOnline(projectId: projectId)
+        profiler.measureFFI("isProjectOnline") {
+            core.isProjectOnline(projectId: projectId)
+        }
     }
 
     /// Boot/start a project (sends kind:24000 event).
     /// This sends a boot request to wake up the project's backend.
     func bootProject(projectId: String) throws {
-        do {
-            try core.bootProject(projectId: projectId)
-        } catch let error as TenexError {
-            throw CoreError.tenex(error)
+        try profiler.measureFFI("bootProject") {
+            do {
+                try core.bootProject(projectId: projectId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
         }
     }
 
