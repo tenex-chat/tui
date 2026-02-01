@@ -482,14 +482,14 @@ impl NostrWorker {
     }
 
     async fn handle_connect(&mut self, keys: Keys, user_pubkey: String) -> Result<()> {
-        // Clone the existing Ndb and wrap it in NdbDatabase for the Client
-        // This avoids opening a second database handle (which would cause LMDB concurrency crashes)
-        // The clone is safe - Ndb internally uses Arc for the LMDB environment
-        let ndb_database = nostr_ndb::NdbDatabase::from((*self.ndb).clone());
+        // NOTE: NdbDatabase was causing LMDB concurrency issues due to opening a second
+        // database handle to the same file. Disabled for now to fix iOS crashes during login.
+        // The existing Ndb handle in self.ndb is already managing the database.
+        // TODO: Integrate NdbDatabase properly by wrapping the existing Arc<Ndb>
+        // or finding another way to pass it to nostr-sdk Client without opening it again.
 
         let client = Client::builder()
             .signer(keys.clone())
-            .database(ndb_database)
             .build();
 
         client.add_relay(RELAY_URL).await?;
