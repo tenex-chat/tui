@@ -86,7 +86,9 @@ final class ConversationDetailViewModel: ObservableObject {
     /// Observer for message change notifications (push-based updates from Rust)
     private var messagesChangedObserver: NSObjectProtocol?
 
-    /// Observer for general data change notifications
+    /// Observer for general data change notifications.
+    /// Note: Intentionally unused - we only subscribe to conversation-specific notifications
+    /// to prevent double-loading. Kept for potential future use.
     private var dataChangedObserver: NSObjectProtocol?
 
     // MARK: - Initialization
@@ -120,31 +122,31 @@ final class ConversationDetailViewModel: ObservableObject {
         subscribeToNotifications()
     }
 
-    /// Subscribe to push-based notifications from Rust core
+    /// Subscribe to push-based notifications from Rust core.
+    ///
+    /// **Performance Note:** We ONLY subscribe to `.tenexMessagesChanged` for this specific
+    /// conversation ID. We do NOT subscribe to `.tenexDataChanged` because:
+    /// 1. It causes duplicate reloads (both notifications fire for the same event)
+    /// 2. General data changes rarely affect messages in this conversation
+    /// 3. If a user wants to see latest changes, they can pull-to-refresh
     private func subscribeToNotifications() {
-        // Subscribe to message change notifications for this specific conversation
+        // Subscribe to message change notifications for this specific conversation only
         messagesChangedObserver = NotificationCenter.default.addObserver(
             forName: .tenexMessagesChanged,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             guard let self = self else { return }
-            // Check if this notification is for our conversation
+            // Only reload if this notification is for our conversation
             if let conversationId = notification.object as? String,
                conversationId == self.conversation.id {
                 Task { await self.loadData() }
             }
         }
 
-        // Subscribe to general data change notifications (catch-all for kind:1 events)
-        dataChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tenexDataChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            // Reload data when any data changes (new messages may have arrived)
-            Task { await self?.loadData() }
-        }
+        // Note: We intentionally do NOT subscribe to .tenexDataChanged here.
+        // General data changes are handled by the conversations list, not individual detail views.
+        // This prevents double-loading and improves performance.
     }
 
     /// Starts periodic metadata refresh for active conversations
@@ -228,6 +230,7 @@ final class ConversationDetailViewModel: ObservableObject {
     }
 
     /// Performs the actual data loading using structured concurrency for proper cancellation
+    /// Performance optimization: Uses TaskGroup for concurrent descendant message fetching
     private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
         try Task.checkCancellation()
 
@@ -243,11 +246,24 @@ final class ConversationDetailViewModel: ObservableObject {
             // Get direct children from descendants (for delegations display)
             let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
-            // Fetch messages for all descendants (for todo aggregation)
-            var descendantMsgs: [String: [MessageInfo]] = [:]
-            for descendant in allDescendants {
-                let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
-                descendantMsgs[descendant.id] = msgs
+            // PERFORMANCE: Fetch messages for all descendants CONCURRENTLY using TaskGroup
+            // This reduces O(n) sequential FFI calls to parallel execution
+            let descendantMsgs = await withTaskGroup(
+                of: (String, [MessageInfo]).self,
+                returning: [String: [MessageInfo]].self
+            ) { group in
+                for descendant in allDescendants {
+                    group.addTask {
+                        let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
+                        return (descendant.id, msgs)
+                    }
+                }
+
+                var results: [String: [MessageInfo]] = [:]
+                for await (id, msgs) in group {
+                    results[id] = msgs
+                }
+                return results
             }
 
             return (directChildren, allDescendants, descendantMsgs)

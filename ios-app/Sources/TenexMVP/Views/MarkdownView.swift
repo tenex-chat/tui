@@ -3,19 +3,61 @@ import SwiftUI
 // MARK: - Markdown View
 
 /// A reusable view that renders markdown content with support for headers, lists, code blocks, tables, etc.
-struct MarkdownView: View {
+///
+/// ## Performance Optimizations
+/// - Uses Equatable conformance to prevent unnecessary re-renders
+/// - Caches parsed elements to avoid re-parsing on every body evaluation
+/// - Uses identifiable wrapper for stable ForEach identity
+struct MarkdownView: View, Equatable {
     let content: String
 
+    /// Cache for parsed markdown elements, keyed by content hash
+    /// This prevents re-parsing the same content multiple times
+    private static var parseCache: [Int: [MarkdownElement]] = [:]
+    private static let cacheLock = NSLock()
+    private static let maxCacheSize = 100
+
+    static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
+        lhs.content == rhs.content
+    }
+
     var body: some View {
+        let elements = cachedParse()
         VStack(alignment: .leading, spacing: 12) {
-            ForEach(Array(parseMarkdown().enumerated()), id: \.offset) { _, element in
-                element
+            ForEach(elements) { element in
+                element.view
             }
         }
     }
 
-    private func parseMarkdown() -> [AnyView] {
-        var views: [AnyView] = []
+    /// Returns cached parsed elements or parses and caches if needed
+    private func cachedParse() -> [MarkdownElement] {
+        let contentHash = content.hashValue
+
+        Self.cacheLock.lock()
+        defer { Self.cacheLock.unlock() }
+
+        if let cached = Self.parseCache[contentHash] {
+            return cached
+        }
+
+        let parsed = parseMarkdown()
+
+        // Evict oldest entries if cache is too large
+        if Self.parseCache.count >= Self.maxCacheSize {
+            // Simple eviction: remove half the cache
+            let keysToRemove = Array(Self.parseCache.keys.prefix(Self.maxCacheSize / 2))
+            for key in keysToRemove {
+                Self.parseCache.removeValue(forKey: key)
+            }
+        }
+
+        Self.parseCache[contentHash] = parsed
+        return parsed
+    }
+
+    private func parseMarkdown() -> [MarkdownElement] {
+        var elements: [MarkdownElement] = []
         let lines = content.components(separatedBy: "\n")
         var inCodeBlock = false
         var codeBlockContent = ""
@@ -26,7 +68,7 @@ struct MarkdownView: View {
             // Code blocks
             if line.hasPrefix("```") {
                 if inCodeBlock {
-                    views.append(AnyView(CodeBlockView(content: codeBlockContent)))
+                    elements.append(MarkdownElement(view: AnyView(CodeBlockView(content: codeBlockContent))))
                     codeBlockContent = ""
                 }
                 inCodeBlock.toggle()
@@ -59,83 +101,83 @@ struct MarkdownView: View {
                 }
                 continue
             } else if inTable {
-                views.append(AnyView(TableView(rows: tableRows)))
+                elements.append(MarkdownElement(view: AnyView(TableView(rows: tableRows))))
                 tableRows = []
                 inTable = false
             }
 
             // Headers
             if line.hasPrefix("# ") {
-                views.append(AnyView(
+                elements.append(MarkdownElement(view: AnyView(
                     Text(line.dropFirst(2))
                         .font(.title)
                         .fontWeight(.bold)
                         .padding(.top, 8)
-                ))
+                )))
             } else if line.hasPrefix("## ") {
-                views.append(AnyView(
+                elements.append(MarkdownElement(view: AnyView(
                     Text(line.dropFirst(3))
                         .font(.title2)
                         .fontWeight(.semibold)
                         .padding(.top, 6)
-                ))
+                )))
             } else if line.hasPrefix("### ") {
-                views.append(AnyView(
+                elements.append(MarkdownElement(view: AnyView(
                     Text(line.dropFirst(4))
                         .font(.title3)
                         .fontWeight(.medium)
                         .padding(.top, 4)
-                ))
+                )))
             }
             // Horizontal rule
             else if line == "---" || line == "***" {
-                views.append(AnyView(Divider().padding(.vertical, 8)))
+                elements.append(MarkdownElement(view: AnyView(Divider().padding(.vertical, 8))))
             }
-            // Bullet lists
-            else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                views.append(AnyView(
-                    HStack(alignment: .top, spacing: 8) {
-                        Text("•")
-                            .foregroundStyle(.secondary)
-                        parseInlineMarkdown(String(line.dropFirst(2)))
-                    }
-                ))
-            }
-            // Checkbox lists
+            // Checkbox lists (must check before bullet lists due to prefix overlap)
             else if line.hasPrefix("- [x] ") {
-                views.append(AnyView(
+                elements.append(MarkdownElement(view: AnyView(
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark.square.fill")
                             .foregroundStyle(.green)
                         parseInlineMarkdown(String(line.dropFirst(6)))
                     }
-                ))
+                )))
             }
             else if line.hasPrefix("- [ ] ") {
-                views.append(AnyView(
+                elements.append(MarkdownElement(view: AnyView(
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "square")
                             .foregroundStyle(.secondary)
                         parseInlineMarkdown(String(line.dropFirst(6)))
                     }
-                ))
+                )))
+            }
+            // Bullet lists
+            else if line.hasPrefix("- ") || line.hasPrefix("* ") {
+                elements.append(MarkdownElement(view: AnyView(
+                    HStack(alignment: .top, spacing: 8) {
+                        Text("•")
+                            .foregroundStyle(.secondary)
+                        parseInlineMarkdown(String(line.dropFirst(2)))
+                    }
+                )))
             }
             // Empty lines
             else if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                views.append(AnyView(Spacer().frame(height: 8)))
+                elements.append(MarkdownElement(view: AnyView(Spacer().frame(height: 8))))
             }
             // Regular text
             else {
-                views.append(AnyView(parseInlineMarkdown(line)))
+                elements.append(MarkdownElement(view: AnyView(parseInlineMarkdown(line))))
             }
         }
 
         // Handle any remaining table
         if inTable && !tableRows.isEmpty {
-            views.append(AnyView(TableView(rows: tableRows)))
+            elements.append(MarkdownElement(view: AnyView(TableView(rows: tableRows))))
         }
 
-        return views
+        return elements
     }
 
     private func parseInlineMarkdown(_ text: String) -> Text {
@@ -173,6 +215,21 @@ struct MarkdownView: View {
 
         return Text(result)
     }
+
+    /// Clears the parse cache (call on memory warning)
+    static func clearCache() {
+        cacheLock.lock()
+        parseCache.removeAll()
+        cacheLock.unlock()
+    }
+}
+
+// MARK: - Markdown Element (Identifiable wrapper)
+
+/// Wrapper to give AnyView a stable identity for ForEach
+private struct MarkdownElement: Identifiable {
+    let id = UUID()
+    let view: AnyView
 }
 
 // MARK: - Code Block View
