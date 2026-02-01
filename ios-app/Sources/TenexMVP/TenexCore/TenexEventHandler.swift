@@ -33,20 +33,26 @@ final class TenexEventHandler: EventCallback {
     }
 
     /// Called by Rust when data has changed.
-    /// Dispatches to main thread and posts appropriate notifications.
+    /// Dispatches to main thread and calls targeted refresh methods on TenexCoreManager.
+    ///
+    /// **Performance Note:** We use targeted @Published property updates instead of
+    /// objectWillChange.send() to avoid triggering full UI refresh. Each change type
+    /// only updates the specific data stores that are affected.
     func onDataChanged(changeType: DataChangeType) {
         DispatchQueue.main.async { [weak self] in
             guard let coreManager = self?.coreManager else { return }
 
             switch changeType {
             case .messages(let conversationId):
-                // Post notification for conversation-specific refresh
+                // Post notification for conversation-specific refresh (for detail views)
                 NotificationCenter.default.post(
                     name: .tenexMessagesChanged,
                     object: conversationId
                 )
-                // Also trigger general refresh for inbox/conversation list updates
-                coreManager.objectWillChange.send()
+                // Update only conversations list via @Published property (not objectWillChange)
+                Task { @MainActor in
+                    await coreManager.onMessagesChanged(conversationId: conversationId)
+                }
 
             case .projectStatus:
                 // Post project status notification
@@ -54,11 +60,14 @@ final class TenexEventHandler: EventCallback {
                     name: .tenexProjectStatusChanged,
                     object: nil
                 )
-                // Trigger general refresh for online agents, etc.
-                coreManager.objectWillChange.send()
+                // Update only projects via @Published property
+                Task { @MainActor in
+                    await coreManager.onProjectStatusChanged()
+                }
 
             case .streamChunk(let agentPubkey, let conversationId, let textDelta):
                 // Post streaming notification with details
+                // No state update needed - just notification for active stream views
                 NotificationCenter.default.post(
                     name: .tenexStreamChunk,
                     object: nil,
@@ -75,8 +84,10 @@ final class TenexEventHandler: EventCallback {
                     name: .tenexDataChanged,
                     object: nil
                 )
-                // Trigger full refresh
-                coreManager.objectWillChange.send()
+                // Refresh all data stores via @Published properties
+                Task { @MainActor in
+                    await coreManager.onGeneralDataChanged()
+                }
             }
         }
     }
