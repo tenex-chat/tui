@@ -152,7 +152,7 @@ final class PerformanceProfiler {
     func logAllocation(_ typeName: String, address: UnsafeRawPointer? = nil) {
         #if DEBUG
         if let addr = address {
-            os_log(.debug, log: memoryLog, "➕ Allocated: %{public}@ at %p", typeName, addr)
+            os_log(.debug, log: memoryLog, "➕ Allocated: %{public}@ at %p", typeName, Int(bitPattern: addr))
         } else {
             os_log(.debug, log: memoryLog, "➕ Allocated: %{public}@", typeName)
         }
@@ -164,7 +164,7 @@ final class PerformanceProfiler {
     func logDeallocation(_ typeName: String, address: UnsafeRawPointer? = nil) {
         #if DEBUG
         if let addr = address {
-            os_log(.debug, log: memoryLog, "➖ Deallocated: %{public}@ at %p", typeName, addr)
+            os_log(.debug, log: memoryLog, "➖ Deallocated: %{public}@ at %p", typeName, Int(bitPattern: addr))
         } else {
             os_log(.debug, log: memoryLog, "➖ Deallocated: %{public}@", typeName)
         }
@@ -523,7 +523,7 @@ final class FrameRateMonitor: ObservableObject {
 
             // Log if FPS drops significantly
             if currentFPS < 45 {
-                os_log(.warning, log: OSLog(subsystem: "com.tenex.app", category: "Performance"),
+                os_log(.error, log: OSLog(subsystem: "com.tenex.app", category: "Performance"),
                        "⚠️ Low frame rate: %.1f FPS", currentFPS)
             }
         }
