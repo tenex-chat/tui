@@ -35,6 +35,7 @@ final class TenexEventHandler: EventCallback {
     /// Refresh projectOnlineStatus for all known projects.
     /// Called when Rust pushes a projectStatus change event.
     /// Must be called from main thread.
+    @MainActor
     private func refreshProjectOnlineStatuses(coreManager: TenexCoreManager) {
         // Get current projects and update their online status
         let projects = coreManager.projects
