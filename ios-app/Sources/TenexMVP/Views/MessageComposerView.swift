@@ -374,6 +374,13 @@ struct MessageComposerView: View {
                     }
                 }
             }
+            .onChange(of: coreManager.onlineAgents) { oldAgents, newAgents in
+                // Reactively update availableAgents when centralized state changes
+                // This eliminates the need for manual refresh() calls
+                if let projectId = selectedProject?.id {
+                    availableAgents = newAgents[projectId] ?? []
+                }
+            }
         }
     }
 
@@ -630,46 +637,36 @@ struct MessageComposerView: View {
         guard let projectId = selectedProject?.id else { return }
 
         Task {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = await coreManager.safeCore.refresh()
-            do {
-                // Use getOnlineAgents to get agents from project status (kind:24010)
-                // These have actual agent instance pubkeys for proper profile lookup
-                let agents = try await coreManager.safeCore.getOnlineAgents(projectId: projectId)
-                availableAgents = agents
-                agentsLoadError = nil
+            // Use centralized cached agents instead of fetching on-demand
+            // This eliminates multi-second FFI delays
+            let agents = coreManager.onlineAgents[projectId] ?? []
+            availableAgents = agents
+            agentsLoadError = nil
 
-                // Auto-select agent if none currently selected
-                // Priority: 1) initialAgentPubkey (last agent in conversation), 2) PM agent
-                if draft.agentPubkey == nil {
-                    if let initialPubkey = initialAgentPubkey,
-                       agents.contains(where: { $0.pubkey == initialPubkey }) {
-                        // Use the initial agent (e.g., last agent that spoke in conversation)
-                        draft.setAgent(initialPubkey)
-                        await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
-                    } else if let pmAgent = agents.first(where: { $0.isPm }) {
-                        // Fall back to PM agent
-                        draft.setAgent(pmAgent.pubkey)
-                        await draftManager.updateAgent(pmAgent.pubkey, conversationId: conversationId, projectId: projectId)
-                    }
+            // Auto-select agent if none currently selected
+            // Priority: 1) initialAgentPubkey (last agent in conversation), 2) PM agent
+            if draft.agentPubkey == nil {
+                if let initialPubkey = initialAgentPubkey,
+                   agents.contains(where: { $0.pubkey == initialPubkey }) {
+                    // Use the initial agent (e.g., last agent that spoke in conversation)
+                    draft.setAgent(initialPubkey)
+                    await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
+                } else if let pmAgent = agents.first(where: { $0.isPm }) {
+                    // Fall back to PM agent
+                    draft.setAgent(pmAgent.pubkey)
+                    await draftManager.updateAgent(pmAgent.pubkey, conversationId: conversationId, projectId: projectId)
                 }
+            }
 
-                if agents.isEmpty {
-                    print("[MessageComposerView] No online agents for this project")
-                }
-            } catch {
-                // Don't clear availableAgents on error - preserve existing data
-                // Only update error state so UI can show warning
-                agentsLoadError = error.localizedDescription
-                print("[MessageComposerView] Failed to load agents: \(error)")
+            if agents.isEmpty {
+                print("[MessageComposerView] No online agents for this project (using cached state)")
             }
         }
     }
 
     private func loadNudges() {
         Task {
-            // Refresh ensures AppDataStore is synced with latest data from nostrdb
-            _ = await coreManager.safeCore.refresh()
+            // No refresh needed - use data already available from centralized state
             do {
                 availableNudges = try await coreManager.safeCore.getNudges()
             } catch {

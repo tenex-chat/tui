@@ -32,7 +32,7 @@ final class TenexEventHandler: EventCallback {
         self.coreManager = coreManager
     }
 
-    /// Refresh projectOnlineStatus for all known projects.
+    /// Refresh projectOnlineStatus and onlineAgents for all known projects.
     /// Called when Rust pushes a projectStatus change event.
     /// Must be called from main thread.
     @MainActor
@@ -44,10 +44,22 @@ final class TenexEventHandler: EventCallback {
         for project in projects {
             // Use the synchronous core API directly (we're already on main thread,
             // and this is a quick in-memory lookup in the Rust layer)
-            newStatus[project.id] = coreManager.core.isProjectOnline(projectId: project.id)
+            let isOnline = coreManager.core.isProjectOnline(projectId: project.id)
+            newStatus[project.id] = isOnline
+
+            // Proactively fetch and cache online agents for online projects
+            // This eliminates the multi-second delay when opening agent selector
+            if isOnline {
+                Task {
+                    await coreManager.fetchAndCacheAgents(for: project.id)
+                }
+            } else {
+                // Clear agents for offline projects immediately
+                coreManager.onlineAgents[project.id] = []
+            }
         }
 
-        // Update the published dictionary - SwiftUI will react automatically
+        // Update the published dictionaries - SwiftUI will react automatically
         coreManager.projectOnlineStatus = newStatus
     }
 
