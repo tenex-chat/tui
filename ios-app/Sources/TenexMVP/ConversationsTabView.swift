@@ -165,10 +165,24 @@ struct ConversationsTabView: View {
                 .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showDiagnostics) {
-                DiagnosticsView(coreManager: coreManager)
+                NavigationStack {
+                    DiagnosticsView(coreManager: coreManager)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { showDiagnostics = false }
+                            }
+                        }
+                }
             }
             .sheet(isPresented: $showStats) {
-                StatsView(coreManager: coreManager)
+                NavigationStack {
+                    StatsView(coreManager: coreManager)
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { showStats = false }
+                            }
+                        }
+                }
             }
             .sheet(isPresented: $showProjectPickerForNewConv) {
                 ProjectSelectorSheet(

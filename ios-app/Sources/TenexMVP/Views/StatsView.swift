@@ -10,62 +10,60 @@ struct StatsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                if viewModel.isLoading && viewModel.snapshot == nil {
-                    // Initial loading state
-                    ProgressView("Loading stats...")
-                } else if let error = viewModel.error {
-                    // Error state
-                    ErrorView(error: error) {
-                        Task {
-                            await viewModel.loadStats()
-                        }
+        ZStack {
+            if viewModel.isLoading && viewModel.snapshot == nil {
+                // Initial loading state
+                ProgressView("Loading stats...")
+            } else if let error = viewModel.error {
+                // Error state
+                ErrorView(error: error) {
+                    Task {
+                        await viewModel.loadStats()
                     }
-                } else if let snapshot = viewModel.snapshot {
-                    // Main content
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Metric Cards (always visible)
-                            MetricCardsView(snapshot: snapshot)
-                                .padding()
-
-                            Divider()
-
-                            // Tab Navigation
-                            TabNavigationView(selectedTab: $viewModel.selectedTab)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-
-                            Divider()
-                                .padding(.top, 8)
-
-                            // Tab Content
-                            TabContentView(
-                                snapshot: snapshot,
-                                selectedTab: viewModel.selectedTab
-                            )
+                }
+            } else if let snapshot = viewModel.snapshot {
+                // Main content
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Metric Cards (always visible)
+                        MetricCardsView(snapshot: snapshot)
                             .padding()
-                        }
+
+                        Divider()
+
+                        // Tab Navigation
+                        TabNavigationView(selectedTab: $viewModel.selectedTab)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+
+                        Divider()
+                            .padding(.top, 8)
+
+                        // Tab Content
+                        TabContentView(
+                            snapshot: snapshot,
+                            selectedTab: viewModel.selectedTab
+                        )
+                        .padding()
                     }
-                    .refreshable {
-                        await viewModel.refresh()
-                    }
-                } else {
-                    // Empty state
-                    EmptyStatsView {
-                        Task {
-                            await viewModel.loadStats()
-                        }
+                }
+                .refreshable {
+                    await viewModel.refresh()
+                }
+            } else {
+                // Empty state
+                EmptyStatsView {
+                    Task {
+                        await viewModel.loadStats()
                     }
                 }
             }
-            .navigationTitle("Stats")
-            .navigationBarTitleDisplayMode(.large)
-            .task {
-                // Load stats on appear
-                await viewModel.loadStats()
-            }
+        }
+        .navigationTitle("Stats")
+        .navigationBarTitleDisplayMode(.large)
+        .task {
+            // Load stats on appear
+            await viewModel.loadStats()
         }
     }
 }

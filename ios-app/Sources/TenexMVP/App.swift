@@ -551,8 +551,10 @@ struct MainTabView: View {
             }
         }
         .sheet(isPresented: $showSearch) {
-            SearchView()
-                .environmentObject(coreManager)
+            NavigationStack {
+                SearchView()
+                    .environmentObject(coreManager)
+            }
         }
         .sheet(isPresented: $showNewConversation) {
             MessageComposerView(
