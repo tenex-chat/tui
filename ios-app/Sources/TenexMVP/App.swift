@@ -83,9 +83,10 @@ class TenexCoreManager: ObservableObject {
     /// ConversationDetailView observes this to know when to reload.
     @Published var conversationMessageUpdates: Set<String> = []
 
-    /// Project status update counter - incremented when agent status changes.
-    /// Views showing agent online/offline status can observe this.
-    @Published var projectStatusVersion: Int = 0
+    /// Project online status - updated reactively via event callbacks.
+    /// Key: project ID, Value: true if online.
+    /// Subscribe to this instead of polling isProjectOnline().
+    @Published var projectOnlineStatus: [String: Bool] = [:]
 
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening
@@ -177,10 +178,9 @@ class TenexCoreManager: ObservableObject {
     }
 
     /// Called when project status changes (agent online/offline).
-    /// Increments projectStatusVersion to trigger targeted updates.
+    /// Refreshes project list. projectOnlineStatus is updated by TenexEventHandler.
     @MainActor
     func onProjectStatusChanged() async {
-        projectStatusVersion += 1
         await refreshProjects()
         // Also refresh conversations since 24133 events can change is_active status
         await refreshConversations()
@@ -265,6 +265,14 @@ class TenexCoreManager: ObservableObject {
             projects = p
             conversations = c
             inboxItems = i
+
+            // Initialize project online status reactively
+            var initialStatus: [String: Bool] = [:]
+            for project in p {
+                initialStatus[project.id] = core.isProjectOnline(projectId: project.id)
+            }
+            projectOnlineStatus = initialStatus
+
             updateActiveAgentsState()
         } catch {
             print("[TenexCoreManager] Fetch failed: \(error)")
