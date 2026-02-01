@@ -1,5 +1,6 @@
 import Foundation
 import os.signpost
+import SwiftUI  // For PerformanceOverlayView and Color types
 
 // MARK: - Performance Profiler
 
@@ -348,8 +349,6 @@ class ProfiledViewModel: ObservableObject {
 
 // MARK: - View Modifier for Body Profiling
 
-import SwiftUI
-
 /// View modifier that logs when a view's body is evaluated
 struct ProfileViewBody: ViewModifier {
     let viewName: String
@@ -378,3 +377,342 @@ extension View {
     }
 }
 #endif
+
+// MARK: - Real-Time Memory Monitor
+
+/// Observable memory monitor for real-time tracking in UI
+@MainActor
+final class MemoryMonitor: ObservableObject {
+    static let shared = MemoryMonitor()
+
+    @Published private(set) var currentMemoryMB: Double = 0
+    @Published private(set) var peakMemoryMB: Double = 0
+    @Published private(set) var memoryDelta: Double = 0  // Change since last update
+
+    private var timer: Timer?
+    private var previousMemory: Double = 0
+    private var isMonitoring = false
+
+    private init() {}
+
+    /// Start real-time memory monitoring
+    func startMonitoring(interval: TimeInterval = 1.0) {
+        guard !isMonitoring else { return }
+        isMonitoring = true
+
+        updateMemory()
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateMemory()
+            }
+        }
+    }
+
+    /// Stop memory monitoring
+    func stopMonitoring() {
+        timer?.invalidate()
+        timer = nil
+        isMonitoring = false
+    }
+
+    private func updateMemory() {
+        let bytes = getMemoryUsage()
+        let mb = Double(bytes) / (1024 * 1024)
+
+        memoryDelta = mb - previousMemory
+        previousMemory = currentMemoryMB
+        currentMemoryMB = mb
+
+        if mb > peakMemoryMB {
+            peakMemoryMB = mb
+        }
+    }
+
+    /// Get current memory usage in bytes
+    nonisolated func getMemoryUsage() -> UInt64 {
+        var info = mach_task_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size) / 4
+
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: 1) {
+                task_info(mach_task_self_, task_flavor_t(MACH_TASK_BASIC_INFO), $0, &count)
+            }
+        }
+
+        return result == KERN_SUCCESS ? info.resident_size : 0
+    }
+
+    /// Reset peak tracking
+    func resetPeak() {
+        peakMemoryMB = currentMemoryMB
+    }
+
+    /// Memory status description
+    var statusDescription: String {
+        if currentMemoryMB > 500 {
+            return "Critical"
+        } else if currentMemoryMB > 300 {
+            return "High"
+        } else if currentMemoryMB > 150 {
+            return "Moderate"
+        }
+        return "Normal"
+    }
+
+    var statusColor: Color {
+        if currentMemoryMB > 500 { return .red }
+        if currentMemoryMB > 300 { return .orange }
+        if currentMemoryMB > 150 { return .yellow }
+        return .green
+    }
+}
+
+// MARK: - Frame Rate Monitor
+
+/// Monitors frame rate for detecting UI jank
+@MainActor
+final class FrameRateMonitor: ObservableObject {
+    static let shared = FrameRateMonitor()
+
+    @Published private(set) var currentFPS: Double = 60
+    @Published private(set) var droppedFrames: Int = 0
+
+    private var displayLink: CADisplayLink?
+    private var lastTimestamp: CFTimeInterval = 0
+    private var frameCount: Int = 0
+    private var isMonitoring = false
+
+    private init() {}
+
+    /// Start frame rate monitoring
+    func startMonitoring() {
+        guard !isMonitoring else { return }
+        isMonitoring = true
+
+        displayLink = CADisplayLink(target: self, selector: #selector(handleDisplayLink(_:)))
+        displayLink?.add(to: .main, forMode: .common)
+    }
+
+    /// Stop frame rate monitoring
+    func stopMonitoring() {
+        displayLink?.invalidate()
+        displayLink = nil
+        isMonitoring = false
+    }
+
+    @objc private func handleDisplayLink(_ link: CADisplayLink) {
+        if lastTimestamp == 0 {
+            lastTimestamp = link.timestamp
+            return
+        }
+
+        frameCount += 1
+        let elapsed = link.timestamp - lastTimestamp
+
+        // Update FPS every second
+        if elapsed >= 1.0 {
+            currentFPS = Double(frameCount) / elapsed
+
+            // Count dropped frames (target is 60 FPS)
+            let expectedFrames = Int(elapsed * 60)
+            let dropped = max(0, expectedFrames - frameCount)
+            droppedFrames += dropped
+
+            frameCount = 0
+            lastTimestamp = link.timestamp
+
+            // Log if FPS drops significantly
+            if currentFPS < 45 {
+                os_log(.warning, log: OSLog(subsystem: "com.tenex.app", category: "Performance"),
+                       "⚠️ Low frame rate: %.1f FPS", currentFPS)
+            }
+        }
+    }
+
+    /// Reset dropped frame counter
+    func resetDroppedFrames() {
+        droppedFrames = 0
+    }
+}
+
+// MARK: - Performance Overlay View
+
+/// Floating overlay showing real-time performance metrics
+struct PerformanceOverlayView: View {
+    @StateObject private var memoryMonitor = MemoryMonitor.shared
+    @StateObject private var frameMonitor = FrameRateMonitor.shared
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 4) {
+            // Compact indicator
+            Button(action: { withAnimation { isExpanded.toggle() } }) {
+                HStack(spacing: 6) {
+                    // FPS indicator
+                    Text("\(Int(frameMonitor.currentFPS))")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(fpsColor)
+
+                    Text("FPS")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+
+                    Divider()
+                        .frame(height: 12)
+
+                    // Memory indicator
+                    Text(String(format: "%.0f", memoryMonitor.currentMemoryMB))
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(memoryMonitor.statusColor)
+
+                    Text("MB")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            }
+            .buttonStyle(.plain)
+
+            // Expanded details
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Frame rate section
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Image(systemName: "speedometer")
+                                .font(.caption)
+                            Text("Frame Rate")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.secondary)
+
+                        HStack {
+                            Text("Current:")
+                                .font(.caption2)
+                            Spacer()
+                            Text(String(format: "%.1f FPS", frameMonitor.currentFPS))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(fpsColor)
+                        }
+
+                        HStack {
+                            Text("Dropped:")
+                                .font(.caption2)
+                            Spacer()
+                            Text("\(frameMonitor.droppedFrames)")
+                                .font(.caption.monospacedDigit())
+                        }
+                    }
+
+                    Divider()
+
+                    // Memory section
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Image(systemName: "memorychip")
+                                .font(.caption)
+                            Text("Memory")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.secondary)
+
+                        HStack {
+                            Text("Current:")
+                                .font(.caption2)
+                            Spacer()
+                            Text(String(format: "%.1f MB", memoryMonitor.currentMemoryMB))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(memoryMonitor.statusColor)
+                        }
+
+                        HStack {
+                            Text("Peak:")
+                                .font(.caption2)
+                            Spacer()
+                            Text(String(format: "%.1f MB", memoryMonitor.peakMemoryMB))
+                                .font(.caption.monospacedDigit())
+                        }
+
+                        HStack {
+                            Text("Status:")
+                                .font(.caption2)
+                            Spacer()
+                            Text(memoryMonitor.statusDescription)
+                                .font(.caption2.bold())
+                                .foregroundStyle(memoryMonitor.statusColor)
+                        }
+                    }
+
+                    Divider()
+
+                    // FFI stats quick view
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack {
+                            Image(systemName: "arrow.left.arrow.right")
+                                .font(.caption)
+                            Text("FFI Calls")
+                                .font(.caption.bold())
+                        }
+                        .foregroundStyle(.secondary)
+
+                        let topCalls = FFIMetrics.shared.summary.prefix(3)
+                        ForEach(topCalls, id: \.name) { call in
+                            HStack {
+                                Text(call.name)
+                                    .font(.caption2)
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(String(format: "%.1fms", call.avgDurationMs))
+                                    .font(.caption2.monospacedDigit())
+                            }
+                        }
+                    }
+                }
+                .padding(10)
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 160)
+            }
+        }
+        .padding(8)
+        .onAppear {
+            memoryMonitor.startMonitoring()
+            frameMonitor.startMonitoring()
+        }
+        .onDisappear {
+            memoryMonitor.stopMonitoring()
+            frameMonitor.stopMonitoring()
+        }
+    }
+
+    private var fpsColor: Color {
+        if frameMonitor.currentFPS < 30 { return .red }
+        if frameMonitor.currentFPS < 50 { return .orange }
+        return .green
+    }
+}
+
+// MARK: - View Modifier for Performance Overlay
+
+struct PerformanceOverlayModifier: ViewModifier {
+    let enabled: Bool
+
+    func body(content: Content) -> some View {
+        ZStack(alignment: .topTrailing) {
+            content
+            if enabled {
+                PerformanceOverlayView()
+            }
+        }
+    }
+}
+
+extension View {
+    /// Add performance overlay to view (for debugging)
+    func withPerformanceOverlay(enabled: Bool = true) -> some View {
+        modifier(PerformanceOverlayModifier(enabled: enabled))
+    }
+}
