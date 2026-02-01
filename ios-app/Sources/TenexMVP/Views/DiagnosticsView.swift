@@ -10,67 +10,65 @@ struct DiagnosticsView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                if viewModel.isLoading && viewModel.snapshot == nil {
-                    // Initial loading state
-                    ProgressView("Loading diagnostics...")
-                } else if let error = viewModel.error, viewModel.snapshot == nil {
-                    // Complete failure error state (no snapshot at all)
-                    DiagnosticsErrorView(error: error) {
-                        Task {
-                            await viewModel.loadDiagnostics()
-                        }
+        ZStack {
+            if viewModel.isLoading && viewModel.snapshot == nil {
+                // Initial loading state
+                ProgressView("Loading diagnostics...")
+            } else if let error = viewModel.error, viewModel.snapshot == nil {
+                // Complete failure error state (no snapshot at all)
+                DiagnosticsErrorView(error: error) {
+                    Task {
+                        await viewModel.loadDiagnostics()
                     }
-                } else if let snapshot = viewModel.snapshot {
-                    // Main content (may have partial data with section errors)
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            // Show section errors banner if any sections failed
-                            // Driven directly from snapshot.sectionErrors (single source of truth)
-                            if !snapshot.sectionErrors.isEmpty {
-                                DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
-                                    .padding(.horizontal)
-                                    .padding(.top, 8)
-                            }
-
-                            // Tab Navigation
-                            DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
+                }
+            } else if let snapshot = viewModel.snapshot {
+                // Main content (may have partial data with section errors)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        // Show section errors banner if any sections failed
+                        // Driven directly from snapshot.sectionErrors (single source of truth)
+                        if !snapshot.sectionErrors.isEmpty {
+                            DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
                                 .padding(.horizontal)
                                 .padding(.top, 8)
-
-                            Divider()
-                                .padding(.top, 8)
-
-                            // Tab Content
-                            DiagnosticsTabContent(
-                                snapshot: snapshot,
-                                selectedTab: viewModel.selectedTab,
-                                isLoading: viewModel.isLoading
-                            )
-                            .padding()
                         }
+
+                        // Tab Navigation
+                        DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+
+                        Divider()
+                            .padding(.top, 8)
+
+                        // Tab Content
+                        DiagnosticsTabContent(
+                            snapshot: snapshot,
+                            selectedTab: viewModel.selectedTab,
+                            isLoading: viewModel.isLoading
+                        )
+                        .padding()
                     }
-                    .refreshable {
-                        await viewModel.refresh()
-                    }
-                } else {
-                    // Empty state
-                    DiagnosticsEmptyView {
-                        Task {
-                            await viewModel.loadDiagnostics()
-                        }
+                }
+                .refreshable {
+                    await viewModel.refresh()
+                }
+            } else {
+                // Empty state
+                DiagnosticsEmptyView {
+                    Task {
+                        await viewModel.loadDiagnostics()
                     }
                 }
             }
-            .navigationTitle("Diagnostics")
-            .navigationBarTitleDisplayMode(.large)
-            .task {
-                await viewModel.loadDiagnostics()
-            }
-            .onDisappear {
-                viewModel.cancelFetch()
-            }
+        }
+        .navigationTitle("Diagnostics")
+        .navigationBarTitleDisplayMode(.large)
+        .task {
+            await viewModel.loadDiagnostics()
+        }
+        .onDisappear {
+            viewModel.cancelFetch()
         }
     }
 }

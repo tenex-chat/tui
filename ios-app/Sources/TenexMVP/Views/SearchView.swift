@@ -26,81 +26,79 @@ struct SearchView: View {
     @State private var navigateToConversation: SearchNavigationData?
 
     var body: some View {
-        NavigationStack {
-            List {
-                if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
-                    ContentUnavailableView(
-                        "No Results",
-                        systemImage: "magnifyingglass",
-                        description: Text("No messages found matching \"\(searchText)\"")
-                    )
-                } else if groupedResults.isEmpty && searchText.isEmpty {
-                    ContentUnavailableView(
-                        "Search Messages",
-                        systemImage: "magnifyingglass",
-                        description: Text("Enter a search term to find messages across all conversations")
-                    )
-                } else {
-                    ForEach(groupedResults) { group in
-                        Section {
-                            // Conversation header - tappable to navigate
+        List {
+            if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
+                ContentUnavailableView(
+                    "No Results",
+                    systemImage: "magnifyingglass",
+                    description: Text("No messages found matching \"\(searchText)\"")
+                )
+            } else if groupedResults.isEmpty && searchText.isEmpty {
+                ContentUnavailableView(
+                    "Search Messages",
+                    systemImage: "magnifyingglass",
+                    description: Text("Enter a search term to find messages across all conversations")
+                )
+            } else {
+                ForEach(groupedResults) { group in
+                    Section {
+                        // Conversation header - tappable to navigate
+                        Button {
+                            navigateToConversation = SearchNavigationData(
+                                conversationId: group.id,
+                                projectId: group.projectId
+                            )
+                        } label: {
+                            ConversationGroupHeader(group: group)
+                        }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+
+                        // Matching messages (indented)
+                        ForEach(group.matches, id: \.eventId) { result in
                             Button {
-                                navigateToConversation = SearchNavigationData(
-                                    conversationId: group.id,
-                                    projectId: group.projectId
-                                )
+                                if let threadId = result.threadId {
+                                    navigateToConversation = SearchNavigationData(
+                                        conversationId: threadId,
+                                        projectId: result.projectATag?.components(separatedBy: ":").last
+                                    )
+                                }
                             } label: {
-                                ConversationGroupHeader(group: group)
+                                MatchingMessageRow(result: result, searchTerm: searchText)
                             }
                             .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
-
-                            // Matching messages (indented)
-                            ForEach(group.matches, id: \.eventId) { result in
-                                Button {
-                                    if let threadId = result.threadId {
-                                        navigateToConversation = SearchNavigationData(
-                                            conversationId: threadId,
-                                            projectId: result.projectATag?.components(separatedBy: ":").last
-                                        )
-                                    }
-                                } label: {
-                                    MatchingMessageRow(result: result, searchTerm: searchText)
-                                }
-                                .buttonStyle(.plain)
-                                .listRowInsets(EdgeInsets(top: 0, leading: 28, bottom: 2, trailing: 16))
-                            }
+                            .listRowInsets(EdgeInsets(top: 0, leading: 28, bottom: 2, trailing: 16))
                         }
                     }
-                    .listSectionSpacing(4)
+                }
+                .listSectionSpacing(4)
+            }
+        }
+        .listStyle(.plain)
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+        .onChange(of: searchText) { _, newValue in
+            performSearch(query: newValue)
+        }
+        .navigationTitle("Search")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Cancel") {
+                    dismiss()
                 }
             }
-            .listStyle(.plain)
-            .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
-            .onChange(of: searchText) { _, newValue in
-                performSearch(query: newValue)
-            }
-            .navigationTitle("Search")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                }
-            }
-            .navigationDestination(item: $navigateToConversation) { navData in
-                SearchConversationView(
-                    conversationId: navData.conversationId,
-                    projectId: navData.projectId
-                )
-                .environmentObject(coreManager)
-            }
-            .overlay {
-                if isSearching {
-                    ProgressView()
-                        .scaleEffect(1.2)
-                }
+        }
+        .navigationDestination(item: $navigateToConversation) { navData in
+            SearchConversationView(
+                conversationId: navData.conversationId,
+                projectId: navData.projectId
+            )
+            .environmentObject(coreManager)
+        }
+        .overlay {
+            if isSearching {
+                ProgressView()
+                    .scaleEffect(1.2)
             }
         }
     }
