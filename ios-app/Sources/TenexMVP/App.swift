@@ -87,6 +87,10 @@ class TenexCoreManager: ObservableObject {
     /// Views showing agent online/offline status can observe this.
     @Published var projectStatusVersion: Int = 0
 
+    /// Whether any conversation currently has active agents (24133 events with agents)
+    /// Used to highlight the runtime indicator when work is happening
+    @Published var hasActiveAgents: Bool = false
+
     // MARK: - Event Callback
     /// Event handler for push-based updates from Rust core
     private var eventHandler: TenexEventHandler?
@@ -178,6 +182,8 @@ class TenexCoreManager: ObservableObject {
     func onProjectStatusChanged() async {
         projectStatusVersion += 1
         await refreshProjects()
+        // Also refresh conversations since 24133 events can change is_active status
+        await refreshConversations()
     }
 
     /// Called for general data changes.
@@ -185,6 +191,12 @@ class TenexCoreManager: ObservableObject {
     @MainActor
     func onGeneralDataChanged() async {
         await fetchData()
+    }
+
+    /// Update hasActiveAgents based on current conversations
+    @MainActor
+    private func updateActiveAgentsState() {
+        hasActiveAgents = conversations.contains { $0.isActive }
     }
 
     /// Refresh only the conversations list
@@ -198,6 +210,7 @@ class TenexCoreManager: ObservableObject {
                 timeFilter: .all
             )
             conversations = try await safeCore.getAllConversations(filter: filter)
+            updateActiveAgentsState()
         } catch {
             print("[TenexCoreManager] Conversations refresh failed: \(error)")
         }
@@ -252,6 +265,7 @@ class TenexCoreManager: ObservableObject {
             projects = p
             conversations = c
             inboxItems = i
+            updateActiveAgentsState()
         } catch {
             print("[TenexCoreManager] Fetch failed: \(error)")
             // Don't crash - just log and continue with stale data
