@@ -11,6 +11,9 @@ struct ConversationDetailView: View {
     @StateObject private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
     @State private var showFullConversation = false
+    @State private var showComposer = false
+    @State private var isLatestReplyExpanded = false
+    @State private var latestReplyContentHeight: CGFloat = 0
 
     /// Initialize the view with a conversation and core manager
     /// Note: coreManager is passed explicitly to support @StateObject initialization
@@ -79,14 +82,14 @@ struct ConversationDetailView: View {
                         todoListSection
                     }
 
+                    // Latest Reply Section (most recent on top)
+                    if let reply = viewModel.latestReply {
+                        latestReplySection(reply)
+                    }
+
                     // Delegations Section
                     if !viewModel.delegations.isEmpty {
                         delegationsSection
-                    }
-
-                    // Latest Reply Section
-                    if let reply = viewModel.latestReply {
-                        latestReplySection(reply)
                     }
 
                     // Full Conversation Button
@@ -154,12 +157,48 @@ struct ConversationDetailView: View {
 
     // MARK: - Latest Reply Section
 
+    /// Maximum height before collapsing (roughly 60% of screen height)
+    private let maxCollapsedHeight: CGFloat = 400
+
+    /// Whether the latest reply content needs collapsing
+    private var latestReplyNeedsCollapsing: Bool {
+        latestReplyContentHeight > maxCollapsedHeight
+    }
+
+    /// Find the project for this conversation
+    private var project: ProjectInfo? {
+        coreManager.safeCore.getProjects().first { $0.id == conversation.extractedProjectId }
+    }
+
+    /// Find the last agent that spoke in the conversation
+    private var lastAgentPubkey: String? {
+        // Get the latest reply author's pubkey
+        if let reply = viewModel.latestReply {
+            return reply.authorNpub.isEmpty ? nil : reply.authorNpub
+        }
+        return nil
+    }
+
     private func latestReplySection(_ reply: MessageInfo) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            // Header with author and timestamp
             HStack {
-                Text(AgentNameFormatter.format(reply.author))
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                // Author avatar and name
+                HStack(spacing: 6) {
+                    AgentAvatarView(
+                        agentName: reply.author,
+                        pubkey: reply.authorNpub.isEmpty ? nil : reply.authorNpub,
+                        size: 20,
+                        fontSize: 8,
+                        showBorder: false
+                    )
+                    .environmentObject(coreManager)
+
+                    Text(AgentNameFormatter.format(reply.author))
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(deterministicColor(for: reply.authorNpub))
+                }
 
                 Spacer()
 
@@ -168,15 +207,116 @@ struct ConversationDetailView: View {
                     .foregroundStyle(.secondary)
             }
 
-            MarkdownView(content: reply.content)
-                .font(.body)
-                .foregroundStyle(.primary)
-                .textSelection(.enabled)
+            // Collapsible content
+            VStack(alignment: .leading, spacing: 0) {
+                // Content with height measurement
+                MarkdownView(content: reply.content)
+                    .font(.body)
+                    .foregroundStyle(.primary)
+                    .textSelection(.enabled)
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear
+                                .onAppear {
+                                    latestReplyContentHeight = geometry.size.height
+                                }
+                                .onChange(of: reply.content) {
+                                    latestReplyContentHeight = geometry.size.height
+                                }
+                        }
+                    )
+                    .frame(maxHeight: isLatestReplyExpanded || !latestReplyNeedsCollapsing ? nil : maxCollapsedHeight, alignment: .top)
+                    .clipped()
+
+                // Gradient fade and "Read more" button when collapsed
+                if latestReplyNeedsCollapsing && !isLatestReplyExpanded {
+                    VStack(spacing: 0) {
+                        // Gradient fade overlay
+                        LinearGradient(
+                            gradient: Gradient(colors: [
+                                Color(.systemBackground).opacity(0),
+                                Color(.systemBackground)
+                            ]),
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 40)
+                        .offset(y: -40)
+
+                        // Read more button
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                isLatestReplyExpanded = true
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("Read more")
+                                    .font(.subheadline)
+                                    .fontWeight(.medium)
+                                Image(systemName: "chevron.down")
+                                    .font(.caption)
+                            }
+                            .foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+                    }
+                }
+
+                // Collapse button when expanded
+                if latestReplyNeedsCollapsing && isLatestReplyExpanded {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            isLatestReplyExpanded = false
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Show less")
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                            Image(systemName: "chevron.up")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(Color.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 8)
+                }
+            }
+
+            // Reply button
+            Button {
+                showComposer = true
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrowshape.turn.up.left.fill")
+                        .font(.caption)
+                    Text("Reply")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(Color.accentColor)
+                .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
         .overlay(alignment: .top) {
             Divider()
+        }
+        .sheet(isPresented: $showComposer) {
+            MessageComposerView(
+                project: project,
+                conversationId: conversation.id,
+                conversationTitle: conversation.title,
+                initialAgentPubkey: lastAgentPubkey
+            )
+            .environmentObject(coreManager)
         }
     }
 
@@ -509,14 +649,9 @@ struct FullConversationSheet: View {
         }
     }
 
-    /// Extract project ID from projectATag
-    private var projectId: String {
-        conversation.projectATag.isEmpty ? conversation.id : conversation.projectATag
-    }
-
     /// Find the project for this conversation
     private var project: ProjectInfo? {
-        coreManager.safeCore.getProjects().first { $0.id == conversation.projectATag }
+        coreManager.safeCore.getProjects().first { $0.id == conversation.extractedProjectId }
     }
 
     /// Find the last agent that spoke in the conversation (like TUI's get_most_recent_agent_from_conversation)
@@ -556,7 +691,7 @@ struct FullConversationSheet: View {
                                     message: item.message,
                                     isConsecutive: item.isConsecutive,
                                     conversationId: conversation.id,
-                                    projectId: projectId,
+                                    projectId: conversation.extractedProjectId,
                                     onDelegationTap: { delegationId in
                                         selectedDelegation = delegationId
                                     }
@@ -685,9 +820,26 @@ extension String: @retroactive Identifiable {
     public var id: String { self }
 }
 
-// MARK: - ConversationFullInfo Identifiable
+// MARK: - ConversationFullInfo Extensions
 
 extension ConversationFullInfo: Identifiable {}
+
+extension ConversationFullInfo {
+    /// Extracts the project ID (d-tag) from the projectATag.
+    ///
+    /// The projectATag follows the format `kind:pubkey:d-tag`.
+    /// This property extracts the d-tag portion (everything after the first two colon-separated parts).
+    /// Returns an empty string if projectATag is empty or malformed.
+    var extractedProjectId: String {
+        guard !projectATag.isEmpty else { return "" }
+        // projectATag format: "kind:pubkey:d-tag"
+        // We need to drop the first two components (kind and pubkey) and join the rest
+        // This handles d-tags that might contain colons themselves
+        let parts = projectATag.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3 else { return "" }
+        return parts.dropFirst(2).joined(separator: ":")
+    }
+}
 
 #Preview {
     ConversationDetailView(conversation: ConversationFullInfo(
