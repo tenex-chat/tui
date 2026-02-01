@@ -289,7 +289,7 @@ struct ConversationsTabView: View {
                             Text(runtimeText)
                                 .font(.subheadline)
                                 .fontWeight(.medium)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(coreManager.hasActiveAgents ? .green : .secondary)
                         }
                         Menu {
                             Toggle(isOn: $showArchived) {
