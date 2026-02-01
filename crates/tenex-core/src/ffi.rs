@@ -929,6 +929,7 @@ impl TenexCore {
 
         let worker = NostrWorker::new(
             ndb.clone(),
+            data_dir.clone(),
             data_tx,
             command_rx,
             event_stats,
