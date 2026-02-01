@@ -14,9 +14,22 @@ use tokio::sync::watch;
 use tokio::sync::RwLock;
 
 use crate::constants::RELAY_URL;
+use crate::models::ProjectStatus;
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
 use crate::store::{get_projects, ingest_events};
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
+
+// Event kind constants
+const KIND_TEXT_NOTE: u16 = 1;
+const KIND_LONG_FORM_CONTENT: u16 = 30023;
+const KIND_PROJECT_METADATA: u16 = 513;
+const KIND_AGENT: u16 = 4199;
+const KIND_LESSON: u16 = 4129;
+const KIND_MCP_TOOL: u16 = 4200;
+const KIND_NUDGE: u16 = 4201;
+const KIND_PROJECT_STATUS: u16 = 24010;
+const KIND_PROJECT_DRAFT: u16 = 31933;
+const KIND_AGENT_STATUS: u16 = 24133;
 
 static START_TIME: OnceLock<Instant> = OnceLock::new();
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
@@ -60,6 +73,42 @@ fn debug_log(msg: &str) {
     }
 }
 
+/// Extract project name from a_tag coordinate (format: kind:pubkey:identifier)
+fn extract_project_name(a_tag: &str) -> &str {
+    a_tag.split(':').nth(2).unwrap_or("unknown")
+}
+
+/// Subscribe to a project if not already subscribed, with automatic rollback on failure
+async fn subscribe_project_if_new(
+    client: &Client,
+    a_tag: &str,
+    subscribed_projects: &Arc<RwLock<HashSet<String>>>,
+    subscription_stats: &SharedSubscriptionStats,
+) -> Result<bool> {
+    // Atomic check+insert: if insert returns true, we're the first to subscribe to this project
+    let is_new = {
+        let mut projects = subscribed_projects.write().await;
+        projects.insert(a_tag.to_string())
+    };
+
+    if !is_new {
+        return Ok(false); // Already subscribed
+    }
+
+    // Try to subscribe
+    match subscribe_project_filters(client, subscription_stats, a_tag).await {
+        Ok(_) => {
+            debug_log(&format!("✅ Subscribed to newly online project: {}", extract_project_name(a_tag)));
+            Ok(true)
+        }
+        Err(e) => {
+            // Rollback on failure
+            subscribed_projects.write().await.remove(a_tag);
+            Err(e)
+        }
+    }
+}
+
 /// Subscribe to all filters for a project (metadata, messages, reports).
 /// Returns Ok(()) only if ALL subscriptions succeed - this is all-or-nothing.
 /// Also registers subscription stats for each filter.
@@ -73,12 +122,11 @@ async fn subscribe_project_filters(
     subscription_stats: &SharedSubscriptionStats,
     project_a_tag: &str,
 ) -> Result<()> {
-    // Extract project name for description
-    let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
+    let project_name = extract_project_name(project_a_tag);
 
     // Metadata subscription (kind:513)
     let metadata_filter = Filter::new()
-        .kind(Kind::Custom(513))
+        .kind(Kind::Custom(KIND_PROJECT_METADATA))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
     let metadata_output = client.subscribe(metadata_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to metadata for {}: {}", project_name, e))?;
@@ -86,14 +134,14 @@ async fn subscribe_project_filters(
         metadata_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} metadata", project_name),
-            vec![513],
+            vec![KIND_PROJECT_METADATA],
             Some(project_a_tag.to_string()),
         ),
     );
 
     // Messages subscription (kind:1)
     let message_filter = Filter::new()
-        .kind(Kind::from(1))
+        .kind(Kind::from(KIND_TEXT_NOTE))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
     let message_output = client.subscribe(message_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to messages for {}: {}", project_name, e))?;
@@ -101,14 +149,14 @@ async fn subscribe_project_filters(
         message_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} messages", project_name),
-            vec![1],
+            vec![KIND_TEXT_NOTE],
             Some(project_a_tag.to_string()),
         ),
     );
 
     // Long-form content subscription (kind:30023)
     let longform_filter = Filter::new()
-        .kind(Kind::Custom(30023))
+        .kind(Kind::Custom(KIND_LONG_FORM_CONTENT))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
     let longform_output = client.subscribe(longform_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to reports for {}: {}", project_name, e))?;
@@ -116,7 +164,7 @@ async fn subscribe_project_filters(
         longform_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} reports", project_name),
-            vec![30023],
+            vec![KIND_LONG_FORM_CONTENT],
             Some(project_a_tag.to_string()),
         ),
     );
@@ -584,111 +632,97 @@ impl NostrWorker {
 
         // 1. User's projects (kind:31933)
         // Two separate subscriptions: projects owned by user (author) AND where user is a participant (p-tag)
-        let project_filter_owned = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
+        let project_filter_owned = Filter::new().kind(Kind::Custom(KIND_PROJECT_DRAFT)).author(pubkey);
         let output = client.subscribe(project_filter_owned, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (owned)".to_string(), vec![31933], None),
+            SubscriptionInfo::new("User projects (owned)".to_string(), vec![KIND_PROJECT_DRAFT], None),
         );
 
         let project_filter_participant = Filter::new()
-            .kind(Kind::Custom(31933))
+            .kind(Kind::Custom(KIND_PROJECT_DRAFT))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string());
         let output = client.subscribe(project_filter_participant, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (participant)".to_string(), vec![31933], None),
+            SubscriptionInfo::new("User projects (participant)".to_string(), vec![KIND_PROJECT_DRAFT], None),
         );
-        tlog!("CONN", "Subscribed to projects (kind:31933) - owned and p-tagged");
+        tlog!("CONN", "Subscribed to projects (kind:{}) - owned and p-tagged", KIND_PROJECT_DRAFT);
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
+        // kind:24010 is the GLOBAL subscription that tells us which projects are online.
+        // When we receive these events, we create per-project subscriptions for kind:1, 513, 30023.
         let since_time = Timestamp::now() - 45;
         let status_filter = Filter::new()
-            .kind(Kind::Custom(24010))
+            .kind(Kind::Custom(KIND_PROJECT_STATUS))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
         let output = client.subscribe(status_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Status updates (24010)".to_string(), vec![24010], None),
+            SubscriptionInfo::new(format!("Status updates ({})", KIND_PROJECT_STATUS), vec![KIND_PROJECT_STATUS], None),
         );
 
         let operations_status_filter = Filter::new()
-            .kind(Kind::Custom(24133))
+            .kind(Kind::Custom(KIND_AGENT_STATUS))
             .custom_tag(SingleLetterTag::uppercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
         let output = client.subscribe(operations_status_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Status updates (24133)".to_string(), vec![24133], None),
+            SubscriptionInfo::new(format!("Status updates ({})", KIND_AGENT_STATUS), vec![KIND_AGENT_STATUS], None),
         );
-        tlog!("CONN", "Subscribed to status events (kind:24010, kind:24133)");
+        tlog!("CONN", "Subscribed to status events (kind:{}, kind:{})", KIND_PROJECT_STATUS, KIND_AGENT_STATUS);
 
         // 3. Agent definitions (kind:4199)
-        let agent_filter = Filter::new().kind(Kind::Custom(4199));
+        let agent_filter = Filter::new().kind(Kind::Custom(KIND_AGENT));
         let output = client.subscribe(agent_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Agent definitions".to_string(), vec![4199], None),
+            SubscriptionInfo::new("Agent definitions".to_string(), vec![KIND_AGENT], None),
         );
-        tlog!("CONN", "Subscribed to agent definitions (kind:4199)");
+        tlog!("CONN", "Subscribed to agent definitions (kind:{})", KIND_AGENT);
 
         // 4. Nudges (kind:4201) - global, like agent definitions
-        let nudge_filter = Filter::new().kind(Kind::Custom(4201));
+        let nudge_filter = Filter::new().kind(Kind::Custom(KIND_NUDGE));
         let output = client.subscribe(nudge_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Nudges".to_string(), vec![4201], None),
+            SubscriptionInfo::new("Nudges".to_string(), vec![KIND_NUDGE], None),
         );
-        tlog!("CONN", "Subscribed to nudges (kind:4201)");
+        tlog!("CONN", "Subscribed to nudges (kind:{})", KIND_NUDGE);
 
         // 5. Agent lessons (kind:4129)
-        let lesson_filter = Filter::new().kind(Kind::Custom(4129));
+        let lesson_filter = Filter::new().kind(Kind::Custom(KIND_LESSON));
         let output = client.subscribe(lesson_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Agent lessons".to_string(), vec![4129], None),
+            SubscriptionInfo::new("Agent lessons".to_string(), vec![KIND_LESSON], None),
         );
-        tlog!("CONN", "Subscribed to agent lessons (kind:4129)");
+        tlog!("CONN", "Subscribed to agent lessons (kind:{})", KIND_LESSON);
 
         // 6. MCP Tools (kind:4200)
-        let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
+        let mcp_tool_filter = Filter::new().kind(Kind::Custom(KIND_MCP_TOOL));
         let output = client.subscribe(mcp_tool_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("MCP tools".to_string(), vec![4200], None),
+            SubscriptionInfo::new("MCP tools".to_string(), vec![KIND_MCP_TOOL], None),
         );
-        tlog!("CONN", "Subscribed to MCP tools (kind:4200)");
+        tlog!("CONN", "Subscribed to MCP tools (kind:{})", KIND_MCP_TOOL);
 
         // 7. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
-        let project_atags: Vec<String> = get_projects(&self.ndb)
-            .unwrap_or_default()
-            .iter()
-            .map(|p| p.a_tag())
-            .collect();
-
-        if !project_atags.is_empty() {
-            tlog!("CONN", "Setting up subscriptions for {} existing projects", project_atags.len());
-
-            for project_a_tag in &project_atags {
-                let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-
-                // Subscribe to all project filters atomically (all-or-nothing)
-                match subscribe_project_filters(client, &self.subscription_stats, project_a_tag).await {
-                    Ok(()) => {
-                        // Only mark as subscribed AFTER all subscriptions succeed
-                        self.subscribed_projects.write().await.insert(project_a_tag.clone());
-                    }
-                    Err(e) => {
-                        // Log but continue - don't fail the whole connect for one project
-                        tlog!("ERROR", "Failed to subscribe to project {}: {}", project_name, e);
-                    }
-                }
-            }
-            tlog!("CONN", "Subscribed to kind:513, kind:1, and kind:30023 for {} projects", project_atags.len());
-        } else {
-            tlog!("CONN", "No projects found, skipping kind:513 and kind:1 subscriptions");
-        }
+        // OPTIMIZATION: We no longer subscribe to ALL projects at startup.
+        // Instead, we subscribe only to projects that are:
+        // a) Online (discovered via kind:24010 status events)
+        // b) Explicitly requested by user (via SubscribeToProjectMessages command)
+        //
+        // This dramatically reduces subscription count from 3*N (where N is total projects)
+        // to 3*M (where M is online/active projects).
+        //
+        // The notification handler will create subscriptions when:
+        // - kind:24010 status events arrive for new online projects
+        // - kind:31933 project events arrive (user discovers/adds project)
+        tlog!("CONN", "Skipping bulk project subscriptions - will subscribe to projects on-demand when they come online or are explicitly requested");
 
         tlog!("CONN", "All subscriptions set up in {:?}", sub_start.elapsed());
 
@@ -753,9 +787,30 @@ impl NostrWorker {
                                     let kind = event.kind.as_u16();
 
                                     // Ephemeral events (24010, 24133) go through DataChange channel
-                                    if kind == 24010 || kind == 24133 {
+                                    if kind == KIND_PROJECT_STATUS || kind == KIND_AGENT_STATUS {
                                         if let Ok(json) = serde_json::to_string(&*event) {
-                                            let _ = data_tx.send(DataChange::ProjectStatus { json });
+                                            if let Err(e) = data_tx.send(DataChange::ProjectStatus { json: json.clone() }) {
+                                                debug_log(&format!("Failed to send ProjectStatus data change: {}", e));
+                                            }
+
+                                            // For kind:24010 (project status), subscribe to project if it's newly online
+                                            if kind == KIND_PROJECT_STATUS {
+                                                if let Some(status) = ProjectStatus::from_json(&json) {
+                                                    let a_tag = status.project_coordinate.clone();
+
+                                                    match subscribe_project_if_new(&client, &a_tag, &subscribed_projects, &subscription_stats).await {
+                                                        Ok(true) => {
+                                                            tlog!("CONN", "Project came online: {}, subscribed to messages", extract_project_name(&a_tag));
+                                                        }
+                                                        Ok(false) => {
+                                                            // Already subscribed - no action needed
+                                                        }
+                                                        Err(e) => {
+                                                            tlog!("ERROR", "Failed to subscribe to online project {}: {}", extract_project_name(&a_tag), e);
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     } else {
                                         // All other events go through nostrdb
@@ -786,23 +841,24 @@ impl NostrWorker {
 
                                         // For kind:31933 (project), immediately subscribe to its messages
                                         // This fixes iOS connectivity where projects are discovered after initial subscriptions
-                                        if kind == 31933 {
+                                        if kind == KIND_PROJECT_DRAFT {
                                             // Extract d-tag to build the a_tag (kind:pubkey:d_tag format)
                                             if let Some(d_tag) = event.tags.iter()
                                                 .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::D)))
                                                 .and_then(|t| t.content())
                                             {
                                                 let a_tag = format!("31933:{}:{}", event.pubkey.to_hex(), d_tag);
-                                                // Atomic check+insert: if insert returns true, we're the first to claim this project
-                                                let is_new = subscribed_projects.write().await.insert(a_tag.clone());
-                                                if is_new {
-                                                    let project_name = d_tag.split(':').last().unwrap_or(d_tag);
-                                                    tlog!("CONN", "New project discovered: {}, subscribing to messages", project_name);
 
-                                                    // Use helper function for all-or-nothing subscriptions with stats registration
-                                                    if let Err(e) = subscribe_project_filters(&client, &subscription_stats, &a_tag).await {
-                                                        // Subscription failed - remove from set so we can retry later
-                                                        subscribed_projects.write().await.remove(&a_tag);
+                                                match subscribe_project_if_new(&client, &a_tag, &subscribed_projects, &subscription_stats).await {
+                                                    Ok(true) => {
+                                                        let project_name = d_tag.split(':').last().unwrap_or(d_tag);
+                                                        tlog!("CONN", "New project discovered: {}, subscribed to messages", project_name);
+                                                    }
+                                                    Ok(false) => {
+                                                        // Already subscribed - no action needed
+                                                    }
+                                                    Err(e) => {
+                                                        let project_name = d_tag.split(':').last().unwrap_or(d_tag);
                                                         tlog!("ERROR", "Failed to subscribe to project {}: {}", project_name, e);
                                                     }
                                                 }
