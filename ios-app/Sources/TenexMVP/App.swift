@@ -64,6 +64,7 @@ final class ProfilePictureCache {
 
 /// Shared TenexCore instance wrapper for environment object
 /// Initializes the core OFF the main thread to avoid UI jank
+@MainActor
 class TenexCoreManager: ObservableObject {
     let core: TenexCore
     /// Thread-safe async wrapper for FFI access with proper error handling
