@@ -121,7 +121,7 @@ async fn test_client_without_database() -> Result<()> {
         tokio::time::sleep(Duration::from_millis(500)).await;
     }
 
-    client.disconnect().await?;
+    client.disconnect().await;
     Ok(())
 }
 
@@ -178,7 +178,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
             }
         }
 
-        client.disconnect().await?;
+        client.disconnect().await;
         drop(ndb);
         println!("  ✓ Disconnected and closed nostrdb\n");
     }
@@ -238,7 +238,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
             }
         }
 
-        client.disconnect().await?;
+        client.disconnect().await;
     }
 
     println!();

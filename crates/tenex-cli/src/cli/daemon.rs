@@ -189,7 +189,7 @@ fn try_login_with_credentials(
             anyhow::anyhow!("Password required for ncryptsec but not provided in config")
         })?;
         let encrypted = EncryptedSecretKey::from_bech32(key)?;
-        let secret_key = encrypted.to_secret_key(password)?;
+        let secret_key = encrypted.decrypt(password)?;
         Keys::new(secret_key)
     } else if key.starts_with("nsec") {
         // Unencrypted nsec

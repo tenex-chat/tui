@@ -79,8 +79,8 @@ async fn subscribe_project_filters(
     // Metadata subscription (kind:513)
     let metadata_filter = Filter::new()
         .kind(Kind::Custom(513))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.to_string()]);
-    let metadata_output = client.subscribe(vec![metadata_filter], None).await
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    let metadata_output = client.subscribe(metadata_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to metadata for {}: {}", project_name, e))?;
     subscription_stats.register(
         metadata_output.val.to_string(),
@@ -94,8 +94,8 @@ async fn subscribe_project_filters(
     // Messages subscription (kind:1)
     let message_filter = Filter::new()
         .kind(Kind::from(1))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.to_string()]);
-    let message_output = client.subscribe(vec![message_filter], None).await
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    let message_output = client.subscribe(message_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to messages for {}: {}", project_name, e))?;
     subscription_stats.register(
         message_output.val.to_string(),
@@ -109,8 +109,8 @@ async fn subscribe_project_filters(
     // Long-form content subscription (kind:30023)
     let longform_filter = Filter::new()
         .kind(Kind::Custom(30023))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), vec![project_a_tag.to_string()]);
-    let longform_output = client.subscribe(vec![longform_filter], None).await
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    let longform_output = client.subscribe(longform_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to reports for {}: {}", project_name, e))?;
     subscription_stats.register(
         longform_output.val.to_string(),
@@ -272,6 +272,8 @@ pub struct NostrWorker {
     keys: Option<Keys>,
     user_pubkey: Option<String>,
     ndb: Arc<Ndb>,
+    /// Path to nostrdb database directory - used for NdbDatabase integration with nostr-sdk Client
+    ndb_path: PathBuf,
     data_tx: Sender<DataChange>,
     command_rx: Receiver<NostrCommand>,
     rt_handle: Option<tokio::runtime::Handle>,
@@ -292,6 +294,7 @@ pub struct NostrWorker {
 impl NostrWorker {
     pub fn new(
         ndb: Arc<Ndb>,
+        ndb_path: PathBuf,
         data_tx: Sender<DataChange>,
         command_rx: Receiver<NostrCommand>,
         event_stats: SharedEventStats,
@@ -303,6 +306,7 @@ impl NostrWorker {
             keys: None,
             user_pubkey: None,
             ndb,
+            ndb_path,
             data_tx,
             command_rx,
             rt_handle: None,
@@ -482,7 +486,18 @@ impl NostrWorker {
     }
 
     async fn handle_connect(&mut self, keys: Keys, user_pubkey: String) -> Result<()> {
-        let client = Client::new(keys.clone());
+        // Initialize NdbDatabase for nostr-sdk Client to enable proper negentropy delta syncing
+        // This is the key fix for the CPU pegging issue - without a database backend,
+        // the Client re-downloads all events on every negentropy sync cycle
+        let ndb_path_str = self.ndb_path.to_str()
+            .ok_or_else(|| anyhow::anyhow!("Invalid ndb path: contains non-UTF8 characters"))?;
+        let ndb_database = nostr_ndb::NdbDatabase::open(ndb_path_str)
+            .map_err(|e| anyhow::anyhow!("Failed to open NdbDatabase for nostr-sdk: {}", e))?;
+
+        let client = Client::builder()
+            .signer(keys.clone())
+            .database(ndb_database)
+            .build();
 
         client.add_relay(RELAY_URL).await?;
 
@@ -575,15 +590,21 @@ impl NostrWorker {
         let sub_start = std::time::Instant::now();
 
         // 1. User's projects (kind:31933)
-        // Two filters: projects owned by user (author) OR where user is a participant (p-tag)
+        // Two separate subscriptions: projects owned by user (author) AND where user is a participant (p-tag)
         let project_filter_owned = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
-        let project_filter_participant = Filter::new()
-            .kind(Kind::Custom(31933))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()]);
-        let output = client.subscribe(vec![project_filter_owned, project_filter_participant], None).await?;
+        let output = client.subscribe(project_filter_owned, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (owned + participant)".to_string(), vec![31933], None),
+            SubscriptionInfo::new("User projects (owned)".to_string(), vec![31933], None),
+        );
+
+        let project_filter_participant = Filter::new()
+            .kind(Kind::Custom(31933))
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string());
+        let output = client.subscribe(project_filter_participant, None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("User projects (participant)".to_string(), vec![31933], None),
         );
         tlog!("CONN", "Subscribed to projects (kind:31933) - owned and p-tagged");
 
@@ -591,22 +612,28 @@ impl NostrWorker {
         let since_time = Timestamp::now() - 45;
         let status_filter = Filter::new()
             .kind(Kind::Custom(24010))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey.to_string()])
+            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
-        let operations_status_filter = Filter::new()
-            .kind(Kind::Custom(24133))
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), vec![user_pubkey.to_string()])
-            .since(since_time);
-        let output = client.subscribe(vec![status_filter, operations_status_filter], None).await?;
+        let output = client.subscribe(status_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Status updates".to_string(), vec![24010, 24133], None),
+            SubscriptionInfo::new("Status updates (24010)".to_string(), vec![24010], None),
+        );
+
+        let operations_status_filter = Filter::new()
+            .kind(Kind::Custom(24133))
+            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), user_pubkey.to_string())
+            .since(since_time);
+        let output = client.subscribe(operations_status_filter, None).await?;
+        self.subscription_stats.register(
+            output.val.to_string(),
+            SubscriptionInfo::new("Status updates (24133)".to_string(), vec![24133], None),
         );
         tlog!("CONN", "Subscribed to status events (kind:24010, kind:24133)");
 
         // 3. Agent definitions (kind:4199)
         let agent_filter = Filter::new().kind(Kind::Custom(4199));
-        let output = client.subscribe(vec![agent_filter], None).await?;
+        let output = client.subscribe(agent_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
             SubscriptionInfo::new("Agent definitions".to_string(), vec![4199], None),
@@ -615,7 +642,7 @@ impl NostrWorker {
 
         // 4. Nudges (kind:4201) - global, like agent definitions
         let nudge_filter = Filter::new().kind(Kind::Custom(4201));
-        let output = client.subscribe(vec![nudge_filter], None).await?;
+        let output = client.subscribe(nudge_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
             SubscriptionInfo::new("Nudges".to_string(), vec![4201], None),
@@ -624,7 +651,7 @@ impl NostrWorker {
 
         // 5. Agent lessons (kind:4129)
         let lesson_filter = Filter::new().kind(Kind::Custom(4129));
-        let output = client.subscribe(vec![lesson_filter], None).await?;
+        let output = client.subscribe(lesson_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
             SubscriptionInfo::new("Agent lessons".to_string(), vec![4129], None),
@@ -633,7 +660,7 @@ impl NostrWorker {
 
         // 6. MCP Tools (kind:4200)
         let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
-        let output = client.subscribe(vec![mcp_tool_filter], None).await?;
+        let output = client.subscribe(mcp_tool_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
             SubscriptionInfo::new("MCP tools".to_string(), vec![4200], None),
@@ -754,7 +781,7 @@ impl NostrWorker {
                                                 let profile_filter = Filter::new()
                                                     .kind(Kind::Metadata)
                                                     .author(event.pubkey);
-                                                if let Err(e) = client.subscribe(vec![profile_filter], None).await {
+                                                if let Err(e) = client.subscribe(profile_filter, None).await {
                                                     // Subscription failed - remove from set so we can retry later
                                                     requested_profiles.write().await.remove(&author_hex);
                                                     tlog!("ERROR", "Failed to subscribe to profile for {}: {}", &author_hex[..8], e);
@@ -838,7 +865,7 @@ impl NostrWorker {
 
         let mut event = EventBuilder::new(Kind::from(1), &content)
             // Project reference (a tag) - required
-            .tag(Tag::coordinate(coordinate))
+            .tag(Tag::coordinate(coordinate, None))
             // Title tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("title")),
@@ -910,7 +937,7 @@ impl NostrWorker {
         // Send to relay with timeout (don't block forever on degraded connections)
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Published thread: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send thread to relay: {}", e),
@@ -944,7 +971,7 @@ impl NostrWorker {
                 vec![thread_id.clone(), "".to_string(), "root".to_string()],
             ))
             // Project reference (a tag)
-            .tag(Tag::coordinate(coordinate))
+            .tag(Tag::coordinate(coordinate, None))
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
@@ -1005,7 +1032,7 @@ impl NostrWorker {
         let send_start = std::time::Instant::now();
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => tlog!("SEND", "Published message in {:?}: {}", send_start.elapsed(), output.id()),
             Ok(Err(e)) => tlog!("SEND", "Failed after {:?}: {}", send_start.elapsed(), e),
@@ -1025,7 +1052,7 @@ impl NostrWorker {
 
         // Kind 24000 boot request with a-tag pointing to project
         let mut event = EventBuilder::new(Kind::Custom(24000), "")
-            .tag(Tag::coordinate(coordinate))
+            .tag(Tag::coordinate(coordinate, None))
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
@@ -1044,7 +1071,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent boot request: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send boot request to relay: {}", e),
@@ -1112,7 +1139,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Updated project agents: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send project update to relay: {}", e),
@@ -1179,7 +1206,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Created project: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send project to relay: {}", e),
@@ -1251,7 +1278,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Created agent definition '{}': {}", name, output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send agent definition to relay: {}", e),
@@ -1276,7 +1303,7 @@ impl NostrWorker {
 
         // Build kind:24134 stop command event
         let mut event = EventBuilder::new(Kind::Custom(24134), "")
-            .tag(Tag::coordinate(coordinate))
+            .tag(Tag::coordinate(coordinate, None))
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
@@ -1303,7 +1330,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent stop command: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send stop command to relay: {}", e),
@@ -1329,7 +1356,7 @@ impl NostrWorker {
 
         // Build kind:24020 agent config update event
         let mut event = EventBuilder::new(Kind::Custom(24020), "")
-            .tag(Tag::coordinate(coordinate))
+            .tag(Tag::coordinate(coordinate, None))
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
@@ -1362,7 +1389,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Sent agent config update: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send agent config update to relay: {}", e),
@@ -1425,7 +1452,7 @@ impl NostrWorker {
         }
 
         if let Some(client) = &self.client {
-            client.disconnect().await?;
+            client.disconnect().await;
         }
 
         // Clear requested_profiles so new sessions start fresh
@@ -1521,7 +1548,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Created nudge '{}': {}", title, output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send nudge to relay: {}", e),
@@ -1615,7 +1642,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Updated nudge '{}': {}", title, output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send updated nudge to relay: {}", e),
@@ -1635,7 +1662,8 @@ impl NostrWorker {
             .map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
 
         // Build the deletion event (kind:5 per NIP-09)
-        let event = EventBuilder::delete(vec![event_id])
+        let deletion_request = EventDeletionRequest::new().id(event_id);
+        let event = EventBuilder::delete(deletion_request)
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
@@ -1650,7 +1678,7 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(signed_event)
+            client.send_event(&signed_event)
         ).await {
             Ok(Ok(output)) => debug_log(&format!("Deleted nudge {}: deletion event {}", &nudge_id[..8], output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send deletion event to relay: {}", e),
@@ -1737,7 +1765,7 @@ async fn sync_all_filters(
     // Projects where user is a participant (kind 31933) - via p-tag
     let project_p_filter = Filter::new()
         .kind(Kind::Custom(31933))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), vec![user_pubkey_hex.clone()]);
+        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey_hex.clone());
     total_new += sync_filter(client, project_p_filter, "31933-p-tagged", stats).await;
 
     // Agent definitions (kind 4199)
@@ -1768,12 +1796,12 @@ async fn sync_all_filters(
             for chunk in atags.chunks(4) {
                 let msg_filter = Filter::new()
                     .kind(Kind::from(1))
-                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
+                    .custom_tags(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
                 total_new += sync_filter(client, msg_filter, "1", stats).await;
 
                 let longform_filter = Filter::new()
                     .kind(Kind::Custom(30023))
-                    .custom_tag(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
+                    .custom_tags(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
                 total_new += sync_filter(client, longform_filter, "30023", stats).await;
             }
         }
