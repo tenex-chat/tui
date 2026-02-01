@@ -19,14 +19,24 @@ struct ConversationsTabView: View {
     /// Updates the runtime text from SafeTenexCore
     private func updateRuntime() async {
         let totalMs = await coreManager.safeCore.getTodayRuntimeMs()
-        let totalMinutes = Double(totalMs) / 60_000.0
-        if totalMinutes >= 60.0 {
-            // Show hours with 2 decimal places (e.g., "1.35h")
-            let hours = totalMinutes / 60.0
-            runtimeText = String(format: "%.2fh", hours)
+        let totalSeconds = totalMs / 1000
+
+        if totalSeconds < 60 {
+            // Less than 1 minute
+            runtimeText = "\(totalSeconds)s"
+        } else if totalSeconds < 3600 {
+            // Less than 1 hour, show minutes only
+            let minutes = totalSeconds / 60
+            runtimeText = "\(minutes)m"
         } else {
-            // Show minutes as integer (e.g., "42m")
-            runtimeText = "\(Int(totalMinutes))m"
+            // 1 hour or more, show "2h 35m" format
+            let hours = totalSeconds / 3600
+            let minutes = (totalSeconds % 3600) / 60
+            if minutes > 0 {
+                runtimeText = "\(hours)h \(minutes)m"
+            } else {
+                runtimeText = "\(hours)h"
+            }
         }
     }
 
