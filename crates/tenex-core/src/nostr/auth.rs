@@ -31,7 +31,7 @@ pub fn load_stored_keys(password: &str, prefs: &PreferencesStorage) -> Result<Ke
     // Try to decrypt
     let secret_key = if ncryptsec.starts_with("ncryptsec") {
         let encrypted = EncryptedSecretKey::from_bech32(ncryptsec)?;
-        encrypted.to_secret_key(password)?
+        encrypted.decrypt(password)?
     } else {
         SecretKey::parse(ncryptsec)?
     };

@@ -15,6 +15,7 @@ serde.workspace = true
 serde_json.workspace = true
 hex.workspace = true
 nostr-sdk.workspace = true
+nostr-ndb.workspace = true
 nostrdb.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
