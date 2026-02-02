@@ -293,7 +293,6 @@ fn print_root_cause_analysis() {
 
     println!("WHY THIS CAUSED 100% CPU:");
     println!("  • kind:4199 (agents) = ~10,000+ events");
-    println!("  • kind:4129 (lessons) = ~178,000+ events");
     println!("  • Every 60s: Download ALL of these (they're always 'new')");
     println!("  • nostrdb must index ALL of them (100% CPU)");
     println!("  • Never backs off because 'new events' are always found");
@@ -311,7 +310,7 @@ fn print_summary() {
     println!("  so ALL events are always considered 'new'.\n");
 
     println!("CURRENT WORKAROUND (in production):");
-    println!("  Global event types (4199, 4129, 4200, 4201) excluded from negentropy.");
+    println!("  Global event types (4199, 4200, 4201) excluded from negentropy.");
     println!("  Only project-scoped events are synced via negentropy.");
     println!("  This works but loses the benefit of historical backfill.\n");
 

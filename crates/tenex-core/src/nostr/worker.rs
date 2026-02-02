@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 use nostr_sdk::prelude::*;
-use nostrdb::Ndb;
+use nostrdb::{Ndb, Transaction};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::sync::watch;
@@ -80,6 +80,7 @@ fn extract_project_name(a_tag: &str) -> &str {
 /// Subscribe to a project if not already subscribed, with automatic rollback on failure
 async fn subscribe_project_if_new(
     client: &Client,
+    ndb: &Ndb,
     a_tag: &str,
     subscribed_projects: &Arc<RwLock<HashSet<String>>>,
     subscription_stats: &SharedSubscriptionStats,
@@ -95,7 +96,7 @@ async fn subscribe_project_if_new(
     }
 
     // Try to subscribe
-    match subscribe_project_filters(client, subscription_stats, a_tag).await {
+    match subscribe_project_filters(client, ndb, subscription_stats, a_tag).await {
         Ok(_) => {
             debug_log(&format!("✅ Subscribed to newly online project: {}", extract_project_name(a_tag)));
             Ok(true)
@@ -118,15 +119,20 @@ async fn subscribe_project_if_new(
 /// 3. Command handlers for explicit project subscription requests
 async fn subscribe_project_filters(
     client: &Client,
+    ndb: &Ndb,
     subscription_stats: &SharedSubscriptionStats,
     project_a_tag: &str,
 ) -> Result<()> {
     let project_name = extract_project_name(project_a_tag);
 
     // Metadata subscription (kind:513)
-    let metadata_filter = Filter::new()
+    let mut metadata_filter = Filter::new()
         .kind(Kind::Custom(KIND_PROJECT_METADATA))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    if let Some(latest) = latest_kind_timestamp_for_project(ndb, KIND_PROJECT_METADATA, project_a_tag) {
+        // Subtract 1s to avoid missing same-second events
+        metadata_filter = metadata_filter.since(Timestamp::from(latest.saturating_sub(1)));
+    }
     let metadata_output = client.subscribe(metadata_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to metadata for {}: {}", project_name, e))?;
     subscription_stats.register(
@@ -139,9 +145,13 @@ async fn subscribe_project_filters(
     );
 
     // Messages subscription (kind:1)
-    let message_filter = Filter::new()
+    let mut message_filter = Filter::new()
         .kind(Kind::from(KIND_TEXT_NOTE))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    if let Some(latest) = latest_kind_timestamp_for_project(ndb, KIND_TEXT_NOTE, project_a_tag) {
+        // Subtract 1s to avoid missing same-second events
+        message_filter = message_filter.since(Timestamp::from(latest.saturating_sub(1)));
+    }
     let message_output = client.subscribe(message_filter, None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to messages for {}: {}", project_name, e))?;
     subscription_stats.register(
@@ -169,6 +179,26 @@ async fn subscribe_project_filters(
     );
 
     Ok(())
+}
+
+fn latest_kind_timestamp_for_project(ndb: &Ndb, kind: u16, project_a_tag: &str) -> Option<u64> {
+    let txn = Transaction::new(ndb).ok()?;
+    let filter = nostrdb::Filter::new()
+        .kinds([kind as u64])
+        .tags([project_a_tag], 'a')
+        .build();
+
+    let results = ndb.query(&txn, &[filter], 1_000_000).ok()?;
+    let mut max_ts: Option<u64> = None;
+
+    for r in results.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
+            let created_at = note.created_at();
+            max_ts = Some(max_ts.map_or(created_at, |current| current.max(created_at)));
+        }
+    }
+
+    max_ts
 }
 
 /// Response channel for commands that need to return data (like event IDs)
@@ -765,7 +795,7 @@ impl NostrWorker {
                                                 if let Some(status) = ProjectStatus::from_json(&json) {
                                                     let a_tag = status.project_coordinate.clone();
 
-                                                    match subscribe_project_if_new(&client, &a_tag, &subscribed_projects, &subscription_stats).await {
+                                                    match subscribe_project_if_new(&client, &ndb, &a_tag, &subscribed_projects, &subscription_stats).await {
                                                         Ok(true) => {
                                                             tlog!("CONN", "Project came online: {}, subscribed to messages", extract_project_name(&a_tag));
                                                         }
@@ -829,7 +859,7 @@ impl NostrWorker {
                                             {
                                                 let a_tag = format!("31933:{}:{}", event.pubkey.to_hex(), d_tag);
 
-                                                match subscribe_project_if_new(&client, &a_tag, &subscribed_projects, &subscription_stats).await {
+                                                match subscribe_project_if_new(&client, &ndb, &a_tag, &subscribed_projects, &subscription_stats).await {
                                                     Ok(true) => {
                                                         let project_name = d_tag.split(':').last().unwrap_or(d_tag);
                                                         tlog!("CONN", "New project discovered: {}, subscribed to messages", project_name);
@@ -844,6 +874,7 @@ impl NostrWorker {
                                                 }
                                             }
                                         }
+                                    }
                                     }
                                     RelayPoolNotification::Message { relay_url, message } => {
                                         if let RelayMessage::Ok { event_id, status, message } = &message {
@@ -1468,7 +1499,7 @@ impl NostrWorker {
         tlog!("CONN", "Adding subscriptions for project: {}", project_name);
 
         // Use the shared helper for consistent subscription behavior
-        match subscribe_project_filters(client, &self.subscription_stats, &project_a_tag).await {
+        match subscribe_project_filters(client, &self.ndb, &self.subscription_stats, &project_a_tag).await {
             Ok(()) => Ok(()),
             Err(e) => {
                 // Subscription failed - remove from set so we can retry later
