@@ -322,6 +322,10 @@ pub enum NostrCommand {
         /// Optional response channel to signal when disconnect is complete
         response_tx: Option<Sender<Result<(), String>>>,
     },
+    /// Get current relay connection status
+    GetRelayStatus {
+        response_tx: Sender<usize>,
+    },
     Shutdown,
 }
 
@@ -540,6 +544,19 @@ impl NostrWorker {
                         if let Some(tx) = response_tx {
                             let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
                         }
+                    }
+                    NostrCommand::GetRelayStatus { response_tx } => {
+                        let connected_count = rt.block_on(async {
+                            if let Some(client) = self.client.as_ref() {
+                                let relays = client.relays().await;
+                                relays.values()
+                                    .filter(|r| r.status() == nostr_sdk::RelayStatus::Connected)
+                                    .count()
+                            } else {
+                                0
+                            }
+                        });
+                        let _ = response_tx.send(connected_count);
                     }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");

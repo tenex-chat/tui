@@ -697,6 +697,10 @@ pub struct SystemDiagnostics {
     pub is_initialized: bool,
     /// Whether a user is logged in
     pub is_logged_in: bool,
+    /// Whether any relay is currently connected
+    pub relay_connected: bool,
+    /// Number of connected relays
+    pub connected_relays: u32,
 }
 
 /// Full diagnostics snapshot containing all diagnostic information
@@ -2438,13 +2442,7 @@ impl TenexCore {
         })?;
 
         let pending = store.drain_pending_backend_approvals();
-        let count = pending.len() as u32;
-
-        for approval in pending {
-            store.add_approved_backend(&approval.backend_pubkey);
-        }
-
-        Ok(count)
+        Ok(store.approve_pending_backends(pending))
     }
 
     /// Send a new conversation (thread) to a project.
@@ -3054,13 +3052,35 @@ impl TenexCore {
         let is_initialized = self.initialized.load(Ordering::SeqCst);
         let is_logged_in = self.is_logged_in();
         let log_path = data_dir.join("tenex.log").to_string_lossy().to_string();
+        let (relay_connected, connected_relays) = self.get_relay_status();
 
         Ok(SystemDiagnostics {
             log_path,
             version: env!("CARGO_PKG_VERSION").to_string(),
             is_initialized,
             is_logged_in,
+            relay_connected,
+            connected_relays,
         })
+    }
+
+    fn get_relay_status(&self) -> (bool, u32) {
+        use std::time::Duration;
+
+        let handle = match get_core_handle(&self.core_handle) {
+            Ok(handle) => handle,
+            Err(_) => return (false, 0),
+        };
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        if handle.send(NostrCommand::GetRelayStatus { response_tx: tx }).is_err() {
+            return (false, 0);
+        }
+
+        match rx.recv_timeout(Duration::from_millis(200)) {
+            Ok(count) => (count > 0, count.min(u32::MAX as usize) as u32),
+            Err(_) => (false, 0),
+        }
     }
 
     /// Collect negentropy sync diagnostics
