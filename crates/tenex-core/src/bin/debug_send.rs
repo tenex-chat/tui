@@ -18,7 +18,7 @@ fn load_nsec() -> Result<String> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let nsec = load_nsec()?;
-    let keys = Keys::parse(nsec)?;
+    let keys = Keys::parse(&nsec)?;
     let pubkey = keys.public_key();
 
     println!("Connecting as: {}", pubkey.to_hex());
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     println!("Connecting to {}...", RELAY_URL);
     tokio::time::timeout(Duration::from_secs(10), client.connect())
         .await
-        .map_err(|_| anyhow!("connect timeout"))??;
+        .map_err(|_| anyhow!("connect timeout"))?;
     println!("Connected.");
 
     let mut notifications = client.notifications();
