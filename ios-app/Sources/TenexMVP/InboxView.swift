@@ -163,9 +163,6 @@ struct InboxView: View {
                     emptyStateView
                 } else {
                     inboxList
-                        .refreshable {
-                            await coreManager.manualRefresh()
-                        }
                 }
             }
             .navigationTitle("Inbox")
