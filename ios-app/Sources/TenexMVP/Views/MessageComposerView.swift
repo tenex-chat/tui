@@ -39,6 +39,7 @@ struct MessageComposerView: View {
     @State private var availableAgents: [OnlineAgentInfo] = []
     @State private var agentsLoadError: String?
     @State private var showAgentSelector = false
+    @State private var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
     @State private var availableNudges: [NudgeInfo] = []
     @State private var showNudgeSelector = false
     @State private var isSending = false
@@ -179,6 +180,9 @@ struct MessageComposerView: View {
                 if !isNewConversation {
                     if let agent = selectedAgent {
                         agentChipView(agent)
+                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
+                        // Show the reply target even if they're not in online agents list
+                        replyTargetChipView(name: targetName, pubkey: targetPubkey)
                     } else if selectedProject != nil {
                         agentPromptView
                     }
@@ -490,6 +494,37 @@ struct MessageComposerView: View {
         .background(Color(.systemGray6))
     }
 
+    /// Shows the reply target agent (used when replying and the agent isn't in online agents list)
+    private func replyTargetChipView(name: String, pubkey: String) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 6) {
+                AgentAvatarView(
+                    agentName: name,
+                    pubkey: pubkey,
+                    size: 24,
+                    showBorder: false
+                )
+                .environmentObject(coreManager)
+
+                Text("@\(name)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+            )
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(.systemGray6))
+    }
+
     private var nudgeChipsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -643,16 +678,17 @@ struct MessageComposerView: View {
             availableAgents = agents
             agentsLoadError = nil
 
-            // Auto-select agent if none currently selected
-            // Priority: 1) initialAgentPubkey (last agent in conversation), 2) PM agent
-            if draft.agentPubkey == nil {
-                if let initialPubkey = initialAgentPubkey,
-                   agents.contains(where: { $0.pubkey == initialPubkey }) {
-                    // Use the initial agent (e.g., last agent that spoke in conversation)
-                    draft.setAgent(initialPubkey)
-                    await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
-                } else if let pmAgent = agents.first(where: { $0.isPm }) {
-                    // Fall back to PM agent
+            // For replies: always use initialAgentPubkey - we know who we're replying to
+            if !isNewConversation, let initialPubkey = initialAgentPubkey {
+                draft.setAgent(initialPubkey)
+                await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
+
+                // Resolve the agent name for display (even if not online)
+                let name = coreManager.safeCore.getProfileName(pubkey: initialPubkey)
+                replyTargetAgentName = name.isEmpty ? "Agent" : name
+            } else if draft.agentPubkey == nil {
+                // New conversation: auto-select PM agent if available
+                if let pmAgent = agents.first(where: { $0.isPm }) {
                     draft.setAgent(pmAgent.pubkey)
                     await draftManager.updateAgent(pmAgent.pubkey, conversationId: conversationId, projectId: projectId)
                 }
