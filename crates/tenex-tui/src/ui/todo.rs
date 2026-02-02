@@ -45,6 +45,7 @@ impl TodoState {
 /// todo_write item format (backend standard)
 #[derive(Debug, Deserialize)]
 struct TodoWriteItem {
+    id: Option<String>,
     content: Option<String>,
     title: Option<String>,
     status: Option<String>,
@@ -54,6 +55,13 @@ struct TodoWriteItem {
     skip_reason: Option<String>,
 }
 
+/// MCP todo_write payload format (supports both "todos" and "items")
+#[derive(Debug, Deserialize)]
+struct McpTodoPayload {
+    #[serde(alias = "items")]
+    todos: Option<Vec<TodoWriteItem>>,
+}
+
 fn parse_status(s: &str) -> TodoStatus {
     match s.to_lowercase().as_str() {
         "done" | "completed" => TodoStatus::Done,
@@ -61,6 +69,14 @@ fn parse_status(s: &str) -> TodoStatus {
         "skipped" => TodoStatus::Skipped,
         _ => TodoStatus::Pending,
     }
+}
+
+/// Check if a tool name is a todo_write variant
+pub fn is_todo_write(name: &str) -> bool {
+    matches!(
+        name,
+        "todo_write" | "todowrite" | "mcp__tenex__todo_write"
+    )
 }
 
 /// Aggregate todo state from a list of messages
@@ -94,34 +110,40 @@ pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
             }
         };
 
-        // Handle both todo_write and TodoWrite (different agent types use different casing)
-        if tool_name == "todo_write" || tool_name == "todowrite" {
+        // Handle todo_write variants (todowrite, todo_write, mcp__tenex__todo_write)
+        if is_todo_write(&tool_name) {
             // todo_write replaces the entire list
-            if let Some(todos) = parameters.get("todos") {
-                if let Some(todos_array) = todos.as_array() {
+            // Support both "todos" and "items" field names
+            let payload_result = serde_json::from_value::<McpTodoPayload>(parameters.clone());
+
+            if let Ok(payload) = payload_result {
+                if let Some(todos_array) = payload.todos {
                     items.clear();
                     id_counter = 0;
 
-                    for item in todos_array {
-                        if let Ok(todo_item) = serde_json::from_value::<TodoWriteItem>(item.clone()) {
-                            let title = todo_item.content
-                                .or(todo_item.title)
-                                .unwrap_or_default();
+                    for todo_item in todos_array {
+                        let title = todo_item.content
+                            .or(todo_item.title)
+                            .unwrap_or_default();
 
-                            if !title.is_empty() {
-                                let id = format!("todo-{}", id_counter);
-                                id_counter += 1;
-
-                                items.push(TodoItem {
-                                    id,
-                                    title,
-                                    description: todo_item.active_form.or(todo_item.description),
-                                    status: todo_item.status
-                                        .map(|s| parse_status(&s))
-                                        .unwrap_or(TodoStatus::Pending),
-                                    skip_reason: todo_item.skip_reason,
+                        if !title.is_empty() {
+                            // Preserve MCP-provided ID, fallback to generated ID
+                            let id = todo_item.id
+                                .unwrap_or_else(|| {
+                                    let generated = format!("todo-{}", id_counter);
+                                    id_counter += 1;
+                                    generated
                                 });
-                            }
+
+                            items.push(TodoItem {
+                                id,
+                                title,
+                                description: todo_item.active_form.or(todo_item.description),
+                                status: todo_item.status
+                                    .map(|s| parse_status(&s))
+                                    .unwrap_or(TodoStatus::Pending),
+                                skip_reason: todo_item.skip_reason,
+                            });
                         }
                     }
                 }
@@ -262,6 +284,29 @@ mod tests {
     }
 
     #[test]
+    fn test_mcp_todo_write() {
+        // MCP-style tag-based tool call: ["tool", "mcp__tenex__todo_write"], ["tool-args", "..."]
+        let msg = make_tag_based_message(
+            "mcp__tenex__todo_write",
+            r#"{"todos":[{"id":"1","title":"Analyze completion event tagging","description":"Investigate why completion events (status: completed) are missing llm-runtime tags when other events in the same conversation have them","status":"in_progress"},{"id":"2","title":"Fix completion event tagging","description":"Implement fix to ensure completion events include llm-runtime tags","status":"pending"},{"id":"3","title":"Verify fix","description":"Test that completion events now properly include llm-runtime tags","status":"pending"},{"id":"4","title":"Merge to master","description":"Merge the fix to master branch and clean up worktree","status":"pending"}]}"#,
+        );
+
+        let state = aggregate_todo_state(&[msg]);
+
+        assert!(state.has_todos());
+        assert_eq!(state.items.len(), 4);
+        assert_eq!(state.items[0].title, "Analyze completion event tagging");
+        assert_eq!(state.items[0].status, TodoStatus::InProgress);
+        assert_eq!(state.items[0].description, Some("Investigate why completion events (status: completed) are missing llm-runtime tags when other events in the same conversation have them".to_string()));
+        assert_eq!(state.items[1].title, "Fix completion event tagging");
+        assert_eq!(state.items[1].status, TodoStatus::Pending);
+        assert_eq!(state.items[2].title, "Verify fix");
+        assert_eq!(state.items[2].status, TodoStatus::Pending);
+        assert_eq!(state.items[3].title, "Merge to master");
+        assert_eq!(state.items[3].status, TodoStatus::Pending);
+    }
+
+    #[test]
     fn test_skipped_status() {
         let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Skipped task", "status": "skipped", "skip_reason": "No longer needed"}]}}"#);
 
@@ -281,5 +326,65 @@ mod tests {
 
         assert_eq!(state.items.len(), 1);
         assert_eq!(state.items[0].title, "Task via title");
+    }
+
+    #[test]
+    fn test_mcp_todo_write_with_items_field() {
+        // Test MCP payload using "items" field instead of "todos"
+        let msg = make_tag_based_message(
+            "mcp__tenex__todo_write",
+            r#"{"items":[{"id":"item-1","title":"First item","status":"pending"},{"id":"item-2","title":"Second item","status":"done"}]}"#,
+        );
+
+        let state = aggregate_todo_state(&[msg]);
+
+        assert!(state.has_todos());
+        assert_eq!(state.items.len(), 2);
+        assert_eq!(state.items[0].title, "First item");
+        assert_eq!(state.items[0].status, TodoStatus::Pending);
+        assert_eq!(state.items[1].title, "Second item");
+        assert_eq!(state.items[1].status, TodoStatus::Done);
+    }
+
+    #[test]
+    fn test_mcp_preserves_provided_ids() {
+        // Test that MCP-provided IDs are preserved instead of generating new ones
+        let msg = make_tag_based_message(
+            "mcp__tenex__todo_write",
+            r#"{"todos":[{"id":"custom-1","title":"Task A","status":"pending"},{"id":"custom-2","title":"Task B","status":"in_progress"}]}"#,
+        );
+
+        let state = aggregate_todo_state(&[msg]);
+
+        assert_eq!(state.items.len(), 2);
+        assert_eq!(state.items[0].id, "custom-1");
+        assert_eq!(state.items[0].title, "Task A");
+        assert_eq!(state.items[1].id, "custom-2");
+        assert_eq!(state.items[1].title, "Task B");
+    }
+
+    #[test]
+    fn test_fallback_to_generated_ids() {
+        // Test that generated IDs are used when MCP doesn't provide them
+        let msg = make_tag_based_message(
+            "todo_write",
+            r#"{"todos":[{"title":"Task without ID","status":"pending"},{"title":"Another task","status":"done"}]}"#,
+        );
+
+        let state = aggregate_todo_state(&[msg]);
+
+        assert_eq!(state.items.len(), 2);
+        assert_eq!(state.items[0].id, "todo-0");
+        assert_eq!(state.items[1].id, "todo-1");
+    }
+
+    #[test]
+    fn test_is_todo_write_helper() {
+        // Test the centralized helper function
+        assert!(is_todo_write("todo_write"));
+        assert!(is_todo_write("todowrite"));
+        assert!(is_todo_write("mcp__tenex__todo_write"));
+        assert!(!is_todo_write("other_tool"));
+        assert!(!is_todo_write("TodoWrite")); // Case-sensitive
     }
 }
