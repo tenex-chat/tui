@@ -5668,6 +5668,14 @@ public struct SystemDiagnostics {
      * Whether a user is logged in
      */
     public var isLoggedIn: Bool
+    /**
+     * Whether any relay is currently connected
+     */
+    public var relayConnected: Bool
+    /**
+     * Number of connected relays
+     */
+    public var connectedRelays: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -5683,11 +5691,19 @@ public struct SystemDiagnostics {
          */isInitialized: Bool, 
         /**
          * Whether a user is logged in
-         */isLoggedIn: Bool) {
+         */isLoggedIn: Bool, 
+        /**
+         * Whether any relay is currently connected
+         */relayConnected: Bool, 
+        /**
+         * Number of connected relays
+         */connectedRelays: UInt32) {
         self.logPath = logPath
         self.version = version
         self.isInitialized = isInitialized
         self.isLoggedIn = isLoggedIn
+        self.relayConnected = relayConnected
+        self.connectedRelays = connectedRelays
     }
 }
 
@@ -5710,6 +5726,12 @@ extension SystemDiagnostics: Equatable, Hashable {
         if lhs.isLoggedIn != rhs.isLoggedIn {
             return false
         }
+        if lhs.relayConnected != rhs.relayConnected {
+            return false
+        }
+        if lhs.connectedRelays != rhs.connectedRelays {
+            return false
+        }
         return true
     }
 
@@ -5718,6 +5740,8 @@ extension SystemDiagnostics: Equatable, Hashable {
         hasher.combine(version)
         hasher.combine(isInitialized)
         hasher.combine(isLoggedIn)
+        hasher.combine(relayConnected)
+        hasher.combine(connectedRelays)
     }
 }
 
@@ -5733,7 +5757,9 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
                 logPath: FfiConverterString.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf), 
                 isInitialized: FfiConverterBool.read(from: &buf), 
-                isLoggedIn: FfiConverterBool.read(from: &buf)
+                isLoggedIn: FfiConverterBool.read(from: &buf), 
+                relayConnected: FfiConverterBool.read(from: &buf), 
+                connectedRelays: FfiConverterUInt32.read(from: &buf)
         )
     }
 
@@ -5742,6 +5768,8 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
         FfiConverterString.write(value.version, into: &buf)
         FfiConverterBool.write(value.isInitialized, into: &buf)
         FfiConverterBool.write(value.isLoggedIn, into: &buf)
+        FfiConverterBool.write(value.relayConnected, into: &buf)
+        FfiConverterUInt32.write(value.connectedRelays, into: &buf)
     }
 }
 

@@ -51,6 +51,19 @@ struct DiagnosticsOverviewTab: View {
             }
 
             HStack(spacing: 12) {
+                // Relay Status Card
+                if let system = snapshot.system {
+                    DiagnosticCard(
+                        title: "Relay",
+                        value: system.relayConnected ? "Connected" : "Disconnected",
+                        subtitle: "\(system.connectedRelays) connected",
+                        color: system.relayConnected ? .green : .red,
+                        icon: "dot.radiowaves.left.and.right"
+                    )
+                } else {
+                    DiagnosticCard.unavailable(title: "Relay", icon: "dot.radiowaves.left.and.right")
+                }
+
                 // Total Events Card
                 if let db = snapshot.database {
                     DiagnosticCard(
@@ -87,6 +100,22 @@ struct DiagnosticsOverviewTab: View {
                         label: "Logged In",
                         value: system.isLoggedIn ? "Yes" : "No",
                         valueColor: system.isLoggedIn ? .green : .red
+                    )
+
+                    Divider()
+
+                    StatusRow(
+                        label: "Relay Connected",
+                        value: system.relayConnected ? "Yes" : "No",
+                        valueColor: system.relayConnected ? .green : .red
+                    )
+
+                    Divider()
+
+                    StatusRow(
+                        label: "Connected Relays",
+                        value: "\(system.connectedRelays)",
+                        valueColor: system.connectedRelays > 0 ? .green : .secondary
                     )
 
                     Divider()
@@ -313,7 +342,9 @@ struct StatusRow: View {
                     logPath: "/var/mobile/.../logs/tenex.log",
                     version: "0.1.0",
                     isInitialized: true,
-                    isLoggedIn: true
+                    isLoggedIn: true,
+                    relayConnected: true,
+                    connectedRelays: 1
                 ),
                 sync: NegentropySyncDiagnostics(
                     enabled: true,
@@ -349,7 +380,9 @@ struct StatusRow: View {
                     logPath: "/var/mobile/.../logs/tenex.log",
                     version: "0.1.0",
                     isInitialized: true,
-                    isLoggedIn: true
+                    isLoggedIn: true,
+                    relayConnected: false,
+                    connectedRelays: 0
                 ),
                 sync: nil,  // Sync failed to load
                 subscriptions: [],
