@@ -459,7 +459,6 @@ fn handle_request(
                         "threads": thread_count,
                         "messages": message_count,
                         "logged_in": logged_in,
-                        "uptime_seconds": start_time.elapsed().as_secs(),
                     }),
                 ),
                 false,
@@ -753,7 +752,6 @@ fn handle_request(
                     serde_json::json!({
                         "status": "running",
                         "logged_in": logged_in,
-                        "uptime_seconds": start_time.elapsed().as_secs(),
                     }),
                 ),
                 false,

@@ -691,8 +691,6 @@ pub struct NegentropySyncDiagnostics {
 pub struct SystemDiagnostics {
     /// Log file path
     pub log_path: String,
-    /// Uptime in milliseconds since core initialization
-    pub uptime_ms: u64,
     /// Core version
     pub version: String,
     /// Whether the core is initialized
@@ -855,8 +853,6 @@ pub struct TenexCore {
     subscription_stats: RwLock<Option<SharedSubscriptionStats>>,
     /// Negentropy sync stats for diagnostics (shared with worker)
     negentropy_stats: RwLock<Option<SharedNegentropySyncStats>>,
-    /// Timestamp when core was initialized (for uptime calculation)
-    init_time: RwLock<Option<std::time::Instant>>,
     /// Event callback for push notifications to UI (Swift/Kotlin)
     event_callback: RwLock<Option<Arc<dyn EventCallback>>>,
     /// Flag to signal callback listener thread to stop (Arc for sharing with thread)
@@ -882,7 +878,6 @@ impl TenexCore {
             preferences: RwLock::new(None),
             subscription_stats: RwLock::new(None),
             negentropy_stats: RwLock::new(None),
-            init_time: RwLock::new(None),
             event_callback: RwLock::new(None),
             callback_listener_running: Arc::new(AtomicBool::new(false)),
         }
@@ -1026,14 +1021,6 @@ impl TenexCore {
             };
             *stats_guard = Some(negentropy_stats_clone);
         }
-        {
-            let mut time_guard = match self.init_time.write() {
-                Ok(g) => g,
-                Err(_) => return false,
-            };
-            *time_guard = Some(std::time::Instant::now());
-        }
-
         self.initialized.store(true, Ordering::SeqCst);
         true
     }
@@ -3048,21 +3035,14 @@ impl TenexCore {
 
 // Private implementation methods for TenexCore (not exposed via UniFFI)
 impl TenexCore {
-    /// Collect system diagnostics (uptime, version, status)
+    /// Collect system diagnostics (version, status)
     fn collect_system_diagnostics(&self, data_dir: &std::path::Path) -> Result<SystemDiagnostics, String> {
-        let uptime_ms = self.init_time.read()
-            .map_err(|_| "Failed to acquire init_time lock".to_string())?
-            .as_ref()
-            .map(|t| t.elapsed().as_millis() as u64)
-            .unwrap_or(0);
-
         let is_initialized = self.initialized.load(Ordering::SeqCst);
         let is_logged_in = self.is_logged_in();
         let log_path = data_dir.join("tenex.log").to_string_lossy().to_string();
 
         Ok(SystemDiagnostics {
             log_path,
-            uptime_ms,
             version: env!("CARGO_PKG_VERSION").to_string(),
             is_initialized,
             is_logged_in,

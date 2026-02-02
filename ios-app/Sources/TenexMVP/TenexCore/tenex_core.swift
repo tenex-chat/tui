@@ -5657,10 +5657,6 @@ public struct SystemDiagnostics {
      */
     public var logPath: String
     /**
-     * Uptime in milliseconds since core initialization
-     */
-    public var uptimeMs: UInt64
-    /**
      * Core version
      */
     public var version: String
@@ -5680,9 +5676,6 @@ public struct SystemDiagnostics {
          * Log file path
          */logPath: String, 
         /**
-         * Uptime in milliseconds since core initialization
-         */uptimeMs: UInt64, 
-        /**
          * Core version
          */version: String, 
         /**
@@ -5692,7 +5685,6 @@ public struct SystemDiagnostics {
          * Whether a user is logged in
          */isLoggedIn: Bool) {
         self.logPath = logPath
-        self.uptimeMs = uptimeMs
         self.version = version
         self.isInitialized = isInitialized
         self.isLoggedIn = isLoggedIn
@@ -5709,9 +5701,6 @@ extension SystemDiagnostics: Equatable, Hashable {
         if lhs.logPath != rhs.logPath {
             return false
         }
-        if lhs.uptimeMs != rhs.uptimeMs {
-            return false
-        }
         if lhs.version != rhs.version {
             return false
         }
@@ -5726,7 +5715,6 @@ extension SystemDiagnostics: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(logPath)
-        hasher.combine(uptimeMs)
         hasher.combine(version)
         hasher.combine(isInitialized)
         hasher.combine(isLoggedIn)
@@ -5743,7 +5731,6 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
         return
             try SystemDiagnostics(
                 logPath: FfiConverterString.read(from: &buf), 
-                uptimeMs: FfiConverterUInt64.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf), 
                 isInitialized: FfiConverterBool.read(from: &buf), 
                 isLoggedIn: FfiConverterBool.read(from: &buf)
@@ -5752,7 +5739,6 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
 
     public static func write(_ value: SystemDiagnostics, into buf: inout [UInt8]) {
         FfiConverterString.write(value.logPath, into: &buf)
-        FfiConverterUInt64.write(value.uptimeMs, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
         FfiConverterBool.write(value.isInitialized, into: &buf)
         FfiConverterBool.write(value.isLoggedIn, into: &buf)

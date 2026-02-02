@@ -51,19 +51,6 @@ struct DiagnosticsOverviewTab: View {
             }
 
             HStack(spacing: 12) {
-                // Uptime Card
-                if let system = snapshot.system {
-                    DiagnosticCard(
-                        title: "Uptime",
-                        value: DiagnosticsSnapshot.formatUptime(system.uptimeMs),
-                        subtitle: "since init",
-                        color: .purple,
-                        icon: "clock.fill"
-                    )
-                } else {
-                    DiagnosticCard.unavailable(title: "Uptime", icon: "clock.fill")
-                }
-
                 // Total Events Card
                 if let db = snapshot.database {
                     DiagnosticCard(
@@ -324,7 +311,6 @@ struct StatusRow: View {
             snapshot: DiagnosticsSnapshot(
                 system: SystemDiagnostics(
                     logPath: "/var/mobile/.../logs/tenex.log",
-                    uptimeMs: 7_200_000,
                     version: "0.1.0",
                     isInitialized: true,
                     isLoggedIn: true
@@ -361,7 +347,6 @@ struct StatusRow: View {
             snapshot: DiagnosticsSnapshot(
                 system: SystemDiagnostics(
                     logPath: "/var/mobile/.../logs/tenex.log",
-                    uptimeMs: 7_200_000,
                     version: "0.1.0",
                     isInitialized: true,
                     isLoggedIn: true

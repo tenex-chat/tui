@@ -515,15 +515,6 @@
 
                 <div class="metric-card">
                     <div class="metric-card-header">
-                        <span class="metric-title">System Uptime</span>
-                        <span class="metric-icon">⏱️</span>
-                    </div>
-                    <div class="metric-value" id="uptimeValue">2h 0m</div>
-                    <div class="metric-subtitle">Process running since 8:30 AM</div>
-                </div>
-
-                <div class="metric-card">
-                    <div class="metric-card-header">
                         <span class="metric-title">Total Events</span>
                         <span class="metric-icon">📊</span>
                     </div>
@@ -564,10 +555,6 @@
                         <div class="info-row">
                             <span class="info-label">Log Path</span>
                             <span class="info-value">/var/mobile/.../Library/logs/tenex.log</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">Uptime</span>
-                            <span class="info-value" id="uptimeDetail">2h 0m 0s</span>
                         </div>
                     </div>
                 </div>
@@ -851,8 +838,7 @@
             },
             
             system: {
-                log_path: "/var/mobile/Containers/Data/Application/.../Library/logs/tenex.log",
-                uptime_ms: 7200000
+                log_path: "/var/mobile/Containers/Data/Application/.../Library/logs/tenex.log"
             }
         };
 
@@ -931,20 +917,6 @@
             details.classList.toggle('show');
         }
 
-        // Uptime counter
-        function updateUptime() {
-            const uptimeMs = mockDiagnosticsData.system.uptime_ms;
-            const hours = Math.floor(uptimeMs / 3600000);
-            const minutes = Math.floor((uptimeMs % 3600000) / 60000);
-            const seconds = Math.floor((uptimeMs % 60000) / 1000);
-            
-            const uptimeValue = document.getElementById('uptimeValue');
-            const uptimeDetail = document.getElementById('uptimeDetail');
-            
-            uptimeValue.textContent = `${hours}h ${minutes}m`;
-            uptimeDetail.textContent = `${hours}h ${minutes}m ${seconds}s`;
-        }
-
         // Pull to refresh simulation
         let startY = 0;
         let isPulling = false;
@@ -1005,9 +977,6 @@
             }, 1500);
         }
 
-        // Initialize
-        updateUptime();
-        
         // Simulate dynamic next sync countdown
         function updateNextSync() {
             const nextSyncElement = document.getElementById('nextSync');

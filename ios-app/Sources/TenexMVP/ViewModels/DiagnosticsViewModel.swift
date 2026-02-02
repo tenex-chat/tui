@@ -241,23 +241,6 @@ enum DiagnosticsFormatters {
 // MARK: - Helper Extensions
 
 extension DiagnosticsSnapshot {
-    /// Format uptime in milliseconds to human-readable string
-    static func formatUptime(_ ms: UInt64) -> String {
-        let seconds = ms / 1000
-
-        if seconds < 60 {
-            return "\(seconds)s"
-        } else if seconds < 3600 {
-            let mins = seconds / 60
-            let secs = seconds % 60
-            return secs > 0 ? "\(mins)m \(secs)s" : "\(mins)m"
-        } else {
-            let hours = seconds / 3600
-            let mins = (seconds % 3600) / 60
-            return mins > 0 ? "\(hours)h \(mins)m" : "\(hours)h"
-        }
-    }
-
     /// Format bytes to human-readable string (KB, MB, GB)
     static func formatBytes(_ bytes: UInt64) -> String {
         let kb = Double(bytes) / 1024
