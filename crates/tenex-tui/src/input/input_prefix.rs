@@ -21,8 +21,10 @@ pub enum PrefixTrigger {
     AgentSelector,
     /// `/` - Open nudges selector modal
     NudgeSelector,
+    /// `#` - Open project selector modal
+    ProjectSelector,
     // Future prefix triggers can be added here:
-    // HashtagSearch,   // `#` - Open hashtag/topic search
+    // HashtagSearch,   // (consider alternative character)
     // BranchSelector,  // `%` - Open branch selector
 }
 
@@ -35,8 +37,8 @@ impl PrefixTrigger {
         match c {
             '@' => Some(PrefixTrigger::AgentSelector),
             '/' => Some(PrefixTrigger::NudgeSelector),
+            '#' => Some(PrefixTrigger::ProjectSelector),
             // Add new prefix mappings here:
-            // '#' => Some(PrefixTrigger::HashtagSearch),
             // '%' => Some(PrefixTrigger::BranchSelector),
             _ => None,
         }
@@ -79,8 +81,10 @@ fn execute_prefix_trigger(app: &mut App, trigger: PrefixTrigger) {
         PrefixTrigger::NudgeSelector => {
             app.open_nudge_selector();
         }
+        PrefixTrigger::ProjectSelector => {
+            app.open_projects_selector_for_switch();
+        }
         // Handle future triggers here:
-        // PrefixTrigger::HashtagSearch => app.open_hashtag_search(),
         // PrefixTrigger::BranchSelector => app.open_branch_selector(),
     }
 }

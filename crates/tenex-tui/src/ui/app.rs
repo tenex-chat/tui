@@ -1350,13 +1350,74 @@ impl App {
         )
     }
 
-    /// Open the projects modal
-    /// If `for_new_thread` is true, selecting a project navigates to chat view
-    pub fn open_projects_modal(&mut self, for_new_thread: bool) {
+    /// Open the projects modal for creating a new thread
+    /// Selecting a project will navigate to chat view and create a draft tab
+    pub fn open_projects_selector_for_new_thread(&mut self) {
+        // Guard: Check if there are any projects to select from
+        let (online, offline) = self.filtered_projects();
+        if online.is_empty() && offline.is_empty() {
+            // Check if projects exist but are filtered out vs truly no projects
+            let has_projects = !self.data_store.borrow().get_projects().is_empty();
+            let message = if has_projects {
+                "No projects match current filters. Check workspace/archived settings."
+            } else {
+                "No projects available. Create a project first."
+            };
+            self.set_warning_status(message);
+            return;
+        }
+
         self.modal_state = ModalState::ProjectsModal {
             selector: SelectorState::new(),
-            for_new_thread,
+            for_new_thread: true,
         };
+    }
+
+    /// Open the projects modal for switching the active project filter
+    /// Selecting a project will update the visible projects list (home view filter)
+    pub fn open_projects_selector_for_switch(&mut self) {
+        // Guard: Check if there are any projects to select from
+        let (online, offline) = self.filtered_projects();
+        if online.is_empty() && offline.is_empty() {
+            // Check if projects exist but are filtered out vs truly no projects
+            let has_projects = !self.data_store.borrow().get_projects().is_empty();
+            let message = if has_projects {
+                "No projects match current filters. Check workspace/archived settings."
+            } else {
+                "No projects available. Create a project first."
+            };
+            self.set_warning_status(message);
+            return;
+        }
+
+        self.modal_state = ModalState::ProjectsModal {
+            selector: SelectorState::new(),
+            for_new_thread: false,
+        };
+    }
+
+    /// DEPRECATED: Use open_projects_selector_for_new_thread() or open_projects_selector_for_switch() instead.
+    /// This method remains for temporary backwards compatibility but will be removed.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use open_projects_selector_for_new_thread() or open_projects_selector_for_switch() instead"
+    )]
+    pub fn open_projects_modal(&mut self, for_new_thread: bool) {
+        if for_new_thread {
+            self.open_projects_selector_for_new_thread();
+        } else {
+            self.open_projects_selector_for_switch();
+        }
+    }
+
+    /// DEPRECATED: Use open_projects_selector_for_switch() instead.
+    /// This method remains for temporary backwards compatibility but will be removed.
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use open_projects_selector_for_switch() instead"
+    )]
+    pub fn open_project_selector(&mut self) {
+        self.open_projects_selector_for_switch();
     }
 
     /// Get projects modal index (from ModalState)
