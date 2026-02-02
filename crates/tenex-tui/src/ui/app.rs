@@ -1323,21 +1323,31 @@ impl App {
                 // Filter out archived projects unless showing archived
                 self.show_archived || !prefs.is_project_archived(&p.a_tag())
             })
-            .filter_map(|p| fuzzy_score(&p.name, filter).map(|score| (p, score)))
+            .filter_map(|p| {
+                fuzzy_score(&p.name, filter).map(|score| {
+                    let is_online = store.is_project_online(&p.a_tag());
+                    (p, score, is_online)
+                })
+            })
             .collect();
 
-        // Sort by score (lower = better match), then alphabetically for ties
-        matching.sort_by(|(a, score_a), (b, score_b)| {
-            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+        // Sort by online status first (online projects first), then by score (lower = better match), then alphabetically for ties
+        matching.sort_by(|(a, score_a, a_online), (b, score_b, b_online)| {
+            // Sort online projects before offline projects (true > false, so we reverse)
+            b_online.cmp(a_online)
+                .then_with(|| score_a.cmp(score_b))
+                .then_with(|| a.name.cmp(&b.name))
         });
 
         // Separate into online and offline, preserving sort order
         let (online, offline): (Vec<_>, Vec<_>) = matching
             .into_iter()
-            .map(|(p, _)| p)
-            .partition(|p| store.is_project_online(&p.a_tag()));
+            .partition(|(_, _, is_online)| *is_online);
 
-        (online.into_iter().cloned().collect(), offline.into_iter().cloned().collect())
+        (
+            online.into_iter().map(|(p, _, _)| p).cloned().collect(),
+            offline.into_iter().map(|(p, _, _)| p).cloned().collect()
+        )
     }
 
     /// Open the projects modal
