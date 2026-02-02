@@ -88,6 +88,12 @@ class TenexCoreManager: ObservableObject {
     /// Subscribe to this instead of polling isProjectOnline().
     @Published var projectOnlineStatus: [String: Bool] = [:]
 
+    /// Online agents for each project - updated reactively via event callbacks.
+    /// Key: project ID, Value: array of OnlineAgentInfo.
+    /// Subscribe to this instead of fetching agents on-demand via getOnlineAgents().
+    /// This eliminates multi-second delays from redundant FFI calls.
+    @Published var onlineAgents: [String: [OnlineAgentInfo]] = [:]
+
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening
     @Published var hasActiveAgents: Bool = false
@@ -132,6 +138,11 @@ class TenexCoreManager: ObservableObject {
         }
     }
 
+    // MARK: - Constants
+
+    /// Duration to wait before clearing message update signals (100ms)
+    private static let messageUpdateSignalDuration: UInt64 = 100_000_000
+
     // MARK: - Event Callback Registration
 
     /// Register the event callback for push-based updates.
@@ -172,7 +183,7 @@ class TenexCoreManager: ObservableObject {
 
         // Clear the signal after a short delay (allows observers to react)
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+            try? await Task.sleep(nanoseconds: Self.messageUpdateSignalDuration)
             conversationMessageUpdates.remove(conversationId)
         }
     }
@@ -197,6 +208,20 @@ class TenexCoreManager: ObservableObject {
     @MainActor
     private func updateActiveAgentsState() {
         hasActiveAgents = conversations.contains { $0.isActive }
+    }
+
+    /// Fetch and cache online agents for a specific project.
+    /// This shared method eliminates code duplication and ensures consistent agent caching.
+    /// - Parameter projectId: The ID of the project to fetch agents for
+    @MainActor
+    func fetchAndCacheAgents(for projectId: String) async {
+        do {
+            let agents = try await safeCore.getOnlineAgents(projectId: projectId)
+            onlineAgents[projectId] = agents
+        } catch {
+            print("[TenexCoreManager] Failed to fetch agents for project '\(projectId)': \(error)")
+            onlineAgents[projectId] = []
+        }
     }
 
     /// Refresh only the conversations list
@@ -266,10 +291,18 @@ class TenexCoreManager: ObservableObject {
             conversations = c
             inboxItems = i
 
-            // Initialize project online status reactively
+            // Initialize project online status and online agents reactively
             var initialStatus: [String: Bool] = [:]
             for project in p {
-                initialStatus[project.id] = core.isProjectOnline(projectId: project.id)
+                let isOnline = core.isProjectOnline(projectId: project.id)
+                initialStatus[project.id] = isOnline
+
+                // Proactively fetch and cache agents for online projects on login
+                if isOnline {
+                    await fetchAndCacheAgents(for: project.id)
+                } else {
+                    onlineAgents[project.id] = []
+                }
             }
             projectOnlineStatus = initialStatus
 
