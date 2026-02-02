@@ -68,37 +68,38 @@ struct ConversationDetailView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        if viewModel.isLoading && viewModel.messages.isEmpty {
-            ProgressView("Loading...")
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                VStack(spacing: 0) {
-                    // Header Section (includes status, avatars, and runtime)
-                    headerSection
+        ScrollView {
+            VStack(spacing: 0) {
+                // Header Section (includes status, avatars, and runtime)
+                headerSection
 
-                    // Todo List Section
-                    if viewModel.todoState.hasTodos {
-                        todoListSection
-                    }
-
-                    // Latest Reply Section (most recent on top)
-                    if let reply = viewModel.latestReply {
-                        latestReplySection(reply)
-                    }
-
-                    // Delegations Section
-                    if !viewModel.delegations.isEmpty {
-                        delegationsSection
-                    }
-
-                    // Full Conversation Button
-                    fullConversationButton
+                // Loading indicator when data is being fetched
+                if viewModel.isLoading && viewModel.messages.isEmpty {
+                    ProgressView()
+                        .padding(.vertical, 20)
                 }
-                .padding(.bottom, 20)
+
+                // Todo List Section
+                if viewModel.todoState.hasTodos {
+                    todoListSection
+                }
+
+                // Latest Reply Section (most recent on top)
+                if let reply = viewModel.latestReply {
+                    latestReplySection(reply)
+                }
+
+                // Delegations Section
+                if !viewModel.delegations.isEmpty {
+                    delegationsSection
+                }
+
+                // Full Conversation Button
+                fullConversationButton
             }
-            .background(Color(.systemBackground))
+            .padding(.bottom, 20)
         }
+        .background(Color(.systemBackground))
     }
 
     /// Initializes the view model with the core manager and loads data
@@ -779,17 +780,21 @@ private struct DelegationSheetFromId: View {
     var body: some View {
         NavigationStack {
             Group {
-                if isLoading {
-                    ProgressView("Loading...")
-                } else if let conv = conversation {
+                if let conv = conversation {
                     ConversationDetailView(conversation: conv)
                         .environmentObject(coreManager)
                 } else {
-                    ContentUnavailableView(
-                        "Conversation Not Found",
-                        systemImage: "doc.questionmark",
-                        description: Text("Unable to load delegation details.")
-                    )
+                    VStack(spacing: 16) {
+                        ContentUnavailableView(
+                            "Conversation Not Found",
+                            systemImage: "doc.questionmark",
+                            description: Text("Unable to load delegation details.")
+                        )
+                        if isLoading {
+                            ProgressView()
+                                .padding(.top, 8)
+                        }
+                    }
                 }
             }
             .navigationBarTitleDisplayMode(.inline)

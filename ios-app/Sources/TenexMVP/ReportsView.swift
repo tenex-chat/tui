@@ -6,12 +6,11 @@ struct ReportsView: View {
     @State private var reports: [ReportInfo] = []
     @State private var isLoading = false
     @State private var selectedReport: ReportInfo?
+    @State private var dataChangedObserver: NSObjectProtocol?
 
     var body: some View {
         Group {
-            if isLoading {
-                ProgressView("Loading reports...")
-            } else if reports.isEmpty {
+            if reports.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "doc.text")
                         .font(.system(size: 60))
@@ -19,6 +18,10 @@ struct ReportsView: View {
                     Text("No Reports")
                         .font(.title2)
                         .fontWeight(.semibold)
+                    if isLoading {
+                        ProgressView()
+                            .padding(.top, 8)
+                    }
                 }
             } else {
                 List {
@@ -45,9 +48,29 @@ struct ReportsView: View {
         }
         .task {
             await loadReports()
+            subscribeToDataChanges()
+        }
+        .onDisappear {
+            if let observer = dataChangedObserver {
+                NotificationCenter.default.removeObserver(observer)
+                dataChangedObserver = nil
+            }
         }
         .sheet(item: $selectedReport) { report in
             ReportDetailView(report: report)
+        }
+    }
+
+    private func subscribeToDataChanges() {
+        // Subscribe to general data change notifications for reactive report updates
+        dataChangedObserver = NotificationCenter.default.addObserver(
+            forName: .tenexDataChanged,
+            object: nil,
+            queue: .main
+        ) { [project] _ in
+            Task {
+                await loadReports()
+            }
         }
     }
 
@@ -64,6 +87,13 @@ struct ReportsView: View {
 
 struct ReportRowView: View {
     let report: ReportInfo
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
 
     var body: some View {
         HStack(spacing: 12) {
@@ -129,10 +159,7 @@ struct ReportRowView: View {
 
     private func formatDate(_ timestamp: UInt64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter.string(from: date)
+        return Self.dateFormatter.string(from: date)
     }
 }
 
@@ -141,6 +168,13 @@ struct ReportRowView: View {
 struct ReportDetailView: View {
     let report: ReportInfo
     @Environment(\.dismiss) private var dismiss
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .long
+        formatter.timeStyle = .short
+        return formatter
+    }()
 
     var body: some View {
         NavigationStack {
@@ -208,10 +242,7 @@ struct ReportDetailView: View {
 
     private func formatDate(_ timestamp: UInt64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = DateFormatter()
-        formatter.dateStyle = .long
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
+        return Self.dateFormatter.string(from: date)
     }
 }
 

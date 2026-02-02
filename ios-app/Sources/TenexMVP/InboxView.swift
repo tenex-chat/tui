@@ -177,11 +177,10 @@ struct InboxView: View {
                     pendingNavigation = nil
                 }
             }) { item in
-                InboxDetailView(item: item, onNavigateToConversation: { convId, projectId in
+                InboxDetailView(item: item, onNavigateToConversation: { convId in
                     // Store pending navigation, then dismiss sheet
                     pendingNavigation = ConversationNavigationData(
-                        conversationId: convId,
-                        projectId: projectId
+                        conversationId: convId
                     )
                     selectedItem = nil
                 })
@@ -189,8 +188,7 @@ struct InboxView: View {
             }
             .navigationDestination(item: $navigateToConversation) { navData in
                 InboxConversationView(
-                    conversationId: navData.conversationId,
-                    projectId: navData.projectId
+                    conversationId: navData.conversationId
                 )
                 .environmentObject(coreManager)
             }
@@ -355,7 +353,7 @@ struct InboxItemRow: View {
 
 struct InboxDetailView: View {
     let item: InboxItem
-    let onNavigateToConversation: (String, String?) -> Void
+    let onNavigateToConversation: (String) -> Void
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
@@ -500,7 +498,7 @@ struct InboxDetailView: View {
             // Conversation navigation button
             if let convId = item.conversationId {
                 Button(action: {
-                    onNavigateToConversation(convId, item.projectId)
+                    onNavigateToConversation(convId)
                 }) {
                     HStack {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
@@ -525,24 +523,24 @@ struct InboxDetailView: View {
 struct ConversationNavigationData: Identifiable, Hashable {
     let id = UUID()
     let conversationId: String
-    let projectId: String?
+    // Note: projectId removed - not needed for message fetching
 }
 
 // MARK: - Inbox Conversation View (Navigate from inbox item)
 
 struct InboxConversationView: View {
     let conversationId: String
-    let projectId: String?
+    // Note: projectId removed - conversation IDs are globally unique Nostr event IDs
+    // and getMessages(conversationId:) doesn't accept projectId parameter
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var messages: [MessageInfo] = []
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
+    @State private var messagesChangedObserver: NSObjectProtocol?
 
     var body: some View {
         Group {
-            if isLoading {
-                ProgressView("Loading conversation...")
-            } else if messages.isEmpty {
+            if messages.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 60))
@@ -550,6 +548,10 @@ struct InboxConversationView: View {
                     Text("No Messages")
                         .font(.title2)
                         .fontWeight(.semibold)
+                    if isLoading {
+                        ProgressView()
+                            .padding(.top, 8)
+                    }
                 }
             } else {
                 ScrollView {
@@ -566,9 +568,29 @@ struct InboxConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             loadMessages()
+            subscribeToMessageChanges()
         }
         .onDisappear {
             loadTask?.cancel()
+            if let observer = messagesChangedObserver {
+                NotificationCenter.default.removeObserver(observer)
+                messagesChangedObserver = nil
+            }
+        }
+    }
+
+    private func subscribeToMessageChanges() {
+        // Subscribe to message change notifications for reactive updates
+        messagesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .tenexMessagesChanged,
+            object: nil,
+            queue: .main
+        ) { [conversationId] notification in
+            // Only reload if this notification is for our conversation
+            if let changedConversationId = notification.object as? String,
+               changedConversationId == conversationId {
+                loadMessages()
+            }
         }
     }
 
