@@ -662,6 +662,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getArchivedConversationIds() throws  -> [String]
     
     /**
+     * Get diagnostics about backend approvals and project statuses.
+     * Returns JSON with project statuses keys.
+     */
+    func getBackendDiagnostics() throws  -> String
+    
+    /**
      * Get all collapsed thread IDs.
      */
     func getCollapsedThreadIds() throws  -> [String]
@@ -1177,6 +1183,17 @@ open func getAllConversations(filter: ConversationFilter)throws  -> [Conversatio
 open func getArchivedConversationIds()throws  -> [String]  {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_archived_conversation_ids(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get diagnostics about backend approvals and project statuses.
+     * Returns JSON with project statuses keys.
+     */
+open func getBackendDiagnostics()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_backend_diagnostics(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -7444,6 +7461,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_archived_conversation_ids() != 44789) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_backend_diagnostics() != 63816) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_collapsed_thread_ids() != 51682) {

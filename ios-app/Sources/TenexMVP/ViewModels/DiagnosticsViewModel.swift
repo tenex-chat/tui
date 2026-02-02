@@ -122,7 +122,7 @@ class DiagnosticsViewModel: ObservableObject {
                     guard self?.currentFetchID == fetchID else { return }
                     self?.currentFetchTask = nil
                     self?.currentFetchIncludesDB = false
-                    // Note: isLoading is set to false in the result handlers below
+                    self?.isLoading = false
                 }
             }
 
@@ -132,45 +132,44 @@ class DiagnosticsViewModel: ObservableObject {
                 // Check for cancellation before starting
                 try Task.checkCancellation()
 
-                // Refresh core data first using SafeTenexCore
+                // PHASE 1: Show cached data immediately (no blocking on network)
+                let cachedSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
+                await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
+                    self?.snapshot = cachedSnapshot
+                    self?.error = nil
+                }
+
+                // Check for cancellation before refresh
+                try Task.checkCancellation()
+
+                // PHASE 2: Refresh from network in background
                 let refreshSuccess = await safeCore.refresh()
                 if !refreshSuccess {
-                    // Log but continue - refresh failure shouldn't block diagnostics
                     Logger.diagnostics.warning("Core refresh returned false, continuing with diagnostics fetch")
                 }
 
                 // Check for cancellation after refresh
                 try Task.checkCancellation()
 
-                // Fetch diagnostics snapshot using SafeTenexCore
-                let fetchedSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
+                // PHASE 3: Get fresh data after refresh
+                let freshSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
 
                 // IDENTITY CHECK: Guard UI updates - only apply if this is still the current fetch
-                // (The underlying Rust work completed, but we shouldn't show stale data)
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
-                    self?.snapshot = fetchedSnapshot
-                    self?.error = nil  // Clear any previous error since we have data
-                    self?.isLoading = false
+                    self?.snapshot = freshSnapshot
+                    self?.error = nil
                 }
             } catch is CancellationError {
-                // Task was cancelled, reset loading state but don't touch data
-                // Keep last known snapshot (with its errors) until new snapshot succeeds
-                // CRITICAL: Only update state if this task is still the current one
-                await MainActor.run { [weak self] in
-                    guard self?.currentFetchID == fetchID else { return }
-                    self?.isLoading = false
-                }
+                // Task was cancelled, keep existing data
             } catch {
-                // Only set error if we have no snapshot at all
-                // If we have existing data, keep showing it with its errors
-                // CRITICAL: Only update state if this task is still the current one
+                // Keep showing cached data if refresh fails
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     if self?.snapshot == nil {
                         self?.error = error
                     }
-                    self?.isLoading = false
                 }
             }
         }

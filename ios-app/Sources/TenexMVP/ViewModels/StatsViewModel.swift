@@ -31,23 +31,28 @@ class StatsViewModel: ObservableObject {
     // MARK: - Public Methods
 
     /// Load stats data from Rust core using SafeTenexCore
+    /// Shows cached data immediately, then refreshes in background
     func loadStats() async {
-        isLoading = true
-        error = nil
-
+        // PHASE 1: Show cached data immediately (no blocking)
         do {
-            // Refresh core data first (pull latest from relays)
-            _ = await coreManager.safeCore.refresh()
-
-            // Fetch stats snapshot using SafeTenexCore with proper error handling
-            let fetchedSnapshot = try await coreManager.safeCore.getStatsSnapshot()
-
-            // Update UI on main actor
-            snapshot = fetchedSnapshot
-            isLoading = false
+            let cachedSnapshot = try await coreManager.safeCore.getStatsSnapshot()
+            snapshot = cachedSnapshot
         } catch {
-            self.error = error
-            isLoading = false
+            // Cached data unavailable, continue to refresh
+        }
+
+        // PHASE 2: Refresh from network in background, then update
+        _ = await coreManager.safeCore.refresh()
+
+        // PHASE 3: Get fresh data after refresh
+        do {
+            let freshSnapshot = try await coreManager.safeCore.getStatsSnapshot()
+            snapshot = freshSnapshot
+        } catch {
+            // Keep showing cached data if fresh fetch fails
+            if snapshot == nil {
+                self.error = error
+            }
         }
     }
 

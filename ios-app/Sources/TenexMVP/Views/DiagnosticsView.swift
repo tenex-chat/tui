@@ -10,55 +10,30 @@ struct DiagnosticsView: View {
     }
 
     var body: some View {
-        ZStack {
-            if viewModel.isLoading && viewModel.snapshot == nil {
-                // Initial loading state
-                ProgressView("Loading diagnostics...")
-            } else if let error = viewModel.error, viewModel.snapshot == nil {
-                // Complete failure error state (no snapshot at all)
-                DiagnosticsErrorView(error: error) {
-                    Task {
-                        await viewModel.loadDiagnostics()
-                    }
+        ScrollView {
+            VStack(spacing: 0) {
+                // Show section errors banner if any sections failed
+                if let snapshot = viewModel.snapshot, !snapshot.sectionErrors.isEmpty {
+                    DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
+                        .padding(.horizontal)
+                        .padding(.top, 8)
                 }
-            } else if let snapshot = viewModel.snapshot {
-                // Main content (may have partial data with section errors)
-                ScrollView {
-                    VStack(spacing: 0) {
-                        // Show section errors banner if any sections failed
-                        // Driven directly from snapshot.sectionErrors (single source of truth)
-                        if !snapshot.sectionErrors.isEmpty {
-                            DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
-                                .padding(.horizontal)
-                                .padding(.top, 8)
-                        }
 
-                        // Tab Navigation
-                        DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
-                            .padding(.horizontal)
-                            .padding(.top, 8)
+                // Tab Navigation - always visible
+                DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
 
-                        Divider()
-                            .padding(.top, 8)
+                Divider()
+                    .padding(.top, 8)
 
-                        // Tab Content
-                        DiagnosticsTabContent(
-                            snapshot: snapshot,
-                            selectedTab: viewModel.selectedTab,
-                            isLoading: viewModel.isLoading
-                        )
-                        .padding()
-                    }
-                }
-                .refreshable {
-                    await viewModel.refresh()
-                }
-            } else {
-                // Empty state
-                DiagnosticsEmptyView {
-                    Task {
-                        await viewModel.loadDiagnostics()
-                    }
+                // Tab Content - shows data as it arrives
+                if let snapshot = viewModel.snapshot {
+                    DiagnosticsTabContent(
+                        snapshot: snapshot,
+                        selectedTab: viewModel.selectedTab
+                    )
+                    .padding()
                 }
             }
         }
@@ -131,7 +106,6 @@ struct DiagnosticsTabPill: View {
 struct DiagnosticsTabContent: View {
     let snapshot: DiagnosticsSnapshot
     let selectedTab: DiagnosticsTab
-    let isLoading: Bool
 
     var body: some View {
         Group {
@@ -164,20 +138,10 @@ struct DiagnosticsTabContent: View {
             case .database:
                 if let database = snapshot.database {
                     DiagnosticsDatabaseTab(dbData: database)
-                } else if isLoading {
-                    // Database stats are being loaded (lazy loading)
-                    VStack(spacing: 16) {
-                        ProgressView()
-                        Text("Loading database statistics...")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 40)
                 } else {
                     DiagnosticsSectionUnavailableView(
                         title: "Database Data Unavailable",
-                        message: "Unable to load database statistics",
+                        message: "Pull to refresh to load database statistics",
                         icon: "cylinder.split.1x2"
                     )
                 }

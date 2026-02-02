@@ -31,9 +31,6 @@ struct ConversationDetailView: View {
             .task {
                 await initializeAndLoad()
             }
-            .refreshable {
-                await viewModel.loadData()
-            }
             .sheet(item: $selectedDelegation) { delegation in
                 if let childConv = viewModel.childConversation(for: delegation.conversationId) {
                     NavigationStack {
@@ -71,25 +68,20 @@ struct ConversationDetailView: View {
         ScrollView {
             VStack(spacing: 0) {
                 // Header Section (includes status, avatars, and runtime)
+                // Always renders immediately with known conversation data
                 headerSection
 
-                // Loading indicator when data is being fetched
-                if viewModel.isLoading && viewModel.messages.isEmpty {
-                    ProgressView()
-                        .padding(.vertical, 20)
-                }
-
-                // Todo List Section
+                // Todo List Section - renders when todos are available
                 if viewModel.todoState.hasTodos {
                     todoListSection
                 }
 
-                // Latest Reply Section (most recent on top)
+                // Latest Reply Section - renders when messages are available
                 if let reply = viewModel.latestReply {
                     latestReplySection(reply)
                 }
 
-                // Delegations Section
+                // Delegations Section - renders when delegations are available
                 if !viewModel.delegations.isEmpty {
                     delegationsSection
                 }
