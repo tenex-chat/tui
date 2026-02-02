@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::theme;
+use crate::ui::todo::is_todo_write;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolCall {
@@ -112,7 +113,13 @@ pub fn parse_message_content(content: &str) -> MessageContent {
 
 /// Get icon for a tool call based on its name (Unicode symbols for consistent width)
 pub fn tool_icon(name: &str) -> &'static str {
-    match name.to_lowercase().as_str() {
+    let lower = name.to_lowercase();
+
+    if is_todo_write(&lower) {
+        return "☐";
+    }
+
+    match lower.as_str() {
         "edit" | "str_replace_editor" | "fs_edit" => "✎",
         "write" | "file_write" | "fs_write" => "✎",
         "read" | "file_read" | "fs_read" => "◉",
@@ -121,14 +128,19 @@ pub fn tool_icon(name: &str) -> &'static str {
         "grep" | "search" | "fs_grep" => "◎",
         "task" | "agent" => "▶",
         "web_search" | "websearch" => "◎",
-        "todo_write" | "todowrite" | "todo" => "☐",
         _ => "⚙",
     }
 }
 
 /// Get semantic verb for a tool (e.g., "Reading", "Writing")
 pub fn tool_verb(name: &str) -> &'static str {
-    match name.to_lowercase().as_str() {
+    let lower = name.to_lowercase();
+
+    if is_todo_write(&lower) {
+        return "";
+    }
+
+    match lower.as_str() {
         "read" | "file_read" | "fs_read" => "Reading",
         "write" | "file_write" | "fs_write" => "Writing",
         "edit" | "str_replace_editor" | "fs_edit" => "Editing",
@@ -137,7 +149,6 @@ pub fn tool_verb(name: &str) -> &'static str {
         "grep" | "search" | "fs_grep" => "Searching",
         "task" | "agent" => "",
         "web_search" | "websearch" => "Searching",
-        "todo_write" | "todowrite" | "todo" => "",
         _ => "Executing",
     }
 }
@@ -201,20 +212,20 @@ pub fn render_tool_line(
     let name = tool_call.name.to_lowercase();
     let target = extract_target(tool_call).unwrap_or_default();
 
-    let display_text = match name.as_str() {
-        // Bash: "$ command" or "$ description"
-        "bash" | "execute_bash" | "shell" => format!("$ {}", target),
-
-        // todo_write: collapsed count
-        "todo_write" | "todowrite" | "todo" => {
-            let count = tool_call
-                .parameters
-                .get("todos")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0);
-            format!("▸ {} tasks", count)
-        }
+    let display_text = if is_todo_write(&name) {
+        // todo_write: collapsed count (supports both "todos" and "items")
+        let count = tool_call
+            .parameters
+            .get("todos")
+            .or_else(|| tool_call.parameters.get("items"))
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        format!("▸ {} tasks", count)
+    } else {
+        match name.as_str() {
+            // Bash: "$ command" or "$ description"
+            "bash" | "execute_bash" | "shell" => format!("$ {}", target),
 
         // Ask: "Asking: "title" [Question1, Question2, ...]"
         "ask" | "askuserquestion" => {
@@ -267,45 +278,46 @@ pub fn render_tool_line(
             format!("▶ {}", truncate_with_ellipsis(desc, 40))
         }
 
-        // Model change: show variant being switched to
-        "change_model" => {
-            let variant = tool_call
-                .parameters
-                .get("variant")
-                .and_then(|v| v.as_str())
-                .unwrap_or("default");
-            format!("🧠 → {}", variant)
-        }
-
-        // Default: use content fallback if available, otherwise verb + target
-        _ => {
-            // If we have a meaningful content fallback, use it
-            if let Some(content) = content_fallback {
-                let trimmed = content.trim();
-                if !trimmed.is_empty() {
-                    return Line::from(vec![
-                        Span::styled("│", Style::default().fg(indicator_color)),
-                        Span::raw("  "),
-                        Span::styled(
-                            truncate_with_ellipsis(trimmed, 80),
-                            Style::default().fg(theme::TEXT_MUTED),
-                        ),
-                    ]);
-                }
+            // Model change: show variant being switched to
+            "change_model" => {
+                let variant = tool_call
+                    .parameters
+                    .get("variant")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("default");
+                format!("🧠 → {}", variant)
             }
 
-            // Fall back to verb + target or just tool name
-            let verb = tool_verb(&tool_call.name);
-            if verb.is_empty() {
-                if target.is_empty() {
-                    tool_call.name.clone()
-                } else {
-                    format!("{} {}", tool_call.name, target)
+            // Default: use content fallback if available, otherwise verb + target
+            _ => {
+                // If we have a meaningful content fallback, use it
+                if let Some(content) = content_fallback {
+                    let trimmed = content.trim();
+                    if !trimmed.is_empty() {
+                        return Line::from(vec![
+                            Span::styled("│", Style::default().fg(indicator_color)),
+                            Span::raw("  "),
+                            Span::styled(
+                                truncate_with_ellipsis(trimmed, 80),
+                                Style::default().fg(theme::TEXT_MUTED),
+                            ),
+                        ]);
+                    }
                 }
-            } else if target.is_empty() {
-                verb.to_string()
-            } else {
-                format!("{} {}", verb, target)
+
+                // Fall back to verb + target or just tool name
+                let verb = tool_verb(&tool_call.name);
+                if verb.is_empty() {
+                    if target.is_empty() {
+                        tool_call.name.clone()
+                    } else {
+                        format!("{} {}", tool_call.name, target)
+                    }
+                } else if target.is_empty() {
+                    verb.to_string()
+                } else {
+                    format!("{} {}", verb, target)
+                }
             }
         }
     };
