@@ -192,6 +192,16 @@ class TenexCoreManager: ObservableObject {
     /// Refreshes project list. projectOnlineStatus is updated by TenexEventHandler.
     @MainActor
     func onProjectStatusChanged() async {
+        do {
+            let approved = try await safeCore.approveAllPendingBackends()
+            if approved > 0 {
+                print("[TenexCoreManager] Auto-approved \(approved) backend(s) after status event")
+                _ = await safeCore.refresh()
+                refreshProjectOnlineStatuses()
+            }
+        } catch {
+            print("[TenexCoreManager] Failed to approve pending backends after status event: \(error)")
+        }
         await refreshProjects()
         // Also refresh conversations since 24133 events can change is_active status
         await refreshConversations()
@@ -222,6 +232,32 @@ class TenexCoreManager: ObservableObject {
             print("[TenexCoreManager] Failed to fetch agents for project '\(projectId)': \(error)")
             onlineAgents[projectId] = []
         }
+    }
+
+    /// Refresh projectOnlineStatus and onlineAgents for all known projects.
+    /// Must be called from main thread.
+    @MainActor
+    func refreshProjectOnlineStatuses() {
+        let projects = self.projects
+        var newStatus: [String: Bool] = [:]
+
+        for project in projects {
+            // Use the synchronous core API directly (in-memory lookup in Rust layer)
+            let isOnline = core.isProjectOnline(projectId: project.id)
+            newStatus[project.id] = isOnline
+
+            // Proactively fetch and cache online agents for online projects
+            if isOnline {
+                Task {
+                    await self.fetchAndCacheAgents(for: project.id)
+                }
+            } else {
+                // Clear agents for offline projects immediately
+                onlineAgents[project.id] = []
+            }
+        }
+
+        projectOnlineStatus = newStatus
     }
 
     /// Refresh only the conversations list
@@ -612,12 +648,14 @@ struct MainTabView: View {
             }
         }
         .sheet(isPresented: $showNewConversation) {
-            MessageComposerView(
-                project: nil,
-                conversationId: nil,
-                conversationTitle: nil
-            )
-            .environmentObject(coreManager)
+            NavigationStack {
+                MessageComposerView(
+                    project: nil,
+                    conversationId: nil,
+                    conversationTitle: nil
+                )
+                .environmentObject(coreManager)
+            }
         }
     }
 }
