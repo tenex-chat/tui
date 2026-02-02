@@ -857,6 +857,11 @@ pub struct TenexCore {
     event_callback: RwLock<Option<Arc<dyn EventCallback>>>,
     /// Flag to signal callback listener thread to stop (Arc for sharing with thread)
     callback_listener_running: Arc<AtomicBool>,
+    /// Mutex to serialize nostrdb Transaction creation across all operations.
+    /// CRITICAL: nostrdb cannot handle concurrent transactions on the same Ndb instance.
+    /// This mutex ensures only one code path can create a Transaction at a time, preventing
+    /// panics when refresh() and getDiagnosticsSnapshot() are called concurrently.
+    ndb_transaction_lock: Mutex<()>,
 }
 
 #[uniffi::export]
@@ -880,6 +885,7 @@ impl TenexCore {
             negentropy_stats: RwLock::new(None),
             event_callback: RwLock::new(None),
             callback_listener_running: Arc::new(AtomicBool::new(false)),
+            ndb_transaction_lock: Mutex::new(()),
         }
     }
 
@@ -2776,6 +2782,14 @@ impl TenexCore {
         // Update last refresh timestamp (atomic swap for thread safety)
         self.last_refresh_ms.store(now_ms, Ordering::Relaxed);
 
+        // CRITICAL: Acquire transaction lock to prevent concurrent nostrdb Transactions.
+        // This lock must be held for the entire duration of note processing to ensure
+        // getDiagnosticsSnapshot() cannot create a conflicting Transaction.
+        let _tx_guard = match self.ndb_transaction_lock.lock() {
+            Ok(guard) => guard,
+            Err(_) => return false, // Lock poisoned, fail safely
+        };
+
         let ndb = {
             let ndb_guard = match self.ndb.read() {
                 Ok(g) => g,
@@ -3131,6 +3145,12 @@ impl TenexCore {
 
     /// Collect database diagnostics (potentially expensive - scans event kinds)
     fn collect_database_diagnostics(&self, data_dir: &std::path::Path) -> Result<DatabaseStats, String> {
+        // CRITICAL: Acquire transaction lock before creating any nostrdb Transactions.
+        // query_ndb_stats() creates a Transaction, so we must hold this lock to prevent
+        // concurrent access with refresh() which also creates Transactions.
+        let _tx_guard = self.ndb_transaction_lock.lock()
+            .map_err(|_| "Failed to acquire transaction lock".to_string())?;
+
         let ndb_guard = self.ndb.read()
             .map_err(|_| "Failed to acquire ndb lock".to_string())?;
 
