@@ -2951,18 +2951,6 @@ impl AppDataStore {
         results
     }
 
-    /// Extract a-tag from a note's tags
-    fn extract_a_tag_from_note(note: &nostrdb::Note) -> Option<String> {
-        for tag in note.tags() {
-            if tag.get(0).and_then(|t| t.variant().str()) == Some("a") {
-                if let Some(a_tag_value) = tag.get(1).and_then(|t| t.variant().str()) {
-                    return Some(a_tag_value.to_string());
-                }
-            }
-        }
-        None
-    }
-
     /// Extract thread ID from a note's e-tags (looking for "root" marker per NIP-10)
     fn extract_thread_id_from_note(note: &nostrdb::Note) -> Option<String> {
         for tag in note.tags() {
@@ -3027,6 +3015,28 @@ impl AppDataStore {
     /// Drain pending backend approvals (called by TUI to show modals)
     pub fn drain_pending_backend_approvals(&mut self) -> Vec<PendingBackendApproval> {
         std::mem::take(&mut self.pending_backend_approvals)
+    }
+
+    /// Approve a batch of pending backends and apply their cached statuses.
+    /// Returns the number of unique backend pubkeys approved.
+    pub fn approve_pending_backends(&mut self, pending: Vec<PendingBackendApproval>) -> u32 {
+        use std::collections::HashSet;
+
+        let mut approved_pubkeys: HashSet<String> = HashSet::new();
+
+        for approval in pending {
+            self.project_statuses.insert(
+                approval.status.project_coordinate.clone(),
+                approval.status,
+            );
+            approved_pubkeys.insert(approval.backend_pubkey);
+        }
+
+        for pubkey in approved_pubkeys.iter() {
+            self.add_approved_backend(pubkey);
+        }
+
+        approved_pubkeys.len() as u32
     }
 
     /// Check if there are pending backend approvals
