@@ -1455,8 +1455,6 @@ impl AppDataStore {
             if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
                 *existing = project;
             } else {
-                // New project - queue subscription for its messages
-                self.pending_project_subscriptions.push(a_tag.clone());
                 self.projects.push(project);
             }
         }
