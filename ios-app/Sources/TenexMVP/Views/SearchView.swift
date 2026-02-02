@@ -45,8 +45,7 @@ struct SearchView: View {
                         // Conversation header - tappable to navigate
                         Button {
                             navigateToConversation = SearchNavigationData(
-                                conversationId: group.id,
-                                projectId: group.projectId
+                                conversationId: group.id
                             )
                         } label: {
                             ConversationGroupHeader(group: group)
@@ -59,8 +58,7 @@ struct SearchView: View {
                             Button {
                                 if let threadId = result.threadId {
                                     navigateToConversation = SearchNavigationData(
-                                        conversationId: threadId,
-                                        projectId: result.projectATag?.components(separatedBy: ":").last
+                                        conversationId: threadId
                                     )
                                 }
                             } label: {
@@ -90,8 +88,7 @@ struct SearchView: View {
         }
         .navigationDestination(item: $navigateToConversation) { navData in
             SearchConversationView(
-                conversationId: navData.conversationId,
-                projectId: navData.projectId
+                conversationId: navData.conversationId
             )
             .environmentObject(coreManager)
         }
@@ -318,24 +315,24 @@ struct MatchingMessageRow: View {
 struct SearchNavigationData: Identifiable, Hashable {
     let id = UUID()
     let conversationId: String
-    let projectId: String?
+    // Note: projectId removed - not needed for message fetching
 }
 
 // MARK: - Search Conversation View
 
 struct SearchConversationView: View {
     let conversationId: String
-    let projectId: String?
+    // Note: projectId removed - conversation IDs are globally unique Nostr event IDs
+    // and getMessages(conversationId:) doesn't accept projectId parameter
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var messages: [MessageInfo] = []
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
+    @State private var messagesChangedObserver: NSObjectProtocol?
 
     var body: some View {
         Group {
-            if isLoading {
-                ProgressView("Loading conversation...")
-            } else if messages.isEmpty {
+            if messages.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
                         .font(.system(size: 60))
@@ -343,6 +340,10 @@ struct SearchConversationView: View {
                     Text("No Messages")
                         .font(.title2)
                         .fontWeight(.semibold)
+                    if isLoading {
+                        ProgressView()
+                            .padding(.top, 8)
+                    }
                 }
             } else {
                 ScrollView {
@@ -359,9 +360,29 @@ struct SearchConversationView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             loadMessages()
+            subscribeToMessageChanges()
         }
         .onDisappear {
             loadTask?.cancel()
+            if let observer = messagesChangedObserver {
+                NotificationCenter.default.removeObserver(observer)
+                messagesChangedObserver = nil
+            }
+        }
+    }
+
+    private func subscribeToMessageChanges() {
+        // Subscribe to message change notifications for reactive updates
+        messagesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .tenexMessagesChanged,
+            object: nil,
+            queue: .main
+        ) { [conversationId] notification in
+            // Only reload if this notification is for our conversation
+            if let changedConversationId = notification.object as? String,
+               changedConversationId == conversationId {
+                loadMessages()
+            }
         }
     }
 
