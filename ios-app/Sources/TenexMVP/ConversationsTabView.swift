@@ -363,8 +363,10 @@ struct ConversationsTabView: View {
             }
             .sheet(isPresented: $showNewConversation) {
                 if let project = projectForNewConversation {
-                    MessageComposerView(project: project)
-                        .environmentObject(coreManager)
+                    NavigationStack {
+                        MessageComposerView(project: project)
+                            .environmentObject(coreManager)
+                    }
                 }
             }
             .task {
