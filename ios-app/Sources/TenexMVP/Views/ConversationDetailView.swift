@@ -754,13 +754,15 @@ struct FullConversationSheet: View {
                     .presentationDragIndicator(.visible)
             }
             .sheet(isPresented: $showComposer) {
-                MessageComposerView(
-                    project: project,
-                    conversationId: conversation.id,
-                    conversationTitle: conversation.title,
-                    initialAgentPubkey: lastAgentPubkey
-                )
-                .environmentObject(coreManager)
+                NavigationStack {
+                    MessageComposerView(
+                        project: project,
+                        conversationId: conversation.id,
+                        conversationTitle: conversation.title,
+                        initialAgentPubkey: lastAgentPubkey
+                    )
+                    .environmentObject(coreManager)
+                }
             }
         }
     }

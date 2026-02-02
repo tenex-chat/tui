@@ -91,13 +91,15 @@ struct ConversationsView: View {
             .presentationDragIndicator(.visible)
         }
         .sheet(isPresented: $showNewConversation) {
-            MessageComposerView(
-                project: project,
-                onSend: { _ in
-                    // Data will auto-refresh via polling
-                }
-            )
-            .environmentObject(coreManager)
+            NavigationStack {
+                MessageComposerView(
+                    project: project,
+                    onSend: { _ in
+                        // Data will auto-refresh via polling
+                    }
+                )
+                .environmentObject(coreManager)
+            }
         }
         .sheet(isPresented: $showReports) {
             NavigationStack {
@@ -403,17 +405,19 @@ struct MessagesView: View {
                 await loadAgents()
             }
             .sheet(isPresented: $showReplyComposer) {
-                MessageComposerView(
-                    project: project,
-                    conversationId: conversation.id,
-                    conversationTitle: conversation.title,
-                    initialAgentPubkey: lastAgentPubkey,
-                    onSend: { _ in
-                        // Refresh messages after sending
-                        Task { await loadMessages() }
-                    }
-                )
-                .environmentObject(coreManager)
+                NavigationStack {
+                    MessageComposerView(
+                        project: project,
+                        conversationId: conversation.id,
+                        conversationTitle: conversation.title,
+                        initialAgentPubkey: lastAgentPubkey,
+                        onSend: { _ in
+                            // Refresh messages after sending
+                            Task { await loadMessages() }
+                        }
+                    )
+                    .environmentObject(coreManager)
+                }
             }
         }
     }
