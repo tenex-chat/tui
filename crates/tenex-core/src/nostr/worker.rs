@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use crate::constants::RELAY_URL;
 use crate::models::ProjectStatus;
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
-use crate::store::{get_projects, ingest_events};
+use crate::store::ingest_events;
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
 // Event kind constants
@@ -24,7 +24,6 @@ const KIND_TEXT_NOTE: u16 = 1;
 const KIND_LONG_FORM_CONTENT: u16 = 30023;
 const KIND_PROJECT_METADATA: u16 = 513;
 const KIND_AGENT: u16 = 4199;
-const KIND_LESSON: u16 = 4129;
 const KIND_MCP_TOOL: u16 = 4200;
 const KIND_NUDGE: u16 = 4201;
 const KIND_PROJECT_STATUS: u16 = 24010;
@@ -617,8 +616,9 @@ impl NostrWorker {
         // Mark negentropy sync as enabled
         negentropy_stats.set_enabled(true);
 
+        let subscribed_projects = self.subscribed_projects.clone();
         rt_handle.spawn(async move {
-            run_negentropy_sync(client, ndb, pubkey, negentropy_stats, cancel_rx).await;
+            run_negentropy_sync(client, ndb, pubkey, negentropy_stats, cancel_rx, subscribed_projects).await;
         });
     }
 
@@ -630,87 +630,53 @@ impl NostrWorker {
         tlog!("CONN", "Starting subscriptions...");
         let sub_start = std::time::Instant::now();
 
-        // 1. User's projects (kind:31933)
-        // Two separate subscriptions: projects owned by user (author) AND where user is a participant (p-tag)
+        // 1. User's projects (kind:31933) - only owned projects
         let project_filter_owned = Filter::new().kind(Kind::Custom(KIND_PROJECT_DRAFT)).author(pubkey);
         let output = client.subscribe(project_filter_owned, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects (owned)".to_string(), vec![KIND_PROJECT_DRAFT], None),
+            SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None),
         );
-
-        let project_filter_participant = Filter::new()
-            .kind(Kind::Custom(KIND_PROJECT_DRAFT))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string());
-        let output = client.subscribe(project_filter_participant, None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new("User projects (participant)".to_string(), vec![KIND_PROJECT_DRAFT], None),
-        );
-        tlog!("CONN", "Subscribed to projects (kind:{}) - owned and p-tagged", KIND_PROJECT_DRAFT);
+        tlog!("CONN", "Subscribed to projects (kind:{}) - owned by user", KIND_PROJECT_DRAFT);
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
         // kind:24010 is the GLOBAL subscription that tells us which projects are online.
         // When we receive these events, we create per-project subscriptions for kind:1, 513, 30023.
         let since_time = Timestamp::now() - 45;
-        let status_filter = Filter::new()
+        let project_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_STATUS))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
-        let output = client.subscribe(status_filter, None).await?;
+        let project_output = client.subscribe(project_status_filter, None).await?;
         self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new(format!("Status updates ({})", KIND_PROJECT_STATUS), vec![KIND_PROJECT_STATUS], None),
+            project_output.val.to_string(),
+            SubscriptionInfo::new("Project status updates".to_string(), vec![KIND_PROJECT_STATUS], None),
         );
 
-        let operations_status_filter = Filter::new()
+        // Backend uses uppercase P tag for kind:24133
+        let agent_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_AGENT_STATUS))
             .custom_tag(SingleLetterTag::uppercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
-        let output = client.subscribe(operations_status_filter, None).await?;
+        let agent_output = client.subscribe(agent_status_filter, None).await?;
         self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new(format!("Status updates ({})", KIND_AGENT_STATUS), vec![KIND_AGENT_STATUS], None),
+            agent_output.val.to_string(),
+            SubscriptionInfo::new("Operations status updates".to_string(), vec![KIND_AGENT_STATUS], None),
         );
+
         tlog!("CONN", "Subscribed to status events (kind:{}, kind:{})", KIND_PROJECT_STATUS, KIND_AGENT_STATUS);
 
-        // 3. Agent definitions (kind:4199)
-        let agent_filter = Filter::new().kind(Kind::Custom(KIND_AGENT));
-        let output = client.subscribe(agent_filter, None).await?;
+        // 3. Global event definitions (kind:4199, 4200, 4201)
+        let global_filter = Filter::new()
+            .kinds(vec![Kind::Custom(KIND_AGENT), Kind::Custom(KIND_MCP_TOOL), Kind::Custom(KIND_NUDGE)]);
+        let output = client.subscribe(global_filter, None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Agent definitions".to_string(), vec![KIND_AGENT], None),
+            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE], None),
         );
-        tlog!("CONN", "Subscribed to agent definitions (kind:{})", KIND_AGENT);
+        tlog!("CONN", "Subscribed to global definitions (kind:{}, kind:{}, kind:{})", KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE);
 
-        // 4. Nudges (kind:4201) - global, like agent definitions
-        let nudge_filter = Filter::new().kind(Kind::Custom(KIND_NUDGE));
-        let output = client.subscribe(nudge_filter, None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new("Nudges".to_string(), vec![KIND_NUDGE], None),
-        );
-        tlog!("CONN", "Subscribed to nudges (kind:{})", KIND_NUDGE);
-
-        // 5. Agent lessons (kind:4129)
-        let lesson_filter = Filter::new().kind(Kind::Custom(KIND_LESSON));
-        let output = client.subscribe(lesson_filter, None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new("Agent lessons".to_string(), vec![KIND_LESSON], None),
-        );
-        tlog!("CONN", "Subscribed to agent lessons (kind:{})", KIND_LESSON);
-
-        // 6. MCP Tools (kind:4200)
-        let mcp_tool_filter = Filter::new().kind(Kind::Custom(KIND_MCP_TOOL));
-        let output = client.subscribe(mcp_tool_filter, None).await?;
-        self.subscription_stats.register(
-            output.val.to_string(),
-            SubscriptionInfo::new("MCP tools".to_string(), vec![KIND_MCP_TOOL], None),
-        );
-        tlog!("CONN", "Subscribed to MCP tools (kind:{})", KIND_MCP_TOOL);
-
-        // 7. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
+        // 4. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
         // OPTIMIZATION: We no longer subscribe to ALL projects at startup.
         // Instead, we subscribe only to projects that are:
         // a) Online (discovered via kind:24010 status events)
@@ -767,7 +733,8 @@ impl NostrWorker {
                     result = notifications.recv() => {
                         match result {
                             Ok(notification) => {
-                                if let RelayPoolNotification::Event { relay_url, subscription_id, event } = notification {
+                                match notification {
+                                    RelayPoolNotification::Event { relay_url, subscription_id, event } => {
                                     if first_event {
                                         tlog!("CONN", "First event received after {:?}", handler_start.elapsed());
                                         first_event = false;
@@ -813,6 +780,19 @@ impl NostrWorker {
                                             }
                                         }
                                     } else {
+                                        if kind == KIND_TEXT_NOTE {
+                                            let project_a_tag = event.tags.iter()
+                                                .find(|t| t.kind() == TagKind::SingleLetter(SingleLetterTag::lowercase(nostr_sdk::Alphabet::A)))
+                                                .and_then(|t| t.content())
+                                                .unwrap_or("unknown");
+                                            tlog!(
+                                                "EVT",
+                                                "kind:1 received id={} author={} a-tag={}",
+                                                event.id.to_hex(),
+                                                event.pubkey.to_hex(),
+                                                project_a_tag
+                                            );
+                                        }
                                         // All other events go through nostrdb
                                         if let Err(e) = Self::handle_incoming_event(&ndb, *event.clone(), relay_url.as_str()) {
                                             tlog!("ERROR", "Failed to handle event: {}", e);
@@ -865,9 +845,22 @@ impl NostrWorker {
                                             }
                                         }
                                     }
-                                } else if let RelayPoolNotification::Shutdown = notification {
-                                    tlog!("CONN", "Notification handler received relay pool shutdown, exiting");
-                                    break;
+                                    RelayPoolNotification::Message { relay_url, message } => {
+                                        if let RelayMessage::Ok { event_id, status, message } = &message {
+                                            tlog!(
+                                                "OK",
+                                                "Relay OK from {}: id={} status={} msg={}",
+                                                relay_url,
+                                                event_id.to_hex(),
+                                                status,
+                                                message
+                                            );
+                                        }
+                                    }
+                                    RelayPoolNotification::Shutdown => {
+                                        tlog!("CONN", "Notification handler received relay pool shutdown, exiting");
+                                        break;
+                                    }
                                 }
                             }
                             Err(_) => {
@@ -1741,13 +1734,14 @@ impl NostrWorker {
 /// Run negentropy sync loop with adaptive timing
 /// Syncs project-scoped kinds: 31933 (projects), 513 (conversation metadata),
 /// 1 (messages), and 30023 (long-form content).
-/// Global event types (4199, 4129, 4200, 4201) are handled via real-time subscriptions only.
+/// Global event types (4199, 4200, 4201) are handled via real-time subscriptions only.
 async fn run_negentropy_sync(
     client: Client,
     ndb: Arc<Ndb>,
     user_pubkey: PublicKey,
     stats: SharedNegentropySyncStats,
     mut cancel_rx: watch::Receiver<bool>,
+    subscribed_projects: Arc<RwLock<HashSet<String>>>,
 ) {
     use std::time::Duration;
 
@@ -1765,7 +1759,7 @@ async fn run_negentropy_sync(
         }
 
         stats.set_in_progress(true);
-        let total_new = sync_all_filters(&client, &ndb, &user_pubkey, &stats).await;
+        let total_new = sync_all_filters(&client, &ndb, &user_pubkey, &stats, &subscribed_projects).await;
         stats.record_cycle_complete();
         stats.set_in_progress(false);
 
@@ -1798,9 +1792,10 @@ async fn run_negentropy_sync(
 /// Sync all non-ephemeral kinds using negentropy reconciliation
 async fn sync_all_filters(
     client: &Client,
-    ndb: &Ndb,
+    _ndb: &Ndb,
     user_pubkey: &PublicKey,
     stats: &SharedNegentropySyncStats,
+    subscribed_projects: &Arc<RwLock<HashSet<String>>>,
 ) -> u64 {
     let mut total_new: u64 = 0;
     let user_pubkey_hex = user_pubkey.to_hex();
@@ -1821,13 +1816,15 @@ async fn sync_all_filters(
     let agent_filter = Filter::new().kind(Kind::Custom(4199));
     total_new += sync_filter(client, agent_filter, "4199", stats).await;
 
-    // Conversation metadata (kind 513)
-    let metadata_filter = Filter::new().kind(Kind::Custom(513));
-    total_new += sync_filter(client, metadata_filter, "513", stats).await;
-
-    // Agent lessons (kind 4129)
-    let lesson_filter = Filter::new().kind(Kind::Custom(4129));
-    total_new += sync_filter(client, lesson_filter, "4129", stats).await;
+    // Conversation metadata (kind 513) - only for subscribed projects
+    if !subscribed_projects.read().await.is_empty() {
+        let subscribed = subscribed_projects.read().await;
+        let atags: Vec<String> = subscribed.iter().cloned().collect();
+        let metadata_filter = Filter::new()
+            .kind(Kind::Custom(513))
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::A), atags);
+        total_new += sync_filter(client, metadata_filter, "513", stats).await;
+    }
 
     // MCP tools (kind 4200)
     let mcp_tool_filter = Filter::new().kind(Kind::Custom(4200));
@@ -1837,23 +1834,21 @@ async fn sync_all_filters(
     let nudge_filter = Filter::new().kind(Kind::Custom(4201));
     total_new += sync_filter(client, nudge_filter, "4201", stats).await;
 
-    // Messages (kind 1) and long-form content (kind 30023) with project a-tags - batched in groups of 4
-    if let Ok(projects) = get_projects(ndb) {
-        let atags: Vec<String> = projects.iter().map(|p| p.a_tag()).collect();
-        if !atags.is_empty() {
-            // Batch in groups of 4 (same as subscriptions)
-            for chunk in atags.chunks(4) {
-                let msg_filter = Filter::new()
-                    .kind(Kind::from(1))
-                    .custom_tags(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
-                total_new += sync_filter(client, msg_filter, "1", stats).await;
+    // Messages (kind 1) and long-form content (kind 30023) with project a-tags
+    // OPTIMIZATION: Only sync for projects we're actually subscribed to (online/active projects)
+    let subscribed = subscribed_projects.read().await;
+    if !subscribed.is_empty() {
+        let atags: Vec<String> = subscribed.iter().cloned().collect();
 
-                let longform_filter = Filter::new()
-                    .kind(Kind::Custom(30023))
-                    .custom_tags(SingleLetterTag::lowercase(Alphabet::A), chunk.to_vec());
-                total_new += sync_filter(client, longform_filter, "30023", stats).await;
-            }
-        }
+        let msg_filter = Filter::new()
+            .kind(Kind::from(1))
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::A), atags.clone());
+        total_new += sync_filter(client, msg_filter, "1", stats).await;
+
+        let longform_filter = Filter::new()
+            .kind(Kind::Custom(30023))
+            .custom_tags(SingleLetterTag::lowercase(Alphabet::A), atags);
+        total_new += sync_filter(client, longform_filter, "30023", stats).await;
     }
 
     total_new
