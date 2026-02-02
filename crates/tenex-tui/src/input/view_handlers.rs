@@ -166,7 +166,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 return Ok(());
             }
             HotkeyId::SwitchProject => {
-                app.open_projects_modal(false);
+                app.open_projects_selector_for_switch();
                 return Ok(());
             }
             HotkeyId::TimeFilter => {
@@ -187,7 +187,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 return Ok(());
             }
             HotkeyId::NewConversationWithPicker => {
-                app.open_projects_modal(true);
+                app.open_projects_selector_for_new_thread();
                 return Ok(());
             }
             HotkeyId::ShowHideArchived => {
@@ -729,6 +729,32 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.switch_to_tab(tab_idx);
                     app.chat_editor_mut().clear();
                 } else {
+                    // When switching projects from Chat view (#), update ONLY draft tabs
+                    // to the new project. NEVER mutate real thread tabs - their project_a_tag
+                    // must always match their thread_id's project to maintain state invariants.
+                    if let Some(tab) = app.tabs.active_tab_mut() {
+                        if tab.is_draft() && app.view == View::Chat {
+                            // Update draft tab to new project - this requires updating:
+                            // 1. project_a_tag (where replies will be published)
+                            // 2. draft_id (storage key for persisting draft content)
+                            // 3. thread_title (UI label showing project name)
+                            let project_name = app
+                                .selected_project
+                                .as_ref()
+                                .map(|p| p.name.clone())
+                                .unwrap_or_else(|| "New".to_string());
+
+                            tab.project_a_tag = a_tag.clone();
+                            tab.draft_id = Some(format!("{}:new", a_tag));
+                            tab.thread_title = format!("New: {}", project_name);
+
+                            // Save the draft content under the new project key
+                            app.save_chat_draft();
+                        }
+                        // For real thread tabs: do nothing. Tab stays on its original project,
+                        // but Home view filter changes to show only the selected project.
+                    }
+
                     // Clear workspace - we're now in manual mode showing only this project
                     if app.preferences.borrow().active_workspace_id().is_some() {
                         app.preferences.borrow_mut().set_active_workspace(None);
@@ -1136,7 +1162,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                 return Ok(true);
             }
             HotkeyId::NewConversationWithPicker => {
-                app.open_projects_modal(true);
+                app.open_projects_selector_for_new_thread();
                 return Ok(true);
             }
             HotkeyId::ShowHideArchived => {

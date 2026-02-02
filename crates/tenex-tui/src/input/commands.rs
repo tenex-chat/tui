@@ -324,7 +324,7 @@ pub static COMMANDS: &[Command] = &[
         section: "Conversation",
         available: |_| true,
         execute: |app| {
-            app.open_projects_modal(true);
+            app.open_projects_selector_for_new_thread();
         },
     },
     // =========================================================================
