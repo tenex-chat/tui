@@ -2133,12 +2133,30 @@ impl AppDataStore {
             .unwrap_or(&[])
     }
 
+    fn get_agent_slug_from_status(&self, pubkey: &str) -> Option<String> {
+        self.project_statuses
+            .values()
+            .flat_map(|status| status.agents.iter())
+            .find(|agent| agent.pubkey == pubkey)
+            .map(|agent| agent.name.clone())
+            .filter(|name| !name.is_empty())
+    }
+
     pub fn get_profile_name(&self, pubkey: &str) -> String {
-        self.profiles.get(pubkey)
-            .cloned()
-            .unwrap_or_else(|| {
-                crate::store::get_profile_name(&self.ndb, pubkey)
-            })
+        if let Some(name) = self.profiles.get(pubkey) {
+            return name.clone();
+        }
+
+        let fallback = format!("{}...", &pubkey[..8.min(pubkey.len())]);
+        let name = crate::store::get_profile_name(&self.ndb, pubkey);
+
+        if name == fallback {
+            if let Some(slug) = self.get_agent_slug_from_status(pubkey) {
+                return slug;
+            }
+        }
+
+        name
     }
 
     /// Get profile picture URL for a pubkey
@@ -3343,6 +3361,38 @@ mod tests {
         );
 
         assert_eq!(results.len(), 3, "Empty query should return all 3 messages");
+    }
+
+    #[test]
+    fn test_get_profile_name_falls_back_to_project_status_slug() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let pubkey = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let slug = "architect-orchestrator";
+
+        let status = ProjectStatus {
+            project_coordinate: "31933:deadbeef:example".to_string(),
+            agents: vec![ProjectAgent {
+                pubkey: pubkey.to_string(),
+                name: slug.to_string(),
+                is_pm: true,
+                model: None,
+                tools: vec![],
+            }],
+            branches: vec![],
+            all_models: vec![],
+            all_tools: vec![],
+            created_at: 0,
+            backend_pubkey: "backend".to_string(),
+            last_seen_at: 0,
+        };
+
+        store.project_statuses.insert(status.project_coordinate.clone(), status);
+
+        let name = store.get_profile_name(pubkey);
+        assert_eq!(name, slug);
     }
 
     // ===== Agent Tracking Integration Tests =====
