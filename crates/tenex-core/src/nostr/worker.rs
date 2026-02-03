@@ -133,7 +133,8 @@ async fn subscribe_project_filters(
         // Subtract 1s to avoid missing same-second events
         metadata_filter = metadata_filter.since(Timestamp::from(latest.saturating_sub(1)));
     }
-    let metadata_output = client.subscribe(metadata_filter, None).await
+    let metadata_filter_json = serde_json::to_string(&metadata_filter).ok();
+    let metadata_output = client.subscribe(metadata_filter.clone(), None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to metadata for {}: {}", project_name, e))?;
     subscription_stats.register(
         metadata_output.val.to_string(),
@@ -141,7 +142,7 @@ async fn subscribe_project_filters(
             format!("{} metadata", project_name),
             vec![KIND_PROJECT_METADATA],
             Some(project_a_tag.to_string()),
-        ),
+        ).with_raw_filter(metadata_filter_json.unwrap_or_default()),
     );
 
     // Messages subscription (kind:1)
@@ -152,7 +153,8 @@ async fn subscribe_project_filters(
         // Subtract 1s to avoid missing same-second events
         message_filter = message_filter.since(Timestamp::from(latest.saturating_sub(1)));
     }
-    let message_output = client.subscribe(message_filter, None).await
+    let message_filter_json = serde_json::to_string(&message_filter).ok();
+    let message_output = client.subscribe(message_filter.clone(), None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to messages for {}: {}", project_name, e))?;
     subscription_stats.register(
         message_output.val.to_string(),
@@ -160,14 +162,15 @@ async fn subscribe_project_filters(
             format!("{} messages", project_name),
             vec![KIND_TEXT_NOTE],
             Some(project_a_tag.to_string()),
-        ),
+        ).with_raw_filter(message_filter_json.unwrap_or_default()),
     );
 
     // Long-form content subscription (kind:30023)
     let longform_filter = Filter::new()
         .kind(Kind::Custom(KIND_LONG_FORM_CONTENT))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
-    let longform_output = client.subscribe(longform_filter, None).await
+    let longform_filter_json = serde_json::to_string(&longform_filter).ok();
+    let longform_output = client.subscribe(longform_filter.clone(), None).await
         .map_err(|e| anyhow::anyhow!("Failed to subscribe to reports for {}: {}", project_name, e))?;
     subscription_stats.register(
         longform_output.val.to_string(),
@@ -175,7 +178,7 @@ async fn subscribe_project_filters(
             format!("{} reports", project_name),
             vec![KIND_LONG_FORM_CONTENT],
             Some(project_a_tag.to_string()),
-        ),
+        ).with_raw_filter(longform_filter_json.unwrap_or_default()),
     );
 
     Ok(())
@@ -679,10 +682,12 @@ impl NostrWorker {
 
         // 1. User's projects (kind:31933) - only owned projects
         let project_filter_owned = Filter::new().kind(Kind::Custom(KIND_PROJECT_DRAFT)).author(pubkey);
-        let output = client.subscribe(project_filter_owned, None).await?;
+        let project_filter_json = serde_json::to_string(&project_filter_owned).ok();
+        let output = client.subscribe(project_filter_owned.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None),
+            SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None)
+                .with_raw_filter(project_filter_json.unwrap_or_default()),
         );
         tlog!("CONN", "Subscribed to projects (kind:{}) - owned by user", KIND_PROJECT_DRAFT);
 
@@ -694,10 +699,12 @@ impl NostrWorker {
             .kind(Kind::Custom(KIND_PROJECT_STATUS))
             .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
-        let project_output = client.subscribe(project_status_filter, None).await?;
+        let project_status_json = serde_json::to_string(&project_status_filter).ok();
+        let project_output = client.subscribe(project_status_filter.clone(), None).await?;
         self.subscription_stats.register(
             project_output.val.to_string(),
-            SubscriptionInfo::new("Project status updates".to_string(), vec![KIND_PROJECT_STATUS], None),
+            SubscriptionInfo::new("Project status updates".to_string(), vec![KIND_PROJECT_STATUS], None)
+                .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
         // Backend uses uppercase P tag for kind:24133
@@ -705,10 +712,12 @@ impl NostrWorker {
             .kind(Kind::Custom(KIND_AGENT_STATUS))
             .custom_tag(SingleLetterTag::uppercase(Alphabet::P), user_pubkey.to_string())
             .since(since_time);
-        let agent_output = client.subscribe(agent_status_filter, None).await?;
+        let agent_status_json = serde_json::to_string(&agent_status_filter).ok();
+        let agent_output = client.subscribe(agent_status_filter.clone(), None).await?;
         self.subscription_stats.register(
             agent_output.val.to_string(),
-            SubscriptionInfo::new("Operations status updates".to_string(), vec![KIND_AGENT_STATUS], None),
+            SubscriptionInfo::new("Operations status updates".to_string(), vec![KIND_AGENT_STATUS], None)
+                .with_raw_filter(agent_status_json.unwrap_or_default()),
         );
 
         tlog!("CONN", "Subscribed to status events (kind:{}, kind:{})", KIND_PROJECT_STATUS, KIND_AGENT_STATUS);
@@ -716,10 +725,12 @@ impl NostrWorker {
         // 3. Global event definitions (kind:4199, 4200, 4201)
         let global_filter = Filter::new()
             .kinds(vec![Kind::Custom(KIND_AGENT), Kind::Custom(KIND_MCP_TOOL), Kind::Custom(KIND_NUDGE)]);
-        let output = client.subscribe(global_filter, None).await?;
+        let global_filter_json = serde_json::to_string(&global_filter).ok();
+        let output = client.subscribe(global_filter.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE], None),
+            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE], None)
+                .with_raw_filter(global_filter_json.unwrap_or_default()),
         );
         tlog!("CONN", "Subscribed to global definitions (kind:{}, kind:{}, kind:{})", KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE);
 
