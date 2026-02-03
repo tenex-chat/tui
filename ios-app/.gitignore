@@ -2,6 +2,7 @@
 *.xcodeproj/
 *.xcworkspace/
 Derived/
+.build/
 
 # Xcode user-specific files
 xcuserdata/

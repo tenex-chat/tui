@@ -87,11 +87,7 @@ cargo build --target aarch64-apple-ios-sim --release -p tenex-core
 cargo build --target aarch64-apple-ios --release -p tenex-core
 
 # Regenerate Swift bindings after Rust changes
-cargo bin uniffi-bindgen generate \
-  --library target/aarch64-apple-ios-sim/release/libtenex_core.a \
-  --language swift \
-  --out-dir swift-bindings \
-  crates/tenex-core/src/tenex_core.udl
+./scripts/generate-swift-bindings.sh
 ```
 
 ### Running
@@ -117,7 +113,7 @@ Configured in Project.swift:
 Located in `Sources/TenexMVP/TenexCoreFFI/`:
 - `tenex_coreFFI.h` - C header with FFI declarations
 - `tenex_coreFFI.modulemap` - Swift module map
-- Generated Swift bindings copied here after `uniffi-bindgen`
+- Generated Swift bindings live in `swift-bindings/tenex_core.swift` and are included directly by the iOS target
 
 ### Swift Import Paths
 ```swift
