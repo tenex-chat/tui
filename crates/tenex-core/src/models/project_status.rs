@@ -29,6 +29,8 @@ pub struct ProjectStatus {
     pub created_at: u64,
     /// The pubkey of the backend that published this status event
     pub backend_pubkey: String,
+    /// When this status was last seen by the client (seconds since UNIX epoch)
+    pub last_seen_at: u64,
 }
 
 impl ProjectStatus {
@@ -193,6 +195,7 @@ impl ProjectStatus {
             all_tools,
             created_at,
             backend_pubkey,
+            last_seen_at: created_at,
         })
     }
 
@@ -202,7 +205,7 @@ impl ProjectStatus {
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        now.saturating_sub(self.created_at) < STALENESS_THRESHOLD_SECS
+        now.saturating_sub(self.last_seen_at) < STALENESS_THRESHOLD_SECS
     }
 
     /// The default branch (first in the branches array)
