@@ -62,7 +62,7 @@ struct ContentView: View {
                     MessageComposerView(
                         project: nil,
                         onSend: { _ in
-                            // Data will auto-refresh via polling
+                            // Data updates via push-based callbacks
                         }
                     )
                     .environmentObject(coreManager)

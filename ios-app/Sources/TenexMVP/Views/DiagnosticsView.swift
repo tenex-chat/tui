@@ -141,7 +141,7 @@ struct DiagnosticsTabContent: View {
                 } else {
                     DiagnosticsSectionUnavailableView(
                         title: "Database Data Unavailable",
-                        message: "Pull to refresh to load database statistics",
+                        message: "Database stats load on demand and should appear shortly",
                         icon: "cylinder.split.1x2"
                     )
                 }

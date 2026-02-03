@@ -6,7 +6,6 @@ struct ReportsView: View {
     @State private var reports: [ReportInfo] = []
     @State private var isLoading = false
     @State private var selectedReport: ReportInfo?
-    @State private var dataChangedObserver: NSObjectProtocol?
 
     var body: some View {
         Group {
@@ -40,7 +39,7 @@ struct ReportsView: View {
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(action: { Task { await loadReports() } }) {
+                Button(action: { Task { await coreManager.syncNow(); await loadReports() } }) {
                     Image(systemName: "arrow.clockwise")
                 }
                 .disabled(isLoading)
@@ -48,36 +47,14 @@ struct ReportsView: View {
         }
         .task {
             await loadReports()
-            subscribeToDataChanges()
-        }
-        .onDisappear {
-            if let observer = dataChangedObserver {
-                NotificationCenter.default.removeObserver(observer)
-                dataChangedObserver = nil
-            }
         }
         .sheet(item: $selectedReport) { report in
             ReportDetailView(report: report)
         }
     }
 
-    private func subscribeToDataChanges() {
-        // Subscribe to general data change notifications for reactive report updates
-        dataChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tenexDataChanged,
-            object: nil,
-            queue: .main
-        ) { [project] _ in
-            Task {
-                await loadReports()
-            }
-        }
-    }
-
     private func loadReports() async {
         isLoading = true
-        // Refresh ensures AppDataStore is synced with latest data from nostrdb
-        _ = await coreManager.safeCore.refresh()
         reports = await coreManager.safeCore.getReports(projectId: project.id)
         isLoading = false
     }

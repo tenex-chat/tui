@@ -95,7 +95,7 @@ struct ConversationsView: View {
                 MessageComposerView(
                     project: project,
                     onSend: { _ in
-                        // Data will auto-refresh via polling
+                        // Data will auto-refresh via push-based updates
                     }
                 )
                 .environmentObject(coreManager)
@@ -391,7 +391,7 @@ struct MessagesView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { Task { await loadMessages() } }) {
+                    Button(action: { Task { await coreManager.syncNow(); await loadMessages() } }) {
                         Image(systemName: "arrow.clockwise")
                     }
                     .disabled(isLoading)
@@ -404,6 +404,14 @@ struct MessagesView: View {
                 await loadMessages()
                 await loadAgents()
             }
+            .onReceive(coreManager.$messagesByConversation) { cache in
+                if let updated = cache[conversation.id] {
+                    messages = updated
+                }
+            }
+            .onReceive(coreManager.$onlineAgents) { cache in
+                availableAgents = cache[project.id] ?? []
+            }
             .sheet(isPresented: $showReplyComposer) {
                 NavigationStack {
                     MessageComposerView(
@@ -411,10 +419,7 @@ struct MessagesView: View {
                         conversationId: conversation.id,
                         conversationTitle: conversation.title,
                         initialAgentPubkey: lastAgentPubkey,
-                        onSend: { _ in
-                            // Refresh messages after sending
-                            Task { await loadMessages() }
-                        }
+                        onSend: { _ in }
                     )
                     .environmentObject(coreManager)
                 }
@@ -441,18 +446,13 @@ struct MessagesView: View {
 
     private func loadMessages() async {
         isLoading = true
-        // Refresh ensures AppDataStore is synced with latest data from nostrdb
-        _ = await coreManager.safeCore.refresh()
-        messages = await coreManager.safeCore.getMessages(conversationId: conversation.id)
+        await coreManager.ensureMessagesLoaded(conversationId: conversation.id)
+        messages = coreManager.messagesByConversation[conversation.id] ?? []
         isLoading = false
     }
 
     private func loadAgents() async {
-        do {
-            availableAgents = try await coreManager.safeCore.getOnlineAgents(projectId: project.id)
-        } catch {
-            print("[MessagesView] Failed to load agents: \(error)")
-        }
+        availableAgents = coreManager.onlineAgents[project.id] ?? []
     }
 }
 

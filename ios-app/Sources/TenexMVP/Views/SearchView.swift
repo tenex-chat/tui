@@ -328,7 +328,6 @@ struct SearchConversationView: View {
     @State private var messages: [MessageInfo] = []
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>?
-    @State private var messagesChangedObserver: NSObjectProtocol?
 
     var body: some View {
         Group {
@@ -359,49 +358,32 @@ struct SearchConversationView: View {
         .navigationTitle("Conversation")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            loadMessages()
-            subscribeToMessageChanges()
+            await loadMessages()
+        }
+        .onReceive(coreManager.$messagesByConversation) { cache in
+            if let updated = cache[conversationId] {
+                messages = updated
+            }
         }
         .onDisappear {
             loadTask?.cancel()
-            if let observer = messagesChangedObserver {
-                NotificationCenter.default.removeObserver(observer)
-                messagesChangedObserver = nil
-            }
         }
     }
 
-    private func subscribeToMessageChanges() {
-        // Subscribe to message change notifications for reactive updates
-        messagesChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tenexMessagesChanged,
-            object: nil,
-            queue: .main
-        ) { [conversationId] notification in
-            // Only reload if this notification is for our conversation
-            if let changedConversationId = notification.object as? String,
-               changedConversationId == conversationId {
-                loadMessages()
-            }
-        }
-    }
-
-    private func loadMessages() {
+    private func loadMessages() async {
         loadTask?.cancel()
 
-        loadTask = Task {
+        let task = Task { @MainActor in
             isLoading = true
             defer { isLoading = false }
 
-            guard !Task.isCancelled else { return }
-
-            _ = await coreManager.safeCore.refresh()
-            let fetched = await coreManager.safeCore.getMessages(conversationId: conversationId)
-
-            guard !Task.isCancelled else { return }
-
+            await coreManager.ensureMessagesLoaded(conversationId: conversationId)
+            let fetched = coreManager.messagesByConversation[conversationId] ?? []
             self.messages = fetched
         }
+
+        loadTask = task
+        await task.value
     }
 }
 

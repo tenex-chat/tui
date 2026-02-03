@@ -726,14 +726,18 @@ private struct MessagesSheetView: View {
             .task {
                 await loadMessages()
             }
+            .onReceive(coreManager.$messagesByConversation) { cache in
+                if let updated = cache[conversation.id] {
+                    messages = updated
+                }
+            }
         }
     }
 
     private func loadMessages() async {
         isLoading = true
-        // Refresh ensures AppDataStore is synced with latest data from nostrdb
-        _ = await coreManager.safeCore.refresh()
-        messages = await coreManager.safeCore.getMessages(conversationId: conversation.id)
+        await coreManager.ensureMessagesLoaded(conversationId: conversation.id)
+        messages = coreManager.messagesByConversation[conversation.id] ?? []
         isLoading = false
     }
 }

@@ -633,6 +633,11 @@ struct FullConversationSheet: View {
     @State private var selectedDelegation: String?
     @State private var showComposer = false
     @State private var availableAgents: [OnlineAgentInfo] = []
+    @State private var isAtBottom = true
+    @State private var scrollViewHeight: CGFloat = 0
+
+    private let bottomAnchorId = "full-conversation-bottom"
+    private let bottomThreshold: CGFloat = 60
 
     /// Compute consecutive message flags for each message
     private var messagesWithConsecutive: [(message: MessageInfo, isConsecutive: Bool)] {
@@ -695,21 +700,60 @@ struct FullConversationSheet: View {
                         }
                         .padding()
                         .padding(.bottom, 80) // Space for compose button
+
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorId)
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: BottomAnchorOffsetKey.self,
+                                        value: geo.frame(in: .named("fullConversationScroll")).maxY
+                                    )
+                                }
+                            )
                     }
+                    .coordinateSpace(name: "fullConversationScroll")
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: ScrollViewHeightKey.self,
+                                value: geo.size.height
+                            )
+                        }
+                    )
                     .onAppear {
                         // Scroll to the last message
                         if let lastMessage = messages.last {
                             proxy.scrollTo(lastMessage.id, anchor: .bottom)
                         }
                     }
+                    .onChange(of: messages.last?.id) { _ in
+                        guard let lastMessage = messages.last else { return }
+                        if isAtBottom {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                    .onPreferenceChange(ScrollViewHeightKey.self) { height in
+                        scrollViewHeight = height
+                    }
+                    .onPreferenceChange(BottomAnchorOffsetKey.self) { bottomY in
+                        let distanceFromBottom = bottomY - scrollViewHeight
+                        isAtBottom = distanceFromBottom <= bottomThreshold
+                    }
                     .task {
                         // Load available agents for the project to determine last agent
                         if let projectId = project?.id {
-                            do {
-                                availableAgents = try await coreManager.safeCore.getOnlineAgents(projectId: projectId)
-                            } catch {
-                                print("[FullConversationSheet] Failed to load agents: \(error)")
-                            }
+                            availableAgents = coreManager.onlineAgents[projectId] ?? []
+                        }
+                    }
+                    .onReceive(coreManager.$onlineAgents) { cache in
+                        if let projectId = project?.id {
+                            availableAgents = cache[projectId] ?? []
                         }
                     }
                 }
@@ -757,6 +801,22 @@ struct FullConversationSheet: View {
                 }
             }
         }
+    }
+}
+
+private struct ScrollViewHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct BottomAnchorOffsetKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
