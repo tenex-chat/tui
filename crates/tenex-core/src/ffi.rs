@@ -195,7 +195,6 @@ fn ask_event_to_info(event: &crate::models::message::AskEvent) -> AskEventInfo {
 fn message_to_info(
     store: &AppDataStore,
     message: &crate::models::Message,
-    agent_pubkeys: &std::collections::HashSet<String>,
 ) -> MessageInfo {
     let author_name = store.get_profile_name(&message.pubkey);
 
@@ -213,10 +212,9 @@ fn message_to_info(
         .and_then(|pk| pk.to_bech32().ok())
         .unwrap_or_else(|| format!("{}...", &message.pubkey[..16.min(message.pubkey.len())]));
 
-    let role = if message.tool_name.is_some() || agent_pubkeys.contains(&message.pubkey) {
-        "assistant".to_string()
-    } else {
-        "user".to_string()
+    let role = match store.user_pubkey.as_deref() {
+        Some(user_pubkey) if user_pubkey == message.pubkey => "user".to_string(),
+        _ => "assistant".to_string(),
     };
 
     let ask_event = message.ask_event.as_ref().map(ask_event_to_info);
@@ -355,7 +353,6 @@ fn process_note_keys_with_deltas(
     core_handle: &CoreHandle,
     note_keys: &[NoteKey],
     archived_ids: &std::collections::HashSet<String>,
-    agent_pubkeys: &std::collections::HashSet<String>,
 ) -> Vec<DataChangeType> {
     let txn = match Transaction::new(ndb) {
         Ok(txn) => txn,
@@ -386,7 +383,7 @@ fn process_note_keys_with_deltas(
                     if let Some(message) = Message::from_note(&note) {
                         deltas.push(DataChangeType::MessageAppended {
                             conversation_id: message.thread_id.clone(),
-                            message: message_to_info(store, &message, agent_pubkeys),
+                            message: message_to_info(store, &message),
                         });
 
                         // Conversation + ancestors (effective_last_activity updates)
@@ -423,7 +420,7 @@ fn process_note_keys_with_deltas(
                         if let Some(root_message) = Message::from_thread_note(&note) {
                             deltas.push(DataChangeType::MessageAppended {
                                 conversation_id: root_message.thread_id.clone(),
-                                message: message_to_info(store, &root_message, agent_pubkeys),
+                                message: message_to_info(store, &root_message),
                             });
                         }
                     }
@@ -1910,19 +1907,12 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        // Build a set of agent pubkeys for role detection (Fix #4: proper role detection)
-        // This avoids content-based heuristics that can misclassify user messages
-        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
-            .values()
-            .map(|def| def.pubkey.clone())
-            .collect();
-
         // Get messages for the thread
         let messages = store.get_messages(&conversation_id);
 
         messages
             .iter()
-            .map(|m| message_to_info(store, m, &agent_pubkeys))
+            .map(|m| message_to_info(store, m))
             .collect()
     }
 
@@ -3216,11 +3206,6 @@ impl TenexCore {
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
-        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
-            .values()
-            .map(|def| def.pubkey.clone())
-            .collect();
-
         let mut deltas: Vec<DataChangeType> = Vec::new();
 
         if !data_changes.is_empty() {
@@ -3235,7 +3220,6 @@ impl TenexCore {
                     &core_handle,
                     &note_keys,
                     &archived_ids,
-                    &agent_pubkeys,
                 ));
             }
         }
@@ -3313,11 +3297,6 @@ impl TenexCore {
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
-        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
-            .values()
-            .map(|def| def.pubkey.clone())
-            .collect();
-
         let callback = self.event_callback.read().ok().and_then(|g| g.clone());
 
         let mut deltas: Vec<DataChangeType> = Vec::new();
@@ -3329,7 +3308,6 @@ impl TenexCore {
                     &core_handle,
                     &note_keys,
                     &archived_ids,
-                    &agent_pubkeys,
                 ));
             }
         }
@@ -3685,11 +3663,6 @@ impl TenexCore {
                     .map(|p| p.prefs.archived_thread_ids.clone())
                     .unwrap_or_default();
 
-                let agent_pubkeys: std::collections::HashSet<String> = store_ref.agent_definitions
-                    .values()
-                    .map(|def| def.pubkey.clone())
-                    .collect();
-
                 let mut deltas: Vec<DataChangeType> = Vec::new();
 
                 if !data_changes.is_empty() {
@@ -3704,7 +3677,6 @@ impl TenexCore {
                             &core_handle,
                             &note_keys,
                             &archived_ids,
-                            &agent_pubkeys,
                         ));
                     }
                 }
