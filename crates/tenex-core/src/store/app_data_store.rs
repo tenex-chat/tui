@@ -81,6 +81,10 @@ pub struct AppDataStore {
     // Updated incrementally on new messages for O(1) lookups instead of O(total_messages) per render
     llm_activity_by_hour: HashMap<(u64, u8), (u64, u64)>,
 
+    // Pre-aggregated runtime totals by day for Stats view performance
+    // Maps day_start_timestamp -> total runtime_ms (from llm-runtime tags)
+    runtime_by_day_counts: HashMap<u64, u64>,
+
     // Real-time agent tracking - tracks active agents and estimates unconfirmed runtime.
     // In-memory only, resets on app restart. See agent_tracking.rs for details.
     pub agent_tracking: AgentTrackingState,
@@ -115,6 +119,7 @@ impl AppDataStore {
             runtime_hierarchy: RuntimeHierarchy::new(),
             messages_by_day_counts: HashMap::new(),
             llm_activity_by_hour: HashMap::new(),
+            runtime_by_day_counts: HashMap::new(),
             agent_tracking: AgentTrackingState::new(),
         };
         store.rebuild_from_ndb();
@@ -132,6 +137,8 @@ impl AppDataStore {
         }
         // Rebuild LLM activity hourly aggregates (always, not user-dependent)
         self.rebuild_llm_activity_by_hour();
+        // Rebuild runtime-by-day aggregates (always, not user-dependent)
+        self.rebuild_runtime_by_day_counts();
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -162,6 +169,7 @@ impl AppDataStore {
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
         self.messages_by_day_counts.clear();
+        self.runtime_by_day_counts.clear();
         self.agent_tracking.clear();
     }
 
@@ -317,6 +325,9 @@ impl AppDataStore {
 
         // Rebuild pre-aggregated LLM activity by hour for Activity grid
         self.rebuild_llm_activity_by_hour();
+
+        // Rebuild pre-aggregated runtime by day for Stats view
+        self.rebuild_runtime_by_day_counts();
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -721,17 +732,41 @@ impl AppDataStore {
         }
     }
 
-    /// Get the total unique runtime for conversations created TODAY only.
-    /// Filters conversations by creation date (today in UTC), then sums their runtimes.
-    /// Used for the global status bar to show today's cumulative runtime.
+    /// Get today's total LLM runtime (in milliseconds), based on message timestamps.
+    /// Used for the global status bar and Stats view.
     pub fn get_today_unique_runtime(&mut self) -> u64 {
-        self.runtime_hierarchy.get_today_unique_runtime()
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+        self.runtime_by_day_counts.get(&today_start).copied().unwrap_or(0)
     }
 
     /// Get runtime aggregated by day for the Stats tab bar chart.
     /// Returns (day_start_timestamp, total_runtime_ms) tuples.
     pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
-        self.runtime_hierarchy.get_runtime_by_day(num_days)
+        if num_days == 0 {
+            return Vec::new();
+        }
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+        let earliest_day = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
+
+        let mut result: Vec<(u64, u64)> = self
+            .runtime_by_day_counts
+            .iter()
+            .filter(|(day_start, runtime_ms)| **day_start >= earliest_day && **runtime_ms > 0)
+            .map(|(day_start, runtime_ms)| (*day_start, *runtime_ms))
+            .collect();
+        result.sort_by_key(|(day, _)| *day);
+        result
     }
 
     /// Get top N conversations by total runtime (including descendants).
@@ -1288,6 +1323,29 @@ impl AppDataStore {
         entry.1 += 1;
     }
 
+    /// Increment runtime-by-day aggregates (O(1) per message).
+    /// Only increments if the message has llm-runtime metadata.
+    fn increment_runtime_day_count(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
+        if created_at < RUNTIME_CUTOFF_TIMESTAMP {
+            return;
+        }
+
+        let runtime_ms: u64 = llm_metadata
+            .iter()
+            .filter(|(key, _)| key == "runtime")
+            .filter_map(|(_, value)| value.parse::<u64>().ok())
+            .sum();
+
+        if runtime_ms == 0 {
+            return;
+        }
+
+        let seconds_per_day: u64 = 86400;
+        let day_start = (created_at / seconds_per_day) * seconds_per_day;
+        let entry = self.runtime_by_day_counts.entry(day_start).or_insert(0);
+        *entry = entry.saturating_add(runtime_ms);
+    }
+
     /// Rebuild LLM activity hourly aggregates from messages_by_thread.
     /// Called during startup after messages are loaded.
     /// Only counts messages with llm_metadata (LLM-generated messages).
@@ -1326,6 +1384,38 @@ impl AppDataStore {
                 }
             }
         }
+    }
+
+    /// Rebuild runtime-by-day aggregates from messages_by_thread.
+    /// Called during startup after messages are loaded.
+    fn rebuild_runtime_by_day_counts(&mut self) {
+        let mut counts: HashMap<u64, u64> = HashMap::new();
+
+        for messages in self.messages_by_thread.values() {
+            for message in messages {
+                let created_at = message.created_at;
+                if created_at < RUNTIME_CUTOFF_TIMESTAMP {
+                    continue;
+                }
+
+                let runtime_ms: u64 = message.llm_metadata
+                    .iter()
+                    .filter(|(key, _)| key == "runtime")
+                    .filter_map(|(_, value)| value.parse::<u64>().ok())
+                    .sum();
+
+                if runtime_ms == 0 {
+                    continue;
+                }
+
+                let seconds_per_day: u64 = 86400;
+                let day_start = (created_at / seconds_per_day) * seconds_per_day;
+                let entry = counts.entry(day_start).or_insert(0);
+                *entry = entry.saturating_add(runtime_ms);
+            }
+        }
+
+        self.runtime_by_day_counts = counts;
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -1793,6 +1883,9 @@ impl AppDataStore {
 
                 // Update pre-aggregated LLM activity for Activity grid (O(1) per message)
                 self.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
+
+                // Update pre-aggregated runtime by day for Stats view (O(1) per message)
+                self.increment_runtime_day_count(message_created_at, &message_llm_metadata);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
@@ -2627,7 +2720,7 @@ impl AppDataStore {
     /// duplicate assembly logic across render files. The `* 1000` conversion from seconds
     /// to milliseconds happens here, in one place.
     pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool, usize) {
-        let today_runtime_ms = self.runtime_hierarchy.get_today_unique_runtime();
+        let today_runtime_ms = self.get_today_unique_runtime();
         let unconfirmed_runtime_ms = self.agent_tracking.unconfirmed_runtime_secs() * 1000;
         let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
         let has_active_agents = self.agent_tracking.has_active_agents();
@@ -4197,6 +4290,35 @@ mod tests {
 
         // Only msg3, msg4, msg5 should be counted: (10 + 20 + 30) = 60 milliseconds
         assert_eq!(runtime_ms, 60, "Should only count messages at or after cutoff");
+    }
+
+    #[test]
+    fn test_runtime_by_day_counts_use_message_timestamps() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+        let yesterday_start = today_start.saturating_sub(seconds_per_day);
+
+        let messages = vec![
+            make_message_with_runtime("msg1", "pubkey1", "thread1", yesterday_start + 60, 1000),
+            make_message_with_runtime("msg2", "pubkey1", "thread1", today_start + 120, 2000),
+        ];
+
+        store.messages_by_thread.insert("thread1".to_string(), messages);
+        store.rebuild_runtime_by_day_counts();
+
+        assert_eq!(store.get_today_unique_runtime(), 2000);
+
+        let by_day = store.get_runtime_by_day(2);
+        assert!(by_day.contains(&(yesterday_start, 1000)));
+        assert!(by_day.contains(&(today_start, 2000)));
     }
 
     #[test]
