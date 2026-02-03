@@ -1464,15 +1464,17 @@ impl AppDataStore {
     /// Routes to appropriate handler based on event kind (24010 or 24133)
     /// Parses JSON once and passes the value to handlers to avoid double parsing
     pub fn handle_status_event_json(&mut self, json: &str) {
-        // Parse JSON once upfront
-        let Ok(event) = serde_json::from_str::<serde_json::Value>(json) else {
-            return;
-        };
+        if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
+            self.handle_status_event_value(&event);
+        }
+    }
 
+    /// Handle a status event from a pre-parsed Value (avoids double parsing).
+    pub fn handle_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(kind) = event.get("kind").and_then(|k| k.as_u64()) {
             match kind {
-                24010 => self.handle_project_status_event_value(&event),
-                24133 => self.handle_operations_status_event_value(&event),
+                24010 => self.handle_project_status_event_value(event),
+                24133 => self.handle_operations_status_event_value(event),
                 _ => {} // Ignore unknown kinds
             }
         }
@@ -1481,24 +1483,40 @@ impl AppDataStore {
     /// Handle a project status event from pre-parsed Value (kind:24010)
     fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(status) = ProjectStatus::from_value(event) {
-            let backend_pubkey = &status.backend_pubkey;
+            let event_created_at = status.created_at;
+            let backend_pubkey = status.backend_pubkey.clone();
+            let should_update = self
+                .project_statuses
+                .get(&status.project_coordinate)
+                .map(|existing| event_created_at >= existing.created_at)
+                .unwrap_or(true);
+            let mut status = status;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            status.last_seen_at = now;
 
             // Check trust status
-            if self.blocked_backends.contains(backend_pubkey) {
+            if self.blocked_backends.contains(&backend_pubkey) {
                 return;
             }
 
-            if self.approved_backends.contains(backend_pubkey) {
-                self.project_statuses.insert(status.project_coordinate.clone(), status);
+            if self.approved_backends.contains(&backend_pubkey) {
+                if should_update {
+                    self.project_statuses.insert(status.project_coordinate.clone(), status);
+                }
                 return;
             }
 
             // Unknown backend - queue for approval (or update existing pending with newer status)
             if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
-                p.backend_pubkey == *backend_pubkey && p.project_a_tag == status.project_coordinate
+                p.backend_pubkey == backend_pubkey && p.project_a_tag == status.project_coordinate
             }) {
-                // Update with newer status
-                existing.status = status;
+                // Update with newer status only
+                if event_created_at >= existing.status.created_at {
+                    existing.status = status;
+                }
             } else {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -1526,7 +1544,8 @@ impl AppDataStore {
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
-        let status = ProjectStatus::from_note(note)?;
+        let mut status = ProjectStatus::from_note(note)?;
+        let event_created_at = status.created_at;
         let backend_pubkey = &status.backend_pubkey;
 
         // Check trust status
@@ -1537,9 +1556,22 @@ impl AppDataStore {
 
         if self.approved_backends.contains(backend_pubkey) {
             // Approved backend - process normally
-            let event = crate::events::CoreEvent::ProjectStatus(status.clone());
-            self.project_statuses.insert(status.project_coordinate.clone(), status);
-            return Some(event);
+            let should_update = self
+                .project_statuses
+                .get(&status.project_coordinate)
+                .map(|existing| event_created_at >= existing.created_at)
+                .unwrap_or(true);
+            if should_update {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                status.last_seen_at = now;
+                let event = crate::events::CoreEvent::ProjectStatus(status.clone());
+                self.project_statuses.insert(status.project_coordinate.clone(), status);
+                return Some(event);
+            }
+            return None;
         }
 
         // Unknown backend - queue for approval (or update existing pending with newer status)
@@ -1547,7 +1579,9 @@ impl AppDataStore {
             p.backend_pubkey == *backend_pubkey && p.project_a_tag == status.project_coordinate
         }) {
             // Update with newer status
-            existing.status = status;
+            if event_created_at >= existing.status.created_at {
+                existing.status = status;
+            }
             return None; // Already pending, don't emit another event
         }
 
@@ -2996,6 +3030,12 @@ impl AppDataStore {
             .collect();
 
         for status in pending_statuses {
+            let mut status = status;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            status.last_seen_at = now;
             self.project_statuses.insert(status.project_coordinate.clone(), status);
         }
 
@@ -3017,6 +3057,13 @@ impl AppDataStore {
         std::mem::take(&mut self.pending_backend_approvals)
     }
 
+    /// Check if a specific backend/project approval is pending.
+    pub fn has_pending_backend_approval(&self, backend_pubkey: &str, project_a_tag: &str) -> bool {
+        self.pending_backend_approvals.iter().any(|p| {
+            p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag
+        })
+    }
+
     /// Approve a batch of pending backends and apply their cached statuses.
     /// Returns the number of unique backend pubkeys approved.
     pub fn approve_pending_backends(&mut self, pending: Vec<PendingBackendApproval>) -> u32 {
@@ -3025,10 +3072,13 @@ impl AppDataStore {
         let mut approved_pubkeys: HashSet<String> = HashSet::new();
 
         for approval in pending {
-            self.project_statuses.insert(
-                approval.status.project_coordinate.clone(),
-                approval.status,
-            );
+            let mut status = approval.status;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            status.last_seen_at = now;
+            self.project_statuses.insert(status.project_coordinate.clone(), status);
             approved_pubkeys.insert(approval.backend_pubkey);
         }
 
