@@ -21,8 +21,18 @@ let project = Project(
                 "NSMicrophoneUsageDescription": "TENEX needs microphone access for voice dictation",
                 "NSSpeechRecognitionUsageDescription": "TENEX uses speech recognition for voice-to-text dictation"
             ]),
-            sources: ["Sources/TenexMVP/**/*.swift"],
+            sources: [
+                "Sources/TenexMVP/**/*.swift",
+                "../swift-bindings/tenex_core.swift"
+            ],
             resources: ["Sources/TenexMVP/Resources/**"],
+            scripts: [
+                .pre(
+                    script: "bash \"${SRCROOT}/../scripts/generate-swift-bindings.sh\"",
+                    name: "Generate Swift Bindings",
+                    basedOnDependencyAnalysis: false
+                )
+            ],
             dependencies: [
                 .package(product: "Kingfisher", type: .runtime)
             ],

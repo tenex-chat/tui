@@ -99,11 +99,7 @@ cargo test -p tenex-core
 cargo check -p tenex-core
 
 # Generate UniFFI bindings (Swift)
-cargo bin uniffi-bindgen generate \
-  --library target/aarch64-apple-ios-sim/release/libtenex_core.a \
-  --language swift \
-  --out-dir swift-bindings \
-  src/tenex_core.udl
+./scripts/generate-swift-bindings.sh
 ```
 
 ## FFI Conventions
@@ -257,7 +253,7 @@ impl TenexCore {
 
 3. Regenerate bindings:
 ```bash
-cargo bin uniffi-bindgen generate ...
+./scripts/generate-swift-bindings.sh
 ```
 
 4. Update iOS code to use new function
