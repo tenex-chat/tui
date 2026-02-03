@@ -239,6 +239,8 @@ pub struct SubscriptionInfo {
     pub kinds: Vec<u16>,
     /// Optional project a-tag filter (for project-specific subscriptions)
     pub project_a_tag: Option<String>,
+    /// Raw filter JSON for debugging
+    pub raw_filter: Option<String>,
     /// Number of events received on this subscription
     pub events_received: u64,
     /// Timestamp when subscription was created
@@ -251,9 +253,15 @@ impl SubscriptionInfo {
             description,
             kinds,
             project_a_tag,
+            raw_filter: None,
             events_received: 0,
             created_at: std::time::Instant::now(),
         }
+    }
+
+    pub fn with_raw_filter(mut self, filter_json: String) -> Self {
+        self.raw_filter = Some(filter_json);
+        self
     }
 
     pub fn record_event(&mut self) {

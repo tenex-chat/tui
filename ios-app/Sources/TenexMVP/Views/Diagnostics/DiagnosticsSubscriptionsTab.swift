@@ -154,6 +154,12 @@ struct SubscriptionRow: View {
                     Divider()
 
                     DetailRow(label: "Age", value: formatAge(subscription.ageSecs))
+
+                    // Raw Filter JSON
+                    if let rawFilter = subscription.rawFilter {
+                        Divider()
+                        RawFilterView(filterJson: rawFilter)
+                    }
                 }
                 .background(Color(.systemGray6))
             }
@@ -213,6 +219,44 @@ struct DetailRow: View {
     }
 }
 
+// MARK: - Raw Filter View
+
+struct RawFilterView: View {
+    let filterJson: String
+
+    private var formattedJson: String {
+        // Try to pretty-print the JSON
+        guard let data = filterJson.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data),
+              let prettyData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys]),
+              let prettyString = String(data: prettyData, encoding: .utf8) else {
+            return filterJson
+        }
+        return prettyString
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Raw Filter")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(formattedJson)
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundColor(.primary)
+                    .padding(8)
+            }
+            .background(Color(.systemBackground))
+            .cornerRadius(6)
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+    }
+}
+
 #Preview {
     ScrollView {
         DiagnosticsSubscriptionsTab(
@@ -221,6 +265,9 @@ struct DetailRow: View {
                     subId: "abc123def456",
                     description: "Text notes and contact lists",
                     kinds: [1, 3, 4],
+                    rawFilter: """
+                    {"kinds":[1,3,4],"authors":["a1b2c3d4"],"#p":["e5f6g7h8"],"since":1700000000}
+                    """,
                     eventsReceived: 1247,
                     ageSecs: 3600
                 ),
@@ -228,6 +275,9 @@ struct DetailRow: View {
                     subId: "xyz789ghi012",
                     description: "User metadata",
                     kinds: [0],
+                    rawFilter: """
+                    {"kinds":[0],"authors":["a1b2c3d4"]}
+                    """,
                     eventsReceived: 342,
                     ageSecs: 3600
                 ),
@@ -235,6 +285,7 @@ struct DetailRow: View {
                     subId: "jkl345mno678",
                     description: "Project status updates",
                     kinds: [24010],
+                    rawFilter: nil,
                     eventsReceived: 89,
                     ageSecs: 1800
                 )

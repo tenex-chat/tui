@@ -46,11 +46,12 @@ const REFRESH_THROTTLE_INTERVAL_MS: u64 = 500;
 
 use futures::{FutureExt, StreamExt};
 use nostr_sdk::prelude::*;
-use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream};
+use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction};
 
 use crate::models::agent_definition::AgentDefinition;
+use crate::models::{ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Thread};
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
-use crate::runtime::{process_note_keys, CoreHandle};
+use crate::runtime::CoreHandle;
 use crate::stats::{query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::AppDataStore;
 
@@ -150,6 +151,444 @@ fn agent_to_info(agent: &AgentDefinition) -> AgentInfo {
         role: agent.role.clone(),
         picture: agent.picture.clone(),
         model: agent.model.clone(),
+    }
+}
+
+/// Convert a project to ProjectInfo (shared helper).
+fn project_to_info(project: &Project) -> ProjectInfo {
+    ProjectInfo {
+        id: project.id.clone(),
+        title: project.name.clone(),
+        description: None, // Project model doesn't include description
+    }
+}
+
+/// Convert an AskEvent to AskEventInfo (shared helper).
+fn ask_event_to_info(event: &crate::models::message::AskEvent) -> AskEventInfo {
+    let questions = event.questions.iter().map(|q| {
+        match q {
+            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
+                AskQuestionInfo::SingleSelect {
+                    title: title.clone(),
+                    question: question.clone(),
+                    suggestions: suggestions.clone(),
+                }
+            }
+            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
+                AskQuestionInfo::MultiSelect {
+                    title: title.clone(),
+                    question: question.clone(),
+                    options: options.clone(),
+                }
+            }
+        }
+    }).collect();
+
+    AskEventInfo {
+        title: event.title.clone(),
+        context: event.context.clone(),
+        questions,
+    }
+}
+
+/// Convert a Message to MessageInfo (shared helper).
+fn message_to_info(
+    store: &AppDataStore,
+    message: &crate::models::Message,
+    agent_pubkeys: &std::collections::HashSet<String>,
+) -> MessageInfo {
+    let author_name = store.get_profile_name(&message.pubkey);
+
+    let author_npub = hex::decode(&message.pubkey)
+        .ok()
+        .and_then(|bytes| {
+            if bytes.len() == 32 {
+                let mut arr = [0u8; 32];
+                arr.copy_from_slice(&bytes);
+                nostr_sdk::PublicKey::from_slice(&arr).ok()
+            } else {
+                None
+            }
+        })
+        .and_then(|pk| pk.to_bech32().ok())
+        .unwrap_or_else(|| format!("{}...", &message.pubkey[..16.min(message.pubkey.len())]));
+
+    let role = if message.tool_name.is_some() || agent_pubkeys.contains(&message.pubkey) {
+        "assistant".to_string()
+    } else {
+        "user".to_string()
+    };
+
+    let ask_event = message.ask_event.as_ref().map(ask_event_to_info);
+
+    MessageInfo {
+        id: message.id.clone(),
+        content: message.content.clone(),
+        author: author_name,
+        author_npub,
+        created_at: message.created_at,
+        is_tool_call: message.tool_name.is_some(),
+        role,
+        q_tags: message.q_tags.clone(),
+        p_tags: message.p_tags.clone(),
+        ask_event,
+        tool_name: message.tool_name.clone(),
+        tool_args: message.tool_args.clone(),
+    }
+}
+
+/// Convert a Thread to ConversationFullInfo (shared helper).
+fn thread_to_full_info(
+    store: &AppDataStore,
+    thread: &Thread,
+    archived_ids: &std::collections::HashSet<String>,
+) -> ConversationFullInfo {
+    let message_count = store.get_messages(&thread.id).len() as u32;
+    let author_name = store.get_profile_name(&thread.pubkey);
+    let has_children = store.runtime_hierarchy.has_children(&thread.id);
+    let is_active = store.is_event_busy(&thread.id);
+    let is_archived = archived_ids.contains(&thread.id);
+    let project_a_tag = store.get_project_a_tag_for_thread(&thread.id).unwrap_or_default();
+
+    ConversationFullInfo {
+        id: thread.id.clone(),
+        title: thread.title.clone(),
+        author: author_name,
+        author_pubkey: thread.pubkey.clone(),
+        summary: thread.summary.clone(),
+        message_count,
+        last_activity: thread.last_activity,
+        effective_last_activity: thread.effective_last_activity,
+        parent_id: thread.parent_conversation_id.clone(),
+        status: thread.status_label.clone(),
+        current_activity: thread.status_current_activity.clone(),
+        is_active,
+        is_archived,
+        has_children,
+        project_a_tag,
+        is_scheduled: thread.is_scheduled,
+        p_tags: thread.p_tags.clone(),
+    }
+}
+
+/// Convert an internal InboxItem to FFI InboxItem (shared helper).
+fn inbox_item_to_info(store: &AppDataStore, item: &crate::models::InboxItem) -> InboxItem {
+    let from_agent = store.get_profile_name(&item.author_pubkey);
+
+    let project_id = if item.project_a_tag.is_empty() {
+        None
+    } else {
+        item.project_a_tag.split(':').nth(2).map(String::from)
+    };
+
+    let priority = match item.event_type {
+        crate::models::InboxEventType::Ask => "high".to_string(),
+        crate::models::InboxEventType::Mention => "high".to_string(),
+        crate::models::InboxEventType::Reply => "medium".to_string(),
+        crate::models::InboxEventType::ThreadReply => "low".to_string(),
+    };
+
+    let status = if item.is_read {
+        "acknowledged".to_string()
+    } else {
+        "waiting".to_string()
+    };
+
+    let ask_event = item.ask_event.as_ref().map(ask_event_to_info);
+
+    InboxItem {
+        id: item.id.clone(),
+        title: item.title.clone(),
+        content: item.title.clone(),
+        from_agent,
+        author_pubkey: item.author_pubkey.clone(),
+        priority,
+        status,
+        created_at: item.created_at,
+        project_id,
+        conversation_id: item.thread_id.clone(),
+        ask_event,
+    }
+}
+
+/// Convert a ProjectAgent to OnlineAgentInfo (shared helper).
+fn project_agent_to_online_info(agent: &crate::models::ProjectAgent) -> OnlineAgentInfo {
+    OnlineAgentInfo {
+        pubkey: agent.pubkey.clone(),
+        name: agent.name.clone(),
+        is_pm: agent.is_pm,
+        model: agent.model.clone(),
+        tools: agent.tools.clone(),
+    }
+}
+
+/// Find project id (d-tag) for a given project a-tag.
+fn project_id_from_a_tag(store: &AppDataStore, a_tag: &str) -> Option<String> {
+    store.get_projects()
+        .iter()
+        .find(|p| p.a_tag() == a_tag)
+        .map(|p| p.id.clone())
+}
+
+/// Extract e-tag event IDs from a note (string or id bytes).
+fn extract_e_tag_ids(note: &Note) -> Vec<String> {
+    let mut ids = Vec::new();
+    for tag in note.tags() {
+        if tag.count() >= 2 {
+            let tag_name = tag.get(0).and_then(|t| t.variant().str());
+            if tag_name == Some("e") {
+                if let Some(id) = tag.get(1).and_then(|t| t.variant().str()) {
+                    ids.push(id.to_string());
+                } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
+                    ids.push(hex::encode(id_bytes));
+                }
+            }
+        }
+    }
+    ids
+}
+
+/// Process nostrdb note keys, update store, and return deltas.
+fn process_note_keys_with_deltas(
+    ndb: &Ndb,
+    store: &mut AppDataStore,
+    core_handle: &CoreHandle,
+    note_keys: &[NoteKey],
+    archived_ids: &std::collections::HashSet<String>,
+    agent_pubkeys: &std::collections::HashSet<String>,
+) -> Vec<DataChangeType> {
+    let txn = match Transaction::new(ndb) {
+        Ok(txn) => txn,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut deltas: Vec<DataChangeType> = Vec::new();
+    let mut conversations_to_upsert: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut inbox_items_to_upsert: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for &note_key in note_keys.iter() {
+        if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
+            let kind = note.kind();
+
+            // Update store first
+            store.handle_event(kind, &note);
+
+            match kind {
+                31933 => {
+                    if let Some(project) = Project::from_note(&note) {
+                        deltas.push(DataChangeType::ProjectUpsert {
+                            project: project_to_info(&project),
+                        });
+                    }
+                }
+                1 => {
+                    // Message (kind:1 with e-tags)
+                    if let Some(message) = Message::from_note(&note) {
+                        deltas.push(DataChangeType::MessageAppended {
+                            conversation_id: message.thread_id.clone(),
+                            message: message_to_info(store, &message, agent_pubkeys),
+                        });
+
+                        // Conversation + ancestors (effective_last_activity updates)
+                        conversations_to_upsert.insert(message.thread_id.clone());
+                        for ancestor in store.runtime_hierarchy.get_ancestors(&message.thread_id) {
+                            conversations_to_upsert.insert(ancestor);
+                        }
+
+                        // Inbox additions (ask events)
+                        if store.get_inbox_items().iter().any(|i| i.id == message.id) {
+                            inbox_items_to_upsert.insert(message.id.clone());
+                        }
+
+                        // Inbox read updates when user replies
+                        if let Some(ref user_pk) = store.user_pubkey.clone() {
+                            if &message.pubkey == user_pk {
+                                for reply_id in extract_e_tag_ids(&note) {
+                                    if store.get_inbox_items().iter().any(|i| i.id == reply_id) {
+                                        inbox_items_to_upsert.insert(reply_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Thread (kind:1 with a-tag and no e-tags)
+                    if let Some(thread) = Thread::from_note(&note) {
+                        conversations_to_upsert.insert(thread.id.clone());
+                        for ancestor in store.runtime_hierarchy.get_ancestors(&thread.id) {
+                            conversations_to_upsert.insert(ancestor);
+                        }
+
+                        // Add thread root as first message
+                        if let Some(root_message) = Message::from_thread_note(&note) {
+                            deltas.push(DataChangeType::MessageAppended {
+                                conversation_id: root_message.thread_id.clone(),
+                                message: message_to_info(store, &root_message, agent_pubkeys),
+                            });
+                        }
+                    }
+                }
+                513 => {
+                    if let Some(metadata) = ConversationMetadata::from_note(&note) {
+                        conversations_to_upsert.insert(metadata.thread_id.clone());
+                        for ancestor in store.runtime_hierarchy.get_ancestors(&metadata.thread_id) {
+                            conversations_to_upsert.insert(ancestor);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    for conversation_id in conversations_to_upsert {
+        if let Some(thread) = store.get_thread_by_id(&conversation_id) {
+            deltas.push(DataChangeType::ConversationUpsert {
+                conversation: thread_to_full_info(store, thread, archived_ids),
+            });
+        }
+    }
+
+    for inbox_id in inbox_items_to_upsert {
+        if let Some(item) = store.get_inbox_items().iter().find(|i| i.id == inbox_id) {
+            deltas.push(DataChangeType::InboxUpsert {
+                item: inbox_item_to_info(store, item),
+            });
+        }
+    }
+
+    // Subscribe to messages for any newly discovered projects
+    for project_a_tag in store.drain_pending_project_subscriptions() {
+        let _ = core_handle.send(NostrCommand::SubscribeToProjectMessages { project_a_tag });
+    }
+
+    deltas
+}
+
+/// Process DataChange channel items and return deltas.
+fn process_data_changes_with_deltas(
+    store: &mut AppDataStore,
+    data_changes: &[DataChange],
+) -> Vec<DataChangeType> {
+    let mut deltas: Vec<DataChangeType> = Vec::new();
+
+    for change in data_changes {
+        match change {
+            DataChange::ProjectStatus { json } => {
+                if let Ok(event) = serde_json::from_str::<serde_json::Value>(json) {
+                    let kind = event.get("kind").and_then(|k| k.as_u64()).unwrap_or(0);
+
+                    // Capture pending state before update to detect new pending approvals
+                    let pending_before = if let Some(status) = ProjectStatus::from_value(&event) {
+                        store.has_pending_backend_approval(&status.backend_pubkey, &status.project_coordinate)
+                    } else {
+                        false
+                    };
+
+                    store.handle_status_event_value(&event);
+
+                    match kind {
+                        24010 => {
+                            if let Some(status) = ProjectStatus::from_value(&event) {
+                                let project_a_tag = status.project_coordinate.clone();
+
+                                if store.project_statuses.get(&project_a_tag).is_some() {
+                                    let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
+                                    let is_online = store.is_project_online(&project_a_tag);
+                                    let online_agents = store.get_online_agents(&project_a_tag)
+                                        .map(|agents| agents.iter().map(project_agent_to_online_info).collect())
+                                        .unwrap_or_else(Vec::new);
+
+                                    deltas.push(DataChangeType::ProjectStatusChanged {
+                                        project_id,
+                                        project_a_tag,
+                                        is_online,
+                                        online_agents,
+                                    });
+                                } else if !pending_before {
+                                    deltas.push(DataChangeType::PendingBackendApproval {
+                                        backend_pubkey: status.backend_pubkey.clone(),
+                                        project_a_tag,
+                                    });
+                                }
+                            }
+                        }
+                        24133 => {
+                            if let Some(status) = OperationsStatus::from_value(&event) {
+                                let project_a_tag = status.project_coordinate.clone();
+                                let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
+                                let active_conversation_ids = store.get_active_event_ids(&project_a_tag);
+
+                                deltas.push(DataChangeType::ActiveConversationsChanged {
+                                    project_id,
+                                    project_a_tag,
+                                    active_conversation_ids,
+                                });
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            DataChange::LocalStreamChunk { agent_pubkey, conversation_id, text_delta, .. } => {
+                deltas.push(DataChangeType::StreamChunk {
+                    agent_pubkey: agent_pubkey.clone(),
+                    conversation_id: conversation_id.clone(),
+                    text_delta: text_delta.clone(),
+                });
+            }
+            DataChange::MCPToolsChanged => {
+                deltas.push(DataChangeType::McpToolsChanged);
+            }
+        }
+    }
+
+    deltas
+}
+
+/// Append stats/diagnostics update signals based on the accumulated deltas.
+/// Ensures snapshots refresh only when relevant data changes, and only once per batch.
+fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
+    let mut stats_changed = false;
+    let mut diagnostics_changed = false;
+    let mut has_stats_update = false;
+    let mut has_diagnostics_update = false;
+
+    for delta in deltas.iter() {
+        match delta {
+            DataChangeType::StatsUpdated => {
+                has_stats_update = true;
+            }
+            DataChangeType::DiagnosticsUpdated => {
+                has_diagnostics_update = true;
+            }
+            DataChangeType::MessageAppended { .. }
+            | DataChangeType::ConversationUpsert { .. }
+            | DataChangeType::ProjectUpsert { .. }
+            | DataChangeType::InboxUpsert { .. } => {
+                stats_changed = true;
+                diagnostics_changed = true;
+            }
+            DataChangeType::ProjectStatusChanged { .. }
+            | DataChangeType::PendingBackendApproval { .. }
+            | DataChangeType::ActiveConversationsChanged { .. }
+            | DataChangeType::McpToolsChanged => {
+                diagnostics_changed = true;
+            }
+            DataChangeType::General => {
+                diagnostics_changed = true;
+                stats_changed = true;
+            }
+            DataChangeType::StreamChunk { .. } => {}
+        }
+    }
+
+    if stats_changed && !has_stats_update {
+        deltas.push(DataChangeType::StatsUpdated);
+    }
+
+    if diagnostics_changed && !has_diagnostics_update {
+        deltas.push(DataChangeType::DiagnosticsUpdated);
     }
 }
 
@@ -642,6 +1081,8 @@ pub struct SubscriptionDiagnostics {
     pub description: String,
     /// Event kinds this subscription listens for
     pub kinds: Vec<u16>,
+    /// Raw filter JSON (for debugging)
+    pub raw_filter: Option<String>,
     /// Number of events received
     pub events_received: u64,
     /// Seconds since subscription was created
@@ -796,17 +1237,33 @@ impl FfiPreferencesStorage {
 /// Allows views to refresh only what changed instead of full refresh.
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum DataChangeType {
-    /// New messages arrived for a conversation
-    Messages { conversation_id: String },
-    /// Project status updated (kind:24010)
-    ProjectStatus,
+    /// A new message was appended to a conversation
+    MessageAppended { conversation_id: String, message: MessageInfo },
+    /// A conversation was created or updated
+    ConversationUpsert { conversation: ConversationFullInfo },
+    /// A project was created or updated
+    ProjectUpsert { project: ProjectInfo },
+    /// An inbox item was created or updated
+    InboxUpsert { item: InboxItem },
+    /// Project online status updated (kind:24010)
+    ProjectStatusChanged { project_id: String, project_a_tag: String, is_online: bool, online_agents: Vec<OnlineAgentInfo> },
+    /// Backend approval required for a project status event
+    PendingBackendApproval { backend_pubkey: String, project_a_tag: String },
+    /// Active conversations updated for a project (kind:24133)
+    ActiveConversationsChanged { project_id: String, project_a_tag: String, active_conversation_ids: Vec<String> },
     /// Streaming text chunk arrived (live typing)
     StreamChunk {
         agent_pubkey: String,
         conversation_id: String,
         text_delta: Option<String>,
     },
-    /// General data changed - full refresh recommended
+    /// MCP tools changed (kind:4200)
+    McpToolsChanged,
+    /// Stats snapshot should be refreshed
+    StatsUpdated,
+    /// Diagnostics snapshot should be refreshed
+    DiagnosticsUpdated,
+    /// General data changed - legacy fallback
     General,
 }
 
@@ -833,39 +1290,41 @@ pub trait EventCallback: Send + Sync {
 pub struct TenexCore {
     initialized: AtomicBool,
     /// Stored keys for the logged-in user (protected by RwLock for interior mutability)
-    keys: RwLock<Option<Keys>>,
+    keys: Arc<RwLock<Option<Keys>>>,
     /// nostrdb instance for local event storage
-    ndb: RwLock<Option<Arc<Ndb>>>,
+    ndb: Arc<RwLock<Option<Arc<Ndb>>>>,
     /// App data store built on top of nostrdb
-    store: RwLock<Option<AppDataStore>>,
+    store: Arc<RwLock<Option<AppDataStore>>>,
     /// Core runtime command handle for NostrWorker
-    core_handle: RwLock<Option<CoreHandle>>,
+    core_handle: Arc<RwLock<Option<CoreHandle>>>,
     /// Data change receiver from NostrWorker (project status, streaming chunks)
     /// Uses Mutex because Receiver is not Sync, and UniFFI objects require Send + Sync
-    data_rx: Mutex<Option<Receiver<DataChange>>>,
+    data_rx: Arc<Mutex<Option<Receiver<DataChange>>>>,
     /// Worker thread handle (joins on drop)
-    worker_handle: RwLock<Option<JoinHandle<()>>>,
+    worker_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     /// NostrDB subscription stream for live updates
-    ndb_stream: RwLock<Option<SubscriptionStream>>,
+    ndb_stream: Arc<RwLock<Option<SubscriptionStream>>>,
     /// iOS preferences storage (archive state, collapsed threads, visible projects)
-    preferences: RwLock<Option<FfiPreferencesStorage>>,
+    preferences: Arc<RwLock<Option<FfiPreferencesStorage>>>,
     /// Timestamp of last refresh() call for throttling (milliseconds since UNIX epoch).
     /// Uses AtomicU64 for lock-free access. Stored as ms for precision without needing
     /// to store Instant (which isn't Send+Sync friendly for FFI).
     last_refresh_ms: AtomicU64,
     /// Subscription stats for diagnostics (shared with worker)
-    subscription_stats: RwLock<Option<SharedSubscriptionStats>>,
+    subscription_stats: Arc<RwLock<Option<SharedSubscriptionStats>>>,
     /// Negentropy sync stats for diagnostics (shared with worker)
-    negentropy_stats: RwLock<Option<SharedNegentropySyncStats>>,
+    negentropy_stats: Arc<RwLock<Option<SharedNegentropySyncStats>>>,
     /// Event callback for push notifications to UI (Swift/Kotlin)
-    event_callback: RwLock<Option<Arc<dyn EventCallback>>>,
+    event_callback: Arc<RwLock<Option<Arc<dyn EventCallback>>>>,
     /// Flag to signal callback listener thread to stop (Arc for sharing with thread)
     callback_listener_running: Arc<AtomicBool>,
+    /// Callback listener thread handle (joined on drop)
+    callback_listener_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
     /// Mutex to serialize nostrdb Transaction creation across all operations.
     /// CRITICAL: nostrdb cannot handle concurrent transactions on the same Ndb instance.
     /// This mutex ensures only one code path can create a Transaction at a time, preventing
     /// panics when refresh() and getDiagnosticsSnapshot() are called concurrently.
-    ndb_transaction_lock: Mutex<()>,
+    ndb_transaction_lock: Arc<Mutex<()>>,
 }
 
 #[uniffi::export]
@@ -876,20 +1335,21 @@ impl TenexCore {
     pub fn new() -> Self {
         Self {
             initialized: AtomicBool::new(false),
-            keys: RwLock::new(None),
-            ndb: RwLock::new(None),
-            store: RwLock::new(None),
-            core_handle: RwLock::new(None),
-            data_rx: Mutex::new(None),
-            worker_handle: RwLock::new(None),
+            keys: Arc::new(RwLock::new(None)),
+            ndb: Arc::new(RwLock::new(None)),
+            store: Arc::new(RwLock::new(None)),
+            core_handle: Arc::new(RwLock::new(None)),
+            data_rx: Arc::new(Mutex::new(None)),
+            worker_handle: Arc::new(RwLock::new(None)),
             last_refresh_ms: AtomicU64::new(0),
-            ndb_stream: RwLock::new(None),
-            preferences: RwLock::new(None),
-            subscription_stats: RwLock::new(None),
-            negentropy_stats: RwLock::new(None),
-            event_callback: RwLock::new(None),
+            ndb_stream: Arc::new(RwLock::new(None)),
+            preferences: Arc::new(RwLock::new(None)),
+            subscription_stats: Arc::new(RwLock::new(None)),
+            negentropy_stats: Arc::new(RwLock::new(None)),
+            event_callback: Arc::new(RwLock::new(None)),
             callback_listener_running: Arc::new(AtomicBool::new(false)),
-            ndb_transaction_lock: Mutex::new(()),
+            callback_listener_handle: Arc::new(RwLock::new(None)),
+            ndb_transaction_lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -1298,11 +1758,7 @@ impl TenexCore {
 
         store.get_projects()
             .iter()
-            .map(|p| ProjectInfo {
-                id: p.id.clone(),
-                title: p.name.clone(),
-                description: None, // Project model doesn't have description field
-            })
+            .map(project_to_info)
             .collect()
     }
 
@@ -1435,33 +1891,7 @@ impl TenexCore {
 
         for conversation_id in conversation_ids {
             if let Some(thread) = store.get_thread_by_id(&conversation_id) {
-                let message_count = store.get_messages(&conversation_id).len() as u32;
-                let author_name = store.get_profile_name(&thread.pubkey);
-                let has_children = store.runtime_hierarchy.has_children(&thread.id);
-                let is_active = store.is_event_busy(&thread.id);
-                let is_archived = archived_ids.contains(&thread.id);
-
-                let project_a_tag = store.get_project_a_tag_for_thread(&conversation_id).unwrap_or_default();
-
-                conversations.push(ConversationFullInfo {
-                    id: thread.id.clone(),
-                    title: thread.title.clone(),
-                    author: author_name,
-                    author_pubkey: thread.pubkey.clone(),
-                    summary: thread.summary.clone(),
-                    message_count,
-                    last_activity: thread.last_activity,
-                    effective_last_activity: thread.effective_last_activity,
-                    parent_id: thread.parent_conversation_id.clone(),
-                    status: thread.status_label.clone(),
-                    current_activity: thread.status_current_activity.clone(),
-                    is_active,
-                    is_archived,
-                    has_children,
-                    project_a_tag,
-                    is_scheduled: thread.is_scheduled,
-                    p_tags: thread.p_tags.clone(),
-                });
+                conversations.push(thread_to_full_info(store, thread, &archived_ids));
             }
         }
 
@@ -1482,9 +1912,9 @@ impl TenexCore {
 
         // Build a set of agent pubkeys for role detection (Fix #4: proper role detection)
         // This avoids content-based heuristics that can misclassify user messages
-        let agent_pubkeys: std::collections::HashSet<&String> = store.agent_definitions
+        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
             .values()
-            .map(|def| &def.pubkey)
+            .map(|def| def.pubkey.clone())
             .collect();
 
         // Get messages for the thread
@@ -1492,78 +1922,7 @@ impl TenexCore {
 
         messages
             .iter()
-            .map(|m| {
-                // Get author display name
-                let author_name = store.get_profile_name(&m.pubkey);
-
-                // Convert pubkey to npub
-                let author_npub = hex::decode(&m.pubkey)
-                    .ok()
-                    .and_then(|bytes| {
-                        if bytes.len() == 32 {
-                            let mut arr = [0u8; 32];
-                            arr.copy_from_slice(&bytes);
-                            nostr_sdk::PublicKey::from_slice(&arr).ok()
-                        } else {
-                            None
-                        }
-                    })
-                    .and_then(|pk| pk.to_bech32().ok())
-                    .unwrap_or_else(|| format!("{}...", &m.pubkey[..16.min(m.pubkey.len())]));
-
-                // Determine role based on author pubkey (Fix #4: remove content-based heuristics)
-                // If the message author is a known agent, role is "assistant", otherwise "user"
-                // Messages with tool_name are always from assistants (tool calls require assistant context)
-                let role = if m.tool_name.is_some() || agent_pubkeys.contains(&m.pubkey) {
-                    "assistant".to_string()
-                } else {
-                    "user".to_string()
-                };
-
-                // Convert ask_event if present
-                let ask_event = m.ask_event.as_ref().map(|ae| {
-                    let questions = ae.questions.iter().map(|q| {
-                        match q {
-                            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
-                                AskQuestionInfo::SingleSelect {
-                                    title: title.clone(),
-                                    question: question.clone(),
-                                    suggestions: suggestions.clone(),
-                                }
-                            }
-                            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
-                                AskQuestionInfo::MultiSelect {
-                                    title: title.clone(),
-                                    question: question.clone(),
-                                    options: options.clone(),
-                                }
-                            }
-                        }
-                    }).collect();
-
-                    AskEventInfo {
-                        title: ae.title.clone(),
-                        context: ae.context.clone(),
-                        questions,
-                    }
-                });
-
-                MessageInfo {
-                    id: m.id.clone(),
-                    content: m.content.clone(),
-                    author: author_name,
-                    author_npub,
-                    created_at: m.created_at,
-                    // Tool calls are indicated by the tool_name tag (Fix #4: remove content heuristics)
-                    is_tool_call: m.tool_name.is_some(),
-                    role,
-                    q_tags: m.q_tags.clone(),
-                    p_tags: m.p_tags.clone(),
-                    ask_event,
-                    tool_name: m.tool_name.clone(),
-                    tool_args: m.tool_args.clone(),
-                }
-            })
+            .map(|m| message_to_info(store, m, &agent_pubkeys))
             .collect()
     }
 
@@ -1640,74 +1999,7 @@ impl TenexCore {
         // Get inbox items from the store
         store.get_inbox_items()
             .iter()
-            .map(|item| {
-                // Get author display name
-                let from_agent = store.get_profile_name(&item.author_pubkey);
-
-                // Extract project ID from a_tag (format: 31933:pubkey:id)
-                let project_id = if item.project_a_tag.is_empty() {
-                    None
-                } else {
-                    item.project_a_tag.split(':').nth(2).map(String::from)
-                };
-
-                // Determine priority based on event type
-                let priority = match item.event_type {
-                    crate::models::InboxEventType::Ask => "high".to_string(),
-                    crate::models::InboxEventType::Mention => "high".to_string(),
-                    crate::models::InboxEventType::Reply => "medium".to_string(),
-                    crate::models::InboxEventType::ThreadReply => "low".to_string(),
-                };
-
-                // Determine status based on is_read
-                let status = if item.is_read {
-                    "acknowledged".to_string()
-                } else {
-                    "waiting".to_string()
-                };
-
-                // Convert ask_event if present
-                let ask_event = item.ask_event.as_ref().map(|ae| {
-                    let questions = ae.questions.iter().map(|q| {
-                        match q {
-                            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
-                                AskQuestionInfo::SingleSelect {
-                                    title: title.clone(),
-                                    question: question.clone(),
-                                    suggestions: suggestions.clone(),
-                                }
-                            }
-                            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
-                                AskQuestionInfo::MultiSelect {
-                                    title: title.clone(),
-                                    question: question.clone(),
-                                    options: options.clone(),
-                                }
-                            }
-                        }
-                    }).collect();
-
-                    AskEventInfo {
-                        title: ae.title.clone(),
-                        context: ae.context.clone(),
-                        questions,
-                    }
-                });
-
-                InboxItem {
-                    id: item.id.clone(),
-                    title: item.title.clone(),
-                    content: item.title.clone(), // Same as title for now
-                    from_agent,
-                    author_pubkey: item.author_pubkey.clone(),
-                    priority,
-                    status,
-                    created_at: item.created_at,
-                    project_id,
-                    conversation_id: item.thread_id.clone(),
-                    ask_event,
-                }
-            })
+            .map(|item| inbox_item_to_info(store, item))
             .collect()
     }
 
@@ -2201,6 +2493,9 @@ impl TenexCore {
     ///
     /// Returns empty if project not found or project is offline.
     pub fn get_online_agents(&self, project_id: String) -> Result<Vec<OnlineAgentInfo>, TenexError> {
+        use crate::tlog;
+        tlog!("FFI", "get_online_agents called with project_id: {}", project_id);
+
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -2209,26 +2504,53 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
+        tlog!("FFI", "Total projects in store: {}", store.get_projects().len());
+        tlog!("FFI", "project_statuses HashMap keys:");
+        for key in store.project_statuses.keys() {
+            tlog!("FFI", "  - '{}'", key);
+        }
+
         // Find the project by ID
         let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
         let project = match project {
-            Some(p) => p,
-            None => return Ok(Vec::new()), // Project not found = empty agents
+            Some(p) => {
+                tlog!("FFI", "Project found: id='{}' a_tag='{}'", p.id, p.a_tag());
+                p
+            },
+            None => {
+                tlog!("FFI", "Project NOT found for id: {}", project_id);
+                return Ok(Vec::new()); // Project not found = empty agents
+            }
         };
 
         // Get agents from project status (kind:24010)
+        tlog!("FFI", "Looking up project_statuses for a_tag: '{}'", project.a_tag());
+
+        // Check if status exists (even if stale)
+        if let Some(status) = store.project_statuses.get(&project.a_tag()) {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let age_secs = now.saturating_sub(status.created_at);
+            tlog!("FFI", "Status exists: created_at={} now={} age={}s is_online={}",
+                status.created_at, now, age_secs, status.is_online());
+        } else {
+            tlog!("FFI", "No status found in project_statuses HashMap");
+        }
+
         let agents = store.get_online_agents(&project.a_tag())
             .map(|agents| {
-                agents.iter().map(|a| OnlineAgentInfo {
-                    pubkey: a.pubkey.clone(),
-                    name: a.name.clone(),
-                    is_pm: a.is_pm,
-                    model: a.model.clone(),
-                    tools: a.tools.clone(),
-                }).collect()
+                tlog!("FFI", "Found {} online agents", agents.len());
+                for agent in agents {
+                    tlog!("FFI", "  Agent: {} ({})", agent.name, agent.pubkey);
+                }
+                agents.iter().map(project_agent_to_online_info).collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                tlog!("FFI", "No online agents (status is stale or missing)");
+                Vec::new()
+            });
 
+        tlog!("FFI", "Returning {} agents", agents.len());
         Ok(agents)
     }
 
@@ -2433,6 +2755,10 @@ impl TenexCore {
     /// Approves any backends that sent kind:24010 events but weren't in the approved list.
     /// Returns the number of backends that were approved.
     pub fn approve_all_pending_backends(&self) -> Result<u32, TenexError> {
+        use crate::tlog;
+        tlog!("FFI", "approve_all_pending_backends called");
+        eprintln!("[DEBUG] approve_all_pending_backends called");
+
         let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -2442,7 +2768,47 @@ impl TenexCore {
         })?;
 
         let pending = store.drain_pending_backend_approvals();
-        Ok(store.approve_pending_backends(pending))
+        tlog!("FFI", "Found {} pending backend approvals", pending.len());
+        eprintln!("[DEBUG] Found {} pending backend approvals", pending.len());
+        for approval in &pending {
+            tlog!("FFI", "  - Backend: {} for project: {}", approval.backend_pubkey, approval.project_a_tag);
+            eprintln!("[DEBUG]   - Backend: {} for project: {}", approval.backend_pubkey, approval.project_a_tag);
+        }
+
+        let count = store.approve_pending_backends(pending);
+        tlog!("FFI", "Approved {} backends, project_statuses now has {} entries", count, store.project_statuses.len());
+        eprintln!("[DEBUG] Approved {} backends", count);
+        eprintln!("[DEBUG] project_statuses HashMap now has {} entries", store.project_statuses.len());
+
+        Ok(count)
+    }
+
+    /// Get diagnostics about backend approvals and project statuses.
+    /// Returns JSON with project statuses keys.
+    pub fn get_backend_diagnostics(&self) -> Result<String, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let diagnostic = serde_json::json!({
+            "has_pending_backend_approvals": store.has_pending_backend_approvals(),
+            "project_statuses_count": store.project_statuses.len(),
+            "project_statuses_keys": store.project_statuses.keys().collect::<Vec<_>>(),
+            "projects_count": store.get_projects().len(),
+            "projects": store.get_projects().iter().map(|p| {
+                serde_json::json!({
+                    "id": p.id,
+                    "name": p.name,
+                    "a_tag": p.a_tag(),
+                })
+            }).collect::<Vec<_>>(),
+        });
+
+        Ok(diagnostic.to_string())
     }
 
     /// Send a new conversation (thread) to a project.
@@ -2842,48 +3208,47 @@ impl TenexCore {
         // Get callback reference before processing changes
         let callback = self.event_callback.read().ok().and_then(|g| g.clone());
 
-        for change in &data_changes {
-            match change {
-                DataChange::ProjectStatus { json } => {
-                    store.handle_status_event_json(json);
-                    if let Some(ref cb) = callback {
-                        cb.on_data_changed(DataChangeType::ProjectStatus);
-                    }
-                }
-                DataChange::LocalStreamChunk { agent_pubkey, conversation_id, text_delta, .. } => {
-                    if let Some(ref cb) = callback {
-                        cb.on_data_changed(DataChangeType::StreamChunk {
-                            agent_pubkey: agent_pubkey.clone(),
-                            conversation_id: conversation_id.clone(),
-                            text_delta: text_delta.clone(),
-                        });
-                    }
-                }
-                DataChange::MCPToolsChanged => {
-                    if let Some(ref cb) = callback {
-                        cb.on_data_changed(DataChangeType::General);
-                    }
-                }
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+        let archived_ids = prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.clone())
+            .unwrap_or_default();
+
+        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
+            .values()
+            .map(|def| def.pubkey.clone())
+            .collect();
+
+        let mut deltas: Vec<DataChangeType> = Vec::new();
+
+        if !data_changes.is_empty() {
+            deltas.extend(process_data_changes_with_deltas(store, &data_changes));
+        }
+
+        for note_keys in note_batches {
+            if !note_keys.is_empty() {
+                deltas.extend(process_note_keys_with_deltas(
+                    ndb.as_ref(),
+                    store,
+                    &core_handle,
+                    &note_keys,
+                    &archived_ids,
+                    &agent_pubkeys,
+                ));
+            }
+        }
+
+        append_snapshot_update_deltas(&mut deltas);
+
+        if let Some(ref cb) = callback {
+            for delta in deltas {
+                cb.on_data_changed(delta);
             }
         }
 
         let mut ok = true;
-        let mut had_notes = false;
-        for note_keys in note_batches {
-            if !note_keys.is_empty() {
-                had_notes = true;
-            }
-            if process_note_keys(ndb.as_ref(), store, &core_handle, &note_keys).is_err() {
-                ok = false;
-            }
-        }
-
-        // Fire callback if we processed any notes (messages, projects, etc.)
-        if had_notes {
-            if let Some(ref cb) = callback {
-                cb.on_data_changed(DataChangeType::General);
-            }
-        }
 
         // Release store lock before polling for more events
         drop(store_guard);
@@ -2940,9 +3305,40 @@ impl TenexCore {
             None => return false,
         };
 
+        let prefs_guard = match self.preferences.read() {
+            Ok(g) => g,
+            Err(_) => return false,
+        };
+        let archived_ids = prefs_guard.as_ref()
+            .map(|p| p.prefs.archived_thread_ids.clone())
+            .unwrap_or_default();
+
+        let agent_pubkeys: std::collections::HashSet<String> = store.agent_definitions
+            .values()
+            .map(|def| def.pubkey.clone())
+            .collect();
+
+        let callback = self.event_callback.read().ok().and_then(|g| g.clone());
+
+        let mut deltas: Vec<DataChangeType> = Vec::new();
         for note_keys in additional_batches {
-            if process_note_keys(ndb.as_ref(), store, &core_handle, &note_keys).is_err() {
-                ok = false;
+            if !note_keys.is_empty() {
+                deltas.extend(process_note_keys_with_deltas(
+                    ndb.as_ref(),
+                    store,
+                    &core_handle,
+                    &note_keys,
+                    &archived_ids,
+                    &agent_pubkeys,
+                ));
+            }
+        }
+
+        append_snapshot_update_deltas(&mut deltas);
+
+        if let Some(ref cb) = callback {
+            for delta in deltas {
+                cb.on_data_changed(delta);
             }
         }
 
@@ -3029,7 +3425,7 @@ impl TenexCore {
 
         // Start listener thread if not already running
         if !self.callback_listener_running.swap(true, Ordering::SeqCst) {
-            self.start_callback_listener(callback);
+            self.start_callback_listener();
         }
     }
 
@@ -3042,6 +3438,11 @@ impl TenexCore {
         }
         // Signal listener thread to stop
         self.callback_listener_running.store(false, Ordering::SeqCst);
+        if let Ok(mut guard) = self.callback_listener_handle.write() {
+            if let Some(handle) = guard.take() {
+                let _ = handle.join();
+            }
+        }
     }
 }
 
@@ -3151,6 +3552,7 @@ impl TenexCore {
                         sub_id: sub_id.clone(),
                         description: info.description.clone(),
                         kinds: info.kinds.clone(),
+                        raw_filter: info.raw_filter.clone(),
                         events_received: info.events_received,
                         age_secs: info.created_at.elapsed().as_secs(),
                     }
@@ -3213,62 +3615,117 @@ impl TenexCore {
 impl TenexCore {
     /// Start the background listener thread that monitors data channels
     /// and fires callbacks when events arrive.
-    fn start_callback_listener(&self, callback: Arc<dyn EventCallback>) {
-        // Get references to the channels we need to monitor
-        // Note: We clone the Ndb Arc and create a fresh subscription stream
-        // because the main ndb_stream is used by refresh() and we can't share it
-        let ndb = match self.ndb.read() {
-            Ok(guard) => guard.as_ref().cloned(),
-            Err(_) => None,
-        };
-
-        // Clone the running flag for the thread
+    fn start_callback_listener(&self) {
         let running = self.callback_listener_running.clone();
+        let data_rx = self.data_rx.clone();
+        let ndb_stream = self.ndb_stream.clone();
+        let store = self.store.clone();
+        let prefs = self.preferences.clone();
+        let ndb = self.ndb.clone();
+        let core_handle = self.core_handle.clone();
+        let txn_lock = self.ndb_transaction_lock.clone();
+        let callback_ref = self.event_callback.clone();
 
-        // For data_rx, we need to check it in refresh() first - the listener
-        // will monitor it in parallel. Since mpsc::Receiver can only have one
-        // consumer, we'll monitor data changes via a different mechanism:
-        // We'll create a separate subscription stream for the listener thread.
-
-        std::thread::spawn(move || {
-            // Create a separate nostrdb subscription for the listener thread
-            let ndb_stream = if let Some(ref ndb) = ndb {
-                let filter = nostrdb::FilterBuilder::new()
-                    .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
-                    .build();
-                match ndb.subscribe(&[filter]) {
-                    Ok(sub) => Some(nostrdb::SubscriptionStream::new((**ndb).clone(), sub)),
-                    Err(e) => {
-                        eprintln!("[EventCallback] Failed to create ndb subscription: {}", e);
-                        None
-                    }
-                }
-            } else {
-                None
-            };
-
-            let mut stream = ndb_stream;
-
-            // Poll loop - check for new events and fire callbacks
+        let handle = std::thread::spawn(move || {
             while running.load(Ordering::Relaxed) {
-                let mut had_event = false;
-
-                // Check ndb_stream for new notes
-                if let Some(ref mut s) = stream {
-                    while let Some(_note_keys) = s.next().now_or_never().flatten() {
-                        had_event = true;
-                        // Fire general callback - views should refresh
-                        // In the future, we could parse note_keys to determine conversation_id
-                        callback.on_data_changed(DataChangeType::General);
+                let mut data_changes: Vec<DataChange> = Vec::new();
+                if let Ok(rx_guard) = data_rx.lock() {
+                    if let Some(rx) = rx_guard.as_ref() {
+                        while let Ok(change) = rx.try_recv() {
+                            data_changes.push(change);
+                        }
                     }
                 }
 
-                // Sleep if no events to avoid CPU spin
-                if !had_event {
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                let mut note_batches: Vec<Vec<NoteKey>> = Vec::new();
+                if let Ok(mut stream_guard) = ndb_stream.write() {
+                    if let Some(stream) = stream_guard.as_mut() {
+                        while let Some(note_keys) = stream.next().now_or_never().flatten() {
+                            note_batches.push(note_keys);
+                        }
+                    }
+                }
+
+                if data_changes.is_empty() && note_batches.is_empty() {
+                    std::thread::sleep(Duration::from_millis(50));
+                    continue;
+                }
+
+                let _tx_guard = match txn_lock.lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        std::thread::sleep(Duration::from_millis(50));
+                        continue;
+                    }
+                };
+
+                let ndb = match ndb.read().ok().and_then(|g| g.as_ref().cloned()) {
+                    Some(db) => db,
+                    None => continue,
+                };
+                let core_handle = match core_handle.read().ok().and_then(|g| g.as_ref().cloned()) {
+                    Some(handle) => handle,
+                    None => continue,
+                };
+
+                let mut store_guard = match store.write() {
+                    Ok(g) => g,
+                    Err(_) => continue,
+                };
+                let store_ref = match store_guard.as_mut() {
+                    Some(s) => s,
+                    None => continue,
+                };
+
+                let prefs_guard = match prefs.read() {
+                    Ok(g) => g,
+                    Err(_) => continue,
+                };
+                let archived_ids = prefs_guard.as_ref()
+                    .map(|p| p.prefs.archived_thread_ids.clone())
+                    .unwrap_or_default();
+
+                let agent_pubkeys: std::collections::HashSet<String> = store_ref.agent_definitions
+                    .values()
+                    .map(|def| def.pubkey.clone())
+                    .collect();
+
+                let mut deltas: Vec<DataChangeType> = Vec::new();
+
+                if !data_changes.is_empty() {
+                    deltas.extend(process_data_changes_with_deltas(store_ref, &data_changes));
+                }
+
+                for note_keys in note_batches {
+                    if !note_keys.is_empty() {
+                        deltas.extend(process_note_keys_with_deltas(
+                            ndb.as_ref(),
+                            store_ref,
+                            &core_handle,
+                            &note_keys,
+                            &archived_ids,
+                            &agent_pubkeys,
+                        ));
+                    }
+                }
+
+                drop(store_guard);
+
+                append_snapshot_update_deltas(&mut deltas);
+
+                if let Ok(cb_guard) = callback_ref.read() {
+                    if let Some(cb) = cb_guard.as_ref() {
+                        for delta in deltas {
+                            cb.on_data_changed(delta);
+                        }
+                    }
                 }
             }
         });
+
+        if let Ok(mut guard) = self.callback_listener_handle.write() {
+            *guard = Some(handle);
+        }
     }
 }
 
@@ -3302,6 +3759,14 @@ fn get_db_file_size(data_dir: &std::path::Path) -> u64 {
 
 impl Drop for TenexCore {
     fn drop(&mut self) {
+        // Stop callback listener if running
+        self.callback_listener_running.store(false, Ordering::SeqCst);
+        if let Ok(mut handle_guard) = self.callback_listener_handle.write() {
+            if let Some(handle) = handle_guard.take() {
+                let _ = handle.join();
+            }
+        }
+
         if let Ok(handle_guard) = self.core_handle.read() {
             if let Some(handle) = handle_guard.as_ref() {
                 let _ = handle.send(NostrCommand::Shutdown);
