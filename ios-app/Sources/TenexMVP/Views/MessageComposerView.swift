@@ -182,7 +182,9 @@ struct MessageComposerView: View {
                         agentChipView(agent)
                     } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
                         // Show the reply target even if they're not in online agents list
-                        replyTargetChipView(name: targetName, pubkey: targetPubkey)
+                        replyTargetChipView(name: targetName, pubkey: targetPubkey) {
+                            showAgentSelector = true
+                        }
                     } else if selectedProject != nil {
                         agentPromptView
                     }
@@ -382,7 +384,10 @@ struct MessageComposerView: View {
                 // Reactively update availableAgents when centralized state changes
                 // This eliminates the need for manual refresh() calls
                 if let projectId = selectedProject?.id {
-                    availableAgents = newAgents[projectId] ?? []
+                    let agents = newAgents[projectId] ?? []
+                    print("[MessageComposerView] onChange(onlineAgents): projectId='\(projectId)' agents.count=\(agents.count)")
+                    availableAgents = agents
+                    print("[MessageComposerView] Updated availableAgents to \(availableAgents.count) agents")
                 }
             }
         }
@@ -495,29 +500,32 @@ struct MessageComposerView: View {
     }
 
     /// Shows the reply target agent (used when replying and the agent isn't in online agents list)
-    private func replyTargetChipView(name: String, pubkey: String) -> some View {
+    private func replyTargetChipView(name: String, pubkey: String, onChange: @escaping () -> Void) -> some View {
         HStack(spacing: 8) {
-            HStack(spacing: 6) {
-                AgentAvatarView(
-                    agentName: name,
-                    pubkey: pubkey,
-                    size: 24,
-                    showBorder: false
-                )
-                .environmentObject(coreManager)
+            Button(action: onChange) {
+                HStack(spacing: 6) {
+                    AgentAvatarView(
+                        agentName: name,
+                        pubkey: pubkey,
+                        size: 24,
+                        showBorder: false
+                    )
+                    .environmentObject(coreManager)
 
-                Text("@\(name)")
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                    .foregroundStyle(.primary)
+                    Text("@\(name)")
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(Color(.systemBackground))
+                        .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+                )
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(Color(.systemBackground))
-                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-            )
+            .buttonStyle(.plain)
             Spacer()
         }
         .padding(.horizontal, 16)
@@ -675,7 +683,9 @@ struct MessageComposerView: View {
             // Use centralized cached agents instead of fetching on-demand
             // This eliminates multi-second FFI delays
             let agents = coreManager.onlineAgents[projectId] ?? []
+            print("[MessageComposerView] loadAgents() for projectId='\(projectId)': found \(agents.count) agents in cache")
             availableAgents = agents
+            print("[MessageComposerView] Set availableAgents to \(availableAgents.count) agents")
             agentsLoadError = nil
 
             // For replies: always use initialAgentPubkey - we know who we're replying to
@@ -848,38 +858,34 @@ struct ProjectChipView: View {
     let onChange: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            // Project icon
-            RoundedRectangle(cornerRadius: 4)
-                .fill(projectColor.gradient)
-                .frame(width: 24, height: 24)
-                .overlay {
-                    Image(systemName: "folder.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.white)
-                }
+        Button(action: onChange) {
+            HStack(spacing: 6) {
+                // Project icon
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(projectColor.gradient)
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Image(systemName: "folder.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.white)
+                    }
 
-            // Project title
-            Text(project.title)
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-
-            // Change button
-            Button(action: onChange) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Project title
+                Text(project.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+            )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-        )
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
     }
 
     /// Deterministic color using shared utility (stable across app launches)
@@ -896,37 +902,33 @@ struct OnlineAgentChipView: View {
     let onChange: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
-            // Agent avatar - uses actual agent pubkey for profile lookup
-            AgentAvatarView(
-                agentName: agent.name,
-                pubkey: agent.pubkey,
-                size: 24,
-                showBorder: false
-            )
-            .environmentObject(coreManager)
+        Button(action: onChange) {
+            HStack(spacing: 6) {
+                // Agent avatar - uses actual agent pubkey for profile lookup
+                AgentAvatarView(
+                    agentName: agent.name,
+                    pubkey: agent.pubkey,
+                    size: 24,
+                    showBorder: false
+                )
+                .environmentObject(coreManager)
 
-            // Agent name
-            Text("@\(agent.name)")
-                .font(.subheadline)
-                .fontWeight(.medium)
-                .foregroundStyle(.primary)
-
-            // Change button
-            Button(action: onChange) {
-                Image(systemName: "arrow.triangle.2.circlepath")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                // Agent name
+                Text("@\(agent.name)")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.primary)
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(Color(.systemBackground))
+                    .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
+            )
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(
-            Capsule()
-                .fill(Color(.systemBackground))
-                .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
-        )
+        .buttonStyle(.plain)
+        .contentShape(Capsule())
     }
 }
 

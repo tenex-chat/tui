@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// ViewModel for Stats tab with full TUI parity
 /// Manages stats data fetching, chart state, and tab selection
@@ -21,44 +22,85 @@ class StatsViewModel: ObservableObject {
     // MARK: - Dependencies
 
     private let coreManager: TenexCoreManager
+    private var subscriptions = Set<AnyCancellable>()
+    private var refreshTask: Task<Void, Never>?
+    private var currentFetchID: UUID?
 
     // MARK: - Initialization
 
     init(coreManager: TenexCoreManager) {
         self.coreManager = coreManager
+        bindToUpdates()
     }
 
     // MARK: - Public Methods
 
     /// Load stats data from Rust core using SafeTenexCore
-    /// Shows cached data immediately, then refreshes in background
+    /// Shows cached data immediately using the local store
     func loadStats() async {
-        // PHASE 1: Show cached data immediately (no blocking)
-        do {
-            let cachedSnapshot = try await coreManager.safeCore.getStatsSnapshot()
-            snapshot = cachedSnapshot
-        } catch {
-            // Cached data unavailable, continue to refresh
-        }
-
-        // PHASE 2: Refresh from network in background, then update
-        _ = await coreManager.safeCore.refresh()
-
-        // PHASE 3: Get fresh data after refresh
-        do {
-            let freshSnapshot = try await coreManager.safeCore.getStatsSnapshot()
-            snapshot = freshSnapshot
-        } catch {
-            // Keep showing cached data if fresh fetch fails
-            if snapshot == nil {
-                self.error = error
-            }
-        }
+        await reloadSnapshot()
     }
 
     /// Refresh stats data (for pull-to-refresh)
     func refresh() async {
-        await loadStats()
+        await coreManager.syncNow()
+        await reloadSnapshot()
+    }
+
+    private func bindToUpdates() {
+        coreManager.$statsVersion
+            .removeDuplicates()
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                Task { await self.reloadSnapshot() }
+            }
+            .store(in: &subscriptions)
+    }
+
+    private func reloadSnapshot() async {
+        refreshTask?.cancel()
+        let fetchID = UUID()
+        currentFetchID = fetchID
+        await MainActor.run {
+            isLoading = true
+        }
+
+        let task = Task { [weak self] in
+            defer {
+                Task { @MainActor [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
+                    self?.isLoading = false
+                }
+            }
+
+            guard let self = self else { return }
+
+            do {
+                try Task.checkCancellation()
+                let freshSnapshot = try await self.coreManager.safeCore.getStatsSnapshot()
+                await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
+                    self?.snapshot = freshSnapshot
+                    self?.error = nil
+                }
+            } catch is CancellationError {
+                // Task canceled; keep current snapshot
+            } catch {
+                await MainActor.run { [weak self] in
+                    guard self?.currentFetchID == fetchID else { return }
+                    if self?.snapshot == nil {
+                        self?.error = error
+                    }
+                }
+            }
+        }
+        refreshTask = task
+        await task.value
+    }
+
+    deinit {
+        refreshTask?.cancel()
     }
 }
 

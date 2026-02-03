@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import os.log
 import SwiftUI
 
@@ -69,10 +70,13 @@ class DiagnosticsViewModel: ObservableObject {
     /// check this ID and skip state mutations if they don't match
     private var currentFetchID: UUID?
 
+    private var subscriptions = Set<AnyCancellable>()
+
     // MARK: - Initialization
 
     init(coreManager: TenexCoreManager) {
         self.coreManager = coreManager
+        bindToUpdates()
     }
 
     // MARK: - Public Methods
@@ -140,19 +144,10 @@ class DiagnosticsViewModel: ObservableObject {
                     self?.error = nil
                 }
 
-                // Check for cancellation before refresh
+                // Check for cancellation before reload
                 try Task.checkCancellation()
 
-                // PHASE 2: Refresh from network in background
-                let refreshSuccess = await safeCore.refresh()
-                if !refreshSuccess {
-                    Logger.diagnostics.warning("Core refresh returned false, continuing with diagnostics fetch")
-                }
-
-                // Check for cancellation after refresh
-                try Task.checkCancellation()
-
-                // PHASE 3: Get fresh data after refresh
+                // PHASE 2: Get fresh data from local store
                 let freshSnapshot = await safeCore.getDiagnosticsSnapshot(includeDatabaseStats: includeDB)
 
                 // IDENTITY CHECK: Guard UI updates - only apply if this is still the current fetch
@@ -164,7 +159,7 @@ class DiagnosticsViewModel: ObservableObject {
             } catch is CancellationError {
                 // Task was cancelled, keep existing data
             } catch {
-                // Keep showing cached data if refresh fails
+                // Keep showing cached data if fetch fails
                 await MainActor.run { [weak self] in
                     guard self?.currentFetchID == fetchID else { return }
                     if self?.snapshot == nil {
@@ -183,6 +178,7 @@ class DiagnosticsViewModel: ObservableObject {
     /// Refresh diagnostics data (for pull-to-refresh)
     /// Always includes database stats since user is explicitly refreshing
     func refresh() async {
+        await coreManager.syncNow()
         await loadDiagnostics(includeDatabaseStats: true)
     }
 
@@ -198,6 +194,25 @@ class DiagnosticsViewModel: ObservableObject {
 
     deinit {
         currentFetchTask?.cancel()
+    }
+
+    private func bindToUpdates() {
+        coreManager.$diagnosticsVersion
+            .removeDuplicates()
+            .debounce(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                Task { await self.loadDiagnostics() }
+            }
+            .store(in: &subscriptions)
+
+        $selectedTab
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                Task { await self.loadDiagnostics() }
+            }
+            .store(in: &subscriptions)
     }
 }
 

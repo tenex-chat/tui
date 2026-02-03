@@ -78,10 +78,13 @@ class TenexCoreManager: ObservableObject {
     @Published var projects: [ProjectInfo] = []
     @Published var conversations: [ConversationFullInfo] = []
     @Published var inboxItems: [InboxItem] = []
+    @Published var messagesByConversation: [String: [MessageInfo]] = [:]
+    @Published private(set) var statsVersion: UInt64 = 0
+    @Published private(set) var diagnosticsVersion: UInt64 = 0
+    @Published private(set) var liveFeed: [LiveFeedItem] = []
+    @Published private(set) var liveFeedLastReceivedAt: Date?
 
-    /// Tracks which conversation IDs have pending message updates.
-    /// ConversationDetailView observes this to know when to reload.
-    @Published var conversationMessageUpdates: Set<String> = []
+    private let liveFeedMaxItems = 400
 
     /// Project online status - updated reactively via event callbacks.
     /// Key: project ID, Value: true if online.
@@ -132,16 +135,10 @@ class TenexCoreManager: ObservableObject {
         }
     }
 
-    func refresh() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            _ = self?.core.refresh()
-        }
+    /// Trigger a manual sync with relays (optional, user-initiated).
+    func syncNow() async {
+        _ = await safeCore.refresh()
     }
-
-    // MARK: - Constants
-
-    /// Duration to wait before clearing message update signals (100ms)
-    private static let messageUpdateSignalDuration: UInt64 = 100_000_000
 
     // MARK: - Event Callback Registration
 
@@ -162,62 +159,159 @@ class TenexCoreManager: ObservableObject {
         print("[TenexCoreManager] Event callback unregistered")
     }
 
-    /// Manual refresh for pull-to-refresh gesture
+    /// Manual refresh for pull-to-refresh gesture (optional)
     func manualRefresh() async {
-        await fetchData()
+        await syncNow()
     }
 
-    // MARK: - Targeted Refresh Methods
-    // These methods update specific @Published properties instead of triggering full UI refresh.
-    // Called by TenexEventHandler in response to push-based events from Rust core.
+    // MARK: - Push-Based Delta Application
+    // These methods update @Published properties directly from Rust callbacks.
 
-    /// Called when messages change for a specific conversation.
-    /// Updates conversationMessageUpdates to notify ConversationDetailView.
     @MainActor
-    func onMessagesChanged(conversationId: String) async {
-        // Signal that this conversation has new messages
-        conversationMessageUpdates.insert(conversationId)
+    func applyMessageAppended(conversationId: String, message: MessageInfo) {
+        var messages = messagesByConversation[conversationId, default: []]
+        if !messages.contains(where: { $0.id == message.id }) {
+            messages.append(message)
+            messages.sort { $0.createdAt < $1.createdAt }
+            setMessagesCache(messages, for: conversationId)
+        }
+        recordLiveFeedItem(conversationId: conversationId, message: message)
+    }
 
-        // Also refresh the conversations list to update last message preview
-        await refreshConversations()
+    @MainActor
+    func applyConversationUpsert(_ conversation: ConversationFullInfo) {
+        var updated = conversations
+        if let index = updated.firstIndex(where: { $0.id == conversation.id }) {
+            updated[index] = conversation
+        } else {
+            updated.append(conversation)
+        }
+        conversations = sortedConversations(updated)
+        updateActiveAgentsState()
+    }
 
-        // Clear the signal after a short delay (allows observers to react)
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: Self.messageUpdateSignalDuration)
-            conversationMessageUpdates.remove(conversationId)
+    @MainActor
+    func applyProjectUpsert(_ project: ProjectInfo) {
+        var updated = projects
+        if let index = updated.firstIndex(where: { $0.id == project.id }) {
+            updated[index] = project
+        } else {
+            updated.insert(project, at: 0)
+        }
+        projects = updated
+    }
+
+    @MainActor
+    func applyInboxUpsert(_ item: InboxItem) {
+        var updated = inboxItems
+        if let index = updated.firstIndex(where: { $0.id == item.id }) {
+            updated[index] = item
+        } else {
+            updated.append(item)
+        }
+        updated.sort { $0.createdAt > $1.createdAt }
+        inboxItems = updated
+    }
+
+    @MainActor
+    func applyProjectStatusChanged(projectId: String, projectATag _: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]) {
+        let previousStatus = projectOnlineStatus[projectId]
+        let previousAgents = self.onlineAgents[projectId]
+        setProjectOnlineStatus(isOnline, for: projectId)
+        setOnlineAgentsCache(onlineAgents, for: projectId)
+        if previousStatus != isOnline || previousAgents != onlineAgents {
+            signalDiagnosticsUpdate()
         }
     }
 
-    /// Called when project status changes (agent online/offline).
-    /// Refreshes project list. projectOnlineStatus is updated by TenexEventHandler.
     @MainActor
-    func onProjectStatusChanged() async {
-        do {
-            let approved = try await safeCore.approveAllPendingBackends()
-            if approved > 0 {
-                print("[TenexCoreManager] Auto-approved \(approved) backend(s) after status event")
-                _ = await safeCore.refresh()
-                refreshProjectOnlineStatuses()
+    func applyActiveConversationsChanged(projectId _: String, projectATag: String, activeConversationIds: [String]) {
+        var updated = conversations
+        var didChange = false
+        for index in updated.indices {
+            if updated[index].projectATag == projectATag {
+                let shouldBeActive = activeConversationIds.contains(updated[index].id)
+                if updated[index].isActive != shouldBeActive {
+                    updated[index].isActive = shouldBeActive
+                    didChange = true
+                }
             }
-        } catch {
-            print("[TenexCoreManager] Failed to approve pending backends after status event: \(error)")
         }
-        await refreshProjects()
-        // Also refresh conversations since 24133 events can change is_active status
-        await refreshConversations()
+        if didChange {
+            conversations = sortedConversations(updated)
+            updateActiveAgentsState()
+        }
     }
 
-    /// Called for general data changes.
-    /// Refreshes all data stores but via @Published properties, not objectWillChange.
     @MainActor
-    func onGeneralDataChanged() async {
-        await fetchData()
+    func handlePendingBackendApproval(backendPubkey: String, projectATag: String) {
+        Task {
+            do {
+                try await safeCore.approveBackend(pubkey: backendPubkey)
+            } catch {
+                print("[TenexCoreManager] Failed to approve backend '\(backendPubkey)': \(error)")
+                return
+            }
+
+            let projectId = Self.projectId(fromATag: projectATag)
+            guard !projectId.isEmpty else { return }
+
+            let isOnline = await safeCore.isProjectOnline(projectId: projectId)
+            let agents = (try? await safeCore.getOnlineAgents(projectId: projectId)) ?? []
+            await MainActor.run {
+                self.applyProjectStatusChanged(projectId: projectId, projectATag: projectATag, isOnline: isOnline, onlineAgents: agents)
+            }
+        }
+    }
+
+    @MainActor
+    func signalStatsUpdate() {
+        bumpStatsVersion()
+    }
+
+    @MainActor
+    func signalDiagnosticsUpdate() {
+        bumpDiagnosticsVersion()
+    }
+
+    @MainActor
+    func recordLiveFeedItem(conversationId: String, message: MessageInfo) {
+        if liveFeed.contains(where: { $0.id == message.id }) {
+            return
+        }
+
+        liveFeed.insert(LiveFeedItem(conversationId: conversationId, message: message), at: 0)
+        if liveFeed.count > liveFeedMaxItems {
+            liveFeed.removeLast(liveFeed.count - liveFeedMaxItems)
+        }
+        liveFeedLastReceivedAt = liveFeed.first?.receivedAt
+    }
+
+    @MainActor
+    func clearLiveFeed() {
+        liveFeed.removeAll()
+        liveFeedLastReceivedAt = nil
     }
 
     /// Update hasActiveAgents based on current conversations
     @MainActor
     private func updateActiveAgentsState() {
         hasActiveAgents = conversations.contains { $0.isActive }
+    }
+
+    private func sortedConversations(_ items: [ConversationFullInfo]) -> [ConversationFullInfo] {
+        var updated = items
+        updated.sort { lhs, rhs in
+            switch (lhs.isActive, rhs.isActive) {
+            case (true, false):
+                return true
+            case (false, true):
+                return false
+            default:
+                return lhs.effectiveLastActivity > rhs.effectiveLastActivity
+            }
+        }
+        return updated
     }
 
     /// Fetch and cache online agents for a specific project.
@@ -227,82 +321,86 @@ class TenexCoreManager: ObservableObject {
     func fetchAndCacheAgents(for projectId: String) async {
         do {
             let agents = try await safeCore.getOnlineAgents(projectId: projectId)
-            onlineAgents[projectId] = agents
+            print("[TenexCoreManager] Fetched \(agents.count) agents for project '\(projectId)'")
+            setOnlineAgentsCache(agents, for: projectId)
+            print("[TenexCoreManager] Cached agents, onlineAgents['\(projectId)'] now has \(onlineAgents[projectId]?.count ?? 0) agents")
         } catch {
             print("[TenexCoreManager] Failed to fetch agents for project '\(projectId)': \(error)")
-            onlineAgents[projectId] = []
+            setOnlineAgentsCache([], for: projectId)
         }
     }
 
-    /// Refresh projectOnlineStatus and onlineAgents for all known projects.
-    /// Must be called from main thread.
     @MainActor
-    func refreshProjectOnlineStatuses() {
-        let projects = self.projects
-        var newStatus: [String: Bool] = [:]
-
-        for project in projects {
-            // Use the synchronous core API directly (in-memory lookup in Rust layer)
-            let isOnline = core.isProjectOnline(projectId: project.id)
-            newStatus[project.id] = isOnline
-
-            // Proactively fetch and cache online agents for online projects
-            if isOnline {
-                Task {
-                    await self.fetchAndCacheAgents(for: project.id)
-                }
-            } else {
-                // Clear agents for offline projects immediately
-                onlineAgents[project.id] = []
-            }
+    func ensureMessagesLoaded(conversationId: String) async {
+        if messagesByConversation[conversationId] != nil {
+            return
         }
-
-        projectOnlineStatus = newStatus
+        let fetched = await safeCore.getMessages(conversationId: conversationId)
+        mergeMessagesCache(fetched, for: conversationId)
     }
 
-    /// Refresh only the conversations list
     @MainActor
-    private func refreshConversations() async {
-        do {
-            let filter = ConversationFilter(
-                projectIds: [],
-                showArchived: true,
-                hideScheduled: true,
-                timeFilter: .all
-            )
-            conversations = try await safeCore.getAllConversations(filter: filter)
-            updateActiveAgentsState()
-        } catch {
-            print("[TenexCoreManager] Conversations refresh failed: \(error)")
+    private func setMessagesCache(_ messages: [MessageInfo], for conversationId: String) {
+        var updated = messagesByConversation
+        updated[conversationId] = messages
+        messagesByConversation = updated
+    }
+
+    @MainActor
+    private func mergeMessagesCache(_ messages: [MessageInfo], for conversationId: String) {
+        var combined = messagesByConversation[conversationId] ?? []
+        if combined.isEmpty {
+            combined = messages
+        } else {
+            let existingIds = Set(combined.map { $0.id })
+            combined.append(contentsOf: messages.filter { !existingIds.contains($0.id) })
         }
+        combined.sort { $0.createdAt < $1.createdAt }
+        setMessagesCache(combined, for: conversationId)
     }
 
-    /// Refresh only the projects list
     @MainActor
-    private func refreshProjects() async {
-        projects = await safeCore.getProjects()
+    private func setOnlineAgentsCache(_ agents: [OnlineAgentInfo], for projectId: String) {
+        var updated = onlineAgents
+        updated[projectId] = agents
+        onlineAgents = updated
     }
 
-    /// Refresh only the inbox
     @MainActor
-    private func refreshInbox() async {
-        inboxItems = await safeCore.getInbox()
+    private func setProjectOnlineStatus(_ isOnline: Bool, for projectId: String) {
+        var updated = projectOnlineStatus
+        updated[projectId] = isOnline
+        projectOnlineStatus = updated
     }
 
-    /// Fetch all data from the core. Called on login and for pull-to-refresh.
+    @MainActor
+    private func bumpStatsVersion() {
+        statsVersion &+= 1
+    }
+
+    @MainActor
+    private func bumpDiagnosticsVersion() {
+        diagnosticsVersion &+= 1
+    }
+
+    static func projectId(fromATag aTag: String) -> String {
+        let parts = aTag.split(separator: ":")
+        guard parts.count >= 3 else { return "" }
+        return parts.dropFirst(2).joined(separator: ":")
+    }
+
+    /// Load initial data from the core (local cache).
     /// Real-time updates come via push-based event callbacks, not polling.
     @MainActor
     func fetchData() async {
-        _ = await safeCore.refresh()
-
         // Auto-approve any pending backends (iOS doesn't have approval UI yet)
         // This allows kind:24010 status events to be processed, enabling online agents
         do {
             let approved = try await safeCore.approveAllPendingBackends()
             if approved > 0 {
                 print("[TenexCoreManager] Auto-approved \(approved) backend(s)")
-                // Refresh again to process the now-approved status events
-                _ = await safeCore.refresh()
+            } else {
+                print("[TenexCoreManager] No pending backends to approve")
             }
         } catch {
             print("[TenexCoreManager] Failed to approve pending backends: \(error)")
@@ -324,25 +422,27 @@ class TenexCoreManager: ObservableObject {
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
 
             projects = p
-            conversations = c
+            conversations = sortedConversations(c)
             inboxItems = i
 
             // Initialize project online status and online agents reactively
             var initialStatus: [String: Bool] = [:]
             for project in p {
-                let isOnline = core.isProjectOnline(projectId: project.id)
+                let isOnline = await safeCore.isProjectOnline(projectId: project.id)
                 initialStatus[project.id] = isOnline
 
                 // Proactively fetch and cache agents for online projects on login
                 if isOnline {
                     await fetchAndCacheAgents(for: project.id)
                 } else {
-                    onlineAgents[project.id] = []
+                    setOnlineAgentsCache([], for: project.id)
                 }
             }
             projectOnlineStatus = initialStatus
 
             updateActiveAgentsState()
+            signalStatsUpdate()
+            signalDiagnosticsUpdate()
         } catch {
             print("[TenexCoreManager] Fetch failed: \(error)")
             // Don't crash - just log and continue with stale data
@@ -525,6 +625,7 @@ struct TenexMVPApp: App {
             .onChange(of: isLoggedIn) { _, loggedIn in
                 // Register/unregister event callback based on login state
                 if loggedIn {
+                    coreManager.clearLiveFeed()
                     coreManager.registerEventCallback()
                     // Initial data fetch on login
                     Task { @MainActor in
@@ -532,6 +633,7 @@ struct TenexMVPApp: App {
                     }
                 } else {
                     coreManager.unregisterEventCallback()
+                    coreManager.clearLiveFeed()
                 }
             }
         }
@@ -593,8 +695,10 @@ struct MainTabView: View {
                 case 0:
                     ConversationsTabView()
                 case 1:
-                    ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
+                    FeedView()
                 case 2:
+                    ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
+                case 3:
                     InboxView()
                 default:
                     ConversationsTabView()
@@ -612,12 +716,17 @@ struct MainTabView: View {
                     Button {
                         selectedTab = 1
                     } label: {
-                        Image(systemName: selectedTab == 1 ? "folder.fill" : "folder")
+                        Image(systemName: "dot.radiowaves.left.and.right")
                     }
                     Button {
                         selectedTab = 2
                     } label: {
-                        Image(systemName: selectedTab == 2 ? "tray.fill" : "tray")
+                        Image(systemName: selectedTab == 2 ? "folder.fill" : "folder")
+                    }
+                    Button {
+                        selectedTab = 3
+                    } label: {
+                        Image(systemName: selectedTab == 3 ? "tray.fill" : "tray")
                     }
                 }
 

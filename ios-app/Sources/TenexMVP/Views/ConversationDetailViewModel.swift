@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // MARK: - Conversation Detail ViewModel
 
@@ -80,16 +81,7 @@ final class ConversationDetailViewModel: ObservableObject {
     private let conversation: ConversationFullInfo
     private weak var coreManager: TenexCoreManager?
 
-    /// Timer for periodic metadata refresh
-    private var metadataRefreshTask: Task<Void, Never>?
-
-    /// Observer for message change notifications (push-based updates from Rust)
-    private var messagesChangedObserver: NSObjectProtocol?
-
-    /// Observer for general data change notifications.
-    /// Note: Intentionally unused - we only subscribe to conversation-specific notifications
-    /// to prevent double-loading. Kept for potential future use.
-    private var dataChangedObserver: NSObjectProtocol?
+    private var subscriptions = Set<AnyCancellable>()
 
     // MARK: - Initialization
 
@@ -101,98 +93,57 @@ final class ConversationDetailViewModel: ObservableObject {
         self.currentIsActive = conversation.isActive
         self.currentActivity = conversation.currentActivity
         self.currentEffectiveLastActivity = conversation.effectiveLastActivity
+
+        // Initialize author info immediately from conversation data
+        // This allows the header to render instantly without waiting for loadData()
+        self.authorInfo = AgentAvatarInfo(
+            name: conversation.author,
+            pubkey: conversation.authorPubkey
+        )
     }
 
     deinit {
-        metadataRefreshTask?.cancel()
-        // Remove notification observers
-        if let observer = messagesChangedObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
-        if let observer = dataChangedObserver {
-            NotificationCenter.default.removeObserver(observer)
-        }
+        subscriptions.removeAll()
     }
 
     /// Sets the core manager after initialization (called from view's onAppear/task)
     func setCoreManager(_ coreManager: TenexCoreManager) {
         guard self.coreManager == nil else { return }
         self.coreManager = coreManager
-        startMetadataRefresh()
-        subscribeToNotifications()
+        bindToCoreManager()
     }
-
-    /// Subscribe to push-based notifications from Rust core.
-    ///
-    /// **Performance Note:** We ONLY subscribe to `.tenexMessagesChanged` for this specific
-    /// conversation ID. We do NOT subscribe to `.tenexDataChanged` because:
-    /// 1. It causes duplicate reloads (both notifications fire for the same event)
-    /// 2. General data changes rarely affect messages in this conversation
-    /// 3. If a user wants to see latest changes, they can pull-to-refresh
-    private func subscribeToNotifications() {
-        // Subscribe to message change notifications for this specific conversation only
-        messagesChangedObserver = NotificationCenter.default.addObserver(
-            forName: .tenexMessagesChanged,
-            object: nil,
-            queue: .main
-        ) { [weak self] notification in
-            guard let self = self else { return }
-            // Only reload if this notification is for our conversation
-            if let conversationId = notification.object as? String,
-               conversationId == self.conversation.id {
-                Task { await self.loadData() }
-            }
-        }
-
-        // Note: We intentionally do NOT subscribe to .tenexDataChanged here.
-        // General data changes are handled by the conversations list, not individual detail views.
-        // This prevents double-loading and improves performance.
-    }
-
-    /// Starts periodic metadata refresh for active conversations
-    private func startMetadataRefresh() {
-        metadataRefreshTask?.cancel()
-        metadataRefreshTask = Task { [weak self] in
-            while !Task.isCancelled {
-                // Refresh every 30 seconds
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                guard !Task.isCancelled else { break }
-                await self?.refreshMetadata()
-            }
-        }
-    }
-
-    /// Refreshes conversation metadata (status, isActive, activity)
-    private func refreshMetadata() async {
+    private func bindToCoreManager() {
         guard let coreManager = coreManager else { return }
 
-        // Extract d-tag from a-tag format "kind:pubkey:d-tag" for filter
-        let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+        coreManager.$messagesByConversation
+            .receive(on: RunLoop.main)
+            .sink { [weak self] cache in
+                guard let self = self else { return }
+                if let updated = cache[self.conversation.id] {
+                    self.applyMessages(updated)
+                }
+                self.applyDescendantMessages(from: cache)
+            }
+            .store(in: &subscriptions)
 
-        // Fetch fresh conversation data
-        let filter = ConversationFilter(
-            projectIds: [projectId],
-            showArchived: false,
-            hideScheduled: true,
-            timeFilter: .all
-        )
+        coreManager.$conversations
+            .receive(on: RunLoop.main)
+            .sink { [weak self] conversations in
+                self?.applyConversationUpdates(conversations)
+            }
+            .store(in: &subscriptions)
 
-        let freshConversation: ConversationFullInfo? = await {
-            let allConversations = (try? await coreManager.safeCore.getAllConversations(filter: filter)) ?? []
-            return allConversations.first { $0.id == conversation.id }
-        }()
-
-        if let fresh = freshConversation {
-            self.currentStatus = fresh.status ?? "unknown"
-            self.currentIsActive = fresh.isActive
-            self.currentActivity = fresh.currentActivity
-            self.currentEffectiveLastActivity = fresh.effectiveLastActivity
+        applyConversationUpdates(coreManager.conversations)
+        if let cached = coreManager.messagesByConversation[conversation.id] {
+            applyMessages(cached)
         }
     }
 
     // MARK: - Data Loading (Async/Await)
 
-    /// Loads conversation data asynchronously with proper cancellation support
+    /// Loads conversation data asynchronously with proper cancellation support.
+    /// IMPORTANT: Prioritizes showing the latest reply quickly by loading messages first,
+    /// then loading children/descendants in the background.
     func loadData() async {
         guard !isLoading, let coreManager = coreManager else { return }
 
@@ -200,28 +151,35 @@ final class ConversationDetailViewModel: ObservableObject {
         error = nil
 
         do {
-            // Perform work off the main actor for better performance
-            let (fetchedMessages, directChildren, descendants, descendantMsgs) = try await loadDataFromCore(
+            // PHASE 1: Load messages first to show latest reply immediately
+            await coreManager.ensureMessagesLoaded(conversationId: conversation.id)
+            let fetchedMessages = coreManager.messagesByConversation[conversation.id] ?? []
+            try Task.checkCancellation()
+
+            // Update messages and compute latest reply immediately
+            applyMessages(fetchedMessages)
+
+            // Start runtime loading (non-blocking)
+            Task {
+                formattedRuntime = await formatEffectiveRuntime()
+            }
+
+            // PHASE 2: Load children/descendants for delegations and aggregated stats
+            let (directChildren, descendants, descendantMsgs) = try await loadChildrenFromCore(
                 coreManager: coreManager,
-                conversationId: conversation.id,
-                projectATag: conversation.projectATag
+                conversationId: conversation.id
             )
 
-            // Update state on main actor
-            self.messages = fetchedMessages
+            // Update state
             self.childConversations = directChildren
             self.allDescendants = descendants
             self.descendantMessages = descendantMsgs
 
-            // Recompute cached derived state
+            // Recompute remaining derived state (delegations, participants, aggregated todos)
             await recomputeDerivedState()
-
-            // Update runtime
-            formattedRuntime = await formatEffectiveRuntime()
 
             isLoading = false
         } catch is CancellationError {
-            // Task was cancelled, don't update state
             isLoading = false
         } catch {
             self.error = error
@@ -229,30 +187,109 @@ final class ConversationDetailViewModel: ObservableObject {
         }
     }
 
-    /// Performs the actual data loading using structured concurrency for proper cancellation
-    /// Performance optimization: Uses TaskGroup for concurrent descendant message fetching
-    private func loadDataFromCore(coreManager: TenexCoreManager, conversationId: String, projectATag: String) async throws -> ([MessageInfo], [ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
+    /// Loads children and descendants - separated from message loading for faster initial render
+    private func loadChildrenFromCore(coreManager: TenexCoreManager, conversationId: String) async throws -> ([ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) {
         try Task.checkCancellation()
 
-        // Fetch messages using safeCore
-        async let messagesTask: [MessageInfo] = coreManager.safeCore.getMessages(conversationId: conversationId)
+        // Get all descendants
+        let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
+        let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
 
-        // Fetch descendants using safeCore
-        async let childrenTask: ([ConversationFullInfo], [ConversationFullInfo], [String: [MessageInfo]]) = {
-            // Get all descendants (for participants extraction)
-            let descendantIds = await coreManager.safeCore.getDescendantConversationIds(conversationId: conversationId)
-            let allDescendants = await coreManager.safeCore.getConversationsByIds(conversationIds: descendantIds)
+        // Get direct children from descendants
+        let directChildren = allDescendants.filter { $0.parentId == conversationId }
 
-            // Get direct children from descendants (for delegations display)
-            let directChildren = allDescendants.filter { $0.parentId == conversationId }
+        // Fetch messages for all descendants CONCURRENTLY
+        let descendantMsgs = await withTaskGroup(
+            of: (String, [MessageInfo]).self,
+            returning: [String: [MessageInfo]].self
+        ) { group in
+            for descendant in allDescendants {
+                group.addTask {
+                    let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
+                    return (descendant.id, msgs)
+                }
+            }
 
-            // PERFORMANCE: Fetch messages for all descendants CONCURRENTLY using TaskGroup
-            // This reduces O(n) sequential FFI calls to parallel execution
-            let descendantMsgs = await withTaskGroup(
+            var results: [String: [MessageInfo]] = [:]
+            for await (id, msgs) in group {
+                results[id] = msgs
+            }
+            return results
+        }
+
+        return (directChildren, allDescendants, descendantMsgs)
+    }
+
+    // MARK: - Reactive Updates
+
+    private func applyMessages(_ fetchedMessages: [MessageInfo]) {
+        messages = fetchedMessages
+        latestReply = fetchedMessages.last { !$0.isToolCall && !$0.content.isEmpty }
+        todoState = TodoParser.parse(messages: fetchedMessages)
+        Task { await recomputeDerivedState() }
+    }
+
+    private func applyConversationUpdates(_ conversations: [ConversationFullInfo]) {
+        if let updated = conversations.first(where: { $0.id == conversation.id }) {
+            currentStatus = updated.status ?? "unknown"
+            currentIsActive = updated.isActive
+            currentActivity = updated.currentActivity
+            currentEffectiveLastActivity = updated.effectiveLastActivity
+        }
+
+        refreshDescendants(from: conversations)
+    }
+
+    private func refreshDescendants(from conversations: [ConversationFullInfo]) {
+        var childrenMap: [String: [ConversationFullInfo]] = [:]
+        for conv in conversations {
+            if let parentId = conv.parentId {
+                childrenMap[parentId, default: []].append(conv)
+            }
+        }
+
+        childrenByParentId = childrenMap.mapValues { $0.map { $0.id } }
+
+        let descendantIds = collectDescendantIds(startId: conversation.id, childrenMap: childrenMap)
+        let descendants = conversations.filter { descendantIds.contains($0.id) }
+        allDescendants = descendants
+        childConversations = descendants
+            .filter { $0.parentId == conversation.id }
+            .sorted { $0.effectiveLastActivity > $1.effectiveLastActivity }
+
+        loadMissingDescendantMessages(from: descendants)
+    }
+
+    private func collectDescendantIds(startId: String, childrenMap: [String: [ConversationFullInfo]]) -> [String] {
+        var result: [String] = []
+        var stack: [String] = [startId]
+        var visited = Set<String>()
+
+        while let current = stack.popLast() {
+            guard let children = childrenMap[current] else { continue }
+            for child in children {
+                if visited.insert(child.id).inserted {
+                    result.append(child.id)
+                    stack.append(child.id)
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func loadMissingDescendantMessages(from descendants: [ConversationFullInfo]) {
+        guard let coreManager = coreManager else { return }
+
+        let missing = descendants.filter { descendantMessages[$0.id] == nil }
+        guard !missing.isEmpty else { return }
+
+        Task {
+            let fetched = await withTaskGroup(
                 of: (String, [MessageInfo]).self,
                 returning: [String: [MessageInfo]].self
             ) { group in
-                for descendant in allDescendants {
+                for descendant in missing {
                     group.addTask {
                         let msgs = await coreManager.safeCore.getMessages(conversationId: descendant.id)
                         return (descendant.id, msgs)
@@ -266,15 +303,28 @@ final class ConversationDetailViewModel: ObservableObject {
                 return results
             }
 
-            return (directChildren, allDescendants, descendantMsgs)
-        }()
+            await MainActor.run { [weak self] in
+                guard let self = self else { return }
+                for (id, msgs) in fetched {
+                    self.descendantMessages[id] = msgs
+                }
+                Task { await self.recomputeDerivedState() }
+            }
+        }
+    }
 
-        // Await both tasks - cancellation will propagate to both
-        let fetchedMessages = await messagesTask
-        try Task.checkCancellation()
-        let (directChildren, allDescendants, descendantMsgs) = await childrenTask
-
-        return (fetchedMessages, directChildren, allDescendants, descendantMsgs)
+    private func applyDescendantMessages(from cache: [String: [MessageInfo]]) {
+        guard !allDescendants.isEmpty else { return }
+        var updated = false
+        for descendant in allDescendants {
+            if let msgs = cache[descendant.id] {
+                descendantMessages[descendant.id] = msgs
+                updated = true
+            }
+        }
+        if updated {
+            Task { await recomputeDerivedState() }
+        }
     }
 
     // MARK: - Derived State Computation
@@ -307,7 +357,7 @@ final class ConversationDetailViewModel: ObservableObject {
 
         // Extract p-tagged recipient info (first p-tag from conversation)
         if let pTaggedPubkey = conversation.pTags.first, let coreManager = coreManager {
-            let name = coreManager.core.getProfileName(pubkey: pTaggedPubkey)
+            let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
             pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
         } else {
             pTaggedRecipientInfo = nil
