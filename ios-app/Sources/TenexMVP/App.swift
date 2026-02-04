@@ -705,6 +705,12 @@ struct MainTabView: View {
                 }
             }
             .environmentObject(coreManager)
+            .overlay(alignment: .topTrailing) {
+                // Audio player indicator overlay - shows when audio is playing
+                AudioPlayingIndicator()
+                    .padding(.top, 50)
+                    .padding(.trailing, 8)
+            }
             .toolbar {
                 // Left glass segment: Tab buttons
                 ToolbarItemGroup(placement: .bottomBar) {

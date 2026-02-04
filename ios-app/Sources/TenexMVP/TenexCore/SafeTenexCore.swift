@@ -507,6 +507,133 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    // MARK: - AI Audio Settings
+
+    /// Get AI audio settings (API keys never exposed - only configuration status)
+    func getAiAudioSettings() throws -> AiAudioSettings {
+        try profiler.measureFFI("getAiAudioSettings") {
+            do {
+                let settings = try core.getAiAudioSettings()
+                return AiAudioSettings(
+                    elevenlabsApiKeyConfigured: settings.elevenlabsApiKeyConfigured,
+                    openrouterApiKeyConfigured: settings.openrouterApiKeyConfigured,
+                    selectedVoiceIds: settings.selectedVoiceIds,
+                    openrouterModel: settings.openrouterModel,
+                    audioPrompt: settings.audioPrompt,
+                    enabled: settings.enabled
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set ElevenLabs API key (stored in OS secure storage)
+    func setElevenLabsApiKey(key: String?) throws {
+        try profiler.measureFFI("setElevenLabsApiKey") {
+            do {
+                try core.setElevenLabsApiKey(key: key)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set OpenRouter API key (stored in OS secure storage)
+    func setOpenRouterApiKey(key: String?) throws {
+        try profiler.measureFFI("setOpenRouterApiKey") {
+            do {
+                try core.setOpenRouterApiKey(key: key)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set whether audio notifications are enabled
+    func setAiAudioEnabled(enabled: Bool) throws {
+        try profiler.measureFFI("setAiAudioEnabled") {
+            do {
+                try core.setAiAudioEnabled(enabled: enabled)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set audio prompt template
+    func setAiAudioPrompt(prompt: String) throws {
+        try profiler.measureFFI("setAiAudioPrompt") {
+            do {
+                try core.setAiAudioPrompt(prompt: prompt)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set OpenRouter model to use for text massage
+    func setOpenRouterModel(model: String?) throws {
+        try profiler.measureFFI("setOpenRouterModel") {
+            do {
+                try core.setOpenRouterModel(model: model)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set selected voice IDs whitelist
+    func setSelectedVoiceIds(voiceIds: [String]) throws {
+        try profiler.measureFFI("setSelectedVoiceIds") {
+            do {
+                try core.setSelectedVoiceIds(voiceIds: voiceIds)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch available voices from ElevenLabs
+    /// Note: This is a blocking call that makes a network request
+    func fetchElevenLabsVoices() throws -> [VoiceInfo] {
+        try profiler.measureFFI("fetchElevenLabsVoices") {
+            do {
+                let voices = try core.fetchElevenLabsVoices()
+                return voices.map { voice in
+                    VoiceInfo(
+                        voiceId: voice.voiceId,
+                        name: voice.name,
+                        category: voice.category,
+                        description: voice.description
+                    )
+                }
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch available models from OpenRouter
+    /// Note: This is a blocking call that makes a network request
+    func fetchOpenRouterModels() throws -> [ModelInfo] {
+        try profiler.measureFFI("fetchOpenRouterModels") {
+            do {
+                let models = try core.fetchOpenRouterModels()
+                return models.map { model in
+                    ModelInfo(
+                        modelId: model.id,
+                        name: model.name ?? model.id,
+                        description: model.description,
+                        contextLength: model.contextLength
+                    )
+                }
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Misc
 
     /// Get version string.

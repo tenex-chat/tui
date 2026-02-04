@@ -143,9 +143,38 @@ fn render_general_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsS
     f.render_widget(desc, desc_area);
 }
 
-/// Render AI tab content - simplified to just API key settings
+/// Render AI tab content - all 6 AI audio settings
 fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     let mut y_offset = area.y;
+
+    // Section header: Audio Notifications
+    let header_area = Rect::new(area.x, y_offset, area.width, 1);
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        "Audio Notifications",
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC),
+    )]));
+    f.render_widget(header, header_area);
+    y_offset += 2;
+
+    // Note: AI audio settings are fetched from secure storage and preferences
+    // For now, we show placeholder values. Future: fetch when modal opens and cache in state
+
+    // 1. Enabled toggle
+    let is_enabled_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::Enabled);
+    render_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Enabled:",
+        "(not yet implemented)",
+        is_enabled_selected,
+        false,
+    );
+    y_offset += 3;
 
     // Section header: API Keys
     let header_area = Rect::new(area.x, y_offset, area.width, 1);
@@ -164,7 +193,7 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     let openrouter_key_exists =
         tenex_core::SecureStorage::exists(tenex_core::SecureKey::OpenRouterApiKey);
 
-    // ElevenLabs API Key
+    // 2. ElevenLabs API Key
     let is_elevenlabs_selected = state.current_tab == SettingsTab::AI
         && state.selected_ai_setting() == Some(AiSetting::ElevenLabsApiKey);
     render_api_key_row(
@@ -181,7 +210,7 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     );
     y_offset += 3;
 
-    // OpenRouter API Key
+    // 3. OpenRouter API Key
     let is_openrouter_selected = state.current_tab == SettingsTab::AI
         && state.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey);
     render_api_key_row(
@@ -196,6 +225,105 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         state.editing_openrouter_key(),
         openrouter_key_exists,
     );
+    y_offset += 3;
+
+    // Section header: Voice & Model Configuration
+    let header_area = Rect::new(area.x, y_offset, area.width, 1);
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        "Voice & Model Configuration",
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC),
+    )]));
+    f.render_widget(header, header_area);
+    y_offset += 2;
+
+    // 4. Selected Voices
+    let is_voices_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::SelectedVoices);
+    render_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Selected Voices:",
+        "(not yet implemented)",
+        is_voices_selected,
+        false,
+    );
+    y_offset += 3;
+
+    // 5. OpenRouter Model
+    let is_model_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::OpenRouterModel);
+    render_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "LLM Model:",
+        "(not yet implemented)",
+        is_model_selected,
+        false,
+    );
+    y_offset += 3;
+
+    // 6. Audio Prompt
+    let is_prompt_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::AudioPrompt);
+    render_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Prompt Template:",
+        "(not yet implemented)",
+        is_prompt_selected,
+        false,
+    );
+}
+
+/// Helper to render a simple read-only setting row
+fn render_setting_row(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    value: &str,
+    is_selected: bool,
+    _is_editing: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    // Left border indicator
+    let border_char = if is_selected { "▌" } else { "│" };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
+
+    // Label
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    spans.push(Span::styled(format!(" {}", label), label_style));
+
+    // Value
+    spans.push(Span::styled(
+        format!(" {}", value),
+        Style::default().fg(theme::ACCENT_SPECIAL),
+    ));
+
+    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
+    f.render_widget(row, row_area);
 }
 
 /// Helper to render an API key row with masked display (always masked, even during edit)

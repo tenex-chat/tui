@@ -48,6 +48,14 @@ final class KeychainService {
     private static let nsecServiceKey = "com.tenex.mvp.nsec"
     private static let nsecAccountKey = "tenex-user-nsec"
 
+    /// Unique identifier for ElevenLabs API key
+    private static let elevenLabsServiceKey = "com.tenex.mvp.elevenlabs"
+    private static let elevenLabsAccountKey = "tenex-elevenlabs-api-key"
+
+    /// Unique identifier for OpenRouter API key
+    private static let openRouterServiceKey = "com.tenex.mvp.openrouter"
+    private static let openRouterAccountKey = "tenex-openrouter-api-key"
+
     // MARK: - Singleton
 
     static let shared = KeychainService()
@@ -172,6 +180,236 @@ final class KeychainService {
         }
     }
 
+    // MARK: - ElevenLabs API Key Methods
+
+    /// Saves the ElevenLabs API key to Keychain
+    /// - Parameter key: The API key string to save
+    /// - Returns: Result indicating success or specific failure
+    /// - Precondition: Must be called from a background thread
+    func saveElevenLabsApiKey(_ key: String) -> KeychainResult<Void> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        guard let keyData = key.data(using: .utf8) else {
+            return .failure(.encodingFailed)
+        }
+
+        let updateQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.elevenLabsServiceKey,
+            kSecAttrAccount as String: Self.elevenLabsAccountKey
+        ]
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: keyData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+
+        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: Self.elevenLabsServiceKey,
+                kSecAttrAccount as String: Self.elevenLabsAccountKey,
+                kSecValueData as String: keyData,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
+        return mapOSStatus(status)
+    }
+
+    /// Retrieves the stored ElevenLabs API key from Keychain
+    /// - Returns: Result containing the API key or specific failure
+    /// - Precondition: Must be called from a background thread
+    func loadElevenLabsApiKey() -> KeychainResult<String> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.elevenLabsServiceKey,
+            kSecAttrAccount as String: Self.elevenLabsAccountKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess else {
+            return .failure(mapOSStatusToError(status))
+        }
+
+        guard let data = result as? Data else {
+            return .failure(.unexpectedData)
+        }
+
+        guard let key = String(data: data, encoding: .utf8) else {
+            return .failure(.decodingFailed)
+        }
+
+        return .success(key)
+    }
+
+    /// Deletes the stored ElevenLabs API key from Keychain
+    /// - Returns: Result indicating success or specific failure
+    /// - Precondition: Must be called from a background thread
+    func deleteElevenLabsApiKey() -> KeychainResult<Void> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.elevenLabsServiceKey,
+            kSecAttrAccount as String: Self.elevenLabsAccountKey
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+
+        if status == errSecItemNotFound {
+            return .success(())
+        }
+
+        return mapOSStatus(status)
+    }
+
+    /// Checks if ElevenLabs API key exists in Keychain without retrieving it
+    /// - Returns: Result indicating whether credential exists
+    /// - Precondition: Must be called from a background thread
+    func hasElevenLabsApiKey() -> KeychainResult<Bool> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.elevenLabsServiceKey,
+            kSecAttrAccount as String: Self.elevenLabsAccountKey,
+            kSecReturnData as String: false
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+
+        switch status {
+        case errSecSuccess:
+            return .success(true)
+        case errSecItemNotFound:
+            return .success(false)
+        default:
+            return .failure(mapOSStatusToError(status))
+        }
+    }
+
+    // MARK: - OpenRouter API Key Methods
+
+    /// Saves the OpenRouter API key to Keychain
+    /// - Parameter key: The API key string to save
+    /// - Returns: Result indicating success or specific failure
+    /// - Precondition: Must be called from a background thread
+    func saveOpenRouterApiKey(_ key: String) -> KeychainResult<Void> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        guard let keyData = key.data(using: .utf8) else {
+            return .failure(.encodingFailed)
+        }
+
+        let updateQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.openRouterServiceKey,
+            kSecAttrAccount as String: Self.openRouterAccountKey
+        ]
+
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: keyData,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        ]
+
+        var status = SecItemUpdate(updateQuery as CFDictionary, updateAttributes as CFDictionary)
+
+        if status == errSecItemNotFound {
+            let addQuery: [String: Any] = [
+                kSecClass as String: kSecClassGenericPassword,
+                kSecAttrService as String: Self.openRouterServiceKey,
+                kSecAttrAccount as String: Self.openRouterAccountKey,
+                kSecValueData as String: keyData,
+                kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            ]
+
+            status = SecItemAdd(addQuery as CFDictionary, nil)
+        }
+
+        return mapOSStatus(status)
+    }
+
+    /// Retrieves the stored OpenRouter API key from Keychain
+    /// - Returns: Result containing the API key or specific failure
+    /// - Precondition: Must be called from a background thread
+    func loadOpenRouterApiKey() -> KeychainResult<String> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.openRouterServiceKey,
+            kSecAttrAccount as String: Self.openRouterAccountKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+
+        guard status == errSecSuccess else {
+            return .failure(mapOSStatusToError(status))
+        }
+
+        guard let data = result as? Data else {
+            return .failure(.unexpectedData)
+        }
+
+        guard let key = String(data: data, encoding: .utf8) else {
+            return .failure(.decodingFailed)
+        }
+
+        return .success(key)
+    }
+
+    /// Deletes the stored OpenRouter API key from Keychain
+    /// - Returns: Result indicating success or specific failure
+    /// - Precondition: Must be called from a background thread
+    func deleteOpenRouterApiKey() -> KeychainResult<Void> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.openRouterServiceKey,
+            kSecAttrAccount as String: Self.openRouterAccountKey
+        ]
+
+        let status = SecItemDelete(query as CFDictionary)
+
+        if status == errSecItemNotFound {
+            return .success(())
+        }
+
+        return mapOSStatus(status)
+    }
+
+    /// Checks if OpenRouter API key exists in Keychain without retrieving it
+    /// - Returns: Result indicating whether credential exists
+    /// - Precondition: Must be called from a background thread
+    func hasOpenRouterApiKey() -> KeychainResult<Bool> {
+        precondition(!Thread.isMainThread, "Keychain operations must not be called on the main thread")
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: Self.openRouterServiceKey,
+            kSecAttrAccount as String: Self.openRouterAccountKey,
+            kSecReturnData as String: false
+        ]
+
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+
+        switch status {
+        case errSecSuccess:
+            return .success(true)
+        case errSecItemNotFound:
+            return .success(false)
+        default:
+            return .failure(mapOSStatusToError(status))
+        }
+    }
+
     // MARK: - Private Helpers
 
     /// Maps an OSStatus to a Result<Void, KeychainError>
@@ -241,6 +479,100 @@ extension KeychainService {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let result = self.hasStoredNsec()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    // MARK: - ElevenLabs Async Extensions
+
+    /// Saves ElevenLabs API key asynchronously on a background thread
+    /// - Parameter key: The API key to save
+    /// - Returns: Result indicating success or failure
+    func saveElevenLabsApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.saveElevenLabsApiKey(key)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Loads ElevenLabs API key asynchronously on a background thread
+    /// - Returns: Result containing the API key or failure
+    func loadElevenLabsApiKeyAsync() async -> KeychainResult<String> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.loadElevenLabsApiKey()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Deletes ElevenLabs API key asynchronously on a background thread
+    /// - Returns: Result indicating success or failure
+    func deleteElevenLabsApiKeyAsync() async -> KeychainResult<Void> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.deleteElevenLabsApiKey()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Checks for stored ElevenLabs API key asynchronously on a background thread
+    /// - Returns: Result indicating whether credential exists
+    func hasElevenLabsApiKeyAsync() async -> KeychainResult<Bool> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.hasElevenLabsApiKey()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    // MARK: - OpenRouter Async Extensions
+
+    /// Saves OpenRouter API key asynchronously on a background thread
+    /// - Parameter key: The API key to save
+    /// - Returns: Result indicating success or failure
+    func saveOpenRouterApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.saveOpenRouterApiKey(key)
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Loads OpenRouter API key asynchronously on a background thread
+    /// - Returns: Result containing the API key or failure
+    func loadOpenRouterApiKeyAsync() async -> KeychainResult<String> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.loadOpenRouterApiKey()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Deletes OpenRouter API key asynchronously on a background thread
+    /// - Returns: Result indicating success or failure
+    func deleteOpenRouterApiKeyAsync() async -> KeychainResult<Void> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.deleteOpenRouterApiKey()
+                continuation.resume(returning: result)
+            }
+        }
+    }
+
+    /// Checks for stored OpenRouter API key asynchronously on a background thread
+    /// - Returns: Result indicating whether credential exists
+    func hasOpenRouterApiKeyAsync() async -> KeychainResult<Bool> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = self.hasOpenRouterApiKey()
                 continuation.resume(returning: result)
             }
         }
