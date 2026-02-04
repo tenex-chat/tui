@@ -3,6 +3,7 @@ mod input;
 mod jaeger;
 mod render;
 mod runtime;
+mod server;
 mod ui;
 
 pub use tenex_core::models;
@@ -31,6 +32,14 @@ struct Args {
     /// Prefer TENEX_NSEC environment variable for safer usage.
     #[arg(long)]
     nsec: Option<String>,
+
+    /// Run in HTTP server mode (OpenAI-compatible API)
+    #[arg(long)]
+    server: bool,
+
+    /// Server bind address (default: 127.0.0.1:3000)
+    #[arg(long, default_value = "127.0.0.1:3000")]
+    bind: String,
 }
 
 /// Authentication source for the nsec key
@@ -160,69 +169,140 @@ async fn main() -> Result<()> {
     // Parse CLI arguments
     let args = Args::parse();
 
-    // Set up panic hook to restore terminal on panic
-    let original_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        // Restore terminal before showing panic
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(
-            std::io::stdout(),
-            crossterm::terminal::LeaveAlternateScreen,
-            crossterm::event::DisableMouseCapture
-        );
-        // Print panic info to stderr
-        eprintln!("\n\n=== PANIC ===");
-        eprintln!("{}", panic_info);
-        eprintln!("=============\n");
-        // Call original hook
-        original_hook(panic_info);
-    }));
-
     let config = CoreConfig::default();
     let data_dir = config.data_dir.to_str().unwrap_or("tenex_data").to_string();
     let mut core_runtime = CoreRuntime::new(config)?;
-    let data_store = core_runtime.data_store();
-    let db = core_runtime.database();
-    let event_stats = core_runtime.event_stats();
-    let subscription_stats = core_runtime.subscription_stats();
-    let negentropy_stats = core_runtime.negentropy_stats();
-    let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, negentropy_stats, &data_dir);
-    let mut terminal = ui::init_terminal()?;
     let core_handle = core_runtime.handle();
-    let data_rx = core_runtime
-        .take_data_rx()
-        .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
-    app.set_core_handle(core_handle.clone(), data_rx);
 
-    // Resolve authentication: CLI arg > env var > stored credentials
-    let nsec_source = resolve_nsec_source(&args);
-    let mut login_step = match resolve_authentication(&mut app, &core_handle, nsec_source) {
-        AuthResult::Success => LoginStep::Nsec, // Won't be shown since view is Home
-        AuthResult::ShowLogin(step, error_msg) => {
-            if let Some(msg) = error_msg {
-                app.set_warning_status(&msg);
+    // Branch based on server mode
+    if args.server {
+        // Server mode: run HTTP server
+        let data_store = core_runtime.data_store();
+        let data_rx = core_runtime
+            .take_data_rx()
+            .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
+
+        // Resolve authentication for server mode
+        let nsec_source = resolve_nsec_source(&args);
+        let keys = match nsec_source {
+            NsecSource::CliArg(nsec) | NsecSource::EnvVar(nsec) => {
+                SecretKey::parse(&nsec)
+                    .map(|sk| Keys::new(sk))
+                    .map_err(|e| anyhow::anyhow!("Invalid nsec: {}", e))?
             }
-            app.input_mode = InputMode::Editing;
-            step
+            NsecSource::Stored => {
+                // For server mode, we need stored credentials
+                let prefs_storage = tenex_core::models::PreferencesStorage::new(&data_dir);
+
+                if !nostr::has_stored_credentials(&prefs_storage) {
+                    return Err(anyhow::anyhow!("Server mode requires authentication. Use --nsec or TENEX_NSEC environment variable."));
+                }
+
+                if nostr::credentials_need_password(&prefs_storage) {
+                    return Err(anyhow::anyhow!("Server mode does not support encrypted credentials. Please use --nsec or TENEX_NSEC."));
+                }
+
+                nostr::load_unencrypted_keys(&prefs_storage)?
+            }
+        };
+
+        let user_pubkey = nostr::get_current_pubkey(&keys);
+
+        // Connect to Nostr
+        core_handle
+            .send(NostrCommand::Connect {
+                keys: keys.clone(),
+                user_pubkey: user_pubkey.clone(),
+                response_tx: None,
+            })
+            .map_err(|e| anyhow::anyhow!("Failed to connect: {}", e))?;
+
+        eprintln!("Connected to Nostr as {}", user_pubkey);
+
+        // Convert to Arc<Mutex<>> for sharing across async tasks
+        let data_store_arc = std::sync::Arc::new(std::sync::Mutex::new(
+            std::rc::Rc::try_unwrap(data_store)
+                .map_err(|_| anyhow::anyhow!("Failed to unwrap data store"))?
+                .into_inner(),
+        ));
+        let data_rx_arc = std::sync::Arc::new(std::sync::Mutex::new(data_rx));
+
+        // Run the server
+        let result = server::run_server(
+            args.bind.clone(),
+            core_handle.clone(),
+            data_store_arc,
+            data_rx_arc,
+        )
+        .await;
+
+        core_runtime.shutdown();
+
+        if let Err(err) = result {
+            eprintln!("Server error: {err}");
         }
-    };
-    let mut pending_nsec: Option<String> = None;
+    } else {
+        // TUI mode: run interactive terminal UI
+        // Set up panic hook to restore terminal on panic
+        let original_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            // Restore terminal before showing panic
+            let _ = crossterm::terminal::disable_raw_mode();
+            let _ = crossterm::execute!(
+                std::io::stdout(),
+                crossterm::terminal::LeaveAlternateScreen,
+                crossterm::event::DisableMouseCapture
+            );
+            // Print panic info to stderr
+            eprintln!("\n\n=== PANIC ===");
+            eprintln!("{}", panic_info);
+            eprintln!("=============\n");
+            // Call original hook
+            original_hook(panic_info);
+        }));
 
-    let result = run_app(
-        &mut terminal,
-        &mut app,
-        &mut core_runtime,
-        &mut login_step,
-        &mut pending_nsec,
-    )
-    .await;
+        let data_store = core_runtime.data_store();
+        let db = core_runtime.database();
+        let event_stats = core_runtime.event_stats();
+        let subscription_stats = core_runtime.subscription_stats();
+        let negentropy_stats = core_runtime.negentropy_stats();
+        let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, negentropy_stats, &data_dir);
+        let mut terminal = ui::init_terminal()?;
+        let data_rx = core_runtime
+            .take_data_rx()
+            .ok_or_else(|| anyhow::anyhow!("Core runtime already has active data receiver"))?;
+        app.set_core_handle(core_handle.clone(), data_rx);
 
-    core_runtime.shutdown();
+        // Resolve authentication: CLI arg > env var > stored credentials
+        let nsec_source = resolve_nsec_source(&args);
+        let mut login_step = match resolve_authentication(&mut app, &core_handle, nsec_source) {
+            AuthResult::Success => LoginStep::Nsec, // Won't be shown since view is Home
+            AuthResult::ShowLogin(step, error_msg) => {
+                if let Some(msg) = error_msg {
+                    app.set_warning_status(&msg);
+                }
+                app.input_mode = InputMode::Editing;
+                step
+            }
+        };
+        let mut pending_nsec: Option<String> = None;
 
-    ui::restore_terminal()?;
+        let result = run_app(
+            &mut terminal,
+            &mut app,
+            &mut core_runtime,
+            &mut login_step,
+            &mut pending_nsec,
+        )
+        .await;
 
-    if let Err(err) = result {
-        eprintln!("Error: {err}");
+        core_runtime.shutdown();
+
+        ui::restore_terminal()?;
+
+        if let Err(err) = result {
+            eprintln!("Error: {err}");
+        }
     }
 
     Ok(())
