@@ -81,6 +81,17 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Reports
     func getReports(projectId: String) -> [ReportInfo]
 
+    // MARK: - AI Audio Settings
+    func getAiAudioSettings() throws -> AiAudioSettings
+    func setElevenLabsApiKey(key: String?) throws
+    func setOpenRouterApiKey(key: String?) throws
+    func setAiAudioEnabled(enabled: Bool) throws
+    func setAiAudioPrompt(prompt: String) throws
+    func setOpenRouterModel(model: String?) throws
+    func setSelectedVoiceIds(voiceIds: [String]) throws
+    func fetchElevenLabsVoices() throws -> [VoiceInfo]
+    func fetchOpenRouterModels() throws -> [ModelInfo]
+
     // MARK: - Misc
     func version() -> String
 }

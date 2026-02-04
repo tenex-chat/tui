@@ -43,7 +43,7 @@ impl AudioPlayer {
         let (stream, stream_handle) = match OutputStream::try_default() {
             Ok((stream, handle)) => (Some(stream), Some(handle)),
             Err(e) => {
-                tracing::warn!("Failed to initialize audio output: {}", e);
+                eprintln!("[AudioPlayer] Warning: Failed to initialize audio output: {}", e);
                 (None, None)
             }
         };

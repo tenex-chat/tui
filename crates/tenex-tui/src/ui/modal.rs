@@ -41,16 +41,26 @@ impl GeneralSetting {
     }
 }
 
-/// Settings in the AI tab (only fully implemented settings)
+/// Settings in the AI tab
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiSetting {
+    Enabled,
     ElevenLabsApiKey,
     OpenRouterApiKey,
+    SelectedVoices,
+    OpenRouterModel,
+    AudioPrompt,
 }
 
 impl AiSetting {
-    pub const ALL: &'static [AiSetting] =
-        &[AiSetting::ElevenLabsApiKey, AiSetting::OpenRouterApiKey];
+    pub const ALL: &'static [AiSetting] = &[
+        AiSetting::Enabled,
+        AiSetting::ElevenLabsApiKey,
+        AiSetting::OpenRouterApiKey,
+        AiSetting::SelectedVoices,
+        AiSetting::OpenRouterModel,
+        AiSetting::AudioPrompt,
+    ];
 
     pub const fn count() -> usize {
         Self::ALL.len()
