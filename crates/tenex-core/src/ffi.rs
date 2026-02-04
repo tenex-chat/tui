@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -54,6 +54,18 @@ use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
 use crate::stats::{query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::AppDataStore;
+
+/// Shared Tokio runtime for async operations in FFI
+/// Using OnceLock ensures thread-safe lazy initialization
+static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+
+/// Get or initialize the shared Tokio runtime
+fn get_tokio_runtime() -> &'static tokio::runtime::Runtime {
+    TOKIO_RUNTIME.get_or_init(|| {
+        tokio::runtime::Runtime::new()
+            .expect("Failed to create Tokio runtime")
+    })
+}
 
 /// Get the data directory for nostrdb
 fn get_data_dir() -> PathBuf {
@@ -1160,6 +1172,48 @@ pub struct DiagnosticsSnapshot {
     pub section_errors: Vec<String>,
 }
 
+/// AI Audio Settings (API keys never exposed - stored securely)
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AiAudioSettingsInfo {
+    pub elevenlabs_api_key_configured: bool,
+    pub openrouter_api_key_configured: bool,
+    pub selected_voice_ids: Vec<String>,
+    pub openrouter_model: Option<String>,
+    pub audio_prompt: String,
+    pub enabled: bool,
+}
+
+/// Voice from ElevenLabs
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct VoiceInfo {
+    pub voice_id: String,
+    pub name: String,
+    pub category: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Model from OpenRouter
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ModelInfo {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub context_length: Option<u32>,
+}
+
+/// Audio notification record
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AudioNotificationInfo {
+    pub id: String,
+    pub agent_pubkey: String,
+    pub conversation_title: String,
+    pub original_text: String,
+    pub massaged_text: String,
+    pub voice_id: String,
+    pub audio_file_path: String,
+    pub created_at: u64,
+}
+
 /// Errors that can occur during TENEX operations.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum TenexError {
@@ -1189,6 +1243,9 @@ pub struct FfiPreferences {
     /// IDs of collapsed threads (for UI state)
     #[serde(default)]
     pub collapsed_thread_ids: std::collections::HashSet<String>,
+    /// AI Audio Notifications settings
+    #[serde(default)]
+    pub ai_audio_settings: crate::models::project_draft::AiAudioSettings,
 }
 
 impl FfiPreferences {
@@ -1213,12 +1270,111 @@ struct FfiPreferencesStorage {
 impl FfiPreferencesStorage {
     fn new(data_dir: &std::path::Path) -> Self {
         let path = data_dir.join("ios_preferences.json");
-        let prefs = FfiPreferences::load_from_file(&path).unwrap_or_default();
+        let mut prefs = FfiPreferences::load_from_file(&path).unwrap_or_default();
+
+        // Migrate any existing API keys from JSON to secure storage
+        Self::migrate_api_keys(&mut prefs.ai_audio_settings);
+
         Self { prefs, path }
     }
 
-    fn save(&self) {
-        self.prefs.save_to_file(&self.path);
+    /// Migrate API keys from JSON to OS secure storage (one-time migration)
+    fn migrate_api_keys(settings: &mut crate::models::project_draft::AiAudioSettings) {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        // Migrate ElevenLabs API key if present in JSON
+        if let Some(key) = settings.elevenlabs_api_key.take() {
+            if !key.is_empty() {
+                let _ = SecureStorage::set(SecureKey::ElevenLabsApiKey, &key);
+                tracing::info!("Migrated ElevenLabs API key to secure storage");
+            }
+        }
+
+        // Migrate OpenRouter API key if present in JSON
+        if let Some(key) = settings.openrouter_api_key.take() {
+            if !key.is_empty() {
+                let _ = SecureStorage::set(SecureKey::OpenRouterApiKey, &key);
+                tracing::info!("Migrated OpenRouter API key to secure storage");
+            }
+        }
+    }
+
+    fn save(&self) -> Result<(), std::io::Error> {
+        let json = serde_json::to_string_pretty(&self.prefs)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        std::fs::write(&self.path, json)?;
+        Ok(())
+    }
+
+    // AI Audio Settings methods
+    fn set_elevenlabs_api_key(&mut self, key: Option<String>) -> Result<(), String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        match key {
+            Some(k) if !k.is_empty() => {
+                SecureStorage::set(SecureKey::ElevenLabsApiKey, &k)
+                    .map_err(|e| format!("Failed to store API key: {}", e))?;
+            }
+            _ => {
+                // Empty or None means delete
+                SecureStorage::delete(SecureKey::ElevenLabsApiKey)
+                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
+            }
+        }
+
+        // Save preferences (triggers resave without API keys)
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))?;
+        Ok(())
+    }
+
+    fn set_openrouter_api_key(&mut self, key: Option<String>) -> Result<(), String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        match key {
+            Some(k) if !k.is_empty() => {
+                SecureStorage::set(SecureKey::OpenRouterApiKey, &k)
+                    .map_err(|e| format!("Failed to store API key: {}", e))?;
+            }
+            _ => {
+                // Empty or None means delete
+                SecureStorage::delete(SecureKey::OpenRouterApiKey)
+                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
+            }
+        }
+
+        // Save preferences (triggers resave without API keys)
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))?;
+        Ok(())
+    }
+
+    fn get_elevenlabs_api_key(&self) -> Option<String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+        SecureStorage::get(SecureKey::ElevenLabsApiKey).ok()
+    }
+
+    fn get_openrouter_api_key(&self) -> Option<String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+        SecureStorage::get(SecureKey::OpenRouterApiKey).ok()
+    }
+
+    fn set_selected_voice_ids(&mut self, voice_ids: Vec<String>) -> Result<(), String> {
+        self.prefs.ai_audio_settings.selected_voice_ids = voice_ids;
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn set_openrouter_model(&mut self, model: Option<String>) -> Result<(), String> {
+        self.prefs.ai_audio_settings.openrouter_model = model;
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn set_audio_prompt(&mut self, prompt: String) -> Result<(), String> {
+        self.prefs.ai_audio_settings.audio_prompt = prompt;
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn set_audio_notifications_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        self.prefs.ai_audio_settings.enabled = enabled;
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
     }
 }
 
@@ -2267,7 +2423,9 @@ impl TenexCore {
 
         if let Some(prefs) = prefs_guard.as_mut() {
             prefs.prefs.visible_projects = project_a_tags.into_iter().collect();
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
         }
     }
 
@@ -2280,7 +2438,9 @@ impl TenexCore {
 
         if let Some(prefs) = prefs_guard.as_mut() {
             prefs.prefs.archived_thread_ids.insert(conversation_id);
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
         }
     }
 
@@ -2293,7 +2453,9 @@ impl TenexCore {
 
         if let Some(prefs) = prefs_guard.as_mut() {
             prefs.prefs.archived_thread_ids.remove(&conversation_id);
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
         }
     }
 
@@ -2313,7 +2475,9 @@ impl TenexCore {
                 prefs.prefs.archived_thread_ids.insert(conversation_id);
                 true
             };
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
             is_now_archived
         } else {
             false
@@ -2364,7 +2528,9 @@ impl TenexCore {
 
         if let Some(prefs) = prefs_guard.as_mut() {
             prefs.prefs.collapsed_thread_ids = thread_ids.into_iter().collect();
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
         }
     }
 
@@ -2384,7 +2550,9 @@ impl TenexCore {
                 prefs.prefs.collapsed_thread_ids.insert(thread_id);
                 true
             };
-            prefs.save();
+            if let Err(e) = prefs.save() {
+                tracing::error!("Failed to save preferences: {}", e);
+            }
             is_now_collapsed
         } else {
             false
@@ -3421,6 +3589,261 @@ impl TenexCore {
                 let _ = handle.join();
             }
         }
+    }
+
+    // ===== AI Audio Notification Methods =====
+
+    /// Get AI audio settings (API keys never exposed - only configuration status)
+    pub fn get_ai_audio_settings(&self) -> Result<AiAudioSettingsInfo, TenexError> {
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let settings = &prefs_storage.prefs.ai_audio_settings;
+
+        // Never expose actual API keys - only return whether they're configured
+        Ok(AiAudioSettingsInfo {
+            elevenlabs_api_key_configured: prefs_storage.get_elevenlabs_api_key().is_some(),
+            openrouter_api_key_configured: prefs_storage.get_openrouter_api_key().is_some(),
+            selected_voice_ids: settings.selected_voice_ids.clone(),
+            openrouter_model: settings.openrouter_model.clone(),
+            audio_prompt: settings.audio_prompt.clone(),
+            enabled: settings.enabled,
+        })
+    }
+
+    /// Set ElevenLabs API key (stored in OS secure storage)
+    pub fn set_elevenlabs_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_elevenlabs_api_key(key)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Set OpenRouter API key (stored in OS secure storage)
+    pub fn set_openrouter_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_openrouter_api_key(key)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Set selected voice IDs
+    pub fn set_selected_voice_ids(&self, voice_ids: Vec<String>) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_selected_voice_ids(voice_ids)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Set OpenRouter model
+    pub fn set_openrouter_model(&self, model: Option<String>) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_openrouter_model(model)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Set audio prompt
+    pub fn set_audio_prompt(&self, prompt: String) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_audio_prompt(prompt)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Enable or disable audio notifications
+    pub fn set_audio_notifications_enabled(&self, enabled: bool) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_audio_notifications_enabled(enabled)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Fetch available voices from ElevenLabs
+    /// Note: This is a blocking call that will wait for the async operation to complete
+    pub fn fetch_elevenlabs_voices(&self) -> Result<Vec<VoiceInfo>, TenexError> {
+        // Get API key from secure storage (not from settings struct)
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+
+        let api_key = prefs_storage.get_elevenlabs_api_key()
+            .ok_or_else(|| TenexError::Internal {
+                message: "ElevenLabs API key not configured".to_string(),
+            })?;
+
+        let client = crate::ai::ElevenLabsClient::new(api_key);
+
+        // Use shared Tokio runtime (not per-call creation)
+        let runtime = get_tokio_runtime();
+
+        let voices = runtime.block_on(client.get_voices()).map_err(|e| TenexError::Internal {
+            message: format!("Failed to fetch voices: {}", e),
+        })?;
+
+        Ok(voices.into_iter().map(|v| VoiceInfo {
+            voice_id: v.voice_id,
+            name: v.name,
+            category: v.category,
+            description: v.description,
+        }).collect())
+    }
+
+    /// Fetch available models from OpenRouter
+    /// Note: This is a blocking call that will wait for the async operation to complete
+    pub fn fetch_openrouter_models(&self) -> Result<Vec<ModelInfo>, TenexError> {
+        // Get API key from secure storage (not from settings struct)
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+
+        let api_key = prefs_storage.get_openrouter_api_key()
+            .ok_or_else(|| TenexError::Internal {
+                message: "OpenRouter API key not configured".to_string(),
+            })?;
+
+        let client = crate::ai::OpenRouterClient::new(api_key);
+
+        // Use shared Tokio runtime (not per-call creation)
+        let runtime = get_tokio_runtime();
+
+        let models = runtime.block_on(client.get_models()).map_err(|e| TenexError::Internal {
+            message: format!("Failed to fetch models: {}", e),
+        })?;
+
+        Ok(models.into_iter().map(|m| ModelInfo {
+            id: m.id,
+            name: m.name,
+            description: m.description,
+            context_length: m.context_length,
+        }).collect())
+    }
+
+    /// Generate audio notification for a message
+    /// Note: This is a blocking call that will wait for the async operation to complete
+    pub fn generate_audio_notification(
+        &self,
+        agent_pubkey: String,
+        conversation_title: String,
+        message_text: String,
+    ) -> Result<AudioNotificationInfo, TenexError> {
+        let settings = self.get_ai_audio_settings()?;
+
+        if !settings.enabled {
+            return Err(TenexError::Internal {
+                message: "Audio notifications are disabled".to_string(),
+            });
+        }
+
+        let data_dir = get_data_dir();
+        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+
+        // Initialize audio notifications directory
+        manager.init().map_err(|e| TenexError::Internal {
+            message: format!("Failed to initialize audio notifications: {}", e),
+        })?;
+
+        // Use shared Tokio runtime (not per-call creation)
+        let runtime = get_tokio_runtime();
+
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let ai_settings = &prefs_storage.prefs.ai_audio_settings;
+
+        // Get API keys from secure storage
+        let elevenlabs_key = prefs_storage.get_elevenlabs_api_key()
+            .ok_or_else(|| TenexError::Internal {
+                message: "ElevenLabs API key not configured".to_string(),
+            })?;
+        let openrouter_key = prefs_storage.get_openrouter_api_key()
+            .ok_or_else(|| TenexError::Internal {
+                message: "OpenRouter API key not configured".to_string(),
+            })?;
+
+        let notification = runtime.block_on(manager.generate_notification(
+            &agent_pubkey,
+            &conversation_title,
+            &message_text,
+            &elevenlabs_key,
+            &openrouter_key,
+            ai_settings,
+        )).map_err(|e| TenexError::Internal {
+            message: format!("Failed to generate audio notification: {}", e),
+        })?;
+
+        Ok(AudioNotificationInfo {
+            id: notification.id,
+            agent_pubkey: notification.agent_pubkey,
+            conversation_title: notification.conversation_title,
+            original_text: notification.original_text,
+            massaged_text: notification.massaged_text,
+            voice_id: notification.voice_id,
+            audio_file_path: notification.audio_file_path,
+            created_at: notification.created_at,
+        })
+    }
+
+    /// List all audio notifications
+    pub fn list_audio_notifications(&self) -> Result<Vec<AudioNotificationInfo>, TenexError> {
+        let data_dir = get_data_dir();
+        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+
+        let notifications = manager.list_notifications().map_err(|e| TenexError::Internal {
+            message: format!("Failed to list audio notifications: {}", e),
+        })?;
+
+        Ok(notifications.into_iter().map(|n| AudioNotificationInfo {
+            id: n.id,
+            agent_pubkey: n.agent_pubkey,
+            conversation_title: n.conversation_title,
+            original_text: n.original_text,
+            massaged_text: n.massaged_text,
+            voice_id: n.voice_id,
+            audio_file_path: n.audio_file_path,
+            created_at: n.created_at,
+        }).collect())
+    }
+
+    /// Delete an audio notification by ID
+    pub fn delete_audio_notification(&self, id: String) -> Result<(), TenexError> {
+        let data_dir = get_data_dir();
+        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+
+        manager.delete_notification(&id).map_err(|e| TenexError::Internal {
+            message: format!("Failed to delete audio notification: {}", e),
+        })?;
+
+        Ok(())
     }
 }
 

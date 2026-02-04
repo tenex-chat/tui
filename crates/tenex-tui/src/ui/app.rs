@@ -9,6 +9,7 @@ use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::selector::SelectorState;
 use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
+use crate::ui::audio_player::AudioPlayer;
 use nostr_sdk::Keys;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -312,6 +313,8 @@ pub struct App {
     pub publish_confirm_tx: Option<tokio::sync::mpsc::Sender<(String, String)>>,
     /// Current subtab within the Stats view
     pub stats_subtab: StatsSubtab,
+    /// Audio player for notification sounds
+    pub audio_player: AudioPlayer,
 }
 
 impl App {
@@ -391,6 +394,7 @@ impl App {
             sidebar_search: crate::ui::search::SidebarSearchState::new(),
             publish_confirm_tx: None,
             stats_subtab: StatsSubtab::default(),
+            audio_player: AudioPlayer::new(),
         }
     }
 

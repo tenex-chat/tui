@@ -114,7 +114,8 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
 
     // Status bar at the very bottom (always visible)
     let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
-    render_statusbar(f, chunks[3], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset());
+    let audio_playing = app.audio_player.is_playing();
+    render_statusbar(f, chunks[3], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
 
     // Global modal overlays - render AppSettings modal for views that don't handle it themselves
     // (Home, Chat, and AgentBrowser handle modals in their own render functions)
