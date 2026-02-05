@@ -264,9 +264,10 @@ async fn main() -> Result<()> {
         let data_store = core_runtime.data_store();
         let db = core_runtime.database();
         let event_stats = core_runtime.event_stats();
+        let event_feed = core_runtime.event_feed();
         let subscription_stats = core_runtime.subscription_stats();
         let negentropy_stats = core_runtime.negentropy_stats();
-        let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, negentropy_stats, &data_dir);
+        let mut app = App::new(db.clone(), data_store, event_stats, event_feed, subscription_stats, negentropy_stats, &data_dir);
         let mut terminal = ui::init_terminal()?;
         let data_rx = core_runtime
             .take_data_rx()

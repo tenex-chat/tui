@@ -229,6 +229,9 @@ pub struct App {
     /// Event stats for debugging (network events received)
     pub event_stats: tenex_core::stats::SharedEventStats,
 
+    /// Live event feed for debugging (most recent events)
+    pub event_feed: tenex_core::stats::SharedEventFeed,
+
     /// Subscription stats for debugging (active subscriptions and their event counts)
     pub subscription_stats: tenex_core::stats::SharedSubscriptionStats,
 
@@ -319,6 +322,7 @@ impl App {
         db: Arc<Database>,
         data_store: Rc<RefCell<AppDataStore>>,
         event_stats: tenex_core::stats::SharedEventStats,
+        event_feed: tenex_core::stats::SharedEventFeed,
         subscription_stats: tenex_core::stats::SharedSubscriptionStats,
         negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
         data_dir: &str,
@@ -355,6 +359,7 @@ impl App {
             chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
             event_stats,
+            event_feed,
             subscription_stats,
             negentropy_stats,
             tabs: TabManager::new(),

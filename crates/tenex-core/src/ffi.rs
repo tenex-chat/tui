@@ -52,7 +52,7 @@ use crate::models::agent_definition::AgentDefinition;
 use crate::models::{ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Thread};
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
-use crate::stats::{query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
+use crate::stats::{query_ndb_stats, SharedEventFeed, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::AppDataStore;
 
 /// Get the data directory for nostrdb
@@ -1382,6 +1382,7 @@ impl TenexCore {
         let (command_tx, command_rx) = mpsc::channel::<NostrCommand>();
         let (data_tx, data_rx) = mpsc::channel::<DataChange>();
         let event_stats = SharedEventStats::new();
+        let event_feed = SharedEventFeed::new(1000); // Keep last 1000 events
         let subscription_stats = SharedSubscriptionStats::new();
         let negentropy_stats = SharedNegentropySyncStats::new();
 
@@ -1394,6 +1395,7 @@ impl TenexCore {
             data_tx,
             command_rx,
             event_stats,
+            event_feed,
             subscription_stats,
             negentropy_stats,
         );
