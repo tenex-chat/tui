@@ -274,6 +274,53 @@ class TenexCoreManager: ObservableObject {
         bumpDiagnosticsVersion()
     }
 
+    /// Signal that messages for a specific conversation have been updated.
+    /// This triggers a refresh of the conversation's messages.
+    @MainActor
+    func signalConversationUpdate(conversationId: String) {
+        Task {
+            // Refresh messages for this specific conversation
+            let messages = await safeCore.getMessages(conversationId: conversationId)
+            await MainActor.run {
+                self.setMessagesCache(messages, for: conversationId)
+            }
+            // Also refresh the conversation list
+            let filter = ConversationFilter(
+                projectIds: [],
+                showArchived: false,
+                hideScheduled: false,
+                timeFilter: .all
+            )
+            if let conversations = try? await safeCore.getAllConversations(filter: filter) {
+                await MainActor.run {
+                    self.conversations = self.sortedConversations(conversations)
+                    self.updateActiveAgentsState()
+                }
+            }
+        }
+    }
+
+    /// Signal that project status has changed (kind:24010 events).
+    /// This triggers a refresh of project status data.
+    @MainActor
+    func signalProjectStatusUpdate() {
+        Task {
+            // Refresh projects list
+            if let projects = try? await safeCore.getProjects() {
+                await MainActor.run {
+                    self.projects = projects
+                }
+            }
+        }
+    }
+
+    /// Signal a general update - used when the change type is not specific.
+    /// This triggers a refresh of core data.
+    @MainActor
+    func signalGeneralUpdate() {
+        bumpDiagnosticsVersion()
+    }
+
     @MainActor
     func recordLiveFeedItem(conversationId: String, message: MessageInfo) {
         if liveFeed.contains(where: { $0.id == message.id }) {
