@@ -393,6 +393,9 @@ pub(super) fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
                     DebugStatsTab::Subscriptions if state.sub_sidebar_focused => {
                         state.sub_selected_filter_index = state.sub_selected_filter_index.saturating_sub(1);
                     }
+                    DebugStatsTab::EventFeed => {
+                        state.event_feed_selected_index = state.event_feed_selected_index.saturating_sub(1);
+                    }
                     _ => {
                         state.scroll_offset = state.scroll_offset.saturating_sub(1);
                     }
@@ -412,18 +415,45 @@ pub(super) fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
                             state.sub_selected_filter_index += 1;
                         }
                     }
+                    DebugStatsTab::EventFeed => {
+                        let event_count = app.event_feed.len();
+                        if state.event_feed_selected_index + 1 < event_count {
+                            state.event_feed_selected_index += 1;
+                        }
+                    }
                     _ => {
                         state.scroll_offset = state.scroll_offset.saturating_add(1);
                     }
                 }
             }
         }
-        // Enter to select filter on subscriptions tab
+        // Enter to select filter on subscriptions tab or view event on event feed tab
         KeyCode::Enter => {
-            if let ModalState::DebugStats(ref mut state) = app.modal_state {
+            if let ModalState::DebugStats(ref state) = app.modal_state {
                 if state.active_tab == DebugStatsTab::Subscriptions {
                     // Selection is immediate via sub_selected_filter_index, Enter just confirms
-                    state.sub_sidebar_focused = false;
+                    if let ModalState::DebugStats(ref mut state) = app.modal_state {
+                        state.sub_sidebar_focused = false;
+                    }
+                } else if state.active_tab == DebugStatsTab::EventFeed {
+                    // Get the selected event and open raw event modal
+                    let recent_events = app.event_feed.recent();
+                    if let Some(event) = recent_events.get(state.event_feed_selected_index) {
+                        // Get the raw event JSON from nostrdb
+                        let event_id = event.event_id.clone();
+                        if let Some(json) = tenex_core::store::events::get_raw_event_json(&app.db.ndb, &event_id) {
+                            let pretty_json = if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json) {
+                                serde_json::to_string_pretty(&value).unwrap_or(json)
+                            } else {
+                                json
+                            };
+                            app.modal_state = ModalState::ViewRawEvent {
+                                message_id: event_id,
+                                json: pretty_json,
+                                scroll_offset: 0,
+                            };
+                        }
+                    }
                 }
             }
         }

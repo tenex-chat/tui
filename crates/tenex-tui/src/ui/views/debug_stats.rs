@@ -1020,6 +1020,101 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
     lines
 }
 
+/// Render the Event Feed tab content - live feed of most recent events
+fn render_event_feed_tab(app: &App, state: &DebugStatsState) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line> = Vec::new();
+
+    // Get recent events from the feed
+    let recent_events = app.event_feed.recent();
+
+    // Header
+    lines.push(Line::from(vec![Span::styled(
+        "═══ Live Event Feed ═══",
+        Style::default().fg(theme::ACCENT_PRIMARY),
+    )]));
+    lines.push(Line::from(""));
+
+    if recent_events.is_empty() {
+        lines.push(Line::from(Span::styled(
+            "  No events received yet",
+            Style::default().fg(theme::TEXT_MUTED),
+        )));
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            "  Events will appear here as they're received from the network.",
+            Style::default().fg(theme::TEXT_MUTED),
+        )));
+        return lines;
+    }
+
+    // Summary
+    lines.push(Line::from(vec![
+        Span::styled("  Total events in feed: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("{}", recent_events.len()),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ),
+    ]));
+    lines.push(Line::from(""));
+
+    // Table header
+    lines.push(Line::from(vec![
+        Span::styled("  Kind  ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled("Event ID", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw("                                                         "),
+        Span::styled("Age", Style::default().fg(theme::TEXT_MUTED)),
+    ]));
+    lines.push(Line::from("  ────────────────────────────────────────────────────────────────────────────────"));
+
+    // Show events (newest first)
+    for (i, event) in recent_events.iter().enumerate() {
+        let is_selected = i == state.event_feed_selected_index;
+        let prefix = if is_selected { "▸ " } else { "  " };
+        let kind_name = kind_name(event.kind);
+
+        // Format age
+        let age = format_time_ago(event.received_at);
+
+        // Format event ID (full, no truncation)
+        let event_id_display = &event.event_id;
+
+        let style = if is_selected {
+            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(prefix, style),
+            Span::styled(
+                format!("{:<6}", event.kind),
+                if is_selected {
+                    Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(theme::ACCENT_SUCCESS)
+                },
+            ),
+            Span::raw(" "),
+            Span::styled(event_id_display.clone(), style),
+            Span::raw(" "),
+            Span::styled(
+                age,
+                Style::default().fg(theme::TEXT_DIM),
+            ),
+        ]));
+    }
+
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("  ↑↓", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw(" select • "),
+        Span::styled("Enter", Style::default().fg(theme::TEXT_MUTED)),
+        Span::raw(" view raw event"),
+    ]));
+
+    lines
+}
+
 pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugStatsState) {
     // Calculate modal content width (approximate based on max_width and area)
     let modal_width = 120u16.min(area.width.saturating_sub(4));
@@ -1048,6 +1143,9 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::DataStore => {
             lines.extend(render_data_store_tab(app));
         }
+        DebugStatsTab::EventFeed => {
+            lines.extend(render_event_feed_tab(app, state));
+        }
     }
 
     lines.push(Line::from(""));
@@ -1058,7 +1156,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::ETagQuery => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-6", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Enter", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" search • "),
@@ -1068,7 +1166,7 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
         DebugStatsTab::Subscriptions => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-6", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" tabs • "),
             Span::styled("↑↓", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" select • "),
@@ -1077,10 +1175,22 @@ pub fn render_debug_stats(f: &mut Frame, area: Rect, app: &App, state: &DebugSta
             Span::styled("Esc", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" close"),
         ],
+        DebugStatsTab::EventFeed => vec![
+            Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
+            Span::styled("1-6", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw(" tabs • "),
+            Span::styled("↑↓", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw(" select • "),
+            Span::styled("Enter", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw(" view • "),
+            Span::styled("Esc", Style::default().fg(theme::TEXT_MUTED)),
+            Span::raw(" close"),
+        ],
         _ => vec![
             Span::styled("Tab", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("/", Style::default().fg(theme::BORDER_INACTIVE)),
-            Span::styled("1-5", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("1-6", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" switch tabs • "),
             Span::styled("Esc", Style::default().fg(theme::TEXT_MUTED)),
             Span::raw(" close"),
