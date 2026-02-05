@@ -51,17 +51,17 @@ struct DiagnosticsOverviewTab: View {
             }
 
             HStack(spacing: 12) {
-                // Relay Status Card
+                // Uptime Card
                 if let system = snapshot.system {
                     DiagnosticCard(
-                        title: "Relay",
-                        value: system.relayConnected ? "Connected" : "Disconnected",
-                        subtitle: "\(system.connectedRelays) connected",
-                        color: system.relayConnected ? .green : .red,
-                        icon: "dot.radiowaves.left.and.right"
+                        title: "Uptime",
+                        value: DiagnosticsFormatters.formatDuration(system.uptimeMs),
+                        subtitle: "Since initialization",
+                        color: .green,
+                        icon: "clock.fill"
                     )
                 } else {
-                    DiagnosticCard.unavailable(title: "Relay", icon: "dot.radiowaves.left.and.right")
+                    DiagnosticCard.unavailable(title: "Uptime", icon: "clock.fill")
                 }
 
                 // Total Events Card
@@ -105,17 +105,9 @@ struct DiagnosticsOverviewTab: View {
                     Divider()
 
                     StatusRow(
-                        label: "Relay Connected",
-                        value: system.relayConnected ? "Yes" : "No",
-                        valueColor: system.relayConnected ? .green : .red
-                    )
-
-                    Divider()
-
-                    StatusRow(
-                        label: "Connected Relays",
-                        value: "\(system.connectedRelays)",
-                        valueColor: system.connectedRelays > 0 ? .green : .secondary
+                        label: "Uptime",
+                        value: DiagnosticsFormatters.formatDuration(system.uptimeMs),
+                        valueColor: .primary
                     )
 
                     Divider()
@@ -340,11 +332,10 @@ struct StatusRow: View {
             snapshot: DiagnosticsSnapshot(
                 system: SystemDiagnostics(
                     logPath: "/var/mobile/.../logs/tenex.log",
+                    uptimeMs: 3600000,
                     version: "0.1.0",
                     isInitialized: true,
-                    isLoggedIn: true,
-                    relayConnected: true,
-                    connectedRelays: 1
+                    isLoggedIn: true
                 ),
                 sync: NegentropySyncDiagnostics(
                     enabled: true,
@@ -378,11 +369,10 @@ struct StatusRow: View {
             snapshot: DiagnosticsSnapshot(
                 system: SystemDiagnostics(
                     logPath: "/var/mobile/.../logs/tenex.log",
+                    uptimeMs: 0,
                     version: "0.1.0",
                     isInitialized: true,
-                    isLoggedIn: true,
-                    relayConnected: false,
-                    connectedRelays: 0
+                    isLoggedIn: true
                 ),
                 sync: nil,  // Sync failed to load
                 subscriptions: [],

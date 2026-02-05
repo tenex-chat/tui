@@ -28,38 +28,13 @@ final class TenexEventHandler: EventCallback {
             guard let coreManager = self?.coreManager else { return }
 
             switch changeType {
-            case .messageAppended(let conversationId, let message):
-                coreManager.applyMessageAppended(conversationId: conversationId, message: message)
+            case .messages(let conversationId):
+                // New messages arrived for a conversation - trigger refresh
+                coreManager.signalConversationUpdate(conversationId: conversationId)
 
-            case .conversationUpsert(let conversation):
-                coreManager.applyConversationUpsert(conversation)
-
-            case .projectUpsert(let project):
-                coreManager.applyProjectUpsert(project)
-
-            case .inboxUpsert(let item):
-                coreManager.applyInboxUpsert(item)
-
-            case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
-                coreManager.applyProjectStatusChanged(
-                    projectId: projectId,
-                    projectATag: projectATag,
-                    isOnline: isOnline,
-                    onlineAgents: onlineAgents
-                )
-
-            case .pendingBackendApproval(let backendPubkey, let projectATag):
-                coreManager.handlePendingBackendApproval(
-                    backendPubkey: backendPubkey,
-                    projectATag: projectATag
-                )
-
-            case .activeConversationsChanged(let projectId, let projectATag, let activeConversationIds):
-                coreManager.applyActiveConversationsChanged(
-                    projectId: projectId,
-                    projectATag: projectATag,
-                    activeConversationIds: activeConversationIds
-                )
+            case .projectStatus:
+                // Project status updated (kind:24010)
+                coreManager.signalProjectStatusUpdate()
 
             case .streamChunk(let agentPubkey, let conversationId, let textDelta):
                 NotificationCenter.default.post(
@@ -72,17 +47,8 @@ final class TenexEventHandler: EventCallback {
                     ]
                 )
 
-            case .mcpToolsChanged:
-                coreManager.signalDiagnosticsUpdate()
-
             case .general:
-                coreManager.signalDiagnosticsUpdate()
-
-            case .statsUpdated:
-                coreManager.signalStatsUpdate()
-
-            case .diagnosticsUpdated:
-                coreManager.signalDiagnosticsUpdate()
+                coreManager.signalGeneralUpdate()
             }
         }
     }

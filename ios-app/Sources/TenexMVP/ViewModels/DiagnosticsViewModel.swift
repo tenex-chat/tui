@@ -250,6 +250,22 @@ enum DiagnosticsFormatters {
             return "\(value)"
         }
     }
+
+    /// Format duration in milliseconds to human-readable string
+    static func formatDuration(_ ms: UInt64) -> String {
+        let totalSeconds = ms / 1000
+        let hours = totalSeconds / 3600
+        let minutes = (totalSeconds % 3600) / 60
+        let seconds = totalSeconds % 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        } else if minutes > 0 {
+            return "\(minutes)m \(seconds)s"
+        } else {
+            return "\(seconds)s"
+        }
+    }
 }
 
 // MARK: - Helper Extensions
