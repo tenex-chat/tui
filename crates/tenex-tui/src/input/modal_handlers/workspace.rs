@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::jaeger;
-use crate::ui::modal::AppSetting;
+use crate::ui::modal::GeneralSetting;
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -191,16 +191,33 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
     let mut state = state;
 
     match key.code {
+        KeyCode::Tab if !state.editing => {
+            // Switch tabs when not editing
+            state.next_tab();
+        }
+        KeyCode::BackTab if !state.editing => {
+            // Switch tabs backwards when not editing
+            state.prev_tab();
+        }
         KeyCode::Esc => {
             if state.editing {
                 // Cancel editing, restore original value based on which setting was selected
                 state.stop_editing();
-                match state.selected_setting() {
-                    Some(AppSetting::JaegerEndpoint) => {
-                        state.jaeger_endpoint_input =
-                            app.preferences.borrow().jaeger_endpoint().to_string();
+                match state.current_tab {
+                    ui::modal::SettingsTab::General => {
+                        match state.selected_general_setting() {
+                            Some(GeneralSetting::JaegerEndpoint) => {
+                                state.jaeger_endpoint_input =
+                                    app.preferences.borrow().jaeger_endpoint().to_string();
+                            }
+                            None => {}
+                        }
                     }
-                    None => {}
+                    ui::modal::SettingsTab::AI => {
+                        // Restore AI settings inputs if needed
+                        state.ai.elevenlabs_key_input.clear();
+                        state.ai.openrouter_key_input.clear();
+                    }
                 }
                 app.modal_state = ModalState::AppSettings(state);
             } else {
@@ -211,37 +228,88 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Enter => {
             if state.editing {
-                // Save the value based on which setting is selected
-                match state.selected_setting() {
-                    Some(AppSetting::JaegerEndpoint) => {
-                        let new_endpoint = state.jaeger_endpoint_input.clone();
+                // Save the value based on which tab and setting are selected
+                match state.current_tab {
+                    ui::modal::SettingsTab::General => {
+                        match state.selected_general_setting() {
+                            Some(GeneralSetting::JaegerEndpoint) => {
+                                let new_endpoint = state.jaeger_endpoint_input.clone();
 
-                        // Validate the endpoint before saving
-                        match jaeger::validate_and_normalize_endpoint(&new_endpoint) {
-                            Ok(normalized) => {
-                                // Save the normalized endpoint
-                                let save_result =
-                                    app.preferences.borrow_mut().set_jaeger_endpoint(normalized);
-                                match save_result {
-                                    Ok(()) => {
-                                        app.set_warning_status("Jaeger endpoint saved");
-                                        state.stop_editing();
+                                // Validate the endpoint before saving
+                                match jaeger::validate_and_normalize_endpoint(&new_endpoint) {
+                                    Ok(normalized) => {
+                                        // Save the normalized endpoint
+                                        let save_result =
+                                            app.preferences.borrow_mut().set_jaeger_endpoint(normalized);
+                                        match save_result {
+                                            Ok(()) => {
+                                                app.set_warning_status("Jaeger endpoint saved");
+                                                state.stop_editing();
+                                            }
+                                            Err(e) => {
+                                                app.set_warning_status(&format!("Failed to save: {}", e));
+                                                // Don't stop editing - let user fix the issue
+                                            }
+                                        }
                                     }
                                     Err(e) => {
-                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                        // Validation failed - show error and keep editing
+                                        app.set_warning_status(&format!("Invalid endpoint: {}", e));
                                         // Don't stop editing - let user fix the issue
                                     }
                                 }
                             }
-                            Err(e) => {
-                                // Validation failed - show error and keep editing
-                                app.set_warning_status(&format!("Invalid endpoint: {}", e));
-                                // Don't stop editing - let user fix the issue
+                            None => {
+                                state.stop_editing();
                             }
                         }
                     }
-                    None => {
-                        state.stop_editing();
+                    ui::modal::SettingsTab::AI => {
+                        match state.selected_ai_setting() {
+                            Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                                let key = state.ai.elevenlabs_key_input.clone();
+                                if !key.is_empty() {
+                                    // Save the API key to secure storage
+                                    match tenex_core::SecureStorage::set(
+                                        tenex_core::SecureKey::ElevenLabsApiKey,
+                                        &key
+                                    ) {
+                                        Ok(()) => {
+                                            app.set_warning_status("ElevenLabs API key saved");
+                                            state.ai.elevenlabs_key_input.clear();
+                                            state.ai.elevenlabs_key_exists = true;
+                                            state.stop_editing();
+                                        }
+                                        Err(e) => {
+                                            app.set_warning_status(&format!("Failed to save: {}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                                let key = state.ai.openrouter_key_input.clone();
+                                if !key.is_empty() {
+                                    // Save the API key to secure storage
+                                    match tenex_core::SecureStorage::set(
+                                        tenex_core::SecureKey::OpenRouterApiKey,
+                                        &key
+                                    ) {
+                                        Ok(()) => {
+                                            app.set_warning_status("OpenRouter API key saved");
+                                            state.ai.openrouter_key_input.clear();
+                                            state.ai.openrouter_key_exists = true;
+                                            state.stop_editing();
+                                        }
+                                        Err(e) => {
+                                            app.set_warning_status(&format!("Failed to save: {}", e));
+                                        }
+                                    }
+                                }
+                            }
+                            None => {
+                                state.stop_editing();
+                            }
+                        }
                     }
                 }
             } else {
@@ -250,21 +318,51 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
             }
         }
         KeyCode::Char(c) if state.editing => {
-            // Handle character input based on which setting is being edited
-            match state.selected_setting() {
-                Some(AppSetting::JaegerEndpoint) => {
-                    state.jaeger_endpoint_input.push(c);
+            // Handle character input based on which tab and setting are being edited
+            match state.current_tab {
+                ui::modal::SettingsTab::General => {
+                    match state.selected_general_setting() {
+                        Some(GeneralSetting::JaegerEndpoint) => {
+                            state.jaeger_endpoint_input.push(c);
+                        }
+                        None => {}
+                    }
                 }
-                None => {}
+                ui::modal::SettingsTab::AI => {
+                    match state.selected_ai_setting() {
+                        Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                            state.ai.elevenlabs_key_input.push(c);
+                        }
+                        Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                            state.ai.openrouter_key_input.push(c);
+                        }
+                        None => {}
+                    }
+                }
             }
         }
         KeyCode::Backspace if state.editing => {
-            // Handle backspace based on which setting is being edited
-            match state.selected_setting() {
-                Some(AppSetting::JaegerEndpoint) => {
-                    state.jaeger_endpoint_input.pop();
+            // Handle backspace based on which tab and setting are being edited
+            match state.current_tab {
+                ui::modal::SettingsTab::General => {
+                    match state.selected_general_setting() {
+                        Some(GeneralSetting::JaegerEndpoint) => {
+                            state.jaeger_endpoint_input.pop();
+                        }
+                        None => {}
+                    }
                 }
-                None => {}
+                ui::modal::SettingsTab::AI => {
+                    match state.selected_ai_setting() {
+                        Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                            state.ai.elevenlabs_key_input.pop();
+                        }
+                        Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                            state.ai.openrouter_key_input.pop();
+                        }
+                        None => {}
+                    }
+                }
             }
         }
         KeyCode::Up if !state.editing => {
@@ -272,6 +370,48 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Down if !state.editing => {
             state.move_down();
+        }
+        KeyCode::Delete if !state.editing => {
+            // Delete/clear API keys when not editing
+            if state.current_tab == ui::modal::SettingsTab::AI {
+                match state.selected_ai_setting() {
+                    Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                        if state.ai.elevenlabs_key_exists {
+                            match tenex_core::SecureStorage::delete(
+                                tenex_core::SecureKey::ElevenLabsApiKey
+                            ) {
+                                Ok(()) => {
+                                    app.set_warning_status("ElevenLabs API key deleted");
+                                    state.ai.elevenlabs_key_exists = false;
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to delete: {}", e));
+                                }
+                            }
+                        } else {
+                            app.set_warning_status("No ElevenLabs API key to delete");
+                        }
+                    }
+                    Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                        if state.ai.openrouter_key_exists {
+                            match tenex_core::SecureStorage::delete(
+                                tenex_core::SecureKey::OpenRouterApiKey
+                            ) {
+                                Ok(()) => {
+                                    app.set_warning_status("OpenRouter API key deleted");
+                                    state.ai.openrouter_key_exists = false;
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to delete: {}", e));
+                                }
+                            }
+                        } else {
+                            app.set_warning_status("No OpenRouter API key to delete");
+                        }
+                    }
+                    None => {}
+                }
+            }
         }
         _ => {}
     }

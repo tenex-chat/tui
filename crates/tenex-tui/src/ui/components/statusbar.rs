@@ -118,12 +118,13 @@ fn calculate_runtime_width(cumulative_runtime_ms: u64) -> u16 {
 }
 
 /// Render the status bar at the bottom of the screen
-/// Shows notification (left/center) and cumulative runtime (right)
+/// Shows notification (left/center), optional audio indicator, and cumulative runtime (right)
 /// Uses fixed-width columns to prevent layout breakage from long notifications
 ///
 /// ## Color Logic
 /// - `has_active_agents = true`: "Today:" label shown in GREEN with wave animation (agents working)
 /// - `has_active_agents = false`: "Today:" label shown in RED (no agents working)
+/// - `audio_playing = true`: Shows audio indicator icon
 pub fn render_statusbar(
     f: &mut Frame,
     area: Rect,
@@ -132,19 +133,31 @@ pub fn render_statusbar(
     has_active_agents: bool,
     active_agent_count: usize,
     wave_offset: usize,
+    audio_playing: bool,
 ) {
     // Calculate dynamic width for runtime column based on actual content
     let runtime_column_width = calculate_runtime_width(cumulative_runtime_ms);
 
-    // Split into columns: notification (flexible) | runtime (dynamic width based on content)
-    let chunks = Layout::horizontal([
-        Constraint::Min(0),                        // Notification (fills remaining space)
-        Constraint::Length(runtime_column_width), // Runtime (dynamic width)
-    ])
-    .split(area);
+    // Audio indicator width: "🔊 " = 3 chars when playing, 0 when not
+    let audio_indicator_width = if audio_playing { 4 } else { 0 };
+
+    // Split into columns: notification (flexible) | audio indicator (optional) | runtime (dynamic width based on content)
+    let constraints = if audio_playing {
+        vec![
+            Constraint::Min(0),                        // Notification (fills remaining space)
+            Constraint::Length(audio_indicator_width), // Audio indicator
+            Constraint::Length(runtime_column_width),  // Runtime (dynamic width)
+        ]
+    } else {
+        vec![
+            Constraint::Min(0),                        // Notification (fills remaining space)
+            Constraint::Length(runtime_column_width),  // Runtime (dynamic width)
+        ]
+    };
+    let chunks = Layout::horizontal(constraints).split(area);
 
     let notification_area = chunks[0];
-    let runtime_area = chunks[1];
+    let runtime_area = if audio_playing { chunks[2] } else { chunks[1] };
 
     // Render notification (left side) - truncate to fit available width
     let notification_paragraph = if let Some(notification) = current_notification {
@@ -172,6 +185,20 @@ pub fn render_statusbar(
     };
 
     f.render_widget(notification_paragraph, notification_area);
+
+    // Render audio indicator (middle) if playing
+    if audio_playing {
+        let audio_area = chunks[1];
+        // Animate the speaker icon based on wave_offset for a pulsing effect
+        let audio_icon = if wave_offset % 4 < 2 { "🔊" } else { "🔈" };
+        let audio_line = Line::from(Span::styled(
+            format!("{} ", audio_icon),
+            Style::default().fg(theme::ACCENT_SUCCESS),
+        ));
+        let audio_paragraph = Paragraph::new(audio_line)
+            .style(Style::default().bg(theme::BG_SIDEBAR));
+        f.render_widget(audio_paragraph, audio_area);
+    }
 
     // Render runtime (right side) - right-aligned within its fixed column
     // Color indicates agent activity: GREEN = agents working, RED = no agents working

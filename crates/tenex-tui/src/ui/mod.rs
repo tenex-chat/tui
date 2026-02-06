@@ -1,5 +1,6 @@
 pub mod app;
 pub mod ask_input;
+pub mod audio_player;
 pub mod card;
 pub mod components;
 pub mod format;
@@ -31,3 +32,4 @@ pub use hotkeys::{
 };
 pub use modal::ModalState;
 pub use terminal::{init as init_terminal, restore as restore_terminal, Tui};
+pub use audio_player::{AudioPlayer, AudioPlaybackState};

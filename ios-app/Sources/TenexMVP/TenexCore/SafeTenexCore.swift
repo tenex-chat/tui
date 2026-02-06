@@ -507,6 +507,117 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    // MARK: - AI Audio Settings
+
+    /// Get AI audio settings (API keys never exposed - only configuration status)
+    func getAiAudioSettings() throws -> AiAudioSettings {
+        try profiler.measureFFI("getAiAudioSettings") {
+            do {
+                let settings = try core.getAiAudioSettings()
+                return AiAudioSettings(
+                    elevenlabsApiKeyConfigured: settings.elevenlabsApiKeyConfigured,
+                    openrouterApiKeyConfigured: settings.openrouterApiKeyConfigured,
+                    selectedVoiceIds: settings.selectedVoiceIds,
+                    openrouterModel: settings.openrouterModel,
+                    audioPrompt: settings.audioPrompt,
+                    enabled: settings.enabled
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set ElevenLabs API key (stored in OS secure storage)
+    func setElevenLabsApiKey(key: String?) throws {
+        try profiler.measureFFI("setElevenlabsApiKey") {
+            do {
+                try core.setElevenlabsApiKey(key: key)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set OpenRouter API key (stored in OS secure storage)
+    func setOpenRouterApiKey(key: String?) throws {
+        try profiler.measureFFI("setOpenrouterApiKey") {
+            do {
+                try core.setOpenrouterApiKey(key: key)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set whether audio notifications are enabled
+    func setAudioNotificationsEnabled(enabled: Bool) throws {
+        try profiler.measureFFI("setAudioNotificationsEnabled") {
+            do {
+                try core.setAudioNotificationsEnabled(enabled: enabled)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set audio prompt template
+    func setAudioPrompt(prompt: String) throws {
+        try profiler.measureFFI("setAudioPrompt") {
+            do {
+                try core.setAudioPrompt(prompt: prompt)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set OpenRouter model to use for text massage
+    func setOpenRouterModel(model: String?) throws {
+        try profiler.measureFFI("setOpenrouterModel") {
+            do {
+                try core.setOpenrouterModel(model: model)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set selected voice IDs whitelist
+    func setSelectedVoiceIds(voiceIds: [String]) throws {
+        try profiler.measureFFI("setSelectedVoiceIds") {
+            do {
+                try core.setSelectedVoiceIds(voiceIds: voiceIds)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch available voices from ElevenLabs
+    /// Note: This is a blocking call that makes a network request
+    func fetchElevenLabsVoices() throws -> [VoiceInfo] {
+        try profiler.measureFFI("fetchElevenlabsVoices") {
+            do {
+                return try core.fetchElevenlabsVoices()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch available models from OpenRouter
+    /// Note: This is a blocking call that makes a network request
+    func fetchOpenRouterModels() throws -> [ModelInfo] {
+        try profiler.measureFFI("fetchOpenrouterModels") {
+            do {
+                return try core.fetchOpenrouterModels()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Misc
 
     /// Get version string.

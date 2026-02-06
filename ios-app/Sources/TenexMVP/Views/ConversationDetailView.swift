@@ -779,6 +779,9 @@ struct FullConversationSheet: View {
             .navigationTitle("Full Conversation")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    AudioStatusBarView()
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }

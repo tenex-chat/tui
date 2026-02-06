@@ -111,51 +111,56 @@ final class ConversationHierarchyCache: ObservableObject {
     }
 
     /// Load hierarchy for a single conversation (used by TaskGroup)
+    /// This method runs off the MainActor to avoid blocking the UI during heavy FFI calls
     private static func loadHierarchy(
         for conversation: ConversationFullInfo,
         using coreManager: TenexCoreManager
     ) async -> ConversationHierarchy {
-        // Load p-tagged recipient
-        var pTaggedRecipientInfo: AgentAvatarInfo?
-        if let pTaggedPubkey = conversation.pTags.first {
-            let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
-            pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
-        }
-
-        // Get all descendants
-        let descendantIds = await coreManager.safeCore.getDescendantConversationIds(
-            conversationId: conversation.id
-        )
-        let descendants = await coreManager.safeCore.getConversationsByIds(
-            conversationIds: descendantIds
-        )
-
-        // Direct children
-        let directChildIds = descendants
-            .filter { $0.parentId == conversation.id }
-            .map(\.id)
-
-        // Collect unique agents from descendants
-        let pTaggedPubkey = conversation.pTags.first
-        var agentsByPubkey: [String: AgentAvatarInfo] = [:]
-        for descendant in descendants {
-            if descendant.authorPubkey != conversation.authorPubkey &&
-                descendant.authorPubkey != pTaggedPubkey {
-                agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
-                    name: descendant.author,
-                    pubkey: descendant.authorPubkey
-                )
+        // Run all heavy FFI work off the MainActor in a detached task
+        // This prevents blocking the UI during profile lookups and hierarchy traversal
+        return await Task.detached {
+            // Load p-tagged recipient
+            var pTaggedRecipientInfo: AgentAvatarInfo?
+            if let pTaggedPubkey = conversation.pTags.first {
+                let name = await coreManager.safeCore.getProfileName(pubkey: pTaggedPubkey)
+                pTaggedRecipientInfo = AgentAvatarInfo(name: name, pubkey: pTaggedPubkey)
             }
-        }
 
-        let delegationAgentInfos = agentsByPubkey.values.sorted { $0.name < $1.name }
+            // Get all descendants
+            let descendantIds = await coreManager.safeCore.getDescendantConversationIds(
+                conversationId: conversation.id
+            )
+            let descendants = await coreManager.safeCore.getConversationsByIds(
+                conversationIds: descendantIds
+            )
 
-        return ConversationHierarchy(
-            pTaggedRecipientInfo: pTaggedRecipientInfo,
-            delegationAgentInfos: delegationAgentInfos,
-            descendantIds: descendantIds,
-            directChildIds: directChildIds
-        )
+            // Direct children
+            let directChildIds = descendants
+                .filter { $0.parentId == conversation.id }
+                .map(\.id)
+
+            // Collect unique agents from descendants
+            let pTaggedPubkey = conversation.pTags.first
+            var agentsByPubkey: [String: AgentAvatarInfo] = [:]
+            for descendant in descendants {
+                if descendant.authorPubkey != conversation.authorPubkey &&
+                    descendant.authorPubkey != pTaggedPubkey {
+                    agentsByPubkey[descendant.authorPubkey] = AgentAvatarInfo(
+                        name: descendant.author,
+                        pubkey: descendant.authorPubkey
+                    )
+                }
+            }
+
+            let delegationAgentInfos = agentsByPubkey.values.sorted { $0.name < $1.name }
+
+            return ConversationHierarchy(
+                pTaggedRecipientInfo: pTaggedRecipientInfo,
+                delegationAgentInfos: delegationAgentInfos,
+                descendantIds: descendantIds,
+                directChildIds: directChildIds
+            )
+        }.value
     }
 
     // MARK: - Cache Management

@@ -89,6 +89,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     let statusbar_area = if has_tabs { chunks[4] } else { chunks[3] };
     let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
         app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let audio_playing = app.audio_player.is_playing();
     render_statusbar(
         f,
         statusbar_area,
@@ -97,6 +98,7 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
         has_active_agents,
         active_agent_count,
         app.wave_offset(),
+        audio_playing,
     );
 
     // Projects modal overlay

@@ -1,7 +1,7 @@
 //! App Settings modal view - global application settings accessible via comma key
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::AppSettingsState;
+use crate::ui::modal::{AiSetting, AppSettingsState, GeneralSetting, SettingsTab};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -15,8 +15,8 @@ use ratatui::{
 pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
     let (popup_area, content_area) = Modal::new("Settings")
         .size(ModalSize {
-            max_width: 70,
-            height_percent: 0.5,
+            max_width: 80,
+            height_percent: 0.7,
         })
         .render_frame(f, area);
 
@@ -28,8 +28,58 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         content_area.height,
     );
 
+    // Render tab bar at top
+    render_tab_bar(f, remaining, state);
+
+    // Render content based on active tab
+    let content_y = remaining.y + 2;
+    let content_area = Rect::new(
+        remaining.x,
+        content_y,
+        remaining.width,
+        remaining.height.saturating_sub(4), // Reserve space for tabs and hints
+    );
+
+    match state.current_tab {
+        SettingsTab::General => render_general_tab(f, app, content_area, state),
+        SettingsTab::AI => render_ai_tab(f, content_area, state),
+    }
+
+    // Hints at bottom
+    render_hints(f, popup_area, state);
+}
+
+/// Render the tab bar
+fn render_tab_bar(f: &mut Frame, area: Rect, state: &AppSettingsState) {
+    let tab_area = Rect::new(area.x, area.y, area.width, 1);
+
+    let mut tab_spans = vec![];
+    for (i, tab) in SettingsTab::ALL.iter().enumerate() {
+        if i > 0 {
+            tab_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
+        }
+
+        let is_active = *tab == state.current_tab;
+        let style = if is_active {
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_MUTED)
+        };
+
+        tab_spans.push(Span::styled(tab.label(), style));
+    }
+
+    let tabs_line = Line::from(tab_spans);
+    let tabs_widget = Paragraph::new(tabs_line);
+    f.render_widget(tabs_widget, tab_area);
+}
+
+/// Render General tab content
+fn render_general_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
     // Section header: Trace Viewer
-    let header_area = Rect::new(remaining.x, remaining.y, remaining.width, 1);
+    let header_area = Rect::new(area.x, area.y, area.width, 1);
     let header = Paragraph::new(Line::from(vec![Span::styled(
         "Trace Viewer",
         Style::default()
@@ -39,10 +89,11 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     f.render_widget(header, header_area);
 
     // Jaeger endpoint setting row
-    let row_y = remaining.y + 2;
-    let row_area = Rect::new(remaining.x, row_y, remaining.width, 3);
+    let row_y = area.y + 2;
+    let row_area = Rect::new(area.x, row_y, area.width, 3);
 
-    let is_selected = state.selected_index == 0;
+    let is_selected = state.current_tab == SettingsTab::General
+        && state.selected_general_setting() == Some(GeneralSetting::JaegerEndpoint);
 
     // Left border indicator
     let border_char = if is_selected { "▌" } else { "│" };
@@ -86,12 +137,134 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     f.render_widget(row, row_area);
 
     // Description below
-    let desc_area = Rect::new(remaining.x + 2, row_y + 1, remaining.width.saturating_sub(2), 1);
+    let desc_area = Rect::new(area.x + 2, row_y + 1, area.width.saturating_sub(2), 1);
     let desc = Paragraph::new("URL for opening trace links (e.g., http://localhost:16686)")
         .style(Style::default().fg(theme::TEXT_DIM));
     f.render_widget(desc, desc_area);
+}
 
-    // Hints at bottom
+/// Render AI tab content - API Keys only (other settings not yet implemented)
+fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
+    let mut y_offset = area.y;
+
+    // Section header: API Keys
+    let header_area = Rect::new(area.x, y_offset, area.width, 1);
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        "API Keys",
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC),
+    )]));
+    f.render_widget(header, header_area);
+    y_offset += 2;
+
+    // Use cached key existence from state instead of checking storage every frame
+    let elevenlabs_key_exists = state.ai.elevenlabs_key_exists;
+    let openrouter_key_exists = state.ai.openrouter_key_exists;
+
+    // 1. ElevenLabs API Key
+    let is_elevenlabs_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::ElevenLabsApiKey);
+    render_api_key_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "ElevenLabs API Key:",
+        "API key for ElevenLabs voice synthesis (Enter to set, Delete to clear)",
+        &state.ai.elevenlabs_key_input,
+        is_elevenlabs_selected,
+        state.editing_elevenlabs_key(),
+        elevenlabs_key_exists,
+    );
+    y_offset += 3;
+
+    // 2. OpenRouter API Key
+    let is_openrouter_selected = state.current_tab == SettingsTab::AI
+        && state.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey);
+    render_api_key_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "OpenRouter API Key:",
+        "API key for OpenRouter LLM access (Enter to set, Delete to clear)",
+        &state.ai.openrouter_key_input,
+        is_openrouter_selected,
+        state.editing_openrouter_key(),
+        openrouter_key_exists,
+    );
+}
+
+/// Helper to render an API key row with masked display (always masked, even during edit)
+fn render_api_key_row(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    description: &str,
+    key_input: &str,
+    is_selected: bool,
+    is_editing: bool,
+    key_exists_in_storage: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    // Left border indicator
+    let border_char = if is_selected { "▌" } else { "│" };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
+
+    // Label
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    spans.push(Span::styled(format!(" {}", label), label_style));
+
+    // Value - ALWAYS masked for security
+    if is_editing {
+        // Show masked input with cursor (bullet points for each character)
+        let masked: String = "•".repeat(key_input.len());
+        spans.push(Span::styled(
+            format!(" {}_", masked),
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::UNDERLINED),
+        ));
+    } else {
+        // Show status when not editing - check both input and secure storage
+        let display_value = if key_exists_in_storage {
+            "••••••••"
+        } else {
+            "(not set)"
+        };
+        spans.push(Span::styled(
+            format!(" {}", display_value),
+            Style::default().fg(theme::ACCENT_SPECIAL),
+        ));
+    }
+
+    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
+    f.render_widget(row, row_area);
+
+    // Description below
+    let desc_area = Rect::new(x + 2, y + 1, width.saturating_sub(2), 1);
+    let desc = Paragraph::new(description).style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(desc, desc_area);
+}
+
+/// Render hints at bottom of modal
+fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
     let hints_area = Rect::new(
         popup_area.x + 2,
         popup_area.y + popup_area.height.saturating_sub(2),
@@ -99,7 +272,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
         1,
     );
 
-    let hint_spans = if state.editing_jaeger_endpoint() {
+    let hint_spans = if state.editing {
         vec![
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" save", Style::default().fg(theme::TEXT_MUTED)),
@@ -108,13 +281,30 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
             Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
         ]
     } else {
-        vec![
+        // Show Delete hint only on AI tab for API key settings
+        let mut hints = vec![
+            Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" switch tab", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" close", Style::default().fg(theme::TEXT_MUTED)),
-        ]
+        ];
+
+        // Show Delete hint on AI tab
+        if state.current_tab == SettingsTab::AI {
+            hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled("Del", Style::default().fg(theme::ACCENT_WARNING)));
+            hints.push(Span::styled(" clear key", Style::default().fg(theme::TEXT_MUTED)));
+        }
+
+        hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+        hints.push(Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)));
+        hints.push(Span::styled(" close", Style::default().fg(theme::TEXT_MUTED)));
+
+        hints
     };
 
     let hints = Paragraph::new(Line::from(hint_spans));
