@@ -20,6 +20,14 @@ struct Cli {
     #[arg(long, short = 'd')]
     data_dir: Option<PathBuf>,
 
+    /// Enable HTTP server (OpenAI-compatible API)
+    #[arg(long)]
+    http: bool,
+
+    /// HTTP server bind address (requires --http)
+    #[arg(long, default_value = "127.0.0.1:8080")]
+    http_bind: String,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -167,7 +175,7 @@ fn main() {
 
     // Run daemon mode
     if cli.daemon {
-        if let Err(e) = run_daemon(data_dir, config) {
+        if let Err(e) = run_daemon(data_dir, config, cli.http, cli.http_bind) {
             eprintln!("Daemon error: {}", e);
             std::process::exit(1);
         }

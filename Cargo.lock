@@ -3025,13 +3025,18 @@ name = "tenex-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-stream",
+ "axum",
  "clap",
  "dirs",
+ "futures",
  "nostr-sdk",
  "serde",
  "serde_json",
  "tenex-core",
  "tokio",
+ "tower-http 0.5.2",
+ "uuid",
 ]
 
 [[package]]
