@@ -223,6 +223,7 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
     case sync = "Sync"
     case subscriptions = "Subscriptions"
     case database = "Database"
+    case settings = "Settings"
 
     var id: String { rawValue }
 
@@ -232,6 +233,7 @@ enum DiagnosticsTab: String, CaseIterable, Identifiable {
         case .sync: return "arrow.triangle.2.circlepath"
         case .subscriptions: return "antenna.radiowaves.left.and.right"
         case .database: return "cylinder"
+        case .settings: return "gearshape"
         }
     }
 }

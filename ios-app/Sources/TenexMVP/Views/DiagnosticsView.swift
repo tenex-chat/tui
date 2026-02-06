@@ -1,19 +1,23 @@
 import SwiftUI
 
 /// Main Diagnostics view showing system internals
-/// 4 tabs: Overview, Sync, Subscriptions, Database
+/// 5 tabs: Overview, Sync, Subscriptions, Database, Settings
 struct DiagnosticsView: View {
     @StateObject private var viewModel: DiagnosticsViewModel
+    private let coreManager: TenexCoreManager
 
     init(coreManager: TenexCoreManager) {
+        self.coreManager = coreManager
         _viewModel = StateObject(wrappedValue: DiagnosticsViewModel(coreManager: coreManager))
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
-                // Show section errors banner if any sections failed
-                if let snapshot = viewModel.snapshot, !snapshot.sectionErrors.isEmpty {
+                // Show section errors banner if any sections failed (not for Settings tab)
+                if viewModel.selectedTab != .settings,
+                   let snapshot = viewModel.snapshot,
+                   !snapshot.sectionErrors.isEmpty {
                     DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
                         .padding(.horizontal)
                         .padding(.top, 8)
@@ -27,8 +31,11 @@ struct DiagnosticsView: View {
                 Divider()
                     .padding(.top, 8)
 
-                // Tab Content - shows data as it arrives
-                if let snapshot = viewModel.snapshot {
+                // Tab Content - Settings tab is handled separately
+                if viewModel.selectedTab == .settings {
+                    AISettingsView()
+                        .environmentObject(coreManager)
+                } else if let snapshot = viewModel.snapshot {
                     DiagnosticsTabContent(
                         snapshot: snapshot,
                         selectedTab: viewModel.selectedTab
@@ -145,6 +152,9 @@ struct DiagnosticsTabContent: View {
                         icon: "cylinder.split.1x2"
                     )
                 }
+            case .settings:
+                // Settings tab is handled in parent view, this case should not be reached
+                EmptyView()
             }
         }
         .transition(.opacity)
