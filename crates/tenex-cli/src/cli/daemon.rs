@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tokio::net::UnixListener;
@@ -11,6 +12,7 @@ use tokio::net::UnixListener;
 use anyhow::Result;
 use serde::Deserialize;
 
+use crate::cli::http::run_server;
 use crate::nostr::{self, DataChange, NostrCommand};
 use crate::store::AppDataStore;
 use tenex_core::config::CoreConfig;
@@ -32,7 +34,12 @@ pub fn socket_path(data_dir: &Path) -> PathBuf {
 
 /// Run the daemon server
 #[tokio::main]
-pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<()> {
+pub async fn run_daemon(
+    data_dir: PathBuf,
+    config: Option<CliConfig>,
+    http_enabled: bool,
+    http_bind: String,
+) -> Result<()> {
     eprintln!("Starting tenex-cli daemon...");
 
     // Ensure data directory exists
@@ -86,50 +93,137 @@ pub async fn run_daemon(data_dir: PathBuf, config: Option<CliConfig>) -> Result<
     // Track state
     let start_time = Instant::now();
 
-    // Handle connections - use async accept to allow batch exporter to run
-    loop {
-        // Drain any pending DataChange events (non-blocking)
-        while let Ok(data_change) = data_rx.try_recv() {
-            match data_change {
-                DataChange::ProjectStatus { json } => {
-                    data_store.borrow_mut().handle_status_event_json(&json);
+    // If HTTP is enabled, we need to use Arc<Mutex<AppDataStore>> for thread-safe sharing
+    if http_enabled {
+        // Create a separate AppDataStore for the HTTP server using the same ndb
+        let http_data_store = Arc::new(Mutex::new(AppDataStore::new(core_runtime.ndb())));
+        let http_data_rx = Arc::new(Mutex::new(data_rx));
+
+        // Copy trusted backends from prefs to http_data_store
+        {
+            let mut dst = http_data_store.lock().unwrap();
+            let approved = prefs.approved_backend_pubkeys().clone();
+            let blocked = prefs.blocked_backend_pubkeys().clone();
+            dst.set_trusted_backends(approved, blocked);
+        }
+
+        // Spawn HTTP server
+        let http_core_handle = core_handle.clone();
+        let http_store_clone = http_data_store.clone();
+        let http_rx_clone = http_data_rx.clone();
+        let http_task = tokio::spawn(async move {
+            if let Err(e) = run_server(
+                http_bind,
+                http_core_handle,
+                http_store_clone,
+                http_rx_clone,
+            )
+            .await
+            {
+                eprintln!("HTTP server error: {}", e);
+            }
+        });
+
+        // Handle connections - use async accept to allow batch exporter to run
+        loop {
+            // Drain any pending DataChange events (non-blocking)
+            // We need to update both data stores when we receive status events
+            {
+                let rx = http_data_rx.lock().unwrap();
+                while let Ok(data_change) = rx.try_recv() {
+                    match &data_change {
+                        DataChange::ProjectStatus { json } => {
+                            data_store.borrow_mut().handle_status_event_json(json);
+                            http_data_store.lock().unwrap().handle_status_event_json(json);
+                        }
+                        _ => {}
+                    }
                 }
-                _ => {}
+            }
+
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _)) => {
+                            // Convert tokio UnixStream to std UnixStream for blocking I/O
+                            let std_stream = stream.into_std()?;
+                            std_stream.set_nonblocking(false)?;
+                            let should_shutdown = handle_connection(
+                                std_stream,
+                                &data_store,
+                                &core_handle,
+                                start_time,
+                                keys.is_some(),
+                            )?;
+
+                            if should_shutdown {
+                                eprintln!("Shutdown requested");
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Connection error: {}", e);
+                        }
+                    }
+                }
+                Some(note_keys) = core_runtime.next_note_keys() => {
+                    if let Err(e) = core_runtime.process_note_keys(&note_keys) {
+                        eprintln!("Failed to process core events: {}", e);
+                    }
+                }
+                // Small timeout to periodically check for DataChange events
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
             }
         }
 
-        tokio::select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((stream, _)) => {
-                        // Convert tokio UnixStream to std UnixStream for blocking I/O
-                        let std_stream = stream.into_std()?;
-                        std_stream.set_nonblocking(false)?;
-                        let should_shutdown = handle_connection(
-                            std_stream,
-                            &data_store,
-                            &core_handle,
-                            start_time,
-                            keys.is_some(),
-                        )?;
+        // Abort HTTP task on shutdown
+        http_task.abort();
+    } else {
+        // Socket-only mode (original behavior)
+        loop {
+            // Drain any pending DataChange events (non-blocking)
+            while let Ok(data_change) = data_rx.try_recv() {
+                match data_change {
+                    DataChange::ProjectStatus { json } => {
+                        data_store.borrow_mut().handle_status_event_json(&json);
+                    }
+                    _ => {}
+                }
+            }
 
-                        if should_shutdown {
-                            eprintln!("Shutdown requested");
-                            break;
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _)) => {
+                            // Convert tokio UnixStream to std UnixStream for blocking I/O
+                            let std_stream = stream.into_std()?;
+                            std_stream.set_nonblocking(false)?;
+                            let should_shutdown = handle_connection(
+                                std_stream,
+                                &data_store,
+                                &core_handle,
+                                start_time,
+                                keys.is_some(),
+                            )?;
+
+                            if should_shutdown {
+                                eprintln!("Shutdown requested");
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Connection error: {}", e);
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Connection error: {}", e);
+                }
+                Some(note_keys) = core_runtime.next_note_keys() => {
+                    if let Err(e) = core_runtime.process_note_keys(&note_keys) {
+                        eprintln!("Failed to process core events: {}", e);
                     }
                 }
+                // Small timeout to periodically check for DataChange events
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
             }
-            Some(note_keys) = core_runtime.next_note_keys() => {
-                if let Err(e) = core_runtime.process_note_keys(&note_keys) {
-                    eprintln!("Failed to process core events: {}", e);
-                }
-            }
-            // Small timeout to periodically check for DataChange events
-            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
         }
     }
 
