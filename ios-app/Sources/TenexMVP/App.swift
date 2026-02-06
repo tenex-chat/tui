@@ -301,15 +301,37 @@ class TenexCoreManager: ObservableObject {
     }
 
     /// Signal that project status has changed (kind:24010 events).
-    /// This triggers a refresh of project status data.
+    /// This triggers a refresh of project status data, online status, and agents cache.
     @MainActor
     func signalProjectStatusUpdate() {
         Task {
             // Refresh projects list
-            if let projects = try? await safeCore.getProjects() {
-                await MainActor.run {
-                    self.projects = projects
+            guard let projects = try? await safeCore.getProjects() else { return }
+
+            await MainActor.run {
+                self.projects = projects
+            }
+
+            // Update online status and agents cache for each project
+            // This mirrors the logic in fetchData() to ensure UI reflects current state
+            var updatedStatus: [String: Bool] = [:]
+            for project in projects {
+                let isOnline = await safeCore.isProjectOnline(projectId: project.id)
+                updatedStatus[project.id] = isOnline
+
+                // Fetch and cache agents for online projects
+                if isOnline {
+                    await fetchAndCacheAgents(for: project.id)
+                } else {
+                    await MainActor.run {
+                        self.setOnlineAgentsCache([], for: project.id)
+                    }
                 }
+            }
+
+            await MainActor.run {
+                self.projectOnlineStatus = updatedStatus
+                self.signalDiagnosticsUpdate()
             }
         }
     }
