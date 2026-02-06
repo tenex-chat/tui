@@ -530,9 +530,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Set ElevenLabs API key (stored in OS secure storage)
     func setElevenLabsApiKey(key: String?) throws {
-        try profiler.measureFFI("setElevenLabsApiKey") {
+        try profiler.measureFFI("setElevenlabsApiKey") {
             do {
-                try core.setElevenLabsApiKey(key: key)
+                try core.setElevenlabsApiKey(key: key)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -541,9 +541,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Set OpenRouter API key (stored in OS secure storage)
     func setOpenRouterApiKey(key: String?) throws {
-        try profiler.measureFFI("setOpenRouterApiKey") {
+        try profiler.measureFFI("setOpenrouterApiKey") {
             do {
-                try core.setOpenRouterApiKey(key: key)
+                try core.setOpenrouterApiKey(key: key)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -551,10 +551,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Set whether audio notifications are enabled
-    func setAiAudioEnabled(enabled: Bool) throws {
-        try profiler.measureFFI("setAiAudioEnabled") {
+    func setAudioNotificationsEnabled(enabled: Bool) throws {
+        try profiler.measureFFI("setAudioNotificationsEnabled") {
             do {
-                try core.setAiAudioEnabled(enabled: enabled)
+                try core.setAudioNotificationsEnabled(enabled: enabled)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -562,10 +562,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Set audio prompt template
-    func setAiAudioPrompt(prompt: String) throws {
-        try profiler.measureFFI("setAiAudioPrompt") {
+    func setAudioPrompt(prompt: String) throws {
+        try profiler.measureFFI("setAudioPrompt") {
             do {
-                try core.setAiAudioPrompt(prompt: prompt)
+                try core.setAudioPrompt(prompt: prompt)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -574,9 +574,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Set OpenRouter model to use for text massage
     func setOpenRouterModel(model: String?) throws {
-        try profiler.measureFFI("setOpenRouterModel") {
+        try profiler.measureFFI("setOpenrouterModel") {
             do {
-                try core.setOpenRouterModel(model: model)
+                try core.setOpenrouterModel(model: model)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -597,17 +597,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     /// Fetch available voices from ElevenLabs
     /// Note: This is a blocking call that makes a network request
     func fetchElevenLabsVoices() throws -> [VoiceInfo] {
-        try profiler.measureFFI("fetchElevenLabsVoices") {
+        try profiler.measureFFI("fetchElevenlabsVoices") {
             do {
-                let voices = try core.fetchElevenLabsVoices()
-                return voices.map { voice in
-                    VoiceInfo(
-                        voiceId: voice.voiceId,
-                        name: voice.name,
-                        category: voice.category,
-                        description: voice.description
-                    )
-                }
+                return try core.fetchElevenlabsVoices()
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -617,17 +609,9 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     /// Fetch available models from OpenRouter
     /// Note: This is a blocking call that makes a network request
     func fetchOpenRouterModels() throws -> [ModelInfo] {
-        try profiler.measureFFI("fetchOpenRouterModels") {
+        try profiler.measureFFI("fetchOpenrouterModels") {
             do {
-                let models = try core.fetchOpenRouterModels()
-                return models.map { model in
-                    ModelInfo(
-                        modelId: model.id,
-                        name: model.name ?? model.id,
-                        description: model.description,
-                        contextLength: model.contextLength
-                    )
-                }
+                return try core.fetchOpenrouterModels()
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
