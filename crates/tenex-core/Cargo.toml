@@ -36,5 +36,21 @@ path = "src/bin/uniffi-bindgen.rs"
 name = "test_negentropy"
 path = "src/bin/test_negentropy.rs"
 
+[[bin]]
+name = "test_notifications"
+path = "src/bin/test_notifications.rs"
+
+[[bin]]
+name = "quick_notification_test"
+path = "src/bin/quick_notification_test.rs"
+
+[[bin]]
+name = "test_negentropy_flood"
+path = "src/bin/test_negentropy_flood.rs"
+
+[[bin]]
+name = "diagnose_negentropy"
+path = "src/bin/diagnose_negentropy.rs"
+
 [dev-dependencies]
 tempfile.workspace = true

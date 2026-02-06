@@ -1924,45 +1924,85 @@ async fn sync_all_filters(
     total_new
 }
 
-/// Perform negentropy sync for a single filter
-/// Returns the number of new events received
+/// Perform negentropy sync for a single filter with automatic pagination
+/// Returns the number of new events received across all pages
 async fn sync_filter(
     client: &Client,
-    filter: Filter,
+    mut filter: Filter,
     label: &str,
     stats: &SharedNegentropySyncStats,
 ) -> u64 {
+    const LIMIT: usize = 10_000; // Match NdbDatabase's MAX_RESULTS
+    const MAX_PAGES: usize = 50; // Safety limit to prevent infinite loops
+
     let opts = SyncOptions::default();
+    let mut total_count = 0u64;
+    let mut page = 0;
 
-    match client.sync(filter, &opts).await {
-        Ok(output) => {
-            // output.val is Reconciliation, output.success is HashSet<RelayUrl>
-            let count = output.val.received.len() as u64;
+    // Add limit to filter
+    filter = filter.limit(LIMIT);
 
-            if count > 0 {
-                tlog!("SYNC", "kind:{} -> {} new events", label, count);
-            }
+    loop {
+        page += 1;
 
-            // Record success
-            stats.record_success(label, count);
-
-            count
+        if page > MAX_PAGES {
+            tlog!("SYNC", "kind:{} reached max pages ({}), stopping", label, MAX_PAGES);
+            break;
         }
-        Err(e) => {
-            let err_str = format!("{}", e);
-            let is_unsupported = err_str.contains("not supported") || err_str.contains("NEG-ERR");
 
-            // Only log if it's not a "not supported" error (common for relays without negentropy)
-            if !is_unsupported {
-                tlog!("SYNC", "kind:{} failed: {}", label, e);
+        match client.sync(filter.clone(), &opts).await {
+            Ok(output) => {
+                let event_ids = output.val.received;
+                let count = event_ids.len();
+
+                if count > 0 {
+                    tlog!("SYNC", "kind:{} page {} -> {} new events", label, page, count);
+                    total_count += count as u64;
+
+                    // If we got a full page, there might be more
+                    if count >= LIMIT {
+                        // Query database to find the oldest event from this batch
+                        // to set .until() for next page
+                        if let Ok(events) = client.database().query(filter.clone()).await {
+                            if let Some(oldest) = events.iter().map(|e| e.created_at).min() {
+                                // Next page: get events older than this
+                                filter = filter.until(oldest - 1);
+                                tlog!("SYNC_DEBUG", "kind:{} -> fetching next page (events before {})", label, oldest);
+                                continue; // Fetch next page
+                            }
+                        }
+                    }
+                }
+
+                // No more events or couldn't paginate - we're done
+                if page == 1 && count == 0 {
+                    tlog!("SYNC_DEBUG", "kind:{} -> 0 new (DB already had them)", label);
+                } else if page > 1 {
+                    tlog!("SYNC", "kind:{} COMPLETE -> {} total events across {} pages", label, total_count, page);
+                }
+
+                break; // Done paginating
             }
+            Err(e) => {
+                let err_str = format!("{}", e);
+                let is_unsupported = err_str.contains("not supported") || err_str.contains("NEG-ERR");
 
-            // Record failure
-            stats.record_failure(label, &err_str, is_unsupported);
+                if !is_unsupported {
+                    tlog!("SYNC", "kind:{} page {} failed: {}", label, page, e);
+                }
 
-            0
+                stats.record_failure(label, &err_str, is_unsupported);
+                break;
+            }
         }
     }
+
+    // Record total success
+    if total_count > 0 {
+        stats.record_success(label, total_count);
+    }
+
+    total_count
 }
 
 #[cfg(test)]
