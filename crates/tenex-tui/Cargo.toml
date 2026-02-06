@@ -34,6 +34,7 @@ tower-http = { version = "0.5", features = ["cors"] }
 http = "1.0"
 async-stream = "0.3"
 uuid.workspace = true
+rodio.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

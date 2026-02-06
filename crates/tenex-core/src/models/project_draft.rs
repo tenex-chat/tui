@@ -110,6 +110,50 @@ pub struct Preferences {
     /// OpenTelemetry/Jaeger endpoint URL for viewing traces
     #[serde(default = "default_jaeger_endpoint")]
     pub jaeger_endpoint: String,
+    /// AI Audio Notifications settings
+    #[serde(default)]
+    pub ai_audio_settings: AiAudioSettings,
+}
+
+/// Settings for AI-powered audio notifications
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiAudioSettings {
+    /// Whitelisted voice IDs from ElevenLabs
+    /// (API keys stored in OS secure storage, not in JSON)
+    #[serde(default)]
+    pub selected_voice_ids: Vec<String>,
+    /// OpenRouter model to use for text massaging
+    #[serde(default)]
+    pub openrouter_model: Option<String>,
+    /// Custom prompt for making text audio-friendly
+    #[serde(default = "default_audio_prompt")]
+    pub audio_prompt: String,
+    /// Enable/disable audio notifications
+    #[serde(default)]
+    pub enabled: bool,
+    /// Legacy fields for migration (ignored, will be removed on next save)
+    /// These are only used during one-time migration from JSON to secure storage
+    #[serde(default, skip_serializing)]
+    pub(crate) elevenlabs_api_key: Option<String>,
+    #[serde(default, skip_serializing)]
+    pub(crate) openrouter_api_key: Option<String>,
+}
+
+fn default_audio_prompt() -> String {
+    "You are helping convert text messages into audio-friendly format. Remove code blocks, long IDs, pubkeys, and technical elements that don't work well in audio. Keep the core message clear and concise. Include a reference to the conversation title if provided. Make it natural for text-to-speech.".to_string()
+}
+
+impl Default for AiAudioSettings {
+    fn default() -> Self {
+        Self {
+            selected_voice_ids: Vec::new(),
+            openrouter_model: None,
+            audio_prompt: default_audio_prompt(),
+            enabled: false,
+            elevenlabs_api_key: None,
+            openrouter_api_key: None,
+        }
+    }
 }
 
 fn default_jaeger_endpoint() -> String {
@@ -133,6 +177,7 @@ impl Default for Preferences {
             workspaces: Vec::new(),
             active_workspace_id: None,
             jaeger_endpoint: default_jaeger_endpoint(),
+            ai_audio_settings: AiAudioSettings::default(),
         }
     }
 }
@@ -145,8 +190,33 @@ pub struct PreferencesStorage {
 impl PreferencesStorage {
     pub fn new(data_dir: &str) -> Self {
         let path = PathBuf::from(data_dir).join("preferences.json");
-        let prefs = Self::load_from_file(&path).unwrap_or_default();
+        let mut prefs = Self::load_from_file(&path).unwrap_or_default();
+
+        // Migrate any existing API keys from JSON to secure storage
+        Self::migrate_api_keys(&mut prefs.ai_audio_settings);
+
         Self { path, prefs }
+    }
+
+    /// Migrate API keys from JSON to OS secure storage (one-time migration)
+    fn migrate_api_keys(settings: &mut AiAudioSettings) {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        // Migrate ElevenLabs API key if present in JSON
+        if let Some(key) = settings.elevenlabs_api_key.take() {
+            if !key.is_empty() {
+                let _ = SecureStorage::set(SecureKey::ElevenLabsApiKey, &key);
+                tracing::info!("Migrated ElevenLabs API key to secure storage");
+            }
+        }
+
+        // Migrate OpenRouter API key if present in JSON
+        if let Some(key) = settings.openrouter_api_key.take() {
+            if !key.is_empty() {
+                let _ = SecureStorage::set(SecureKey::OpenRouterApiKey, &key);
+                tracing::info!("Migrated OpenRouter API key to secure storage");
+            }
+        }
     }
 
     fn load_from_file(path: &PathBuf) -> Option<Preferences> {
@@ -428,5 +498,85 @@ impl PreferencesStorage {
         fs::write(&self.path, json)
             .map_err(|e| format!("Failed to write preferences file: {}", e))?;
         Ok(())
+    }
+
+    // ===== AI Audio Settings Methods =====
+
+    pub fn ai_audio_settings(&self) -> &AiAudioSettings {
+        &self.prefs.ai_audio_settings
+    }
+
+    /// Set ElevenLabs API key (stored in OS secure storage, not JSON)
+    pub fn set_elevenlabs_api_key(&mut self, key: Option<String>) -> Result<(), String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        match key {
+            Some(k) if !k.is_empty() => {
+                SecureStorage::set(SecureKey::ElevenLabsApiKey, &k)
+                    .map_err(|e| format!("Failed to store API key: {}", e))?;
+            }
+            _ => {
+                // Empty or None means delete
+                SecureStorage::delete(SecureKey::ElevenLabsApiKey)
+                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Set OpenRouter API key (stored in OS secure storage, not JSON)
+    pub fn set_openrouter_api_key(&mut self, key: Option<String>) -> Result<(), String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        match key {
+            Some(k) if !k.is_empty() => {
+                SecureStorage::set(SecureKey::OpenRouterApiKey, &k)
+                    .map_err(|e| format!("Failed to store API key: {}", e))?;
+            }
+            _ => {
+                // Empty or None means delete
+                SecureStorage::delete(SecureKey::OpenRouterApiKey)
+                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Get ElevenLabs API key from secure storage
+    pub fn get_elevenlabs_api_key(&self) -> Option<String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+        SecureStorage::get(SecureKey::ElevenLabsApiKey).ok()
+    }
+
+    /// Get OpenRouter API key from secure storage
+    pub fn get_openrouter_api_key(&self) -> Option<String> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+        SecureStorage::get(SecureKey::OpenRouterApiKey).ok()
+    }
+
+    pub fn set_selected_voice_ids(&mut self, voice_ids: Vec<String>) -> Result<(), String> {
+        self.prefs.ai_audio_settings.selected_voice_ids = voice_ids;
+        self.save_to_file_with_result()
+    }
+
+    pub fn set_openrouter_model(&mut self, model: Option<String>) -> Result<(), String> {
+        self.prefs.ai_audio_settings.openrouter_model = model;
+        self.save_to_file_with_result()
+    }
+
+    pub fn set_audio_prompt(&mut self, prompt: String) -> Result<(), String> {
+        self.prefs.ai_audio_settings.audio_prompt = prompt;
+        self.save_to_file_with_result()
+    }
+
+    pub fn set_audio_notifications_enabled(&mut self, enabled: bool) -> Result<(), String> {
+        self.prefs.ai_audio_settings.enabled = enabled;
+        self.save_to_file_with_result()
+    }
+
+    pub fn toggle_audio_notifications(&mut self) -> Result<bool, String> {
+        self.prefs.ai_audio_settings.enabled = !self.prefs.ai_audio_settings.enabled;
+        self.save_to_file_with_result()?;
+        Ok(self.prefs.ai_audio_settings.enabled)
     }
 }

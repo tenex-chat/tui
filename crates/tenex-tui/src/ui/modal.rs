@@ -5,70 +5,207 @@ use crate::ui::selector::SelectorState;
 use crate::ui::text_editor::TextEditor;
 use tenex_core::models::NamedDraft;
 
-/// Available settings in the app settings modal
+/// Settings tabs for the app settings modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AppSetting {
-    JaegerEndpoint,
-    // Add new settings here as needed
+pub enum SettingsTab {
+    General,
+    AI,
 }
 
-impl AppSetting {
-    /// All settings in order
-    pub const ALL: &'static [AppSetting] = &[
-        AppSetting::JaegerEndpoint,
-        // Add new settings here as needed
-    ];
+impl SettingsTab {
+    pub const ALL: &'static [SettingsTab] = &[SettingsTab::General, SettingsTab::AI];
 
-    /// Total number of settings
+    pub fn label(&self) -> &'static str {
+        match self {
+            SettingsTab::General => "General",
+            SettingsTab::AI => "AI",
+        }
+    }
+}
+
+/// Settings in the General tab
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneralSetting {
+    JaegerEndpoint,
+}
+
+impl GeneralSetting {
+    pub const ALL: &'static [GeneralSetting] = &[GeneralSetting::JaegerEndpoint];
+
     pub const fn count() -> usize {
         Self::ALL.len()
     }
 
-    /// Get setting at index
-    pub fn from_index(index: usize) -> Option<AppSetting> {
+    pub fn from_index(index: usize) -> Option<GeneralSetting> {
         Self::ALL.get(index).copied()
+    }
+}
+
+/// Settings in the AI tab
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AiSetting {
+    ElevenLabsApiKey,
+    OpenRouterApiKey,
+}
+
+impl AiSetting {
+    pub const ALL: &'static [AiSetting] = &[
+        AiSetting::ElevenLabsApiKey,
+        AiSetting::OpenRouterApiKey,
+    ];
+
+    pub const fn count() -> usize {
+        Self::ALL.len()
+    }
+
+    pub fn from_index(index: usize) -> Option<AiSetting> {
+        Self::ALL.get(index).copied()
+    }
+}
+
+/// State for AI settings - only API keys for now
+#[derive(Debug, Clone)]
+pub struct AiSettingsState {
+    /// Input for ElevenLabs API key (always masked in UI)
+    pub elevenlabs_key_input: String,
+    /// Input for OpenRouter API key (always masked in UI)
+    pub openrouter_key_input: String,
+    /// Cached: whether ElevenLabs key exists in secure storage (checked once on modal open)
+    pub elevenlabs_key_exists: bool,
+    /// Cached: whether OpenRouter key exists in secure storage (checked once on modal open)
+    pub openrouter_key_exists: bool,
+}
+
+impl AiSettingsState {
+    pub fn new() -> Self {
+        // Check secure storage once when creating state (modal opens)
+        let elevenlabs_key_exists =
+            tenex_core::SecureStorage::exists(tenex_core::SecureKey::ElevenLabsApiKey);
+        let openrouter_key_exists =
+            tenex_core::SecureStorage::exists(tenex_core::SecureKey::OpenRouterApiKey);
+
+        Self {
+            elevenlabs_key_input: String::new(),
+            openrouter_key_input: String::new(),
+            elevenlabs_key_exists,
+            openrouter_key_exists,
+        }
+    }
+
+    pub fn has_elevenlabs_key(&self) -> bool {
+        !self.elevenlabs_key_input.is_empty()
+    }
+
+    pub fn has_openrouter_key(&self) -> bool {
+        !self.openrouter_key_input.is_empty()
     }
 }
 
 /// State for app settings modal (global settings accessible via comma key)
 #[derive(Debug, Clone)]
 pub struct AppSettingsState {
-    /// Which setting row is selected
-    pub selected_index: usize,
+    /// Currently active tab
+    pub current_tab: SettingsTab,
+    /// Selected setting index in General tab
+    pub general_index: usize,
+    /// Selected setting index in AI tab
+    pub ai_index: usize,
     /// Whether a field is currently being edited
     pub editing: bool,
     /// The current value being edited for jaeger endpoint
     pub jaeger_endpoint_input: String,
+    /// AI settings state
+    pub ai: AiSettingsState,
 }
 
 impl AppSettingsState {
     pub fn new(current_jaeger_endpoint: &str) -> Self {
         Self {
-            selected_index: 0,
+            current_tab: SettingsTab::General,
+            general_index: 0,
+            ai_index: 0,
             editing: false,
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
+            ai: AiSettingsState::new(),
         }
     }
 
-    /// Get the currently selected setting
-    pub fn selected_setting(&self) -> Option<AppSetting> {
-        AppSetting::from_index(self.selected_index)
+    /// Switch to next tab
+    pub fn next_tab(&mut self) {
+        let idx = SettingsTab::ALL
+            .iter()
+            .position(|&t| t == self.current_tab)
+            .unwrap_or(0);
+        self.current_tab = SettingsTab::ALL[(idx + 1) % SettingsTab::ALL.len()];
     }
 
-    /// Check if the jaeger endpoint field is being edited
+    /// Switch to previous tab
+    pub fn prev_tab(&mut self) {
+        let idx = SettingsTab::ALL
+            .iter()
+            .position(|&t| t == self.current_tab)
+            .unwrap_or(0);
+        self.current_tab = SettingsTab::ALL[(idx + SettingsTab::ALL.len() - 1) % SettingsTab::ALL.len()];
+    }
+
+    /// Get selected setting in General tab
+    pub fn selected_general_setting(&self) -> Option<GeneralSetting> {
+        GeneralSetting::from_index(self.general_index)
+    }
+
+    /// Get selected setting in AI tab
+    pub fn selected_ai_setting(&self) -> Option<AiSetting> {
+        AiSetting::from_index(self.ai_index)
+    }
+
+    /// Check if jaeger endpoint is being edited
     pub fn editing_jaeger_endpoint(&self) -> bool {
-        self.editing && self.selected_setting() == Some(AppSetting::JaegerEndpoint)
+        self.editing
+            && self.current_tab == SettingsTab::General
+            && self.selected_general_setting() == Some(GeneralSetting::JaegerEndpoint)
+    }
+
+    /// Check if ElevenLabs key is being edited
+    pub fn editing_elevenlabs_key(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::ElevenLabsApiKey)
+    }
+
+    /// Check if OpenRouter key is being edited
+    pub fn editing_openrouter_key(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey)
     }
 
     pub fn move_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
+        match self.current_tab {
+            SettingsTab::General => {
+                if self.general_index > 0 {
+                    self.general_index -= 1;
+                }
+            }
+            SettingsTab::AI => {
+                if self.ai_index > 0 {
+                    self.ai_index -= 1;
+                }
+            }
         }
     }
 
     pub fn move_down(&mut self) {
-        if self.selected_index + 1 < AppSetting::count() {
-            self.selected_index += 1;
+        match self.current_tab {
+            SettingsTab::General => {
+                if self.general_index + 1 < GeneralSetting::count() {
+                    self.general_index += 1;
+                }
+            }
+            SettingsTab::AI => {
+                if self.ai_index + 1 < AiSetting::count() {
+                    self.ai_index += 1;
+                }
+            }
         }
     }
 

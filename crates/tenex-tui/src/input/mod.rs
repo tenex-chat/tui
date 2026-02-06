@@ -113,6 +113,34 @@ pub(crate) fn handle_key(
     }
 
     // =========================================================================
+    // GLOBAL AUDIO PLAYER CONTROLS (work from anywhere)
+    // =========================================================================
+
+    // Alt+S: Stop audio playback
+    if code == KeyCode::Char('s') && modifiers.contains(KeyModifiers::ALT) {
+        app.audio_player.stop();
+        app.set_warning_status("Audio stopped");
+        return Ok(());
+    }
+
+    // Alt+R: Replay last audio
+    if code == KeyCode::Char('r') && modifiers.contains(KeyModifiers::ALT) {
+        match app.audio_player.replay() {
+            Ok(()) => {
+                if let Some(name) = app.audio_player.current_audio_name() {
+                    app.set_warning_status(&format!("Replaying: {}", name));
+                } else {
+                    app.set_warning_status("Replaying audio");
+                }
+            }
+            Err(e) => {
+                app.set_warning_status(&format!("Replay failed: {}", e));
+            }
+        }
+        return Ok(());
+    }
+
+    // =========================================================================
     // MODAL HANDLERS - Process modal-specific input first
     // =========================================================================
 
