@@ -266,10 +266,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     }
                     ui::modal::SettingsTab::AI => {
                         match state.selected_ai_setting() {
-                            Some(ui::modal::AiSetting::Enabled) => {
-                                // TODO: Toggle enabled state
-                                app.set_warning_status("Audio notifications toggle not yet implemented");
-                            }
                             Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
                                 let key = state.ai.elevenlabs_key_input.clone();
                                 if !key.is_empty() {
@@ -281,6 +277,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                         Ok(()) => {
                                             app.set_warning_status("ElevenLabs API key saved");
                                             state.ai.elevenlabs_key_input.clear();
+                                            state.ai.elevenlabs_key_exists = true;
                                             state.stop_editing();
                                         }
                                         Err(e) => {
@@ -300,6 +297,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                         Ok(()) => {
                                             app.set_warning_status("OpenRouter API key saved");
                                             state.ai.openrouter_key_input.clear();
+                                            state.ai.openrouter_key_exists = true;
                                             state.stop_editing();
                                         }
                                         Err(e) => {
@@ -307,18 +305,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                         }
                                     }
                                 }
-                            }
-                            Some(ui::modal::AiSetting::SelectedVoices) => {
-                                // TODO: Open voice picker modal
-                                app.set_warning_status("Voice selection not yet implemented");
-                            }
-                            Some(ui::modal::AiSetting::OpenRouterModel) => {
-                                // TODO: Open model picker modal
-                                app.set_warning_status("Model selection not yet implemented");
-                            }
-                            Some(ui::modal::AiSetting::AudioPrompt) => {
-                                // TODO: Open text editor modal
-                                app.set_warning_status("Prompt editing not yet implemented");
                             }
                             None => {
                                 state.stop_editing();
@@ -350,11 +336,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                             state.ai.openrouter_key_input.push(c);
                         }
-                        // Other AI settings don't support character input
-                        Some(ui::modal::AiSetting::Enabled) |
-                        Some(ui::modal::AiSetting::SelectedVoices) |
-                        Some(ui::modal::AiSetting::OpenRouterModel) |
-                        Some(ui::modal::AiSetting::AudioPrompt) |
                         None => {}
                     }
                 }
@@ -379,11 +360,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                             state.ai.openrouter_key_input.pop();
                         }
-                        // Other AI settings don't support backspace
-                        Some(ui::modal::AiSetting::Enabled) |
-                        Some(ui::modal::AiSetting::SelectedVoices) |
-                        Some(ui::modal::AiSetting::OpenRouterModel) |
-                        Some(ui::modal::AiSetting::AudioPrompt) |
                         None => {}
                     }
                 }
@@ -394,6 +370,48 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Down if !state.editing => {
             state.move_down();
+        }
+        KeyCode::Delete if !state.editing => {
+            // Delete/clear API keys when not editing
+            if state.current_tab == ui::modal::SettingsTab::AI {
+                match state.selected_ai_setting() {
+                    Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                        if state.ai.elevenlabs_key_exists {
+                            match tenex_core::SecureStorage::delete(
+                                tenex_core::SecureKey::ElevenLabsApiKey
+                            ) {
+                                Ok(()) => {
+                                    app.set_warning_status("ElevenLabs API key deleted");
+                                    state.ai.elevenlabs_key_exists = false;
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to delete: {}", e));
+                                }
+                            }
+                        } else {
+                            app.set_warning_status("No ElevenLabs API key to delete");
+                        }
+                    }
+                    Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                        if state.ai.openrouter_key_exists {
+                            match tenex_core::SecureStorage::delete(
+                                tenex_core::SecureKey::OpenRouterApiKey
+                            ) {
+                                Ok(()) => {
+                                    app.set_warning_status("OpenRouter API key deleted");
+                                    state.ai.openrouter_key_exists = false;
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to delete: {}", e));
+                                }
+                            }
+                        } else {
+                            app.set_warning_status("No OpenRouter API key to delete");
+                        }
+                    }
+                    None => {}
+                }
+            }
         }
         _ => {}
     }

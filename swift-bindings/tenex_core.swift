@@ -630,12 +630,40 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func clearEventCallback() 
     
     /**
+     * Delete an audio notification by ID
+     */
+    func deleteAudioNotification(id: String) throws 
+    
+    /**
+     * Fetch available voices from ElevenLabs
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+    func fetchElevenlabsVoices() throws  -> [VoiceInfo]
+    
+    /**
+     * Fetch available models from OpenRouter
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+    func fetchOpenrouterModels() throws  -> [ModelInfo]
+    
+    /**
+     * Generate audio notification for a message
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+    func generateAudioNotification(agentPubkey: String, conversationTitle: String, messageText: String) throws  -> AudioNotificationInfo
+    
+    /**
      * Get agents for a project.
      *
      * Returns agents configured for the specified project.
      * Returns an error if the store cannot be accessed.
      */
     func getAgents(projectId: String) throws  -> [AgentInfo]
+    
+    /**
+     * Get AI audio settings (API keys never exposed - only configuration status)
+     */
+    func getAiAudioSettings() throws  -> AiAudioSettingsInfo
     
     /**
      * Get all available agents (not filtered by project).
@@ -849,6 +877,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func isThreadCollapsed(threadId: String)  -> Bool
     
     /**
+     * List all audio notifications
+     */
+    func listAudioNotifications() throws  -> [AudioNotificationInfo]
+    
+    /**
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
@@ -904,9 +937,24 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws  -> SendMessageResult
     
     /**
+     * Enable or disable audio notifications
+     */
+    func setAudioNotificationsEnabled(enabled: Bool) throws 
+    
+    /**
+     * Set audio prompt
+     */
+    func setAudioPrompt(prompt: String) throws 
+    
+    /**
      * Set collapsed thread IDs (replace all).
      */
     func setCollapsedThreadIds(threadIds: [String]) 
+    
+    /**
+     * Set ElevenLabs API key (stored in OS secure storage)
+     */
+    func setElevenlabsApiKey(key: String?) throws 
     
     /**
      * Register a callback to receive event notifications.
@@ -922,6 +970,21 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Calling this again will replace the previous callback.
      */
     func setEventCallback(callback: EventCallback) 
+    
+    /**
+     * Set OpenRouter API key (stored in OS secure storage)
+     */
+    func setOpenrouterApiKey(key: String?) throws 
+    
+    /**
+     * Set OpenRouter model
+     */
+    func setOpenrouterModel(model: String?) throws 
+    
+    /**
+     * Set selected voice IDs
+     */
+    func setSelectedVoiceIds(voiceIds: [String]) throws 
     
     /**
      * Set the trusted backends from preferences.
@@ -1134,6 +1197,52 @@ open func clearEventCallback()  {try! rustCall() {
 }
     
     /**
+     * Delete an audio notification by ID
+     */
+open func deleteAudioNotification(id: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_delete_audio_notification(self.uniffiClonePointer(),
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+    
+    /**
+     * Fetch available voices from ElevenLabs
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+open func fetchElevenlabsVoices()throws  -> [VoiceInfo]  {
+    return try  FfiConverterSequenceTypeVoiceInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_fetch_elevenlabs_voices(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Fetch available models from OpenRouter
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+open func fetchOpenrouterModels()throws  -> [ModelInfo]  {
+    return try  FfiConverterSequenceTypeModelInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_fetch_openrouter_models(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Generate audio notification for a message
+     * Note: This is a blocking call that will wait for the async operation to complete
+     */
+open func generateAudioNotification(agentPubkey: String, conversationTitle: String, messageText: String)throws  -> AudioNotificationInfo  {
+    return try  FfiConverterTypeAudioNotificationInfo_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_generate_audio_notification(self.uniffiClonePointer(),
+        FfiConverterString.lower(agentPubkey),
+        FfiConverterString.lower(conversationTitle),
+        FfiConverterString.lower(messageText),$0
+    )
+})
+}
+    
+    /**
      * Get agents for a project.
      *
      * Returns agents configured for the specified project.
@@ -1143,6 +1252,16 @@ open func getAgents(projectId: String)throws  -> [AgentInfo]  {
     return try  FfiConverterSequenceTypeAgentInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_agents(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),$0
+    )
+})
+}
+    
+    /**
+     * Get AI audio settings (API keys never exposed - only configuration status)
+     */
+open func getAiAudioSettings()throws  -> AiAudioSettingsInfo  {
+    return try  FfiConverterTypeAiAudioSettingsInfo_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_ai_audio_settings(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1519,6 +1638,16 @@ open func isThreadCollapsed(threadId: String) -> Bool  {
 }
     
     /**
+     * List all audio notifications
+     */
+open func listAudioNotifications()throws  -> [AudioNotificationInfo]  {
+    return try  FfiConverterSequenceTypeAudioNotificationInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_list_audio_notifications(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
      * Login with an nsec (Nostr secret key in bech32 format).
      *
      * The nsec should be in the format `nsec1...`.
@@ -1615,11 +1744,41 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
 }
     
     /**
+     * Enable or disable audio notifications
+     */
+open func setAudioNotificationsEnabled(enabled: Bool)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_audio_notifications_enabled(self.uniffiClonePointer(),
+        FfiConverterBool.lower(enabled),$0
+    )
+}
+}
+    
+    /**
+     * Set audio prompt
+     */
+open func setAudioPrompt(prompt: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_audio_prompt(self.uniffiClonePointer(),
+        FfiConverterString.lower(prompt),$0
+    )
+}
+}
+    
+    /**
      * Set collapsed thread IDs (replace all).
      */
 open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(self.uniffiClonePointer(),
         FfiConverterSequenceString.lower(threadIds),$0
+    )
+}
+}
+    
+    /**
+     * Set ElevenLabs API key (stored in OS secure storage)
+     */
+open func setElevenlabsApiKey(key: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_elevenlabs_api_key(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(key),$0
     )
 }
 }
@@ -1640,6 +1799,36 @@ open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
 open func setEventCallback(callback: EventCallback)  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_set_event_callback(self.uniffiClonePointer(),
         FfiConverterCallbackInterfaceEventCallback_lower(callback),$0
+    )
+}
+}
+    
+    /**
+     * Set OpenRouter API key (stored in OS secure storage)
+     */
+open func setOpenrouterApiKey(key: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_openrouter_api_key(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(key),$0
+    )
+}
+}
+    
+    /**
+     * Set OpenRouter model
+     */
+open func setOpenrouterModel(model: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_openrouter_model(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(model),$0
+    )
+}
+}
+    
+    /**
+     * Set selected voice IDs
+     */
+open func setSelectedVoiceIds(voiceIds: [String])throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_selected_voice_ids(self.uniffiClonePointer(),
+        FfiConverterSequenceString.lower(voiceIds),$0
     )
 }
 }
@@ -1960,6 +2149,111 @@ public func FfiConverterTypeAgentInfo_lower(_ value: AgentInfo) -> RustBuffer {
 
 
 /**
+ * AI Audio Settings (API keys never exposed - stored securely)
+ */
+public struct AiAudioSettingsInfo {
+    public var elevenlabsApiKeyConfigured: Bool
+    public var openrouterApiKeyConfigured: Bool
+    public var selectedVoiceIds: [String]
+    public var openrouterModel: String?
+    public var audioPrompt: String
+    public var enabled: Bool
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(elevenlabsApiKeyConfigured: Bool, openrouterApiKeyConfigured: Bool, selectedVoiceIds: [String], openrouterModel: String?, audioPrompt: String, enabled: Bool) {
+        self.elevenlabsApiKeyConfigured = elevenlabsApiKeyConfigured
+        self.openrouterApiKeyConfigured = openrouterApiKeyConfigured
+        self.selectedVoiceIds = selectedVoiceIds
+        self.openrouterModel = openrouterModel
+        self.audioPrompt = audioPrompt
+        self.enabled = enabled
+    }
+}
+
+#if compiler(>=6)
+extension AiAudioSettingsInfo: Sendable {}
+#endif
+
+
+extension AiAudioSettingsInfo: Equatable, Hashable {
+    public static func ==(lhs: AiAudioSettingsInfo, rhs: AiAudioSettingsInfo) -> Bool {
+        if lhs.elevenlabsApiKeyConfigured != rhs.elevenlabsApiKeyConfigured {
+            return false
+        }
+        if lhs.openrouterApiKeyConfigured != rhs.openrouterApiKeyConfigured {
+            return false
+        }
+        if lhs.selectedVoiceIds != rhs.selectedVoiceIds {
+            return false
+        }
+        if lhs.openrouterModel != rhs.openrouterModel {
+            return false
+        }
+        if lhs.audioPrompt != rhs.audioPrompt {
+            return false
+        }
+        if lhs.enabled != rhs.enabled {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(elevenlabsApiKeyConfigured)
+        hasher.combine(openrouterApiKeyConfigured)
+        hasher.combine(selectedVoiceIds)
+        hasher.combine(openrouterModel)
+        hasher.combine(audioPrompt)
+        hasher.combine(enabled)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAiAudioSettingsInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AiAudioSettingsInfo {
+        return
+            try AiAudioSettingsInfo(
+                elevenlabsApiKeyConfigured: FfiConverterBool.read(from: &buf), 
+                openrouterApiKeyConfigured: FfiConverterBool.read(from: &buf), 
+                selectedVoiceIds: FfiConverterSequenceString.read(from: &buf), 
+                openrouterModel: FfiConverterOptionString.read(from: &buf), 
+                audioPrompt: FfiConverterString.read(from: &buf), 
+                enabled: FfiConverterBool.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AiAudioSettingsInfo, into buf: inout [UInt8]) {
+        FfiConverterBool.write(value.elevenlabsApiKeyConfigured, into: &buf)
+        FfiConverterBool.write(value.openrouterApiKeyConfigured, into: &buf)
+        FfiConverterSequenceString.write(value.selectedVoiceIds, into: &buf)
+        FfiConverterOptionString.write(value.openrouterModel, into: &buf)
+        FfiConverterString.write(value.audioPrompt, into: &buf)
+        FfiConverterBool.write(value.enabled, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAiAudioSettingsInfo_lift(_ buf: RustBuffer) throws -> AiAudioSettingsInfo {
+    return try FfiConverterTypeAiAudioSettingsInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAiAudioSettingsInfo_lower(_ value: AiAudioSettingsInfo) -> RustBuffer {
+    return FfiConverterTypeAiAudioSettingsInfo.lower(value)
+}
+
+
+/**
  * An answer to a single question in an ask event.
  */
 public struct AskAnswer {
@@ -2140,6 +2434,127 @@ public func FfiConverterTypeAskEventInfo_lift(_ buf: RustBuffer) throws -> AskEv
 #endif
 public func FfiConverterTypeAskEventInfo_lower(_ value: AskEventInfo) -> RustBuffer {
     return FfiConverterTypeAskEventInfo.lower(value)
+}
+
+
+/**
+ * Audio notification record
+ */
+public struct AudioNotificationInfo {
+    public var id: String
+    public var agentPubkey: String
+    public var conversationTitle: String
+    public var originalText: String
+    public var massagedText: String
+    public var voiceId: String
+    public var audioFilePath: String
+    public var createdAt: UInt64
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, agentPubkey: String, conversationTitle: String, originalText: String, massagedText: String, voiceId: String, audioFilePath: String, createdAt: UInt64) {
+        self.id = id
+        self.agentPubkey = agentPubkey
+        self.conversationTitle = conversationTitle
+        self.originalText = originalText
+        self.massagedText = massagedText
+        self.voiceId = voiceId
+        self.audioFilePath = audioFilePath
+        self.createdAt = createdAt
+    }
+}
+
+#if compiler(>=6)
+extension AudioNotificationInfo: Sendable {}
+#endif
+
+
+extension AudioNotificationInfo: Equatable, Hashable {
+    public static func ==(lhs: AudioNotificationInfo, rhs: AudioNotificationInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.agentPubkey != rhs.agentPubkey {
+            return false
+        }
+        if lhs.conversationTitle != rhs.conversationTitle {
+            return false
+        }
+        if lhs.originalText != rhs.originalText {
+            return false
+        }
+        if lhs.massagedText != rhs.massagedText {
+            return false
+        }
+        if lhs.voiceId != rhs.voiceId {
+            return false
+        }
+        if lhs.audioFilePath != rhs.audioFilePath {
+            return false
+        }
+        if lhs.createdAt != rhs.createdAt {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(agentPubkey)
+        hasher.combine(conversationTitle)
+        hasher.combine(originalText)
+        hasher.combine(massagedText)
+        hasher.combine(voiceId)
+        hasher.combine(audioFilePath)
+        hasher.combine(createdAt)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeAudioNotificationInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> AudioNotificationInfo {
+        return
+            try AudioNotificationInfo(
+                id: FfiConverterString.read(from: &buf), 
+                agentPubkey: FfiConverterString.read(from: &buf), 
+                conversationTitle: FfiConverterString.read(from: &buf), 
+                originalText: FfiConverterString.read(from: &buf), 
+                massagedText: FfiConverterString.read(from: &buf), 
+                voiceId: FfiConverterString.read(from: &buf), 
+                audioFilePath: FfiConverterString.read(from: &buf), 
+                createdAt: FfiConverterUInt64.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: AudioNotificationInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.agentPubkey, into: &buf)
+        FfiConverterString.write(value.conversationTitle, into: &buf)
+        FfiConverterString.write(value.originalText, into: &buf)
+        FfiConverterString.write(value.massagedText, into: &buf)
+        FfiConverterString.write(value.voiceId, into: &buf)
+        FfiConverterString.write(value.audioFilePath, into: &buf)
+        FfiConverterUInt64.write(value.createdAt, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAudioNotificationInfo_lift(_ buf: RustBuffer) throws -> AudioNotificationInfo {
+    return try FfiConverterTypeAudioNotificationInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeAudioNotificationInfo_lower(_ value: AudioNotificationInfo) -> RustBuffer {
+    return FfiConverterTypeAudioNotificationInfo.lower(value)
 }
 
 
@@ -3919,6 +4334,95 @@ public func FfiConverterTypeMessageInfo_lift(_ buf: RustBuffer) throws -> Messag
 #endif
 public func FfiConverterTypeMessageInfo_lower(_ value: MessageInfo) -> RustBuffer {
     return FfiConverterTypeMessageInfo.lower(value)
+}
+
+
+/**
+ * Model from OpenRouter
+ */
+public struct ModelInfo {
+    public var id: String
+    public var name: String?
+    public var description: String?
+    public var contextLength: UInt32?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(id: String, name: String?, description: String?, contextLength: UInt32?) {
+        self.id = id
+        self.name = name
+        self.description = description
+        self.contextLength = contextLength
+    }
+}
+
+#if compiler(>=6)
+extension ModelInfo: Sendable {}
+#endif
+
+
+extension ModelInfo: Equatable, Hashable {
+    public static func ==(lhs: ModelInfo, rhs: ModelInfo) -> Bool {
+        if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        if lhs.contextLength != rhs.contextLength {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+        hasher.combine(name)
+        hasher.combine(description)
+        hasher.combine(contextLength)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeModelInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> ModelInfo {
+        return
+            try ModelInfo(
+                id: FfiConverterString.read(from: &buf), 
+                name: FfiConverterOptionString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf), 
+                contextLength: FfiConverterOptionUInt32.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: ModelInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.id, into: &buf)
+        FfiConverterOptionString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+        FfiConverterOptionUInt32.write(value.contextLength, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeModelInfo_lift(_ buf: RustBuffer) throws -> ModelInfo {
+    return try FfiConverterTypeModelInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeModelInfo_lower(_ value: ModelInfo) -> RustBuffer {
+    return FfiConverterTypeModelInfo.lower(value)
 }
 
 
@@ -6017,6 +6521,95 @@ public func FfiConverterTypeUserInfo_lower(_ value: UserInfo) -> RustBuffer {
     return FfiConverterTypeUserInfo.lower(value)
 }
 
+
+/**
+ * Voice from ElevenLabs
+ */
+public struct VoiceInfo {
+    public var voiceId: String
+    public var name: String
+    public var category: String?
+    public var description: String?
+
+    // Default memberwise initializers are never public by default, so we
+    // declare one manually.
+    public init(voiceId: String, name: String, category: String?, description: String?) {
+        self.voiceId = voiceId
+        self.name = name
+        self.category = category
+        self.description = description
+    }
+}
+
+#if compiler(>=6)
+extension VoiceInfo: Sendable {}
+#endif
+
+
+extension VoiceInfo: Equatable, Hashable {
+    public static func ==(lhs: VoiceInfo, rhs: VoiceInfo) -> Bool {
+        if lhs.voiceId != rhs.voiceId {
+            return false
+        }
+        if lhs.name != rhs.name {
+            return false
+        }
+        if lhs.category != rhs.category {
+            return false
+        }
+        if lhs.description != rhs.description {
+            return false
+        }
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(voiceId)
+        hasher.combine(name)
+        hasher.combine(category)
+        hasher.combine(description)
+    }
+}
+
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public struct FfiConverterTypeVoiceInfo: FfiConverterRustBuffer {
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> VoiceInfo {
+        return
+            try VoiceInfo(
+                voiceId: FfiConverterString.read(from: &buf), 
+                name: FfiConverterString.read(from: &buf), 
+                category: FfiConverterOptionString.read(from: &buf), 
+                description: FfiConverterOptionString.read(from: &buf)
+        )
+    }
+
+    public static func write(_ value: VoiceInfo, into buf: inout [UInt8]) {
+        FfiConverterString.write(value.voiceId, into: &buf)
+        FfiConverterString.write(value.name, into: &buf)
+        FfiConverterOptionString.write(value.category, into: &buf)
+        FfiConverterOptionString.write(value.description, into: &buf)
+    }
+}
+
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceInfo_lift(_ buf: RustBuffer) throws -> VoiceInfo {
+    return try FfiConverterTypeVoiceInfo.lift(buf)
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+public func FfiConverterTypeVoiceInfo_lower(_ value: VoiceInfo) -> RustBuffer {
+    return FfiConverterTypeVoiceInfo.lower(value)
+}
+
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 /**
@@ -6770,6 +7363,30 @@ public func FfiConverterCallbackInterfaceEventCallback_lower(_ v: EventCallback)
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterOptionUInt32: FfiConverterRustBuffer {
+    typealias SwiftType = UInt32?
+
+    public static func write(_ value: SwiftType, into buf: inout [UInt8]) {
+        guard let value = value else {
+            writeInt(&buf, Int8(0))
+            return
+        }
+        writeInt(&buf, Int8(1))
+        FfiConverterUInt32.write(value, into: &buf)
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SwiftType {
+        switch try readInt(&buf) as Int8 {
+        case 0: return nil
+        case 1: return try FfiConverterUInt32.read(from: &buf)
+        default: throw UniffiInternalError.unexpectedOptionalTag
+        }
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterOptionUInt64: FfiConverterRustBuffer {
     typealias SwiftType = UInt64?
 
@@ -7062,6 +7679,31 @@ fileprivate struct FfiConverterSequenceTypeAskAnswer: FfiConverterRustBuffer {
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeAudioNotificationInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [AudioNotificationInfo]
+
+    public static func write(_ value: [AudioNotificationInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeAudioNotificationInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [AudioNotificationInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [AudioNotificationInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeAudioNotificationInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeConversationFullInfo: FfiConverterRustBuffer {
     typealias SwiftType = [ConversationFullInfo]
 
@@ -7254,6 +7896,31 @@ fileprivate struct FfiConverterSequenceTypeMessageInfo: FfiConverterRustBuffer {
         seq.reserveCapacity(Int(len))
         for _ in 0 ..< len {
             seq.append(try FfiConverterTypeMessageInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
+fileprivate struct FfiConverterSequenceTypeModelInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [ModelInfo]
+
+    public static func write(_ value: [ModelInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeModelInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [ModelInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [ModelInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeModelInfo.read(from: &buf))
         }
         return seq
     }
@@ -7512,6 +8179,31 @@ fileprivate struct FfiConverterSequenceTypeTopConversation: FfiConverterRustBuff
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
+fileprivate struct FfiConverterSequenceTypeVoiceInfo: FfiConverterRustBuffer {
+    typealias SwiftType = [VoiceInfo]
+
+    public static func write(_ value: [VoiceInfo], into buf: inout [UInt8]) {
+        let len = Int32(value.count)
+        writeInt(&buf, len)
+        for item in value {
+            FfiConverterTypeVoiceInfo.write(item, into: &buf)
+        }
+    }
+
+    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [VoiceInfo] {
+        let len: Int32 = try readInt(&buf)
+        var seq = [VoiceInfo]()
+        seq.reserveCapacity(Int(len))
+        for _ in 0 ..< len {
+            seq.append(try FfiConverterTypeVoiceInfo.read(from: &buf))
+        }
+        return seq
+    }
+}
+
+#if swift(>=5.8)
+@_documentation(visibility: private)
+#endif
 fileprivate struct FfiConverterSequenceTypeAskQuestionInfo: FfiConverterRustBuffer {
     typealias SwiftType = [AskQuestionInfo]
 
@@ -7570,7 +8262,22 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_delete_audio_notification() != 959) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_fetch_elevenlabs_voices() != 44842) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_fetch_openrouter_models() != 32499) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_generate_audio_notification() != 43465) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_agents() != 48100) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_ai_audio_settings() != 57808) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_all_agents() != 27201) {
@@ -7660,6 +8367,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_list_audio_notifications() != 64639) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_login() != 8995) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7678,10 +8388,28 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 27250) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_notifications_enabled() != 31649) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_prompt() != 7030) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_elevenlabs_api_key() != 26328) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_event_callback() != 600) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_api_key() != 36887) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_model() != 18970) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_selected_voice_ids() != 61539) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 54253) {

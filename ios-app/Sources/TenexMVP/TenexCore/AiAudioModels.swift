@@ -9,7 +9,7 @@ public struct AiAudioSettings {
     public let openrouterModel: String?
     public let audioPrompt: String
     public let enabled: Bool
-    
+
     public init(
         elevenlabsApiKeyConfigured: Bool,
         openrouterApiKeyConfigured: Bool,
@@ -27,32 +27,5 @@ public struct AiAudioSettings {
     }
 }
 
-/// Voice from ElevenLabs API
-public struct VoiceInfo {
-    public let voiceId: String
-    public let name: String
-    public let category: String?
-    public let description: String?
-    
-    public init(voiceId: String, name: String, category: String?, description: String?) {
-        self.voiceId = voiceId
-        self.name = name
-        self.category = category
-        self.description = description
-    }
-}
-
-/// Model from OpenRouter API
-public struct ModelInfo {
-    public let modelId: String
-    public let name: String
-    public let description: String?
-    public let contextLength: UInt32?
-    
-    public init(modelId: String, name: String, description: String?, contextLength: UInt32?) {
-        self.modelId = modelId
-        self.name = name
-        self.description = description
-        self.contextLength = contextLength
-    }
-}
+// NOTE: VoiceInfo and ModelInfo types are now provided by the Rust FFI bindings
+// (tenex_core.swift). Do not redefine them here to avoid type conflicts.

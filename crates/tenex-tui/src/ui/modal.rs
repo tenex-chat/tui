@@ -44,22 +44,14 @@ impl GeneralSetting {
 /// Settings in the AI tab
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiSetting {
-    Enabled,
     ElevenLabsApiKey,
     OpenRouterApiKey,
-    SelectedVoices,
-    OpenRouterModel,
-    AudioPrompt,
 }
 
 impl AiSetting {
     pub const ALL: &'static [AiSetting] = &[
-        AiSetting::Enabled,
         AiSetting::ElevenLabsApiKey,
         AiSetting::OpenRouterApiKey,
-        AiSetting::SelectedVoices,
-        AiSetting::OpenRouterModel,
-        AiSetting::AudioPrompt,
     ];
 
     pub const fn count() -> usize {
@@ -78,13 +70,25 @@ pub struct AiSettingsState {
     pub elevenlabs_key_input: String,
     /// Input for OpenRouter API key (always masked in UI)
     pub openrouter_key_input: String,
+    /// Cached: whether ElevenLabs key exists in secure storage (checked once on modal open)
+    pub elevenlabs_key_exists: bool,
+    /// Cached: whether OpenRouter key exists in secure storage (checked once on modal open)
+    pub openrouter_key_exists: bool,
 }
 
 impl AiSettingsState {
     pub fn new() -> Self {
+        // Check secure storage once when creating state (modal opens)
+        let elevenlabs_key_exists =
+            tenex_core::SecureStorage::exists(tenex_core::SecureKey::ElevenLabsApiKey);
+        let openrouter_key_exists =
+            tenex_core::SecureStorage::exists(tenex_core::SecureKey::OpenRouterApiKey);
+
         Self {
             elevenlabs_key_input: String::new(),
             openrouter_key_input: String::new(),
+            elevenlabs_key_exists,
+            openrouter_key_exists,
         }
     }
 

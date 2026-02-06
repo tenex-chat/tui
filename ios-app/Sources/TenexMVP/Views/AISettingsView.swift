@@ -142,13 +142,14 @@ struct AISettingsView: View {
                             Picker("LLM Model", selection: Binding(
                                 get: { selectedModel ?? "" },
                                 set: { newValue in
+                                    let previousModel = selectedModel
                                     selectedModel = newValue.isEmpty ? nil : newValue
-                                    saveSelectedModel()
+                                    saveSelectedModel(previousModel: previousModel)
                                 }
                             )) {
                                 Text("Select a model").tag("")
-                                ForEach(availableModels, id: \.modelId) { model in
-                                    Text(model.name).tag(model.modelId)
+                                ForEach(availableModels, id: \.id) { model in
+                                    Text(model.name ?? model.id).tag(model.id)
                                 }
                             }
                         }
@@ -342,13 +343,22 @@ struct AISettingsView: View {
                         hasElevenLabsKey = true
                         elevenLabsKeyInput = ""
                     }
-                case .failure(let error):
+                case .failure(let keychainError):
                     // Rollback core change on keychain failure
-                    try? await coreManager.safeCore.setElevenLabsApiKey(key: nil)
-                    await MainActor.run {
-                        isSavingApiKey = false
-                        errorMessage = "Failed to save API key to keychain: \(error.localizedDescription)"
-                        showError = true
+                    do {
+                        try await coreManager.safeCore.setElevenLabsApiKey(key: nil)
+                        await MainActor.run {
+                            isSavingApiKey = false
+                            errorMessage = "Failed to save API key to keychain: \(keychainError.localizedDescription)"
+                            showError = true
+                        }
+                    } catch let rollbackError {
+                        // Rollback failed - warn user about inconsistent state
+                        await MainActor.run {
+                            isSavingApiKey = false
+                            errorMessage = "Keychain save failed (\(keychainError.localizedDescription)) and rollback also failed (\(rollbackError.localizedDescription)). State may be inconsistent."
+                            showError = true
+                        }
                     }
                 }
             } catch {
@@ -404,13 +414,22 @@ struct AISettingsView: View {
                         hasOpenRouterKey = true
                         openRouterKeyInput = ""
                     }
-                case .failure(let error):
+                case .failure(let keychainError):
                     // Rollback core change on keychain failure
-                    try? await coreManager.safeCore.setOpenRouterApiKey(key: nil)
-                    await MainActor.run {
-                        isSavingApiKey = false
-                        errorMessage = "Failed to save API key to keychain: \(error.localizedDescription)"
-                        showError = true
+                    do {
+                        try await coreManager.safeCore.setOpenRouterApiKey(key: nil)
+                        await MainActor.run {
+                            isSavingApiKey = false
+                            errorMessage = "Failed to save API key to keychain: \(keychainError.localizedDescription)"
+                            showError = true
+                        }
+                    } catch let rollbackError {
+                        // Rollback failed - warn user about inconsistent state
+                        await MainActor.run {
+                            isSavingApiKey = false
+                            errorMessage = "Keychain save failed (\(keychainError.localizedDescription)) and rollback also failed (\(rollbackError.localizedDescription)). State may be inconsistent."
+                            showError = true
+                        }
                     }
                 }
             } catch {
@@ -447,11 +466,14 @@ struct AISettingsView: View {
     // MARK: - Settings Management
 
     private func saveAudioEnabled(_ enabled: Bool) {
+        let previousValue = !enabled  // Toggle changed it, so previous is opposite
         Task {
             do {
-                try await coreManager.safeCore.setAiAudioEnabled(enabled: enabled)
+                try await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
             } catch {
+                // Rollback on failure
                 await MainActor.run {
+                    audioEnabled = previousValue
                     errorMessage = "Failed to save setting: \(error.localizedDescription)"
                     showError = true
                 }
@@ -462,7 +484,7 @@ struct AISettingsView: View {
     private func saveAudioPrompt() {
         Task {
             do {
-                try await coreManager.safeCore.setAiAudioPrompt(prompt: audioPrompt)
+                try await coreManager.safeCore.setAudioPrompt(prompt: audioPrompt)
             } catch {
                 await MainActor.run {
                     errorMessage = "Failed to save prompt: \(error.localizedDescription)"
@@ -472,12 +494,14 @@ struct AISettingsView: View {
         }
     }
 
-    private func saveSelectedModel() {
+    private func saveSelectedModel(previousModel: String?) {
         Task {
             do {
                 try await coreManager.safeCore.setOpenRouterModel(model: selectedModel)
             } catch {
+                // Rollback on failure
                 await MainActor.run {
+                    selectedModel = previousModel
                     errorMessage = "Failed to save model: \(error.localizedDescription)"
                     showError = true
                 }
@@ -486,7 +510,11 @@ struct AISettingsView: View {
     }
 
     private func toggleVoice(_ voiceId: String) {
-        if selectedVoiceIds.contains(voiceId) {
+        // Capture previous state for rollback
+        let wasSelected = selectedVoiceIds.contains(voiceId)
+
+        // Apply optimistic update
+        if wasSelected {
             selectedVoiceIds.remove(voiceId)
         } else {
             selectedVoiceIds.insert(voiceId)
@@ -496,7 +524,13 @@ struct AISettingsView: View {
             do {
                 try await coreManager.safeCore.setSelectedVoiceIds(voiceIds: Array(selectedVoiceIds))
             } catch {
+                // Rollback on failure
                 await MainActor.run {
+                    if wasSelected {
+                        selectedVoiceIds.insert(voiceId)
+                    } else {
+                        selectedVoiceIds.remove(voiceId)
+                    }
                     errorMessage = "Failed to save voice selection: \(error.localizedDescription)"
                     showError = true
                 }
