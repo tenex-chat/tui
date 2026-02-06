@@ -105,6 +105,9 @@ class TenexCoreManager: ObservableObject {
     /// Event handler for push-based updates from Rust core
     private var eventHandler: TenexEventHandler?
 
+    /// Task reference for project status updates - enables cancellation of stale refreshes
+    private var projectStatusUpdateTask: Task<Void, Never>?
+
     /// Cache for profile picture URLs to prevent repeated FFI calls
     let profilePictureCache = ProfilePictureCache.shared
 
@@ -302,36 +305,77 @@ class TenexCoreManager: ObservableObject {
 
     /// Signal that project status has changed (kind:24010 events).
     /// This triggers a refresh of project status data, online status, and agents cache.
+    /// Uses task cancellation to prevent stale overwrites from overlapping refreshes.
     @MainActor
     func signalProjectStatusUpdate() {
-        Task {
-            // Refresh projects list
-            guard let projects = try? await safeCore.getProjects() else { return }
+        // Cancel any existing refresh task to prevent stale results
+        projectStatusUpdateTask?.cancel()
+
+        projectStatusUpdateTask = Task { [weak self] in
+            guard let self else { return }
+
+            // Fetch projects with proper error handling
+            let projects: [ProjectInfo]
+            do {
+                projects = try await safeCore.getProjects()
+            } catch {
+                print("[TenexCoreManager] getProjects failed: \(error)")
+                return
+            }
+
+            // Check for cancellation before continuing
+            if Task.isCancelled { return }
 
             await MainActor.run {
                 self.projects = projects
             }
 
-            // Update online status and agents cache for each project
-            // This mirrors the logic in fetchData() to ensure UI reflects current state
-            var updatedStatus: [String: Bool] = [:]
-            for project in projects {
-                let isOnline = await safeCore.isProjectOnline(projectId: project.id)
-                updatedStatus[project.id] = isOnline
+            // Compute status and agents OFF main actor using shared helper
+            await self.refreshProjectStatusParallel(for: projects)
 
-                // Fetch and cache agents for online projects
-                if isOnline {
-                    await fetchAndCacheAgents(for: project.id)
-                } else {
-                    await MainActor.run {
-                        self.setOnlineAgentsCache([], for: project.id)
+            // Final diagnostics update on main actor
+            if !Task.isCancelled {
+                await MainActor.run {
+                    self.signalDiagnosticsUpdate()
+                }
+            }
+        }
+    }
+
+    /// Refresh project online status and agents in parallel, OFF the main actor.
+    /// This shared helper is used by both signalProjectStatusUpdate() and fetchData()
+    /// to eliminate code duplication and ensure consistent behavior.
+    /// - Parameter projects: Array of projects to check status for
+    private func refreshProjectStatusParallel(for projects: [ProjectInfo]) async {
+        // Use withTaskGroup for concurrent project status checks (runs OFF MainActor)
+        await withTaskGroup(of: (String, Bool, [OnlineAgentInfo]).self) { group in
+            for project in projects {
+                group.addTask {
+                    // Check cancellation inside each task
+                    if Task.isCancelled {
+                        return (project.id, false, [])
                     }
+
+                    let isOnline = await self.safeCore.isProjectOnline(projectId: project.id)
+                    let agents: [OnlineAgentInfo]
+                    if isOnline {
+                        agents = (try? await self.safeCore.getOnlineAgents(projectId: project.id)) ?? []
+                    } else {
+                        agents = []
+                    }
+                    return (project.id, isOnline, agents)
                 }
             }
 
-            await MainActor.run {
-                self.projectOnlineStatus = updatedStatus
-                self.signalDiagnosticsUpdate()
+            // Merge results on main actor with per-project updates (not whole-dictionary overwrites)
+            for await (projectId, isOnline, agents) in group {
+                // Check for cancellation before each update to minimize race windows
+                if Task.isCancelled { continue }
+
+                await MainActor.run {
+                    self.setProjectOnlineStatus(isOnline, for: projectId)
+                    self.setOnlineAgentsCache(agents, for: projectId)
+                }
             }
         }
     }
@@ -385,17 +429,25 @@ class TenexCoreManager: ObservableObject {
 
     /// Fetch and cache online agents for a specific project.
     /// This shared method eliminates code duplication and ensures consistent agent caching.
+    /// FFI work runs off the main thread; only state mutation hops to MainActor.
     /// - Parameter projectId: The ID of the project to fetch agents for
-    @MainActor
     func fetchAndCacheAgents(for projectId: String) async {
+        // Perform FFI call OFF the MainActor to avoid UI blocking
+        let agents: [OnlineAgentInfo]
         do {
-            let agents = try await safeCore.getOnlineAgents(projectId: projectId)
+            agents = try await safeCore.getOnlineAgents(projectId: projectId)
             print("[TenexCoreManager] Fetched \(agents.count) agents for project '\(projectId)'")
-            setOnlineAgentsCache(agents, for: projectId)
-            print("[TenexCoreManager] Cached agents, onlineAgents['\(projectId)'] now has \(onlineAgents[projectId]?.count ?? 0) agents")
         } catch {
             print("[TenexCoreManager] Failed to fetch agents for project '\(projectId)': \(error)")
-            setOnlineAgentsCache([], for: projectId)
+            // Cache empty array on failure to prevent stale data
+            await MainActor.run { self.setOnlineAgentsCache([], for: projectId) }
+            return
+        }
+
+        // Only hop to main actor to mutate state
+        await MainActor.run {
+            self.setOnlineAgentsCache(agents, for: projectId)
+            print("[TenexCoreManager] Cached agents, onlineAgents['\(projectId)'] now has \(self.onlineAgents[projectId]?.count ?? 0) agents")
         }
     }
 
@@ -494,20 +546,9 @@ class TenexCoreManager: ObservableObject {
             conversations = sortedConversations(c)
             inboxItems = i
 
-            // Initialize project online status and online agents reactively
-            var initialStatus: [String: Bool] = [:]
-            for project in p {
-                let isOnline = await safeCore.isProjectOnline(projectId: project.id)
-                initialStatus[project.id] = isOnline
-
-                // Proactively fetch and cache agents for online projects on login
-                if isOnline {
-                    await fetchAndCacheAgents(for: project.id)
-                } else {
-                    setOnlineAgentsCache([], for: project.id)
-                }
-            }
-            projectOnlineStatus = initialStatus
+            // Initialize project online status and online agents in parallel, OFF main actor
+            // This uses the shared helper to avoid code duplication and ensure consistent behavior
+            await refreshProjectStatusParallel(for: p)
 
             updateActiveAgentsState()
             signalStatsUpdate()
