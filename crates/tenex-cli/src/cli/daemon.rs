@@ -251,13 +251,13 @@ fn try_auto_login_with_config(
         }
     }
 
-    // Try environment variables (used when daemon is spawned by client)
-    if let Ok(key) = std::env::var("TENEX_KEY") {
-        let password = std::env::var("TENEX_KEY_PASSWORD").ok();
+    // Try environment variables (used when daemon is spawned by client, or set manually)
+    if let Ok(key) = std::env::var("TENEX_NSEC") {
+        let password = std::env::var("TENEX_NSEC_PASSWORD").ok();
         match try_login_with_credentials(&key, password.as_deref(), core_handle) {
             Ok(keys) => return Some(keys),
             Err(e) => {
-                eprintln!("Failed to login with TENEX_KEY: {}", e);
+                eprintln!("Failed to login with TENEX_NSEC: {}", e);
             }
         }
     }
