@@ -67,6 +67,14 @@ pub fn process_note_keys(
                 1 => {
                     if let Some(message) = Message::from_note(&note) {
                         events.push(CoreEvent::Message(message));
+                    } else if let Some(message) = Message::from_thread_note(&note) {
+                        // Thread root: emit as CoreEvent::Message if it p-tags the user
+                        // so TUI can show status bar notifications for ask events
+                        if let Some(ref user_pk) = data_store.user_pubkey {
+                            if message.p_tags.iter().any(|p| p == user_pk) {
+                                events.push(CoreEvent::Message(message));
+                            }
+                        }
                     }
                 }
                 24010 => {

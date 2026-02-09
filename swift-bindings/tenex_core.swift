@@ -690,6 +690,12 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getArchivedConversationIds() throws  -> [String]
     
     /**
+     * Get diagnostics about backend approvals and project statuses.
+     * Returns JSON with project statuses keys.
+     */
+    func getBackendDiagnostics() throws  -> String
+    
+    /**
      * Get all collapsed thread IDs.
      */
     func getCollapsedThreadIds() throws  -> [String]
@@ -1296,6 +1302,17 @@ open func getAllConversations(filter: ConversationFilter)throws  -> [Conversatio
 open func getArchivedConversationIds()throws  -> [String]  {
     return try  FfiConverterSequenceString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_get_archived_conversation_ids(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get diagnostics about backend approvals and project statuses.
+     * Returns JSON with project statuses keys.
+     */
+open func getBackendDiagnostics()throws  -> String  {
+    return try  FfiConverterString.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_get_backend_diagnostics(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -5917,6 +5934,10 @@ public struct SubscriptionDiagnostics {
      */
     public var kinds: [UInt16]
     /**
+     * Raw filter JSON (for debugging)
+     */
+    public var rawFilter: String?
+    /**
      * Number of events received
      */
     public var eventsReceived: UInt64
@@ -5938,6 +5959,9 @@ public struct SubscriptionDiagnostics {
          * Event kinds this subscription listens for
          */kinds: [UInt16], 
         /**
+         * Raw filter JSON (for debugging)
+         */rawFilter: String?, 
+        /**
          * Number of events received
          */eventsReceived: UInt64, 
         /**
@@ -5946,6 +5970,7 @@ public struct SubscriptionDiagnostics {
         self.subId = subId
         self.description = description
         self.kinds = kinds
+        self.rawFilter = rawFilter
         self.eventsReceived = eventsReceived
         self.ageSecs = ageSecs
     }
@@ -5967,6 +5992,9 @@ extension SubscriptionDiagnostics: Equatable, Hashable {
         if lhs.kinds != rhs.kinds {
             return false
         }
+        if lhs.rawFilter != rhs.rawFilter {
+            return false
+        }
         if lhs.eventsReceived != rhs.eventsReceived {
             return false
         }
@@ -5980,6 +6008,7 @@ extension SubscriptionDiagnostics: Equatable, Hashable {
         hasher.combine(subId)
         hasher.combine(description)
         hasher.combine(kinds)
+        hasher.combine(rawFilter)
         hasher.combine(eventsReceived)
         hasher.combine(ageSecs)
     }
@@ -5997,6 +6026,7 @@ public struct FfiConverterTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
                 subId: FfiConverterString.read(from: &buf), 
                 description: FfiConverterString.read(from: &buf), 
                 kinds: FfiConverterSequenceUInt16.read(from: &buf), 
+                rawFilter: FfiConverterOptionString.read(from: &buf), 
                 eventsReceived: FfiConverterUInt64.read(from: &buf), 
                 ageSecs: FfiConverterUInt64.read(from: &buf)
         )
@@ -6006,6 +6036,7 @@ public struct FfiConverterTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
         FfiConverterString.write(value.subId, into: &buf)
         FfiConverterString.write(value.description, into: &buf)
         FfiConverterSequenceUInt16.write(value.kinds, into: &buf)
+        FfiConverterOptionString.write(value.rawFilter, into: &buf)
         FfiConverterUInt64.write(value.eventsReceived, into: &buf)
         FfiConverterUInt64.write(value.ageSecs, into: &buf)
     }
@@ -6163,10 +6194,6 @@ public struct SystemDiagnostics {
      */
     public var logPath: String
     /**
-     * Uptime in milliseconds since core initialization
-     */
-    public var uptimeMs: UInt64
-    /**
      * Core version
      */
     public var version: String
@@ -6178,6 +6205,14 @@ public struct SystemDiagnostics {
      * Whether a user is logged in
      */
     public var isLoggedIn: Bool
+    /**
+     * Whether any relay is currently connected
+     */
+    public var relayConnected: Bool
+    /**
+     * Number of connected relays
+     */
+    public var connectedRelays: UInt32
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -6186,9 +6221,6 @@ public struct SystemDiagnostics {
          * Log file path
          */logPath: String, 
         /**
-         * Uptime in milliseconds since core initialization
-         */uptimeMs: UInt64, 
-        /**
          * Core version
          */version: String, 
         /**
@@ -6196,12 +6228,19 @@ public struct SystemDiagnostics {
          */isInitialized: Bool, 
         /**
          * Whether a user is logged in
-         */isLoggedIn: Bool) {
+         */isLoggedIn: Bool, 
+        /**
+         * Whether any relay is currently connected
+         */relayConnected: Bool, 
+        /**
+         * Number of connected relays
+         */connectedRelays: UInt32) {
         self.logPath = logPath
-        self.uptimeMs = uptimeMs
         self.version = version
         self.isInitialized = isInitialized
         self.isLoggedIn = isLoggedIn
+        self.relayConnected = relayConnected
+        self.connectedRelays = connectedRelays
     }
 }
 
@@ -6215,9 +6254,6 @@ extension SystemDiagnostics: Equatable, Hashable {
         if lhs.logPath != rhs.logPath {
             return false
         }
-        if lhs.uptimeMs != rhs.uptimeMs {
-            return false
-        }
         if lhs.version != rhs.version {
             return false
         }
@@ -6227,15 +6263,22 @@ extension SystemDiagnostics: Equatable, Hashable {
         if lhs.isLoggedIn != rhs.isLoggedIn {
             return false
         }
+        if lhs.relayConnected != rhs.relayConnected {
+            return false
+        }
+        if lhs.connectedRelays != rhs.connectedRelays {
+            return false
+        }
         return true
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(logPath)
-        hasher.combine(uptimeMs)
         hasher.combine(version)
         hasher.combine(isInitialized)
         hasher.combine(isLoggedIn)
+        hasher.combine(relayConnected)
+        hasher.combine(connectedRelays)
     }
 }
 
@@ -6249,19 +6292,21 @@ public struct FfiConverterTypeSystemDiagnostics: FfiConverterRustBuffer {
         return
             try SystemDiagnostics(
                 logPath: FfiConverterString.read(from: &buf), 
-                uptimeMs: FfiConverterUInt64.read(from: &buf), 
                 version: FfiConverterString.read(from: &buf), 
                 isInitialized: FfiConverterBool.read(from: &buf), 
-                isLoggedIn: FfiConverterBool.read(from: &buf)
+                isLoggedIn: FfiConverterBool.read(from: &buf), 
+                relayConnected: FfiConverterBool.read(from: &buf), 
+                connectedRelays: FfiConverterUInt32.read(from: &buf)
         )
     }
 
     public static func write(_ value: SystemDiagnostics, into buf: inout [UInt8]) {
         FfiConverterString.write(value.logPath, into: &buf)
-        FfiConverterUInt64.write(value.uptimeMs, into: &buf)
         FfiConverterString.write(value.version, into: &buf)
         FfiConverterBool.write(value.isInitialized, into: &buf)
         FfiConverterBool.write(value.isLoggedIn, into: &buf)
+        FfiConverterBool.write(value.relayConnected, into: &buf)
+        FfiConverterUInt32.write(value.connectedRelays, into: &buf)
     }
 }
 
@@ -6764,21 +6809,59 @@ extension AskQuestionInfo: Equatable, Hashable {}
 public enum DataChangeType {
     
     /**
-     * New messages arrived for a conversation
+     * A new message was appended to a conversation
      */
-    case messages(conversationId: String
+    case messageAppended(conversationId: String, message: MessageInfo
     )
     /**
-     * Project status updated (kind:24010)
+     * A conversation was created or updated
      */
-    case projectStatus
+    case conversationUpsert(conversation: ConversationFullInfo
+    )
+    /**
+     * A project was created or updated
+     */
+    case projectUpsert(project: ProjectInfo
+    )
+    /**
+     * An inbox item was created or updated
+     */
+    case inboxUpsert(item: InboxItem
+    )
+    /**
+     * Project online status updated (kind:24010)
+     */
+    case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]
+    )
+    /**
+     * Backend approval required for a project status event
+     */
+    case pendingBackendApproval(backendPubkey: String, projectATag: String
+    )
+    /**
+     * Active conversations updated for a project (kind:24133)
+     */
+    case activeConversationsChanged(projectId: String, projectATag: String, activeConversationIds: [String]
+    )
     /**
      * Streaming text chunk arrived (live typing)
      */
     case streamChunk(agentPubkey: String, conversationId: String, textDelta: String?
     )
     /**
-     * General data changed - full refresh recommended
+     * MCP tools changed (kind:4200)
+     */
+    case mcpToolsChanged
+    /**
+     * Stats snapshot should be refreshed
+     */
+    case statsUpdated
+    /**
+     * Diagnostics snapshot should be refreshed
+     */
+    case diagnosticsUpdated
+    /**
+     * General data changed - legacy fallback
      */
     case general
 }
@@ -6798,15 +6881,37 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         let variant: Int32 = try readInt(&buf)
         switch variant {
         
-        case 1: return .messages(conversationId: try FfiConverterString.read(from: &buf)
+        case 1: return .messageAppended(conversationId: try FfiConverterString.read(from: &buf), message: try FfiConverterTypeMessageInfo.read(from: &buf)
         )
         
-        case 2: return .projectStatus
-        
-        case 3: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        case 2: return .conversationUpsert(conversation: try FfiConverterTypeConversationFullInfo.read(from: &buf)
         )
         
-        case 4: return .general
+        case 3: return .projectUpsert(project: try FfiConverterTypeProjectInfo.read(from: &buf)
+        )
+        
+        case 4: return .inboxUpsert(item: try FfiConverterTypeInboxItem.read(from: &buf)
+        )
+        
+        case 5: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeOnlineAgentInfo.read(from: &buf)
+        )
+        
+        case 6: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
+        )
+        
+        case 7: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
+        )
+        
+        case 8: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        )
+        
+        case 9: return .mcpToolsChanged
+        
+        case 10: return .statsUpdated
+        
+        case 11: return .diagnosticsUpdated
+        
+        case 12: return .general
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -6816,24 +6921,69 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         switch value {
         
         
-        case let .messages(conversationId):
+        case let .messageAppended(conversationId,message):
             writeInt(&buf, Int32(1))
             FfiConverterString.write(conversationId, into: &buf)
+            FfiConverterTypeMessageInfo.write(message, into: &buf)
             
         
-        case .projectStatus:
+        case let .conversationUpsert(conversation):
             writeInt(&buf, Int32(2))
+            FfiConverterTypeConversationFullInfo.write(conversation, into: &buf)
+            
         
+        case let .projectUpsert(project):
+            writeInt(&buf, Int32(3))
+            FfiConverterTypeProjectInfo.write(project, into: &buf)
+            
+        
+        case let .inboxUpsert(item):
+            writeInt(&buf, Int32(4))
+            FfiConverterTypeInboxItem.write(item, into: &buf)
+            
+        
+        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+            writeInt(&buf, Int32(5))
+            FfiConverterString.write(projectId, into: &buf)
+            FfiConverterString.write(projectATag, into: &buf)
+            FfiConverterBool.write(isOnline, into: &buf)
+            FfiConverterSequenceTypeOnlineAgentInfo.write(onlineAgents, into: &buf)
+            
+        
+        case let .pendingBackendApproval(backendPubkey,projectATag):
+            writeInt(&buf, Int32(6))
+            FfiConverterString.write(backendPubkey, into: &buf)
+            FfiConverterString.write(projectATag, into: &buf)
+            
+        
+        case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
+            writeInt(&buf, Int32(7))
+            FfiConverterString.write(projectId, into: &buf)
+            FfiConverterString.write(projectATag, into: &buf)
+            FfiConverterSequenceString.write(activeConversationIds, into: &buf)
+            
         
         case let .streamChunk(agentPubkey,conversationId,textDelta):
-            writeInt(&buf, Int32(3))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
             
         
+        case .mcpToolsChanged:
+            writeInt(&buf, Int32(9))
+        
+        
+        case .statsUpdated:
+            writeInt(&buf, Int32(10))
+        
+        
+        case .diagnosticsUpdated:
+            writeInt(&buf, Int32(11))
+        
+        
         case .general:
-            writeInt(&buf, Int32(4))
+            writeInt(&buf, Int32(12))
         
         }
     }
@@ -8139,6 +8289,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_archived_conversation_ids() != 44789) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_backend_diagnostics() != 63816) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_collapsed_thread_ids() != 51682) {

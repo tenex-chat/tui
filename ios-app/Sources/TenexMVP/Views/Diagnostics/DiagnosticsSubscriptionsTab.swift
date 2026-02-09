@@ -221,6 +221,7 @@ struct DetailRow: View {
                     subId: "abc123def456",
                     description: "Text notes and contact lists",
                     kinds: [1, 3, 4],
+                    rawFilter: nil,
                     eventsReceived: 1247,
                     ageSecs: 3600
                 ),
@@ -228,6 +229,7 @@ struct DetailRow: View {
                     subId: "xyz789ghi012",
                     description: "User metadata",
                     kinds: [0],
+                    rawFilter: nil,
                     eventsReceived: 342,
                     ageSecs: 3600
                 ),
@@ -235,6 +237,7 @@ struct DetailRow: View {
                     subId: "jkl345mno678",
                     description: "Project status updates",
                     kinds: [24010],
+                    rawFilter: nil,
                     eventsReceived: 89,
                     ageSecs: 1800
                 )

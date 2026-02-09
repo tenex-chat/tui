@@ -236,23 +236,29 @@ impl AppDataStore {
             };
 
             if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
-                // Check for inbox: ask events that p-tag the user
-                if self.note_ptags_user(&note, user_pubkey) && self.note_is_ask_event(&note) {
+                if self.note_ptags_user(&note, user_pubkey) {
+                    let is_ask = self.note_is_ask_event(&note);
+
                     // Skip ask events that user has already answered
-                    if answered_ask_ids.contains(&message.id) {
+                    if is_ask && answered_ask_ids.contains(&message.id) {
                         continue;
                     }
 
-                    // Extract project a_tag directly from the note first, fall back to thread lookup
+                    let event_type = if is_ask {
+                        InboxEventType::Ask
+                    } else {
+                        InboxEventType::Mention
+                    };
+
                     let project_a_tag = Self::extract_project_a_tag(&note)
-                        .or_else(|| self.find_project_for_thread(&thread_id));
-                    let project_a_tag_str = project_a_tag.unwrap_or_default();
+                        .or_else(|| self.find_project_for_thread(&thread_id))
+                        .unwrap_or_default();
 
                     let inbox_item = InboxItem {
                         id: message.id.clone(),
-                        event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
+                        event_type,
                         title: message.content.chars().take(50).collect(),
-                        project_a_tag: project_a_tag_str,
+                        project_a_tag,
                         author_pubkey: message.pubkey.clone(),
                         created_at: message.created_at,
                         is_read: false,
@@ -261,7 +267,6 @@ impl AppDataStore {
                     };
                     self.inbox_items.push(inbox_item);
                 }
-
             }
         }
 
@@ -1797,6 +1802,8 @@ impl AppDataStore {
             // Also add the thread root as the first message in the conversation
             // This ensures the initial kind:1 that started the conversation is rendered
             if let Some(root_message) = Message::from_thread_note(note) {
+                self.check_and_add_inbox_item(note, &thread_id, &root_message);
+
                 let messages = self.messages_by_thread.entry(thread_id).or_default();
 
                 // Check if message already exists (avoid duplicates)
@@ -1845,33 +1852,8 @@ impl AppDataStore {
                 }
             }
 
-            // Check for p-tag matching current user AND ask tag (for inbox)
-            if let Some(ref user_pk) = self.user_pubkey.clone() {
-                if pubkey != *user_pk {  // Don't inbox our own messages
-                    // Only include ask events that p-tag the user
-                    if self.note_ptags_user(note, user_pk) && self.note_is_ask_event(note) {
-                        // Extract project a_tag directly from the note (not from thread lookup)
-                        // This ensures inbox items are added even when the thread hasn't been
-                        // registered yet (e.g., out-of-order event arrival during real-time sync)
-                        let project_a_tag = Self::extract_project_a_tag(note)
-                            .or_else(|| self.find_project_for_thread(&thread_id));
-                        let project_a_tag_str = project_a_tag.clone().unwrap_or_default();
-
-                        let inbox_item = InboxItem {
-                            id: message_id.clone(),
-                            event_type: InboxEventType::Ask,  // This is an ask event, not just a mention
-                            title: message.content.chars().take(50).collect(),
-                            project_a_tag: project_a_tag_str,
-                            author_pubkey: pubkey.clone(),
-                            created_at: message.created_at,
-                            is_read: false,
-                            thread_id: Some(thread_id.clone()),
-                            ask_event: message.ask_event.clone(),
-                        };
-                        self.add_inbox_item(inbox_item);
-                    }
-                }
-            }
+            // Check for inbox: any kind:1 that p-tags the user (Ask or Mention)
+            self.check_and_add_inbox_item(note, &thread_id, &message);
 
             // Add to existing messages list, maintaining sort order by created_at
             let messages = self.messages_by_thread.entry(thread_id.clone()).or_default();
@@ -2425,6 +2407,48 @@ impl AppDataStore {
             let pos = self.inbox_items.partition_point(|i| i.created_at > item.created_at);
             self.inbox_items.insert(pos, item);
         }
+    }
+
+    /// Check if a note should be added to inbox and add it if so.
+    /// Handles both Ask and Mention event types for any kind:1 that p-tags the user.
+    pub fn check_and_add_inbox_item(&mut self, note: &Note, thread_id: &str, message: &Message) {
+        let user_pk = match self.user_pubkey.clone() {
+            Some(pk) => pk,
+            None => return,
+        };
+
+        // Skip own messages
+        if message.pubkey == user_pk {
+            return;
+        }
+
+        // Must p-tag the current user
+        if !self.note_ptags_user(note, &user_pk) {
+            return;
+        }
+
+        let event_type = if self.note_is_ask_event(note) {
+            InboxEventType::Ask
+        } else {
+            InboxEventType::Mention
+        };
+
+        let project_a_tag = Self::extract_project_a_tag(note)
+            .or_else(|| self.find_project_for_thread(thread_id))
+            .unwrap_or_default();
+
+        let inbox_item = InboxItem {
+            id: message.id.clone(),
+            event_type,
+            title: message.content.chars().take(50).collect(),
+            project_a_tag,
+            author_pubkey: message.pubkey.clone(),
+            created_at: message.created_at,
+            is_read: false,
+            thread_id: Some(thread_id.to_string()),
+            ask_event: message.ask_event.clone(),
+        };
+        self.add_inbox_item(inbox_item);
     }
 
     pub fn mark_inbox_read(&mut self, id: &str) {

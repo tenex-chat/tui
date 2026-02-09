@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InboxEventType {
     /// Ask event (kind:1 with "ask" tag) - agent asking user a question

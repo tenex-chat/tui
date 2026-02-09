@@ -423,8 +423,9 @@ fn process_note_keys_with_deltas(
 
                     // Thread (kind:1 with a-tag and no e-tags)
                     if let Some(thread) = Thread::from_note(&note) {
-                        conversations_to_upsert.insert(thread.id.clone());
-                        for ancestor in store.runtime_hierarchy.get_ancestors(&thread.id) {
+                        let thread_id = thread.id.clone();
+                        conversations_to_upsert.insert(thread_id.clone());
+                        for ancestor in store.runtime_hierarchy.get_ancestors(&thread_id) {
                             conversations_to_upsert.insert(ancestor);
                         }
 
@@ -434,6 +435,11 @@ fn process_note_keys_with_deltas(
                                 conversation_id: root_message.thread_id.clone(),
                                 message: message_to_info(store, &root_message),
                             });
+
+                            // Inbox additions for thread roots (ask events / mentions)
+                            if store.get_inbox_items().iter().any(|i| i.id == root_message.id) {
+                                inbox_items_to_upsert.insert(root_message.id.clone());
+                            }
                         }
                     }
                 }

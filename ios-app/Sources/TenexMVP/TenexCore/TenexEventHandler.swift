@@ -28,13 +28,26 @@ final class TenexEventHandler: EventCallback {
             guard let coreManager = self?.coreManager else { return }
 
             switch changeType {
-            case .messages(let conversationId):
-                // New messages arrived for a conversation - trigger refresh
+            case .messageAppended(let conversationId, _):
                 coreManager.signalConversationUpdate(conversationId: conversationId)
 
-            case .projectStatus:
-                // Project status updated (kind:24010)
+            case .conversationUpsert(let conversation):
+                coreManager.signalConversationUpdate(conversationId: conversation.id)
+
+            case .projectUpsert:
+                coreManager.signalGeneralUpdate()
+
+            case .inboxUpsert:
+                coreManager.signalGeneralUpdate()
+
+            case .projectStatusChanged:
                 coreManager.signalProjectStatusUpdate()
+
+            case .pendingBackendApproval:
+                coreManager.signalGeneralUpdate()
+
+            case .activeConversationsChanged:
+                coreManager.signalGeneralUpdate()
 
             case .streamChunk(let agentPubkey, let conversationId, let textDelta):
                 NotificationCenter.default.post(
@@ -46,6 +59,15 @@ final class TenexEventHandler: EventCallback {
                         "textDelta": textDelta as Any
                     ]
                 )
+
+            case .mcpToolsChanged:
+                coreManager.signalGeneralUpdate()
+
+            case .statsUpdated:
+                coreManager.signalGeneralUpdate()
+
+            case .diagnosticsUpdated:
+                coreManager.signalGeneralUpdate()
 
             case .general:
                 coreManager.signalGeneralUpdate()
