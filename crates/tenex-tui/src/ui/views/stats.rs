@@ -47,8 +47,13 @@ const TABLE_INSET: u16 = 2; // Padding inside table blocks
 const TABLE_COST_COL_WIDTH: u16 = 10; // Width for cost/runtime columns
 const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
 
-// Number of days to show in the chart (fixed window for averaging)
-const STATS_WINDOW_DAYS: usize = 14;
+// Import shared constants for cost and chart windows
+// COST_WINDOW_DAYS is used for cost calculations (shared with FFI)
+// CHART_WINDOW_DAYS is used for chart rendering (runtime, messages)
+use tenex_core::constants::{COST_WINDOW_DAYS, CHART_WINDOW_DAYS};
+
+// Local alias for chart window (usize for iteration)
+const STATS_WINDOW_DAYS: usize = CHART_WINDOW_DAYS;
 
 // Number of items to show in ranking tables (expanded view with all vertical space)
 const RANKINGS_TABLE_ROWS: usize = 20;
@@ -104,8 +109,11 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // 1. Runtime by day (last STATS_WINDOW_DAYS days)
     let runtime_by_day = data_store.get_runtime_by_day(STATS_WINDOW_DAYS);
 
-    // 2. Total cost
-    let total_cost = data_store.get_total_cost();
+    // 2. Total cost (past COST_WINDOW_DAYS)
+    // Use saturating_sub for safe arithmetic in case of clock skew
+    let now_secs = Utc::now().timestamp() as u64;
+    let cost_window_start = now_secs.saturating_sub(COST_WINDOW_DAYS * 24 * 60 * 60);
+    let total_cost = data_store.get_total_cost_since(cost_window_start);
 
     // 3. Cost by project
     let cost_by_project = data_store.get_cost_by_project();
@@ -328,12 +336,12 @@ fn render_metric_cards(
     ])
     .split(area);
 
-    // Card 1: Total Cost
+    // Card 1: Total Cost (past 2 weeks)
     render_metric_card(
         f,
         "Total Cost",
         &format!("${:.2}", total_cost),
-        "all-time",
+        "past 2 weeks",
         theme::ACCENT_SUCCESS,
         card_chunks[0],
     );

@@ -22,6 +22,16 @@ pub const DEFAULT_NUDGE_TITLE: &str = "Untitled";
 /// Staleness threshold in seconds - status older than this is considered offline
 pub const STALENESS_THRESHOLD_SECS: u64 = 5 * 60; // 5 minutes
 
+// Stats window constants
+/// Number of days for the cost display window (used in Stats tab and FFI).
+/// This is separate from the chart window to allow independent tuning.
+/// Note: Both TUI stats.rs and FFI ffi.rs use this constant for cost calculations.
+pub const COST_WINDOW_DAYS: u64 = 14;
+
+/// Number of days for the chart display window (runtime, messages charts).
+/// Used by TUI stats view for chart rendering.
+pub const CHART_WINDOW_DAYS: usize = 14;
+
 // Nostr event kinds used by TENEX
 pub mod kinds {
     /// Text note (thread or message)
