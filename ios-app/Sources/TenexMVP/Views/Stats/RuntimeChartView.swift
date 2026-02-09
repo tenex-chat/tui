@@ -103,7 +103,7 @@ struct EmptyChartView: View {
 
     return RuntimeChartView(
         snapshot: StatsSnapshot(
-            totalCost: 0,
+            totalCost14Days: 0,
             todayRuntimeMs: 0,
             avgDailyRuntimeMs: 0,
             activeDaysCount: 0,
