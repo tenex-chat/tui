@@ -44,7 +44,10 @@ pub struct CoreRuntime {
     negentropy_stats: SharedNegentropySyncStats,
 }
 
-pub(crate) fn process_note_keys(
+/// Process note keys and update the given data store.
+/// This standalone function allows external callers (like the daemon) to process
+/// note keys with a custom data store instead of the CoreRuntime's internal one.
+pub fn process_note_keys(
     ndb: &Ndb,
     data_store: &mut AppDataStore,
     handle: &CoreHandle,
