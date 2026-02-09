@@ -2089,6 +2089,23 @@ impl AppDataStore {
         &self.projects
     }
 
+    /// Query projects directly from nostrdb (bypasses in-memory cache).
+    /// Use this when you need fresh project data that may not be in the cache yet.
+    /// For example, the HTTP server uses this because it doesn't receive project
+    /// update events like the main data store does.
+    pub fn query_projects_from_ndb(&self) -> Vec<Project> {
+        crate::store::get_projects(&self.ndb).unwrap_or_default()
+    }
+
+    /// Find a project by its d-tag (slug) directly from nostrdb.
+    /// Returns the project's a_tag if found.
+    pub fn find_project_a_tag_by_dtag_from_ndb(&self, dtag: &str) -> Option<String> {
+        self.query_projects_from_ndb()
+            .into_iter()
+            .find(|p| p.id == dtag)
+            .map(|p| p.a_tag())
+    }
+
     /// Drain pending project subscriptions (called by CoreRuntime after processing events)
     pub fn drain_pending_project_subscriptions(&mut self) -> Vec<String> {
         std::mem::take(&mut self.pending_project_subscriptions)

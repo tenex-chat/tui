@@ -57,9 +57,9 @@ fn spawn_daemon(data_dir: &Path, config: Option<&CliConfig>) -> Result<()> {
     // Pass credentials via environment to avoid them showing in process list
     if let Some(cfg) = config {
         if let Some(ref creds) = cfg.credentials {
-            cmd.env("TENEX_KEY", &creds.key);
+            cmd.env("TENEX_NSEC", &creds.key);
             if let Some(ref password) = creds.password {
-                cmd.env("TENEX_KEY_PASSWORD", password);
+                cmd.env("TENEX_NSEC_PASSWORD", password);
             }
         }
     }

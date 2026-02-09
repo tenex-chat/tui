@@ -774,40 +774,13 @@ fn create_responses_sse_stream(
     stream
 }
 
-/// Default timeout for waiting for project to appear (10 seconds)
-const WAIT_FOR_PROJECT_TIMEOUT_SECS: u64 = 10;
-
-/// Resolve project dtag to full coordinate, waiting for project to appear if needed.
-/// This addresses timing issues where HTTP requests arrive before projects are synced.
+/// Resolve project dtag to full coordinate.
+/// Queries nostrdb directly to get fresh data, bypassing the in-memory cache
+/// which doesn't receive project discovery events in the HTTP server context.
 async fn resolve_project_coordinate(state: &HTTPServerState, project_dtag: &str) -> Result<String> {
-    let start = tokio::time::Instant::now();
-    let timeout = tokio::time::Duration::from_secs(WAIT_FOR_PROJECT_TIMEOUT_SECS);
-
-    loop {
-        // Check for timeout
-        if start.elapsed() > timeout {
-            return Err(anyhow::anyhow!(
-                "Timeout waiting for project '{}' to appear. Project may not exist or is not synced yet.",
-                project_dtag
-            ));
-        }
-
-        // Try to find the project
-        {
-            let store = state.data_store.lock().unwrap();
-            let projects = store.get_projects();
-
-            for project in projects {
-                // Check if the project id (d-tag) matches
-                if project.id == project_dtag {
-                    return Ok(project.a_tag());
-                }
-            }
-        }
-
-        // Project not found yet, wait a bit before retrying (async sleep)
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    }
+    let store = state.data_store.lock().unwrap();
+    store.find_project_a_tag_by_dtag_from_ndb(project_dtag)
+        .ok_or_else(|| anyhow::anyhow!("Project with dtag '{}' not found", project_dtag))
 }
 
 /// Default timeout for waiting for project status (30 seconds)
