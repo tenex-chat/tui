@@ -165,6 +165,7 @@ struct ConversationsTabView: View {
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
     @State private var showDiagnostics = false
+    @State private var showAISettings = false
     @State private var showStats = false
     @State private var showArchived = false
     @State private var selectedConversation: ConversationFullInfo?
@@ -301,6 +302,10 @@ struct ConversationsTabView: View {
                             Button(action: { showDiagnostics = true }) {
                                 Label("Diagnostics", systemImage: "gauge.with.needle")
                             }
+
+                            Button(action: { showAISettings = true }) {
+                                Label("AI Settings", systemImage: "waveform")
+                            }
                         } label: {
                             Image(systemName: "person.circle")
                                 .font(.title3)
@@ -335,6 +340,16 @@ struct ConversationsTabView: View {
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
                                 Button("Done") { showDiagnostics = false }
+                            }
+                        }
+                }
+            }
+            .sheet(isPresented: $showAISettings) {
+                NavigationStack {
+                    AISettingsView()
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("Done") { showAISettings = false }
                             }
                         }
                 }
