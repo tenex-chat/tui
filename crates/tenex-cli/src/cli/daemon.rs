@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use tokio::net::UnixListener;
+use tokio::sync::broadcast;
 
 use anyhow::Result;
 use serde::Deserialize;
@@ -74,9 +75,44 @@ pub async fn run_daemon(
 
     // Create a SINGLE shared data store for both Unix socket and HTTP handlers.
     // This ensures both see the same projects, threads, and messages.
-    // FIX: Previously, HTTP had a separate store that was never populated with project data.
+    // Note: Using std::sync::Mutex because daemon has sync code paths (handle_connection)
     let shared_data_store = Arc::new(Mutex::new(AppDataStore::new(core_runtime.ndb())));
-    let shared_data_rx = Arc::new(Mutex::new(data_rx));
+
+    // Create a broadcast channel for DataChange events.
+    // This allows multiple consumers (HTTP SSE streams + daemon) to receive all events.
+    // FIX: Previously used Arc<Mutex<Receiver>> which caused data loss - first consumer
+    // would steal all events from other consumers.
+    let (broadcast_tx, _broadcast_rx) = broadcast::channel::<DataChange>(1024);
+    let broadcast_tx_for_http = broadcast_tx.clone();
+    let broadcast_tx_for_forward = broadcast_tx.clone();
+
+    // Spawn a task to forward from the original mpsc receiver to the broadcast channel
+    let data_rx_mutex = Arc::new(Mutex::new(data_rx));
+    let data_rx_for_forward = data_rx_mutex.clone();
+    tokio::spawn(async move {
+        loop {
+            // Non-blocking receive from the original channel
+            let data_change = {
+                let rx = data_rx_for_forward.lock().unwrap();
+                rx.try_recv()
+            };
+
+            match data_change {
+                Ok(change) => {
+                    // Forward to broadcast channel (ignore send errors - no subscribers is OK)
+                    let _ = broadcast_tx_for_forward.send(change);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    // No data available, sleep briefly
+                    tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // Channel closed, exit the forwarding loop
+                    break;
+                }
+            }
+        }
+    });
 
     // Set trusted backends from preferences
     {
@@ -101,13 +137,12 @@ pub async fn run_daemon(
     let http_task = if http_enabled {
         let http_core_handle = core_handle.clone();
         let http_store_clone = shared_data_store.clone();
-        let http_rx_clone = shared_data_rx.clone();
         Some(tokio::spawn(async move {
             if let Err(e) = run_server(
                 http_bind,
                 http_core_handle,
                 http_store_clone,
-                http_rx_clone,
+                broadcast_tx_for_http,
             )
             .await
             {
@@ -118,19 +153,26 @@ pub async fn run_daemon(
         None
     };
 
+    // Subscribe to broadcast for daemon's own use (handling ProjectStatus)
+    let mut daemon_rx = broadcast_tx.subscribe();
+
     // Main event loop - unified for both HTTP and socket-only modes
     loop {
-        // Drain any pending DataChange events (non-blocking)
+        // Drain any pending DataChange events from broadcast (non-blocking)
         // Update the shared data store with status events
-        {
-            let rx = shared_data_rx.lock().unwrap();
-            while let Ok(data_change) = rx.try_recv() {
-                match &data_change {
-                    DataChange::ProjectStatus { json } => {
-                        shared_data_store.lock().unwrap().handle_status_event_json(json);
+        loop {
+            match daemon_rx.try_recv() {
+                Ok(data_change) => {
+                    match &data_change {
+                        DataChange::ProjectStatus { json } => {
+                            shared_data_store.lock().unwrap().handle_status_event_json(json);
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => continue, // Skip lagged messages
+                Err(broadcast::error::TryRecvError::Closed) => break,
             }
         }
 

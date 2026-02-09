@@ -1,6 +1,6 @@
 # ElevenLabs Integration with TENEX
 
-This guide shows how to integrate ElevenLabs Conversational AI with TENEX agents using the OpenAI-compatible API server.
+This guide shows how to integrate ElevenLabs Conversational AI with TENEX agents using the OpenAI Responses API server.
 
 ## Overview
 
@@ -54,7 +54,7 @@ API Key: not-needed
 
 ### 4. Configure System Prompt (Optional)
 
-You can set a system prompt in ElevenLabs that will be included in the messages array. TENEX will use the last user message.
+You can set a system prompt in ElevenLabs using the `instructions` field. TENEX will use the last user message from the input.
 
 ### 5. Test the Integration
 
@@ -69,7 +69,7 @@ User Speech
     ↓
 ElevenLabs (Speech-to-Text)
     ↓
-HTTP POST /project/chat/completions
+HTTP POST /project/responses
     ↓
 TENEX Server
     ↓
@@ -93,7 +93,14 @@ User hears response
 3. **API Request**: ElevenLabs sends POST request:
    ```json
    {
-     "messages": [
+     "input": "transcribed text",
+     "stream": true
+   }
+   ```
+   Or with message array:
+   ```json
+   {
+     "input": [
        {"role": "user", "content": "transcribed text"}
      ],
      "stream": true
@@ -117,11 +124,18 @@ By default, TENEX uses the PM (project manager) agent. To use a different agent,
 
 ### Conversation Context
 
-Each request creates a new thread ID. For conversation history, ElevenLabs maintains the context and sends it in the `messages` array.
+For conversation continuity, use `previous_response_id` to chain responses:
+```json
+{
+  "input": "Follow up question",
+  "previous_response_id": "resp_abc123...",
+  "stream": true
+}
+```
 
 ### Custom Models
 
-ElevenLabs may send a `model` field. TENEX ignores this field but requires it for OpenAI SDK compatibility.
+ElevenLabs may send a `model` field. TENEX accepts but ignores this field.
 
 ## Troubleshooting
 
@@ -175,58 +189,72 @@ ElevenLabs may send a `model` field. TENEX ignores this field but requires it fo
 
 ## Example Request from ElevenLabs
 
-This is what ElevenLabs typically sends:
+This is what ElevenLabs typically sends using the Responses API:
 
 ```json
-POST /my-project/chat/completions
+POST /my-project/responses
 Content-Type: application/json
 
 {
   "model": "gpt-4",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a helpful AI assistant."
-    },
-    {
-      "role": "user",
-      "content": "Hello, can you help me?"
-    }
-  ],
-  "stream": true,
-  "temperature": 0.7,
-  "max_tokens": 2048
+  "input": "Hello, can you help me?",
+  "instructions": "You are a helpful AI assistant.",
+  "stream": true
 }
 ```
 
-TENEX extracts the last user message and forwards it to the agent.
+Or with message array format:
+
+```json
+POST /my-project/responses
+Content-Type: application/json
+
+{
+  "model": "gpt-4",
+  "input": [
+    {"role": "user", "content": "Hello, can you help me?"}
+  ],
+  "instructions": "You are a helpful AI assistant.",
+  "stream": true
+}
+```
+
+TENEX extracts the user content and forwards it to the agent.
 
 ## Example SSE Response
 
-This is what TENEX sends back to ElevenLabs:
+This is what TENEX sends back to ElevenLabs using the Responses API format:
 
 ```
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_abc123","created_at":1234567890.0,"status":"in_progress","model":"tenex","object":"response","output":[]}}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_abc123","status":"in_progress",...}}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":null}]}
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_xyz789","type":"message","role":"assistant","status":"in_progress","content":[]}}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" I"},"finish_reason":null}]}
+event: response.content_part.added
+data: {"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":"'d"},"finish_reason":null}]}
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" be"},"finish_reason":null}]}
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"!"}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" happy"},"finish_reason":null}]}
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" I'd be happy to help!"}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" to"},"finish_reason":null}]}
+event: response.output_text.done
+data: {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"Hello! I'd be happy to help!"}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" help"},"finish_reason":null}]}
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_xyz789","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello! I'd be happy to help!","annotations":[]}]}}
 
-data: {"id":"api-123","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_abc123","status":"completed","output":[...],"output_text":"Hello! I'd be happy to help!"}}
 ```
 
 ## Performance Tips
