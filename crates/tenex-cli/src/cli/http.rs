@@ -152,28 +152,46 @@ async fn chat_completions(
     let agent_pubkey = get_pm_agent_pubkey(&state, &project_a_tag)
         .map_err(|e| (StatusCode::SERVICE_UNAVAILABLE, format!("Agent not available: {}", e)))?;
 
-    // Create a unique thread ID for this conversation
-    let thread_id = format!("api-{}", uuid::Uuid::new_v4());
+    // Create a title from the user message (first 50 chars)
+    let title: String = if user_message.content.chars().count() > 50 {
+        format!("{}...", user_message.content.chars().take(50).collect::<String>())
+    } else {
+        user_message.content.clone()
+    };
 
-    // Publish the message as a kind:1 Nostr event
-    let publish_result = state.core_handle.send(NostrCommand::PublishMessage {
-        thread_id: thread_id.clone(),
+    // Create response channel to get the thread ID (which is a valid 64-char hex event ID)
+    let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+    // Publish a new thread using PublishThread command (not PublishMessage)
+    // This creates a proper kind:1 event with no e-tags (thread root)
+    let publish_result = state.core_handle.send(NostrCommand::PublishThread {
         project_a_tag: project_a_tag.clone(),
+        title,
         content: user_message.content.clone(),
         agent_pubkey: Some(agent_pubkey.clone()),
-        reply_to: None,
         branch: None,
         nudge_ids: Vec::new(),
-        ask_author_pubkey: None,
-        response_tx: None,
+        reference_conversation_id: None,
+        fork_message_id: None,
+        response_tx: Some(response_tx),
     });
 
     if let Err(e) = publish_result {
         return Err((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to publish message: {}", e),
+            format!("Failed to create thread: {}", e),
         ));
     }
+
+    // Wait for the thread ID (with timeout)
+    let thread_id = response_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Timeout waiting for thread creation".to_string(),
+            )
+        })?;
 
     // If streaming is requested, return SSE stream
     if request.stream {
@@ -313,34 +331,73 @@ fn create_sse_stream(
     stream
 }
 
-/// Resolve project dtag to full coordinate
+/// Default timeout for waiting for project to appear (10 seconds)
+const WAIT_FOR_PROJECT_TIMEOUT_SECS: u64 = 10;
+
+/// Resolve project dtag to full coordinate, waiting for project to appear if needed.
+/// This addresses timing issues where HTTP requests arrive before projects are synced.
 fn resolve_project_coordinate(state: &HTTPServerState, project_dtag: &str) -> Result<String> {
-    let store = state.data_store.lock().unwrap();
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(WAIT_FOR_PROJECT_TIMEOUT_SECS);
 
-    // Search through all projects in the data store
-    let projects = store.get_projects();
-
-    for project in projects {
-        // Check if the project id (d-tag) matches
-        if project.id == project_dtag {
-            return Ok(project.a_tag());
+    loop {
+        // Check for timeout
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for project '{}' to appear. Project may not exist or is not synced yet.",
+                project_dtag
+            ));
         }
-    }
 
-    Err(anyhow::anyhow!("Project with dtag '{}' not found", project_dtag))
+        // Try to find the project
+        {
+            let store = state.data_store.lock().unwrap();
+            let projects = store.get_projects();
+
+            for project in projects {
+                // Check if the project id (d-tag) matches
+                if project.id == project_dtag {
+                    return Ok(project.a_tag());
+                }
+            }
+        }
+
+        // Project not found yet, wait a bit before retrying
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
-/// Get the PM agent pubkey from project status
+/// Default timeout for waiting for project status (30 seconds)
+const WAIT_FOR_STATUS_TIMEOUT_SECS: u64 = 30;
+
+/// Get the PM agent pubkey from project status, waiting for status to appear if needed.
+/// This addresses timing issues where HTTP requests arrive before project status is synced.
 fn get_pm_agent_pubkey(state: &HTTPServerState, project_a_tag: &str) -> Result<String> {
-    let store = state.data_store.lock().unwrap();
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(WAIT_FOR_STATUS_TIMEOUT_SECS);
 
-    let status = store
-        .get_project_status(project_a_tag)
-        .ok_or_else(|| anyhow::anyhow!("No status found for project"))?;
+    loop {
+        // Check for timeout
+        if start.elapsed() > timeout {
+            return Err(anyhow::anyhow!(
+                "Timeout waiting for project status. Project may not be booted."
+            ));
+        }
 
-    let pm_agent = status
-        .pm_agent()
-        .ok_or_else(|| anyhow::anyhow!("No PM agent found in project status"))?;
+        // Try to get the status
+        {
+            let store = state.data_store.lock().unwrap();
 
-    Ok(pm_agent.pubkey.clone())
+            if let Some(status) = store.get_project_status(project_a_tag) {
+                if let Some(pm_agent) = status.pm_agent() {
+                    return Ok(pm_agent.pubkey.clone());
+                }
+                // Status exists but no PM agent - this is a real error, don't wait
+                return Err(anyhow::anyhow!("No PM agent found in project status"));
+            }
+        }
+
+        // Status not found yet, wait a bit before retrying
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
 }
