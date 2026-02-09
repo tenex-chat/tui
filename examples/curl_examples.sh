@@ -1,5 +1,5 @@
 #!/bin/bash
-# Example curl commands for testing TENEX OpenAI-compatible API server
+# Example curl commands for testing TENEX OpenAI Responses API server
 
 # Configuration
 SERVER_URL="http://127.0.0.1:3000"
@@ -10,69 +10,71 @@ GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}TENEX OpenAI API Server - Example Requests${NC}\n"
+echo -e "${BLUE}TENEX OpenAI Responses API Server - Example Requests${NC}\n"
 
-# Example 1: Simple streaming request
-echo -e "${GREEN}Example 1: Simple streaming chat completion${NC}"
-echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/chat/completions \\"
+# Example 1: Simple string input (streaming)
+echo -e "${GREEN}Example 1: Simple string input (streaming)${NC}"
+echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/responses \\"
 echo "  -H \"Content-Type: application/json\" \\"
 echo "  -d '{"
-echo "    \"messages\": ["
-echo "      {\"role\": \"user\", \"content\": \"Hello! What is TENEX?\"}"
-echo "    ],"
+echo "    \"input\": \"Hello! What is TENEX?\","
 echo "    \"stream\": true"
 echo "  }'"
 echo ""
 
 # Uncomment to run:
-# curl -X POST "$SERVER_URL/$PROJECT_DTAG/chat/completions" \
+# curl -X POST "$SERVER_URL/$PROJECT_DTAG/responses" \
 #   -H "Content-Type: application/json" \
 #   -d '{
-#     "messages": [
-#       {"role": "user", "content": "Hello! What is TENEX?"}
-#     ],
+#     "input": "Hello! What is TENEX?",
 #     "stream": true
 #   }'
 
 echo ""
-echo -e "${GREEN}Example 2: Multi-turn conversation${NC}"
-echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/chat/completions \\"
+echo -e "${GREEN}Example 2: Message array input${NC}"
+echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/responses \\"
 echo "  -H \"Content-Type: application/json\" \\"
 echo "  -d '{"
-echo "    \"messages\": ["
-echo "      {\"role\": \"user\", \"content\": \"What is 2+2?\"},"
-echo "      {\"role\": \"assistant\", \"content\": \"2+2 equals 4.\"},"
-echo "      {\"role\": \"user\", \"content\": \"What about 3+3?\"}"
+echo "    \"input\": ["
+echo "      {\"role\": \"user\", \"content\": \"What is 2+2?\"}"
 echo "    ],"
 echo "    \"stream\": true"
 echo "  }'"
 echo ""
 
-# Example 3: Code question
+# Example 3: Chained conversation using previous_response_id
 echo ""
-echo -e "${GREEN}Example 3: Ask a code question${NC}"
-echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/chat/completions \\"
+echo -e "${GREEN}Example 3: Chained conversation (use previous response ID)${NC}"
+echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/responses \\"
 echo "  -H \"Content-Type: application/json\" \\"
 echo "  -d '{"
-echo "    \"messages\": ["
-echo "      {\"role\": \"user\", \"content\": \"Write a Python function to reverse a string\"}"
-echo "    ],"
+echo "    \"input\": \"Can you elaborate on that?\","
+echo "    \"previous_response_id\": \"resp_abc123...\","
+echo "    \"stream\": true"
+echo "  }'"
+echo ""
+
+# Example 4: Code question
+echo ""
+echo -e "${GREEN}Example 4: Ask a code question${NC}"
+echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/responses \\"
+echo "  -H \"Content-Type: application/json\" \\"
+echo "  -d '{"
+echo "    \"input\": \"Write a Python function to reverse a string\","
 echo "    \"stream\": true,"
 echo "    \"model\": \"tenex\""
 echo "  }'"
 echo ""
 
-# Example 4: Test with different models (model name is ignored but can be set)
+# Example 5: Rich content with instructions
 echo ""
-echo -e "${GREEN}Example 4: Request with model specification${NC}"
-echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/chat/completions \\"
+echo -e "${GREEN}Example 5: With instructions${NC}"
+echo "curl -X POST $SERVER_URL/$PROJECT_DTAG/responses \\"
 echo "  -H \"Content-Type: application/json\" \\"
 echo "  -d '{"
-echo "    \"messages\": ["
-echo "      {\"role\": \"user\", \"content\": \"Tell me a joke\"}"
-echo "    ],"
-echo "    \"stream\": true,"
-echo "    \"model\": \"gpt-4\""
+echo "    \"input\": \"Tell me a joke\","
+echo "    \"instructions\": \"You are a helpful assistant with a great sense of humor.\","
+echo "    \"stream\": true"
 echo "  }'"
 echo ""
 

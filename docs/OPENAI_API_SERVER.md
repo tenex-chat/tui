@@ -1,6 +1,6 @@
-# OpenAI-Compatible API Server
+# OpenAI Responses API Server
 
-TENEX TUI now includes an HTTP server mode that exposes an OpenAI-compatible API endpoint for integration with ElevenLabs and other services.
+TENEX TUI now includes an HTTP server mode that exposes an OpenAI Responses API endpoint for integration with ElevenLabs and other services.
 
 ## Quick Start
 
@@ -22,17 +22,26 @@ Default server address: `http://127.0.0.1:3000`
 
 ### Making Requests
 
-The server exposes the endpoint: `POST /:project_dtag/chat/completions`
+The server exposes the endpoint: `POST /:project_dtag/responses`
 
 Replace `:project_dtag` with your project's d-tag identifier (the last part of the project coordinate).
 
 #### Example with curl
 
 ```bash
-curl -X POST http://127.0.0.1:3000/my-project/chat/completions \
+# Simple string input
+curl -X POST http://127.0.0.1:3000/my-project/responses \
   -H "Content-Type: application/json" \
   -d '{
-    "messages": [
+    "input": "Hello, what can you help me with?",
+    "stream": true
+  }'
+
+# Message array input
+curl -X POST http://127.0.0.1:3000/my-project/responses \
+  -H "Content-Type: application/json" \
+  -d '{
+    "input": [
       {"role": "user", "content": "Hello, what can you help me with?"}
     ],
     "stream": true
@@ -50,18 +59,16 @@ client = OpenAI(
     api_key="not-needed"  # No authentication required
 )
 
-# Make a streaming request
-stream = client.chat.completions.create(
-    model="tenex",  # Model name is ignored but required
-    messages=[
-        {"role": "user", "content": "What is TENEX?"}
-    ],
+# Make a streaming request using the Responses API
+response = client.responses.create(
+    model="tenex",  # Model name is optional
+    input="What is TENEX?",
     stream=True
 )
 
-for chunk in stream:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
+for event in response:
+    if event.type == "response.output_text.delta":
+        print(event.delta, end="")
 ```
 
 #### Example with JavaScript/TypeScript
@@ -74,56 +81,83 @@ const client = new OpenAI({
   apiKey: 'not-needed'
 });
 
-const stream = await client.chat.completions.create({
+const stream = await client.responses.create({
   model: 'tenex',
-  messages: [{ role: 'user', content: 'Hello!' }],
+  input: 'Hello!',
   stream: true,
 });
 
-for await (const chunk of stream) {
-  process.stdout.write(chunk.choices[0]?.delta?.content || '');
+for await (const event of stream) {
+  if (event.type === 'response.output_text.delta') {
+    process.stdout.write(event.delta);
+  }
 }
 ```
 
 ## Request Format
 
-### Chat Completion Request
+### Responses Request
 
 ```json
 {
-  "messages": [
-    {"role": "user", "content": "Your message here"}
-  ],
+  "input": "Your message here",
   "stream": true,
-  "model": "tenex"
+  "model": "tenex",
+  "previous_response_id": "resp_...",
+  "instructions": "System instructions",
+  "metadata": {},
+  "user": "user-id"
 }
 ```
 
 **Required fields:**
-- `messages`: Array of message objects with `role` and `content`
-  - At least one message with `role: "user"` is required
-  - The last user message is sent to the agent
+- `input`: Either a simple string or an array of message objects
+  - String: `"Your message"`
+  - Array: `[{"role": "user", "content": "Your message"}]`
+  - Rich content: `[{"role": "user", "content": [{"type": "input_text", "text": "..."}]}]`
 
 **Optional fields:**
 - `stream`: Boolean (default: false)
   - `true`: Stream responses via Server-Sent Events (SSE)
   - `false`: Return complete response (not yet implemented)
-- `model`: String (ignored but may be required by some clients)
+- `model`: String (optional, TENEX uses its own model)
+- `previous_response_id`: String for conversation chaining
+- `instructions`: System instructions for the model
+- `store`: Boolean to control response storage
+- `metadata`: Object with custom metadata
+- `user`: User identifier string
 
 ### Response Format (Streaming)
 
-Server-Sent Events with OpenAI-compatible format:
+Server-Sent Events with OpenAI Responses API format:
 
 ```
-data: {"id":"api-...","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_...","created_at":1234567890.0,"status":"in_progress","model":"tenex","object":"response","output":[]}}
 
-data: {"id":"api-...","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_...","status":"in_progress",...}}
 
-data: {"id":"api-...","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{"content":" there"},"finish_reason":null}]}
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"id":"msg_...","type":"message","role":"assistant","status":"in_progress","content":[]}}
 
-data: {"id":"api-...","object":"chat.completion.chunk","created":1234567890,"model":"tenex","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+event: response.content_part.added
+data: {"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}
 
-data: [DONE]
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"Hello"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" there!"}
+
+event: response.output_text.done
+data: {"type":"response.output_text.done","output_index":0,"content_index":0,"text":"Hello there!"}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"id":"msg_...","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Hello there!","annotations":[]}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_...","status":"completed","output":[...],"output_text":"Hello there!"}}
 ```
 
 ## How It Works
@@ -132,7 +166,7 @@ data: [DONE]
 2. **Agent Selection**: Automatically uses the PM (project manager) agent from the project status
 3. **Message Publishing**: Creates a kind:1 Nostr event p-tagging the selected agent
 4. **Real-time Streaming**: Forwards agent responses via SSE as they arrive
-5. **OpenAI Format**: Converts TENEX streaming format to OpenAI-compatible chunks
+5. **OpenAI Format**: Converts TENEX streaming format to OpenAI Responses API format
 
 ## Architecture
 
@@ -161,7 +195,7 @@ data: [DONE]
 The primary use case is integrating ElevenLabs conversational AI with TENEX agents:
 
 1. Start TENEX server: `TENEX_NSEC=nsec1... tenex-tui --server`
-2. Configure ElevenLabs to use your endpoint: `http://127.0.0.1:3000/PROJECT_DTAG/chat/completions`
+2. Configure ElevenLabs to use your endpoint: `http://127.0.0.1:3000/PROJECT_DTAG/responses`
 3. ElevenLabs will send user speech as messages and stream agent responses for TTS
 
 ## Limitations
@@ -169,7 +203,7 @@ The primary use case is integrating ElevenLabs conversational AI with TENEX agen
 - **Non-streaming mode**: Not yet implemented (use `stream: true`)
 - **No authentication**: Intended for local/trusted network use only
 - **Single project per request**: Project is specified in the URL path
-- **No conversation history**: Each request is independent (new thread ID)
+- **Conversation chaining**: Use `previous_response_id` to chain conversations
 
 ## Troubleshooting
 
@@ -203,7 +237,6 @@ Do not expose this server to the public internet without adding authentication.
 ## Examples
 
 See the [examples directory](../examples/) for complete working examples:
-- `openai_client.py`: Python client using OpenAI SDK
 - `curl_examples.sh`: Shell script with curl examples
 - `elevenlabs_integration.md`: ElevenLabs setup guide
 
