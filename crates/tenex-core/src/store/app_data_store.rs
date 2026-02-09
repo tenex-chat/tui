@@ -796,6 +796,25 @@ impl AppDataStore {
         self.iter_message_costs().map(|(_, cost)| cost).sum()
     }
 
+    /// Get total cost for messages created since a given timestamp.
+    ///
+    /// # Arguments
+    /// * `since_timestamp_secs` - Unix epoch timestamp in seconds. Messages with
+    ///   `created_at >= since_timestamp_secs` are included in the sum.
+    ///
+    /// # Returns
+    /// Total cost in USD as a float. Returns 0.0 if no messages match.
+    ///
+    /// # Edge Cases
+    /// * If `since_timestamp_secs` is in the future, returns 0.0 (no messages match)
+    /// * If `since_timestamp_secs` is 0, effectively returns all-time cost
+    pub fn get_total_cost_since(&self, since_timestamp_secs: u64) -> f64 {
+        self.iter_message_costs()
+            .filter(|(msg, _)| msg.created_at >= since_timestamp_secs)
+            .map(|(_, cost)| cost)
+            .sum()
+    }
+
     /// Get cost aggregated by project.
     /// Returns (project_a_tag, project_name, total_cost) tuples sorted by cost descending.
     pub fn get_cost_by_project(&self) -> Vec<(String, String, f64)> {
@@ -3226,6 +3245,7 @@ impl AppDataStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::constants::COST_WINDOW_DAYS;
     use crate::store::Database;
     use tempfile::tempdir;
 
@@ -4897,5 +4917,146 @@ mod tests {
 
         // Total tokens: 100 + 200 + 300 = 600, Total messages: 3
         assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(600, 3)), "Should aggregate all tokens and count all messages");
+    }
+
+    // ===== get_total_cost_since Tests =====
+
+    /// Helper to create a test message with cost metadata
+    fn make_test_message_with_cost(
+        id: &str,
+        pubkey: &str,
+        thread_id: &str,
+        created_at: u64,
+        cost_usd: f64,
+    ) -> Message {
+        let mut msg = make_test_message(id, pubkey, thread_id, "test", created_at);
+        msg.llm_metadata = vec![("cost-usd".to_string(), cost_usd.to_string())];
+        msg
+    }
+
+    /// Test get_total_cost_since with empty message list returns 0.0
+    #[test]
+    fn test_get_total_cost_since_empty_messages() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let result = store.get_total_cost_since(0);
+        assert_eq!(result, 0.0, "Empty store should return 0.0 cost");
+    }
+
+    /// Test get_total_cost_since with future timestamp returns 0.0
+    #[test]
+    fn test_get_total_cost_since_future_timestamp() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Add a message with cost at timestamp 1000
+        let msg = make_test_message_with_cost("msg1", "pubkey1", "thread1", 1000, 0.50);
+        store.messages_by_thread.insert("thread1".to_string(), vec![msg]);
+
+        // Query with a future timestamp (greater than message timestamp)
+        let result = store.get_total_cost_since(2000);
+        assert_eq!(result, 0.0, "Future timestamp should return 0.0 (no matching messages)");
+    }
+
+    /// Test get_total_cost_since boundary case: message exactly at cutoff is included
+    #[test]
+    fn test_get_total_cost_since_boundary_exact_match() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let cutoff = 1000_u64;
+
+        // Message exactly at cutoff (should be included: created_at >= since_timestamp_secs)
+        let msg_at_cutoff = make_test_message_with_cost("msg1", "pubkey1", "thread1", cutoff, 0.25);
+        // Message before cutoff (should NOT be included)
+        let msg_before = make_test_message_with_cost("msg2", "pubkey1", "thread1", cutoff - 1, 0.75);
+        // Message after cutoff (should be included)
+        let msg_after = make_test_message_with_cost("msg3", "pubkey1", "thread1", cutoff + 1, 1.00);
+
+        store.messages_by_thread.insert(
+            "thread1".to_string(),
+            vec![msg_at_cutoff, msg_before, msg_after],
+        );
+
+        let result = store.get_total_cost_since(cutoff);
+        // Expected: 0.25 (at cutoff) + 1.00 (after) = 1.25
+        // NOT included: 0.75 (before cutoff)
+        assert!(
+            (result - 1.25).abs() < 0.001,
+            "Should include message exactly at cutoff: expected 1.25, got {}",
+            result
+        );
+    }
+
+    /// Test get_total_cost_since with timestamp 0 returns all-time cost
+    #[test]
+    fn test_get_total_cost_since_zero_returns_all() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Add messages at various timestamps
+        let msg1 = make_test_message_with_cost("msg1", "pubkey1", "thread1", 100, 0.10);
+        let msg2 = make_test_message_with_cost("msg2", "pubkey1", "thread1", 1000, 0.20);
+        let msg3 = make_test_message_with_cost("msg3", "pubkey1", "thread1", 10000, 0.30);
+
+        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+
+        let result = store.get_total_cost_since(0);
+        // Expected: 0.10 + 0.20 + 0.30 = 0.60
+        assert!(
+            (result - 0.60).abs() < 0.001,
+            "Timestamp 0 should return all messages: expected 0.60, got {}",
+            result
+        );
+    }
+
+    /// Test get_total_cost_since correctly filters by the COST_WINDOW_DAYS window boundary
+    #[test]
+    fn test_get_total_cost_since_cost_window() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let now = 1700000000_u64; // Some arbitrary "now" timestamp
+        let seconds_per_day = 86400_u64;
+        let window_start = now.saturating_sub(COST_WINDOW_DAYS * seconds_per_day);
+
+        // Message within window (should be included)
+        let msg_within = make_test_message_with_cost(
+            "msg1", "pubkey1", "thread1",
+            now - (7 * seconds_per_day), // 7 days ago
+            1.00,
+        );
+        // Message exactly at boundary (should be included)
+        let msg_boundary = make_test_message_with_cost(
+            "msg2", "pubkey1", "thread1",
+            window_start, // exactly at COST_WINDOW_DAYS boundary
+            2.00,
+        );
+        // Message outside window (should NOT be included)
+        let msg_outside = make_test_message_with_cost(
+            "msg3", "pubkey1", "thread1",
+            window_start - 1, // COST_WINDOW_DAYS + 1 second ago
+            5.00,
+        );
+
+        store.messages_by_thread.insert(
+            "thread1".to_string(),
+            vec![msg_within, msg_boundary, msg_outside],
+        );
+
+        let result = store.get_total_cost_since(window_start);
+        // Expected: 1.00 (within) + 2.00 (boundary) = 3.00
+        // NOT included: 5.00 (outside)
+        assert!(
+            (result - 3.00).abs() < 0.001,
+            "COST_WINDOW_DAYS window should include boundary: expected 3.00, got {}",
+            result
+        );
     }
 }
