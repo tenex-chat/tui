@@ -1,9 +1,7 @@
-use std::cell::RefCell;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -68,18 +66,23 @@ pub async fn run_daemon(
 
     // Initialize core runtime
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
-    let data_store = core_runtime.data_store();
     let core_handle = core_runtime.handle();
     let data_rx = core_runtime.take_data_rx().expect("data_rx should be available");
 
     // Initialize preferences for credential storage and trusted backends
     let prefs = PreferencesStorage::new(data_dir.to_str().unwrap_or("tenex_data"));
 
+    // Create a SINGLE shared data store for both Unix socket and HTTP handlers.
+    // This ensures both see the same projects, threads, and messages.
+    // FIX: Previously, HTTP had a separate store that was never populated with project data.
+    let shared_data_store = Arc::new(Mutex::new(AppDataStore::new(core_runtime.ndb())));
+    let shared_data_rx = Arc::new(Mutex::new(data_rx));
+
     // Set trusted backends from preferences
     {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
-        data_store.borrow_mut().set_trusted_backends(approved, blocked);
+        shared_data_store.lock().unwrap().set_trusted_backends(approved, blocked);
     }
 
     // Try to auto-login: config credentials take priority over stored credentials
@@ -92,26 +95,14 @@ pub async fn run_daemon(
 
     // Track state
     let start_time = Instant::now();
+    let ndb = core_runtime.ndb();
 
-    // If HTTP is enabled, we need to use Arc<Mutex<AppDataStore>> for thread-safe sharing
-    if http_enabled {
-        // Create a separate AppDataStore for the HTTP server using the same ndb
-        let http_data_store = Arc::new(Mutex::new(AppDataStore::new(core_runtime.ndb())));
-        let http_data_rx = Arc::new(Mutex::new(data_rx));
-
-        // Copy trusted backends from prefs to http_data_store
-        {
-            let mut dst = http_data_store.lock().unwrap();
-            let approved = prefs.approved_backend_pubkeys().clone();
-            let blocked = prefs.blocked_backend_pubkeys().clone();
-            dst.set_trusted_backends(approved, blocked);
-        }
-
-        // Spawn HTTP server
+    // Spawn HTTP server if enabled (shares the same data store)
+    let http_task = if http_enabled {
         let http_core_handle = core_handle.clone();
-        let http_store_clone = http_data_store.clone();
-        let http_rx_clone = http_data_rx.clone();
-        let http_task = tokio::spawn(async move {
+        let http_store_clone = shared_data_store.clone();
+        let http_rx_clone = shared_data_rx.clone();
+        Some(tokio::spawn(async move {
             if let Err(e) = run_server(
                 http_bind,
                 http_core_handle,
@@ -122,109 +113,73 @@ pub async fn run_daemon(
             {
                 eprintln!("HTTP server error: {}", e);
             }
-        });
-
-        // Handle connections - use async accept to allow batch exporter to run
-        loop {
-            // Drain any pending DataChange events (non-blocking)
-            // We need to update both data stores when we receive status events
-            {
-                let rx = http_data_rx.lock().unwrap();
-                while let Ok(data_change) = rx.try_recv() {
-                    match &data_change {
-                        DataChange::ProjectStatus { json } => {
-                            data_store.borrow_mut().handle_status_event_json(json);
-                            http_data_store.lock().unwrap().handle_status_event_json(json);
-                        }
-                        _ => {}
-                    }
-                }
-            }
-
-            tokio::select! {
-                accept_result = listener.accept() => {
-                    match accept_result {
-                        Ok((stream, _)) => {
-                            // Convert tokio UnixStream to std UnixStream for blocking I/O
-                            let std_stream = stream.into_std()?;
-                            std_stream.set_nonblocking(false)?;
-                            let should_shutdown = handle_connection(
-                                std_stream,
-                                &data_store,
-                                &core_handle,
-                                start_time,
-                                keys.is_some(),
-                            )?;
-
-                            if should_shutdown {
-                                eprintln!("Shutdown requested");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Connection error: {}", e);
-                        }
-                    }
-                }
-                Some(note_keys) = core_runtime.next_note_keys() => {
-                    if let Err(e) = core_runtime.process_note_keys(&note_keys) {
-                        eprintln!("Failed to process core events: {}", e);
-                    }
-                }
-                // Small timeout to periodically check for DataChange events
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
-            }
-        }
-
-        // Abort HTTP task on shutdown
-        http_task.abort();
+        }))
     } else {
-        // Socket-only mode (original behavior)
-        loop {
-            // Drain any pending DataChange events (non-blocking)
-            while let Ok(data_change) = data_rx.try_recv() {
-                match data_change {
+        None
+    };
+
+    // Main event loop - unified for both HTTP and socket-only modes
+    loop {
+        // Drain any pending DataChange events (non-blocking)
+        // Update the shared data store with status events
+        {
+            let rx = shared_data_rx.lock().unwrap();
+            while let Ok(data_change) = rx.try_recv() {
+                match &data_change {
                     DataChange::ProjectStatus { json } => {
-                        data_store.borrow_mut().handle_status_event_json(&json);
+                        shared_data_store.lock().unwrap().handle_status_event_json(json);
                     }
                     _ => {}
                 }
             }
-
-            tokio::select! {
-                accept_result = listener.accept() => {
-                    match accept_result {
-                        Ok((stream, _)) => {
-                            // Convert tokio UnixStream to std UnixStream for blocking I/O
-                            let std_stream = stream.into_std()?;
-                            std_stream.set_nonblocking(false)?;
-                            let should_shutdown = handle_connection(
-                                std_stream,
-                                &data_store,
-                                &core_handle,
-                                start_time,
-                                keys.is_some(),
-                            )?;
-
-                            if should_shutdown {
-                                eprintln!("Shutdown requested");
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("Connection error: {}", e);
-                        }
-                    }
-                }
-                Some(note_keys) = core_runtime.next_note_keys() => {
-                    if let Err(e) = core_runtime.process_note_keys(&note_keys) {
-                        eprintln!("Failed to process core events: {}", e);
-                    }
-                }
-                // Small timeout to periodically check for DataChange events
-                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
-            }
         }
+
+        tokio::select! {
+            accept_result = listener.accept() => {
+                match accept_result {
+                    Ok((stream, _)) => {
+                        // Convert tokio UnixStream to std UnixStream for blocking I/O
+                        let std_stream = stream.into_std()?;
+                        std_stream.set_nonblocking(false)?;
+                        let should_shutdown = handle_connection(
+                            std_stream,
+                            &shared_data_store,
+                            &core_handle,
+                            start_time,
+                            keys.is_some(),
+                        )?;
+
+                        if should_shutdown {
+                            eprintln!("Shutdown requested");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Connection error: {}", e);
+                    }
+                }
+            }
+            Some(note_keys) = core_runtime.next_note_keys() => {
+                // Process note keys and update the SHARED data store
+                // This ensures both HTTP and Unix socket see the same data
+                let mut store = shared_data_store.lock().unwrap();
+                if let Err(e) = tenex_core::runtime::process_note_keys(
+                    ndb.as_ref(),
+                    &mut store,
+                    &core_handle,
+                    &note_keys,
+                ) {
+                    eprintln!("Failed to process core events: {}", e);
+                }
+            }
+            // Small timeout to periodically check for DataChange events
+            _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {}
+        }
+    }
+
+    // Abort HTTP task on shutdown if it was running
+    if let Some(task) = http_task {
+        task.abort();
     }
 
     // Cleanup
@@ -363,7 +318,7 @@ fn try_auto_login(prefs: &PreferencesStorage, core_handle: &CoreHandle) -> Optio
 
 fn handle_connection(
     stream: UnixStream,
-    data_store: &Rc<RefCell<AppDataStore>>,
+    data_store: &Arc<Mutex<AppDataStore>>,
     core_handle: &CoreHandle,
     start_time: Instant,
     logged_in: bool,
@@ -401,7 +356,7 @@ fn handle_connection(
 
 fn handle_request(
     request: &Request,
-    data_store: &Rc<RefCell<AppDataStore>>,
+    data_store: &Arc<Mutex<AppDataStore>>,
     core_handle: &CoreHandle,
     start_time: Instant,
     logged_in: bool,
@@ -410,7 +365,7 @@ fn handle_request(
 
     match request.method.as_str() {
         "list_projects" => {
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let projects: Vec<_> = store
                 .get_projects()
                 .iter()
@@ -444,7 +399,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
 
             let project_a_tag = match find_project_a_tag_by_slug(&store, project_slug) {
                 Some(a_tag) => a_tag,
@@ -486,7 +441,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
 
             let project_a_tag = match find_project_a_tag_by_slug(&store, project_slug) {
                 Some(a_tag) => a_tag,
@@ -511,7 +466,7 @@ fn handle_request(
 
         "list_messages" => {
             let thread_id = request.params["thread_id"].as_str().unwrap_or("");
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let messages: Vec<_> = store
                 .get_messages(thread_id)
                 .iter()
@@ -532,7 +487,7 @@ fn handle_request(
         }
 
         "get_state" => {
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let projects = store.get_projects();
             let mut thread_count = 0;
             let mut message_count = 0;
@@ -600,7 +555,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let lookup = find_agent_in_project(&store, project_slug, recipient_slug);
             drop(store);
 
@@ -708,7 +663,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let lookup = find_agent_in_project(&store, project_slug, recipient_slug);
             drop(store);
 
@@ -798,7 +753,7 @@ fn handle_request(
             }
 
             // Find the project by slug to get its a_tag and pubkey
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let project = store
                 .get_projects()
                 .iter()
@@ -858,7 +813,7 @@ fn handle_request(
         ),
 
         "list_agent_definitions" => {
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let agent_defs: Vec<_> = store
                 .get_agent_definitions()
                 .iter()
@@ -895,7 +850,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
 
             // Find the project by slug
             let project = store
@@ -1055,7 +1010,7 @@ fn handle_request(
                 }
             }
 
-            let store = data_store.borrow();
+            let store = data_store.lock().unwrap();
             let lookup = find_agent_in_project(&store, &params.project_slug, &params.agent_slug);
 
             // Get the current status timestamp for wait comparison
@@ -1092,7 +1047,7 @@ fn handle_request(
 
                                     std::thread::sleep(std::time::Duration::from_millis(500));
 
-                                    let store = data_store.borrow();
+                                    let store = data_store.lock().unwrap();
                                     if let Some(status) = store.get_project_status(&result.project_a_tag) {
                                         if status.created_at > current_timestamp {
                                             // New status received - check if settings were applied
@@ -1206,7 +1161,7 @@ const WAIT_FOR_PROJECT_TIMEOUT_SECS: u64 = 30;
 /// Wait for a project's 24010 status event to appear.
 /// Returns Ok(a_tag) if found within timeout, or an error response if not found.
 fn wait_for_project_status(
-    data_store: &Rc<RefCell<AppDataStore>>,
+    data_store: &Arc<Mutex<AppDataStore>>,
     project_slug: &str,
     id: u64,
 ) -> Result<String, (Response, bool)> {
@@ -1228,7 +1183,7 @@ fn wait_for_project_status(
             ));
         }
 
-        let store = data_store.borrow();
+        let store = data_store.lock().unwrap();
         if let Some(a_tag) = find_project_a_tag_by_slug(&store, project_slug) {
             if store.get_project_status(&a_tag).is_some() {
                 return Ok(a_tag);
