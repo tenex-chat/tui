@@ -1024,8 +1024,9 @@ pub struct HourActivity {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct StatsSnapshot {
     // === Metric Cards Data ===
-    /// Total all-time cost in USD
-    pub total_cost: f64,
+    /// Total cost in USD for the past 14 days (COST_WINDOW_DAYS).
+    /// Note: This is NOT all-time cost. For display, show as "past 2 weeks" or similar.
+    pub total_cost_14_days: f64,
     /// 24-hour runtime in milliseconds
     pub today_runtime_ms: u64,
     /// 14-day average daily runtime in milliseconds (counting only non-zero days)
@@ -3126,7 +3127,16 @@ impl TenexCore {
             .ok_or(TenexError::CoreNotInitialized)?;
 
         // ===== 1. Metric Cards Data =====
-        let total_cost = store.get_total_cost();
+        // Total cost for the past COST_WINDOW_DAYS (shared constant with TUI stats page)
+        use crate::constants::COST_WINDOW_DAYS;
+        const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        // Use saturating_sub to safely handle clock skew or pre-epoch edge cases
+        let cost_window_start = now.saturating_sub(COST_WINDOW_DAYS * SECONDS_PER_DAY);
+        let total_cost = store.get_total_cost_since(cost_window_start);
 
         // Get today's runtime (requires mutable borrow, so we do it separately)
         drop(store_guard);
@@ -3144,9 +3154,10 @@ impl TenexCore {
         let store = store_guard.as_ref()
             .ok_or(TenexError::CoreNotInitialized)?;
 
-        // ===== 2. Runtime Chart Data (14 days) =====
-        const STATS_WINDOW_DAYS: usize = 14;
-        let runtime_by_day_raw = store.get_runtime_by_day(STATS_WINDOW_DAYS);
+        // ===== 2. Runtime Chart Data (CHART_WINDOW_DAYS) =====
+        // Use shared constant for chart window (same as TUI stats view)
+        use crate::constants::CHART_WINDOW_DAYS;
+        let runtime_by_day_raw = store.get_runtime_by_day(CHART_WINDOW_DAYS);
         let runtime_by_day: Vec<DayRuntime> = runtime_by_day_raw
             .into_iter()
             .map(|(day_start, runtime_ms)| DayRuntime {
@@ -3196,8 +3207,8 @@ impl TenexCore {
             })
             .collect();
 
-        // ===== 4. Messages Chart Data (14 days) =====
-        let (user_messages_raw, all_messages_raw) = store.get_messages_by_day(STATS_WINDOW_DAYS);
+        // ===== 4. Messages Chart Data (CHART_WINDOW_DAYS) =====
+        let (user_messages_raw, all_messages_raw) = store.get_messages_by_day(CHART_WINDOW_DAYS);
 
         // Combine into single vector with day_start as key
         let mut messages_map: std::collections::HashMap<u64, (u64, u64)> = std::collections::HashMap::new();
@@ -3270,7 +3281,7 @@ impl TenexCore {
 
         // ===== Return Complete Snapshot =====
         Ok(StatsSnapshot {
-            total_cost,
+            total_cost_14_days: total_cost,
             today_runtime_ms,
             avg_daily_runtime_ms,
             active_days_count,

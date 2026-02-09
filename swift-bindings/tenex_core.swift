@@ -5690,9 +5690,10 @@ public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) 
  */
 public struct StatsSnapshot {
     /**
-     * Total all-time cost in USD
+     * Total cost in USD for the past 14 days (COST_WINDOW_DAYS).
+     * Note: This is NOT all-time cost. For display, show as "past 2 weeks" or similar.
      */
-    public var totalCost: Double
+    public var totalCost14Days: Double
     /**
      * 24-hour runtime in milliseconds
      */
@@ -5739,8 +5740,9 @@ public struct StatsSnapshot {
     // declare one manually.
     public init(
         /**
-         * Total all-time cost in USD
-         */totalCost: Double, 
+         * Total cost in USD for the past 14 days (COST_WINDOW_DAYS).
+         * Note: This is NOT all-time cost. For display, show as "past 2 weeks" or similar.
+         */totalCost14Days: Double, 
         /**
          * 24-hour runtime in milliseconds
          */todayRuntimeMs: UInt64, 
@@ -5772,7 +5774,7 @@ public struct StatsSnapshot {
         /**
          * Maximum message count across all hours (for legend display)
          */maxMessages: UInt64) {
-        self.totalCost = totalCost
+        self.totalCost14Days = totalCost14Days
         self.todayRuntimeMs = todayRuntimeMs
         self.avgDailyRuntimeMs = avgDailyRuntimeMs
         self.activeDaysCount = activeDaysCount
@@ -5793,7 +5795,7 @@ extension StatsSnapshot: Sendable {}
 
 extension StatsSnapshot: Equatable, Hashable {
     public static func ==(lhs: StatsSnapshot, rhs: StatsSnapshot) -> Bool {
-        if lhs.totalCost != rhs.totalCost {
+        if lhs.totalCost14Days != rhs.totalCost14Days {
             return false
         }
         if lhs.todayRuntimeMs != rhs.todayRuntimeMs {
@@ -5830,7 +5832,7 @@ extension StatsSnapshot: Equatable, Hashable {
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(totalCost)
+        hasher.combine(totalCost14Days)
         hasher.combine(todayRuntimeMs)
         hasher.combine(avgDailyRuntimeMs)
         hasher.combine(activeDaysCount)
@@ -5853,7 +5855,7 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StatsSnapshot {
         return
             try StatsSnapshot(
-                totalCost: FfiConverterDouble.read(from: &buf), 
+                totalCost14Days: FfiConverterDouble.read(from: &buf),
                 todayRuntimeMs: FfiConverterUInt64.read(from: &buf), 
                 avgDailyRuntimeMs: FfiConverterUInt64.read(from: &buf), 
                 activeDaysCount: FfiConverterUInt32.read(from: &buf), 
@@ -5868,7 +5870,7 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
     }
 
     public static func write(_ value: StatsSnapshot, into buf: inout [UInt8]) {
-        FfiConverterDouble.write(value.totalCost, into: &buf)
+        FfiConverterDouble.write(value.totalCost14Days, into: &buf)
         FfiConverterUInt64.write(value.todayRuntimeMs, into: &buf)
         FfiConverterUInt64.write(value.avgDailyRuntimeMs, into: &buf)
         FfiConverterUInt32.write(value.activeDaysCount, into: &buf)

@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// Metric cards showing key stats (Total Cost, 24h Runtime, 14-day Average)
+/// Metric cards showing key stats (2-Week Cost, 24h Runtime, 14-day Average)
 /// Matches TUI metric cards with proper formatting
 struct MetricCardsView: View {
     let snapshot: StatsSnapshot
 
     var body: some View {
         VStack(spacing: 12) {
-            // First row: Total Cost + 24h Runtime
+            // First row: 2-Week Cost + 24h Runtime
             HStack(spacing: 12) {
                 MetricCard(
                     title: "Total Cost",
-                    value: String(format: "$%.2f", snapshot.totalCost),
-                    subtitle: "all-time",
+                    value: String(format: "$%.2f", snapshot.totalCost14Days),
+                    subtitle: "past 2 weeks",
                     color: .green
                 )
 
@@ -82,7 +82,7 @@ struct MetricCard: View {
 #Preview {
     MetricCardsView(
         snapshot: StatsSnapshot(
-            totalCost: 123.45,
+            totalCost14Days: 123.45,
             todayRuntimeMs: 3_600_000,
             avgDailyRuntimeMs: 2_400_000,
             activeDaysCount: 10,
