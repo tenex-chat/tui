@@ -25,20 +25,32 @@ final class TenexEventHandler: EventCallback {
             case .conversationUpsert(let conversation):
                 coreManager.signalConversationUpdate(conversationId: conversation.id)
 
-            case .projectUpsert:
-                coreManager.signalGeneralUpdate()
+            case .projectUpsert(let project):
+                coreManager.applyProjectUpsert(project)
 
-            case .inboxUpsert:
-                coreManager.signalGeneralUpdate()
+            case .inboxUpsert(let item):
+                coreManager.applyInboxUpsert(item)
 
-            case .projectStatusChanged:
-                coreManager.signalProjectStatusUpdate()
+            case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
+                coreManager.applyProjectStatusChanged(
+                    projectId: projectId,
+                    projectATag: projectATag,
+                    isOnline: isOnline,
+                    onlineAgents: onlineAgents
+                )
 
-            case .pendingBackendApproval:
-                coreManager.signalGeneralUpdate()
+            case .pendingBackendApproval(let backendPubkey, let projectATag):
+                coreManager.handlePendingBackendApproval(
+                    backendPubkey: backendPubkey,
+                    projectATag: projectATag
+                )
 
-            case .activeConversationsChanged:
-                coreManager.signalGeneralUpdate()
+            case .activeConversationsChanged(let projectId, let projectATag, let activeConversationIds):
+                coreManager.applyActiveConversationsChanged(
+                    projectId: projectId,
+                    projectATag: projectATag,
+                    activeConversationIds: activeConversationIds
+                )
 
             case .streamChunk(let agentPubkey, let conversationId, let textDelta):
                 coreManager.applyStreamChunk(
