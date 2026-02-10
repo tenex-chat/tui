@@ -128,7 +128,7 @@ struct EventKindRow: View {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color(.systemGray5))
+                            .fill(Color.systemGray5)
 
                         RoundedRectangle(cornerRadius: 3)
                             .fill(Color.blue)
@@ -164,5 +164,5 @@ struct EventKindRow: View {
         )
         .padding()
     }
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

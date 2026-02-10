@@ -8,10 +8,10 @@ let project = Project(
     targets: [
         .target(
             name: "TenexMVP",
-            destinations: [.iPhone, .iPad],
+            destinations: [.iPhone, .iPad, .mac],
             product: .app,
             bundleId: "com.tenex.mvp",
-            deploymentTargets: .iOS("26.0"),
+            deploymentTargets: .multiplatform(iOS: "26.0", macOS: "15.0"),
             infoPlist: .extendingDefault(with: [
                 "UILaunchScreen": [
                     "UIColorName": "",
@@ -55,6 +55,10 @@ let project = Project(
                         "$(inherited)",
                         "$(SRCROOT)/../target/aarch64-apple-ios/release"
                     ],
+                    "LIBRARY_SEARCH_PATHS[sdk=macosx*]": [
+                        "$(inherited)",
+                        "$(SRCROOT)/../target/release"
+                    ],
                     // Link the Rust static library - use full path to force static linking
                     "OTHER_LDFLAGS[sdk=iphonesimulator*]": [
                         "$(inherited)",
@@ -63,6 +67,11 @@ let project = Project(
                     "OTHER_LDFLAGS[sdk=iphoneos*]": [
                         "$(inherited)",
                         "$(SRCROOT)/../target/aarch64-apple-ios/release/libtenex_core.a"
+                    ],
+                    "OTHER_LDFLAGS[sdk=macosx*]": [
+                        "$(inherited)",
+                        "$(SRCROOT)/../target/release/libtenex_core.a",
+                        "-framework", "SystemConfiguration"
                     ],
                     // Swift import paths for the modulemap
                     "SWIFT_INCLUDE_PATHS": [

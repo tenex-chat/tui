@@ -173,6 +173,15 @@ struct ConversationsTabView: View {
     @State private var showProjectPickerForNewConv = false
     @State private var projectForNewConversation: ProjectInfo?
     @State private var showNewConversation = false
+    @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
+
+    /// Rebuild the cached hierarchy from current filtered conversations
+    private func rebuildHierarchy() {
+        cachedHierarchy = ConversationFullHierarchy(conversations: filteredConversations)
+    }
 
     /// Updates the runtime text from SafeTenexCore
     private func updateRuntime() async {
@@ -219,16 +228,6 @@ struct ConversationsTabView: View {
         return conversations
     }
 
-    /// Precomputed hierarchy with activity tracking (computed once per render)
-    private var conversationHierarchy: ConversationFullHierarchy {
-        ConversationFullHierarchy(conversations: filteredConversations)
-    }
-
-    /// Root conversations sorted by hierarchical activity first, then by effective last activity
-    private var rootConversations: [ConversationFullInfo] {
-        conversationHierarchy.sortedRootConversations
-    }
-
     /// Text for the filter button
     private var filterButtonLabel: String {
         if selectedProjectIds.isEmpty {
@@ -243,21 +242,24 @@ struct ConversationsTabView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if rootConversations.isEmpty {
+                if cachedHierarchy.sortedRootConversations.isEmpty {
                     ConversationsEmptyState(
                         hasFilter: !selectedProjectIds.isEmpty,
                         onClearFilter: { selectedProjectIds.removeAll() }
                     )
                 } else {
-                    let hierarchy = conversationHierarchy
                     List {
-                        ForEach(hierarchy.sortedRootConversations, id: \.id) { conversation in
+                        ForEach(cachedHierarchy.sortedRootConversations, id: \.id) { conversation in
                             ConversationRowFull(
                                 conversation: conversation,
                                 projectTitle: projectTitle(for: conversation),
-                                isHierarchicallyActive: hierarchy.isHierarchicallyActive(conversation.id),
+                                isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
                                 onSelect: { selected in
+                                    #if os(macOS)
+                                    openWindow(id: "conversation-summary", value: selected.id)
+                                    #else
                                     selectedConversation = selected
+                                    #endif
                                 }
                             )
                             .environmentObject(coreManager)
@@ -319,6 +321,7 @@ struct ConversationsTabView: View {
                     selectedProjectIds: $selectedProjectIds
                 )
             }
+            #if os(iOS)
             .sheet(item: $selectedConversation) { conversation in
                 NavigationStack {
                     ConversationDetailView(conversation: conversation)
@@ -334,6 +337,7 @@ struct ConversationsTabView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+            #endif
             .sheet(isPresented: $showDiagnostics) {
                 NavigationStack {
                     DiagnosticsView(coreManager: coreManager)
@@ -385,17 +389,22 @@ struct ConversationsTabView: View {
                 }
             }
             .task {
+                rebuildHierarchy()
                 await updateRuntime()
-                // PERFORMANCE: Preload hierarchy data for all visible conversations
-                // This prevents N+1 FFI calls when each row tries to load its own data
-                await coreManager.hierarchyCache.preloadForConversations(rootConversations)
+                await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             }
             .onChange(of: coreManager.conversations) { _, _ in
+                rebuildHierarchy()
                 Task {
                     await updateRuntime()
-                    // Preload hierarchy for new conversations
-                    await coreManager.hierarchyCache.preloadForConversations(rootConversations)
+                    await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
                 }
+            }
+            .onChange(of: showArchived) { _, _ in
+                rebuildHierarchy()
+            }
+            .onChange(of: selectedProjectIds) { _, _ in
+                rebuildHierarchy()
             }
         }
     }
@@ -635,7 +644,11 @@ private struct ProjectFilterSheet: View {
                     }
                 }
             }
-            .listStyle(.insetGrouped)
+            #if os(iOS)
+                .listStyle(.insetGrouped)
+                #else
+                .listStyle(.inset)
+                #endif
             .navigationTitle("Filter Projects")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -809,7 +822,7 @@ private struct MessageBubbleView: View {
                 Text(message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
 

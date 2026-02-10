@@ -22,7 +22,7 @@ struct StatusBadge: View {
         switch status.lowercased() {
         case "active", "in progress": return Color.green.opacity(0.15)
         case "waiting", "blocked": return Color.orange.opacity(0.15)
-        case "completed", "done": return Color(.systemGray5)
+        case "completed", "done": return Color.systemGray5
         default: return Color.blue.opacity(0.15)
         }
     }
@@ -99,7 +99,7 @@ struct SharedMessageBubble: View {
                 MarkdownView(content: message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.accentColor : Color(.systemGray6))
+                    .background(isUser ? Color.accentColor : Color.systemGray6)
                     .foregroundStyle(isUser ? .white : .primary)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
@@ -141,7 +141,7 @@ struct SharedCardView<Content: View>: View {
 
             content
                 .padding(16)
-                .background(Color(.systemBackground))
+                .background(Color.systemBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal, 16)
                 .padding(.top, title == nil ? 16 : 0)

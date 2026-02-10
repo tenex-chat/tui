@@ -59,7 +59,7 @@ struct CostByProjectTable: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray6))
+                        .background(Color.systemGray6)
 
                         // Rows
                         ForEach(Array(projects.enumerated()), id: \.offset) { index, project in
@@ -78,30 +78,30 @@ struct CostByProjectTable: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(index % 2 == 0 ? Color(.systemBackground) : Color(.systemGray6).opacity(0.5))
+                            .background(index % 2 == 0 ? Color.systemBackground : Color.systemGray6.opacity(0.5))
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("\(project.name): \(String(format: "$%.2f", project.cost))")
                         }
                     }
                 }
                 .frame(maxHeight: 400)
-                .background(Color(.systemBackground))
+                .background(Color.systemBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
+                        .stroke(Color.systemGray4, lineWidth: 1)
                 )
             }
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
+                .fill(Color.systemBackground)
                 .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
+                .stroke(Color.systemGray5, lineWidth: 1)
         )
     }
 }
@@ -139,7 +139,7 @@ struct TopConversationsTable: View {
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color(.systemGray6))
+                        .background(Color.systemGray6)
 
                         // Rows
                         ForEach(Array(conversations.enumerated()), id: \.offset) { index, conversation in
@@ -158,30 +158,30 @@ struct TopConversationsTable: View {
                             }
                             .padding(.horizontal, 12)
                             .padding(.vertical, 10)
-                            .background(index % 2 == 0 ? Color(.systemBackground) : Color(.systemGray6).opacity(0.5))
+                            .background(index % 2 == 0 ? Color.systemBackground : Color.systemGray6.opacity(0.5))
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("\(conversation.title): \(StatsSnapshot.formatRuntime(conversation.runtimeMs))")
                         }
                     }
                 }
                 .frame(maxHeight: 400)
-                .background(Color(.systemBackground))
+                .background(Color.systemBackground)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color(.systemGray4), lineWidth: 1)
+                        .stroke(Color.systemGray4, lineWidth: 1)
                 )
             }
         }
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
+                .fill(Color.systemBackground)
                 .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
+                .stroke(Color.systemGray5, lineWidth: 1)
         )
     }
 }
@@ -231,5 +231,5 @@ struct EmptyTableView: View {
         )
     )
     .padding()
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

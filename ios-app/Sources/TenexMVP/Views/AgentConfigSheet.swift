@@ -124,7 +124,11 @@ struct AgentConfigSheet: View {
                 Text("Select the tools available to this agent")
             }
         }
-        .listStyle(.insetGrouped)
+        #if os(iOS)
+                .listStyle(.insetGrouped)
+                #else
+                .listStyle(.inset)
+                #endif
     }
 
     // MARK: - Tool Group Row

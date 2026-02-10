@@ -30,7 +30,7 @@ struct ToolCallRow: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color(uiColor: .systemGray6))
+        .background(Color.systemGray6)
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 

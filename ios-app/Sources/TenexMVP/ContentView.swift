@@ -156,7 +156,7 @@ struct UserHeaderView: View {
             }
         }
         .padding()
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 
     private var truncatedNpub: String {
@@ -242,7 +242,7 @@ struct ProjectRowView: View {
                     .frame(width: 12, height: 12)
                     .overlay {
                         Circle()
-                            .stroke(Color(.systemBackground), lineWidth: 2)
+                            .stroke(Color.systemBackground, lineWidth: 2)
                     }
                     .offset(x: 2, y: 2)
             }
@@ -407,7 +407,7 @@ struct ProjectDetailSheet: View {
                         }
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(Color(.systemGray6))
+                        .background(Color.systemGray6)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                     }
 

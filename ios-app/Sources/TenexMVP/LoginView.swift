@@ -57,7 +57,9 @@ struct LoginView: View {
 
                     SecureField("nsec1...", text: $nsecInput)
                         .textFieldStyle(.roundedBorder)
+                        #if os(iOS)
                         .autocapitalization(.none)
+                        #endif
                         .autocorrectionDisabled()
                         .font(.system(.body, design: .monospaced))
                 }

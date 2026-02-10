@@ -90,7 +90,7 @@ struct TabPillButton: View {
             .background(
                 isSelected
                     ? Color.blue
-                    : Color(.systemGray5)
+                    : Color.systemGray5
             )
             .foregroundColor(isSelected ? .white : .primary)
             .clipShape(Capsule())

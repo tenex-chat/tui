@@ -103,7 +103,7 @@ struct InlineDelegationCard: View {
                     .foregroundStyle(.tertiary)
             }
             .padding(12)
-            .background(Color(uiColor: .secondarySystemBackground))
+            .background(Color.systemGray6)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)

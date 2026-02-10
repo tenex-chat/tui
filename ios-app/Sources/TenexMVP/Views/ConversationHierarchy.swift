@@ -364,7 +364,7 @@ struct AgentAvatarView: View {
         .overlay {
             if showBorder {
                 Circle()
-                    .stroke(Color(.systemBackground), lineWidth: 2)
+                    .stroke(Color.systemBackground, lineWidth: 2)
             }
         }
         .overlay {
@@ -485,7 +485,7 @@ struct ConversationAvatarGroup: View {
                     // +N indicator
                     if otherParticipants.count > maxVisibleAvatars {
                         Circle()
-                            .fill(Color(.systemGray4))
+                            .fill(Color.systemGray4)
                             .frame(width: avatarSize, height: avatarSize)
                             .overlay {
                                 Text("+\(otherParticipants.count - maxVisibleAvatars)")

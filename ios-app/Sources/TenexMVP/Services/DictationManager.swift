@@ -1,3 +1,4 @@
+#if os(iOS)
 import Speech
 import AVFoundation
 import Observation
@@ -287,3 +288,68 @@ enum DictationError: LocalizedError {
         }
     }
 }
+
+#elseif os(macOS)
+import Foundation
+import Observation
+
+/// macOS stub for DictationManager - voice dictation is not available on macOS.
+@MainActor
+@Observable
+final class DictationManager {
+    enum State: Equatable {
+        case idle
+        case recording(partialText: String)
+
+        var isIdle: Bool {
+            if case .idle = self { return true }
+            return false
+        }
+
+        var isRecording: Bool {
+            if case .recording = self { return true }
+            return false
+        }
+    }
+
+    private(set) var state: State = .idle
+    private(set) var finalText: String = ""
+    private(set) var error: String?
+
+    func startRecording() async throws {
+        error = "Voice dictation is not available on macOS"
+    }
+
+    func stopRecording() async {
+        state = .idle
+    }
+
+    func cancelRecording() {
+        finalText = ""
+        state = .idle
+    }
+
+    func reset() {
+        finalText = ""
+        state = .idle
+        error = nil
+    }
+}
+
+enum DictationError: LocalizedError {
+    case audioEngineSetupFailed
+    case speechRecognitionFailed
+    case permissionDenied
+
+    var errorDescription: String? {
+        switch self {
+        case .audioEngineSetupFailed:
+            return "Failed to setup audio engine"
+        case .speechRecognitionFailed:
+            return "Speech recognition failed"
+        case .permissionDenied:
+            return "Permission denied"
+        }
+    }
+}
+#endif

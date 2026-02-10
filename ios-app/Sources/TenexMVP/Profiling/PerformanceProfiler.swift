@@ -469,7 +469,8 @@ final class MemoryMonitor: ObservableObject {
 
 // MARK: - Frame Rate Monitor
 
-/// Monitors frame rate for detecting UI jank
+#if os(iOS)
+/// Monitors frame rate for detecting UI jank using CADisplayLink
 @MainActor
 final class FrameRateMonitor: ObservableObject {
     static let shared = FrameRateMonitor()
@@ -484,7 +485,6 @@ final class FrameRateMonitor: ObservableObject {
 
     private init() {}
 
-    /// Start frame rate monitoring
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
@@ -493,7 +493,6 @@ final class FrameRateMonitor: ObservableObject {
         displayLink?.add(to: .main, forMode: .common)
     }
 
-    /// Stop frame rate monitoring
     func stopMonitoring() {
         displayLink?.invalidate()
         displayLink = nil
@@ -509,11 +508,9 @@ final class FrameRateMonitor: ObservableObject {
         frameCount += 1
         let elapsed = link.timestamp - lastTimestamp
 
-        // Update FPS every second
         if elapsed >= 1.0 {
             currentFPS = Double(frameCount) / elapsed
 
-            // Count dropped frames (target is 60 FPS)
             let expectedFrames = Int(elapsed * 60)
             let dropped = max(0, expectedFrames - frameCount)
             droppedFrames += dropped
@@ -521,7 +518,6 @@ final class FrameRateMonitor: ObservableObject {
             frameCount = 0
             lastTimestamp = link.timestamp
 
-            // Log if FPS drops significantly
             if currentFPS < 45 {
                 os_log(.error, log: OSLog(subsystem: "com.tenex.app", category: "Performance"),
                        "⚠️ Low frame rate: %.1f FPS", currentFPS)
@@ -529,11 +525,26 @@ final class FrameRateMonitor: ObservableObject {
         }
     }
 
-    /// Reset dropped frame counter
     func resetDroppedFrames() {
         droppedFrames = 0
     }
 }
+#elseif os(macOS)
+/// macOS stub - frame rate monitoring not available without CADisplayLink
+@MainActor
+final class FrameRateMonitor: ObservableObject {
+    static let shared = FrameRateMonitor()
+
+    @Published private(set) var currentFPS: Double = 60
+    @Published private(set) var droppedFrames: Int = 0
+
+    private init() {}
+
+    func startMonitoring() {}
+    func stopMonitoring() {}
+    func resetDroppedFrames() { droppedFrames = 0 }
+}
+#endif
 
 // MARK: - Performance Overlay View
 

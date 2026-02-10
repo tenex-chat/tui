@@ -1,3 +1,4 @@
+#if os(iOS)
 import SwiftUI
 
 /// Overlay view for voice dictation that shows recording state and transcription editing.
@@ -112,7 +113,7 @@ struct RecordingView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color(.systemGray6))
+                    .background(Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
 
@@ -162,7 +163,7 @@ struct FinalTranscriptionView: View {
                 .font(.body)
                 .frame(minHeight: 100)
                 .padding(8)
-                .background(Color(.systemGray6))
+                .background(Color.systemGray6)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .scrollContentBackground(.hidden)
 
@@ -216,3 +217,4 @@ struct FinalTranscriptionView: View {
         onCancel: { }
     )
 }
+#endif

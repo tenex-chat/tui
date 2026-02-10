@@ -100,11 +100,11 @@ struct ActivityGridView: View {
                         }
                         .padding()
                     }
-                    .background(Color(.systemBackground))
+                    .background(Color.systemBackground)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color(.systemGray4), lineWidth: 1)
+                            .stroke(Color.systemGray4, lineWidth: 1)
                     )
                 }
             }
@@ -112,12 +112,12 @@ struct ActivityGridView: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
+                .fill(Color.systemBackground)
                 .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
+                .stroke(Color.systemGray5, lineWidth: 1)
         )
     }
 
@@ -163,7 +163,7 @@ struct ActivityCell: View {
             .cornerRadius(2)
             .overlay(
                 Rectangle()
-                    .stroke(Color(.systemGray6), lineWidth: 0.5)
+                    .stroke(Color.systemGray6, lineWidth: 0.5)
                     .cornerRadius(2)
             )
             .help(tooltipText)
@@ -172,12 +172,12 @@ struct ActivityCell: View {
 
     private var color: Color {
         guard let activity = activity else {
-            return Color(.systemGray6)
+            return Color.systemGray6
         }
 
         let value: UInt64 = mode == .tokens ? activity.tokens : activity.messages
         if value == 0 {
-            return Color(.systemGray6)
+            return Color.systemGray6
         }
 
         // Use correct pre-computed intensity from Rust based on mode (0-255)
@@ -251,7 +251,7 @@ enum ActivityIntensityLevel: CaseIterable, Identifiable {
     var color: Color {
         switch self {
         case .none:
-            return Color(.systemGray6)
+            return Color.systemGray6
         case .low:
             return Color(red: 187/255, green: 247/255, blue: 208/255) // green-200
         case .medium:
@@ -299,5 +299,5 @@ enum ActivityIntensityLevel: CaseIterable, Identifiable {
         )
     )
     .padding()
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

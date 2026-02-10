@@ -1,5 +1,7 @@
 import SwiftUI
+#if os(iOS)
 import UIKit
+#endif
 import CryptoKit
 
 /// A premium message composition view for both new conversations and replies.
@@ -173,7 +175,7 @@ struct MessageComposerView: View {
                     }
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
-                    .background(Color(.systemGray6))
+                    .background(Color.systemGray6)
                 }
 
                 // Agent chip for replies (not new conversations)
@@ -205,6 +207,7 @@ struct MessageComposerView: View {
                 // Toolbar
                 toolbarView
             }
+            #if os(iOS)
             .overlay {
                 if showDictationOverlay {
                     DictationOverlayView(
@@ -226,11 +229,13 @@ struct MessageComposerView: View {
                     )
                 }
             }
+            #endif
             .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
+                        #if os(iOS)
                         // CRITICAL DATA SAFETY: Use background task to guarantee save completes
                         var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
@@ -243,7 +248,6 @@ struct MessageComposerView: View {
                         }
 
                         Task {
-                            // MEDIUM #3 FIX: Catch save errors and alert user
                             do {
                                 try await draftManager.saveNow()
 
@@ -260,11 +264,22 @@ struct MessageComposerView: View {
                                     backgroundTaskID = .invalid
                                 }
 
-                                // Show error alert and block dismissal
                                 saveFailedError = error.localizedDescription
                                 showSaveFailedAlert = true
                             }
                         }
+                        #else
+                        Task {
+                            do {
+                                try await draftManager.saveNow()
+                                onDismiss?()
+                                dismiss()
+                            } catch {
+                                saveFailedError = error.localizedDescription
+                                showSaveFailedAlert = true
+                            }
+                        }
+                        #endif
                     }
                 }
 
@@ -347,13 +362,12 @@ struct MessageComposerView: View {
                 Text("Failed to save your draft: \(saveFailedError ?? "Unknown error"). Your changes may be lost if you dismiss now. Please try again or contact support.")
             }
             .onChange(of: scenePhase) { oldPhase, newPhase in
-                // CRITICAL DATA SAFETY: Flush drafts immediately when app goes to background
-                // Use proper background task to guarantee completion even if app is suspended
+                // Flush drafts immediately when app goes to background
                 if newPhase == .background || newPhase == .inactive {
+                    #if os(iOS)
                     var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
                     backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-                        // Background time expired - clean up
                         print("[MessageComposerView] WARNING: Background save time expired")
                         if backgroundTaskID != .invalid {
                             UIApplication.shared.endBackgroundTask(backgroundTaskID)
@@ -362,22 +376,28 @@ struct MessageComposerView: View {
                     }
 
                     Task {
-                        // MEDIUM #3 FIX: Catch save errors (but can't block backgrounding - just log)
                         do {
                             try await draftManager.saveNow()
                             print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
                         } catch {
                             print("[MessageComposerView] ERROR: Failed to save on background: \(error)")
-                            // Note: Can't show alert here as app is backgrounding
-                            // Error will be surfaced on next foreground if critical
                         }
 
-                        // End background task after save completes
                         if backgroundTaskID != .invalid {
                             UIApplication.shared.endBackgroundTask(backgroundTaskID)
                             backgroundTaskID = .invalid
                         }
                     }
+                    #else
+                    Task {
+                        do {
+                            try await draftManager.saveNow()
+                            print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
+                        } catch {
+                            print("[MessageComposerView] ERROR: Failed to save on background: \(error)")
+                        }
+                    }
+                    #endif
                 }
             }
             .onChange(of: coreManager.onlineAgents) { oldAgents, newAgents in
@@ -404,7 +424,7 @@ struct MessageComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
     }
 
     private var projectPromptView: some View {
@@ -421,7 +441,7 @@ struct MessageComposerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(.systemGray6))
+            .background(Color.systemGray6)
         }
         .buttonStyle(.plain)
     }
@@ -440,7 +460,7 @@ struct MessageComposerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color(.systemGray6))
+            .background(Color.systemGray6)
         }
         .buttonStyle(.plain)
     }
@@ -496,7 +516,7 @@ struct MessageComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
     }
 
     /// Shows the reply target agent (used when replying and the agent isn't in online agents list)
@@ -521,7 +541,7 @@ struct MessageComposerView: View {
                 .padding(.vertical, 6)
                 .background(
                     Capsule()
-                        .fill(Color(.systemBackground))
+                        .fill(Color.systemBackground)
                         .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 )
             }
@@ -530,7 +550,7 @@ struct MessageComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
     }
 
     private var nudgeChipsView: some View {
@@ -565,7 +585,7 @@ struct MessageComposerView: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 12)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
     }
 
     private var contentEditorView: some View {
@@ -611,6 +631,7 @@ struct MessageComposerView: View {
                     .font(.caption)
             }
 
+            #if os(iOS)
             // Voice dictation button
             Button {
                 Task {
@@ -623,6 +644,7 @@ struct MessageComposerView: View {
             }
             .buttonStyle(.plain)
             .disabled(!dictationManager.state.isIdle || selectedProject == nil)
+            #endif
 
             Spacer()
 
@@ -644,7 +666,7 @@ struct MessageComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 
     // MARK: - Actions
@@ -880,7 +902,7 @@ struct ProjectChipView: View {
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(Color(.systemBackground))
+                    .fill(Color.systemBackground)
                     .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
             )
         }
@@ -923,7 +945,7 @@ struct OnlineAgentChipView: View {
             .padding(.vertical, 6)
             .background(
                 Capsule()
-                    .fill(Color(.systemBackground))
+                    .fill(Color.systemBackground)
                     .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
             )
         }

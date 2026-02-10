@@ -276,5 +276,5 @@ struct DiagnosticsSyncTab: View {
         )
         .padding()
     }
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

@@ -257,7 +257,9 @@ struct AISettingsView: View {
                     SecureField("Enter API key", text: keyInput)
                         .textFieldStyle(.roundedBorder)
                         .autocorrectionDisabled()
+                        #if os(iOS)
                         .textInputAutocapitalization(.never)
+                        #endif
 
                     Button("Save") {
                         onSave()

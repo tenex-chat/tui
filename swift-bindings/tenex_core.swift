@@ -5872,7 +5872,7 @@ public struct FfiConverterTypeStatsSnapshot: FfiConverterRustBuffer {
     public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> StatsSnapshot {
         return
             try StatsSnapshot(
-                totalCost14Days: FfiConverterDouble.read(from: &buf),
+                totalCost14Days: FfiConverterDouble.read(from: &buf), 
                 todayRuntimeMs: FfiConverterUInt64.read(from: &buf), 
                 avgDailyRuntimeMs: FfiConverterUInt64.read(from: &buf), 
                 activeDaysCount: FfiConverterUInt32.read(from: &buf), 

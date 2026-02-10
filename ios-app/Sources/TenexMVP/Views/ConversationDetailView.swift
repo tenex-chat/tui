@@ -14,6 +14,9 @@ struct ConversationDetailView: View {
     @State private var showComposer = false
     @State private var isLatestReplyExpanded = false
     @State private var latestReplyContentHeight: CGFloat = 0
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     /// Initialize the view with a conversation and core manager
     /// Note: coreManager is passed explicitly to support @StateObject initialization
@@ -31,6 +34,7 @@ struct ConversationDetailView: View {
             .task {
                 await initializeAndLoad()
             }
+            #if os(iOS)
             .sheet(item: $selectedDelegation) { delegation in
                 if let childConv = viewModel.childConversation(for: delegation.conversationId) {
                     NavigationStack {
@@ -61,6 +65,7 @@ struct ConversationDetailView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
             }
+            #endif
     }
 
     @ViewBuilder
@@ -81,6 +86,11 @@ struct ConversationDetailView: View {
                     latestReplySection(reply)
                 }
 
+                // Streaming Section - shows live agent output from local socket
+                if let buffer = coreManager.streamingBuffers[conversation.id] {
+                    streamingSection(buffer)
+                }
+
                 // Delegations Section - renders when delegations are available
                 if !viewModel.delegations.isEmpty {
                     delegationsSection
@@ -91,7 +101,7 @@ struct ConversationDetailView: View {
             }
             .padding(.bottom, 20)
         }
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 
     /// Initializes the view model with the core manager and loads data
@@ -227,8 +237,8 @@ struct ConversationDetailView: View {
                         // Gradient fade overlay
                         LinearGradient(
                             gradient: Gradient(colors: [
-                                Color(.systemBackground).opacity(0),
-                                Color(.systemBackground)
+                                Color.systemBackground.opacity(0),
+                                Color.systemBackground
                             ]),
                             startPoint: .top,
                             endPoint: .bottom
@@ -313,6 +323,35 @@ struct ConversationDetailView: View {
         }
     }
 
+    // MARK: - Streaming Section
+
+    private func streamingSection(_ buffer: StreamingBuffer) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .scaleEffect(0.7)
+                Text("Agent is typing...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .italic()
+                Spacer()
+            }
+            if !buffer.text.isEmpty {
+                HStack(alignment: .lastTextBaseline, spacing: 0) {
+                    MarkdownView(content: buffer.text)
+                        .font(.body)
+                    Text("\u{258C}")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .opacity(0.6)
+                }
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .overlay(alignment: .top) { Divider() }
+    }
+
     // MARK: - Todo List Section
 
     private var todoListSection: some View {
@@ -349,7 +388,11 @@ struct ConversationDetailView: View {
         VStack(spacing: 0) {
             ForEach(viewModel.delegations) { delegation in
                 DelegationRowView(delegation: delegation) {
+                    #if os(macOS)
+                    openWindow(id: "conversation-summary", value: delegation.conversationId)
+                    #else
                     selectedDelegation = delegation
+                    #endif
                 }
                 .environmentObject(coreManager)
 
@@ -368,7 +411,13 @@ struct ConversationDetailView: View {
     // MARK: - Full Conversation Button
 
     private var fullConversationButton: some View {
-        Button(action: { showFullConversation = true }) {
+        Button(action: {
+            #if os(macOS)
+            openWindow(id: "full-conversation", value: conversation.id)
+            #else
+            showFullConversation = true
+            #endif
+        }) {
             Text("View Full Conversation")
                 .font(.headline)
                 .foregroundStyle(.white)
@@ -635,6 +684,9 @@ struct FullConversationSheet: View {
     @State private var availableAgents: [OnlineAgentInfo] = []
     @State private var isAtBottom = true
     @State private var scrollViewHeight: CGFloat = 0
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     private let bottomAnchorId = "full-conversation-bottom"
     private let bottomThreshold: CGFloat = 60
@@ -691,11 +743,24 @@ struct FullConversationSheet: View {
                                     conversationId: conversation.id,
                                     projectId: conversation.extractedProjectId,
                                     onDelegationTap: { delegationId in
+                                        #if os(macOS)
+                                        openWindow(id: "conversation-summary", value: delegationId)
+                                        #else
                                         selectedDelegation = delegationId
+                                        #endif
                                     }
                                 )
                                 .environmentObject(coreManager)
                                 .id(item.message.id)
+                            }
+
+                            if let buffer = coreManager.streamingBuffers[conversation.id] {
+                                StreamingMessageRow(
+                                    buffer: buffer,
+                                    isConsecutive: messages.last?.authorNpub == buffer.agentPubkey
+                                )
+                                .environmentObject(coreManager)
+                                .id("streaming-row")
                             }
                         }
                         .padding()
@@ -734,6 +799,15 @@ struct FullConversationSheet: View {
                             DispatchQueue.main.async {
                                 withAnimation(.easeOut(duration: 0.2)) {
                                     proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                    .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _ in
+                        if isAtBottom {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    proxy.scrollTo("streaming-row", anchor: .bottom)
                                 }
                             }
                         }
@@ -786,12 +860,14 @@ struct FullConversationSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
+            #if os(iOS)
             .sheet(item: $selectedDelegation) { delegationId in
                 DelegationSheetFromId(delegationId: delegationId)
                     .environmentObject(coreManager)
                     .presentationDetents([.large])
                     .presentationDragIndicator(.visible)
             }
+            #endif
             .sheet(isPresented: $showComposer) {
                 NavigationStack {
                     MessageComposerView(

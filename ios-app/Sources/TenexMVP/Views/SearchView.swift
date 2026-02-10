@@ -69,11 +69,17 @@ struct SearchView: View {
                         }
                     }
                 }
+                #if os(iOS)
                 .listSectionSpacing(4)
+                #endif
             }
         }
         .listStyle(.plain)
+        #if os(iOS)
         .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+        #else
+        .searchable(text: $searchText)
+        #endif
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
@@ -439,7 +445,7 @@ struct SearchMessageBubble: View {
                 Text(message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
 

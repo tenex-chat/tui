@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- CRT phosphor glow -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Subtle inner shadow for depth -->
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#1a2332"/>
+      <stop offset="100%" stop-color="#0a0f16"/>
+    </radialGradient>
+    <!-- Scanline pattern -->
+    <pattern id="scanlines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="rgba(0,0,0,0.08)"/>
+    </pattern>
+    <!-- Terminal green gradient for the T -->
+    <linearGradient id="termGreen" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#5af78e"/>
+      <stop offset="50%" stop-color="#39d668"/>
+      <stop offset="100%" stop-color="#20a84a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGrad)"/>
+
+  <!-- Scanline overlay for CRT feel -->
+  <rect width="1024" height="1024" rx="224" fill="url(#scanlines)"/>
+
+  <!-- Terminal prompt: >_ -->
+  <g filter="url(#glow)" opacity="0.35">
+    <text x="160" y="340" font-family="Menlo, 'Courier New', monospace" font-size="120" font-weight="bold" fill="#39d668">
+      &gt;_
+    </text>
+  </g>
+
+  <!-- The T - bold, blocky, terminal-style -->
+  <g filter="url(#glow)">
+    <!-- T horizontal bar -->
+    <rect x="240" y="300" width="544" height="88" rx="8" fill="url(#termGreen)"/>
+    <!-- T vertical stem -->
+    <rect x="432" y="300" width="160" height="460" rx="8" fill="url(#termGreen)"/>
+  </g>
+
+  <!-- Block cursor blinking at bottom right of T -->
+  <rect x="608" y="680" width="64" height="80" rx="4" fill="#5af78e" opacity="0.9">
+    <animate attributeName="opacity" values="0.9;0.3;0.9" dur="1.2s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Subtle CRT vignette -->
+  <rect width="1024" height="1024" rx="224" fill="none" stroke="rgba(0,0,0,0.3)" stroke-width="16"/>
+</svg>
