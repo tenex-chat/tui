@@ -202,7 +202,7 @@ struct InboxView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 
     private func filterTab(for filter: InboxFilter) -> some View {
@@ -488,7 +488,7 @@ struct InboxDetailView: View {
                         .foregroundStyle(.tertiary)
                 }
                 .padding()
-                .background(Color(.systemGray6))
+                .background(Color.systemGray6)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
             }
 
@@ -506,7 +506,7 @@ struct InboxDetailView: View {
                             .foregroundStyle(.tertiary)
                     }
                     .padding()
-                    .background(Color(.systemGray6))
+                    .background(Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .buttonStyle(.plain)
@@ -644,7 +644,7 @@ struct InboxMessageBubble: View {
                 Text(message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
 

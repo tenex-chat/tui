@@ -6,6 +6,9 @@ struct ConversationsView: View {
     @State private var selectedConversation: ConversationFullInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    #endif
 
     /// Conversations filtered by this project from the centralized store
     private var projectConversations: [ConversationFullInfo] {
@@ -50,7 +53,11 @@ struct ConversationsView: View {
                         ProjectConversationRow(
                             conversation: conversation,
                             onSelect: { selected in
+                                #if os(macOS)
+                                openWindow(id: "conversation-summary", value: selected.id)
+                                #else
                                 selectedConversation = selected
+                                #endif
                             }
                         )
                     }
@@ -75,6 +82,7 @@ struct ConversationsView: View {
                 }
             }
         }
+        #if os(iOS)
         .sheet(item: $selectedConversation) { conversation in
             NavigationStack {
                 ConversationDetailView(conversation: conversation)
@@ -90,6 +98,7 @@ struct ConversationsView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        #endif
         .sheet(isPresented: $showNewConversation) {
             NavigationStack {
                 MessageComposerView(
@@ -311,7 +320,7 @@ private struct OptimizedConversationRow: View {
 
                             if aggregatedData.delegationAgentInfos.count > maxVisibleAvatars - 1 {
                                 Circle()
-                                    .fill(Color(.systemGray4))
+                                    .fill(Color.systemGray4)
                                     .frame(width: 24, height: 24)
                                     .overlay {
                                         Text("+\(aggregatedData.delegationAgentInfos.count - (maxVisibleAvatars - 1))")
@@ -439,7 +448,7 @@ struct MessagesView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
-            .background(Color(.systemGray6))
+            .background(Color.systemGray6)
         }
         .buttonStyle(.plain)
     }
@@ -508,7 +517,7 @@ struct MessageBubble: View {
                 Text(message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color(.systemGray6))
+                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
 
                 // Ask event component (inline ask)

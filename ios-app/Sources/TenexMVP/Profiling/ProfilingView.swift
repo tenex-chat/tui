@@ -84,7 +84,11 @@ struct ProfilingView: View {
                         }
                     }
                 }
+                #if os(iOS)
                 .listStyle(.insetGrouped)
+                #else
+                .listStyle(.inset)
+                #endif
             }
         }
     }
@@ -125,7 +129,11 @@ struct ProfilingView: View {
                         Text("Note: Some objects may be intentionally long-lived. Investigate objects with high leak counts.")
                     }
                 }
+                #if os(iOS)
                 .listStyle(.insetGrouped)
+                #else
+                .listStyle(.inset)
+                #endif
             }
         }
     }
@@ -208,7 +216,7 @@ struct ProfilingView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

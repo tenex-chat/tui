@@ -46,6 +46,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     // MARK: - Audio Session Configuration
 
     private func configureAudioSession() {
+        #if os(iOS)
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .default)
@@ -53,6 +54,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         } catch {
             print("[AudioNotificationPlayer] Failed to configure audio session: \(error)")
         }
+        #endif
     }
 
     // MARK: - Playback Control

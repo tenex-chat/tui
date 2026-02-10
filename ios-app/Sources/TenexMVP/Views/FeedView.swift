@@ -70,7 +70,7 @@ private struct FeedHeaderView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 10)
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 
     private var statusLine: String {
@@ -101,7 +101,7 @@ private struct FeedEmptyStateView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(.systemBackground))
+        .background(Color.systemBackground)
     }
 }
 

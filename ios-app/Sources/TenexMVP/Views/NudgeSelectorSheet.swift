@@ -120,7 +120,7 @@ struct NudgeSelectorSheet: View {
                     .padding(.vertical, 4)
                     .background(
                         Capsule()
-                            .fill(Color(.systemBackground))
+                            .fill(Color.systemBackground)
                             .shadow(color: .black.opacity(0.1), radius: 1, x: 0, y: 1)
                     )
                 }
@@ -128,7 +128,7 @@ struct NudgeSelectorSheet: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 12)
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
     }
 
     private var emptyStateView: some View {
@@ -252,7 +252,7 @@ struct NudgeChipView: View {
         .padding(.vertical, 6)
         .background(
             Capsule()
-                .fill(Color(.systemBackground))
+                .fill(Color.systemBackground)
                 .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
         )
     }

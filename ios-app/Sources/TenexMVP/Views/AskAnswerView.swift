@@ -399,7 +399,7 @@ private struct SelectableChoiceRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.orange.opacity(0.15) : Color(.systemGray6))
+            .background(isSelected ? Color.orange.opacity(0.15) : Color.systemGray6)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)

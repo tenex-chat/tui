@@ -69,12 +69,12 @@ struct MetricCard: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.systemBackground))
+                .fill(Color.systemBackground)
                 .shadow(color: Color.black.opacity(0.05), radius: 8, x: 0, y: 2)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color(.systemGray5), lineWidth: 1)
+                .stroke(Color.systemGray5, lineWidth: 1)
         )
     }
 }
@@ -96,5 +96,5 @@ struct MetricCard: View {
         )
     )
     .padding()
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

@@ -155,7 +155,7 @@ struct SubscriptionRow: View {
 
                     DetailRow(label: "Age", value: formatAge(subscription.ageSecs))
                 }
-                .background(Color(.systemGray6))
+                .background(Color.systemGray6)
             }
         }
         .diagnosticCardStyle()
@@ -246,5 +246,5 @@ struct DetailRow: View {
         )
         .padding()
     }
-    .background(Color(.systemGroupedBackground))
+    .background(Color.systemGroupedBackground)
 }

@@ -140,8 +140,8 @@ struct SlackMessageRow: View {
                     // Gradient fade overlay
                     LinearGradient(
                         gradient: Gradient(colors: [
-                            Color(.systemBackground).opacity(0),
-                            Color(.systemBackground)
+                            Color.systemBackground.opacity(0),
+                            Color.systemBackground
                         ]),
                         startPoint: .top,
                         endPoint: .bottom

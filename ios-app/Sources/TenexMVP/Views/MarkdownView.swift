@@ -244,7 +244,7 @@ struct CodeBlockView: View {
                 .foregroundStyle(.primary)
                 .padding(12)
         }
-        .background(Color(.systemGray6))
+        .background(Color.systemGray6)
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
@@ -263,7 +263,7 @@ struct TableView: View {
                             .font(rowIndex == 0 ? .caption.bold() : .caption)
                             .padding(8)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(rowIndex == 0 ? Color(.systemGray5) : Color(.systemGray6).opacity(0.5))
+                            .background(rowIndex == 0 ? Color.systemGray5 : Color.systemGray6.opacity(0.5))
                     }
                 }
 
@@ -275,7 +275,7 @@ struct TableView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color(.systemGray4), lineWidth: 1)
+                .stroke(Color.systemGray4, lineWidth: 1)
         )
     }
 }

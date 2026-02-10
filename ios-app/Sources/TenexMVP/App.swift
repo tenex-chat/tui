@@ -15,6 +15,13 @@ enum AutoLoginResult {
     case transientError(error: String)
 }
 
+// MARK: - Streaming Buffer
+
+struct StreamingBuffer {
+    let agentPubkey: String
+    var text: String
+}
+
 // MARK: - Profile Picture Cache
 
 /// Thread-safe cache for profile picture URLs to prevent repeated synchronous FFI calls during scroll.
@@ -83,6 +90,7 @@ class TenexCoreManager: ObservableObject {
     @Published private(set) var diagnosticsVersion: UInt64 = 0
     @Published private(set) var liveFeed: [LiveFeedItem] = []
     @Published private(set) var liveFeedLastReceivedAt: Date?
+    @Published var streamingBuffers: [String: StreamingBuffer] = [:]
 
     private let liveFeedMaxItems = 400
 
@@ -268,6 +276,14 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
+    func applyStreamChunk(agentPubkey: String, conversationId: String, textDelta: String?) {
+        guard let delta = textDelta, !delta.isEmpty else { return }
+        var buffer = streamingBuffers[conversationId] ?? StreamingBuffer(agentPubkey: agentPubkey, text: "")
+        buffer.text.append(delta)
+        streamingBuffers[conversationId] = buffer
+    }
+
+    @MainActor
     func signalStatsUpdate() {
         bumpStatsVersion()
     }
@@ -281,6 +297,7 @@ class TenexCoreManager: ObservableObject {
     /// This triggers a refresh of the conversation's messages.
     @MainActor
     func signalConversationUpdate(conversationId: String) {
+        streamingBuffers.removeValue(forKey: conversationId)
         Task {
             // Refresh messages for this specific conversation
             let messages = await safeCore.getMessages(conversationId: conversationId)
@@ -747,6 +764,27 @@ struct TenexMVPApp: App {
                 }
             }
         }
+        #if os(macOS)
+        .defaultSize(width: 1200, height: 800)
+        #endif
+
+        #if os(macOS)
+        WindowGroup(id: "conversation-summary", for: String.self) { $conversationId in
+            if let conversationId {
+                ConversationSummaryWindow(conversationId: conversationId)
+                    .environmentObject(coreManager)
+            }
+        }
+        .defaultSize(width: 700, height: 600)
+
+        WindowGroup(id: "full-conversation", for: String.self) { $conversationId in
+            if let conversationId {
+                FullConversationWindow(conversationId: conversationId)
+                    .environmentObject(coreManager)
+            }
+        }
+        .defaultSize(width: 800, height: 700)
+        #endif
     }
 
     private func attemptAutoLogin() {
@@ -821,8 +859,8 @@ struct MainTabView: View {
                     .padding(.top, 50)
                     .padding(.trailing, 8)
             }
+            #if os(iOS)
             .toolbar {
-                // Left glass segment: Tab buttons
                 ToolbarItemGroup(placement: .bottomBar) {
                     Button {
                         selectedTab = 0
@@ -846,10 +884,8 @@ struct MainTabView: View {
                     }
                 }
 
-                // Pushes segments to opposite sides
                 ToolbarSpacer(.flexible, placement: .bottomBar)
 
-                // Right glass segment: Search and New conversation
                 ToolbarItem(placement: .bottomBar) {
                     Button {
                         showSearch = true
@@ -865,6 +901,45 @@ struct MainTabView: View {
                     }
                 }
             }
+            #else
+            .toolbar {
+                ToolbarItemGroup(placement: .automatic) {
+                    Button {
+                        selectedTab = 0
+                    } label: {
+                        Image(systemName: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                    }
+                    Button {
+                        selectedTab = 1
+                    } label: {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                    }
+                    Button {
+                        selectedTab = 2
+                    } label: {
+                        Image(systemName: selectedTab == 2 ? "folder.fill" : "folder")
+                    }
+                    Button {
+                        selectedTab = 3
+                    } label: {
+                        Image(systemName: selectedTab == 3 ? "tray.fill" : "tray")
+                    }
+
+                    Spacer()
+
+                    Button {
+                        showSearch = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    Button {
+                        showNewConversation = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                }
+            }
+            #endif
         }
         .sheet(isPresented: $showSearch) {
             NavigationStack {
