@@ -1,5 +1,5 @@
 use crate::ui::components::{
-    render_chat_sidebar, render_modal_items, render_statusbar, render_tab_bar, ConversationMetadata, Modal,
+    render_chat_sidebar, render_modal_items, render_modal_items_with_scroll, render_statusbar, render_tab_bar, ConversationMetadata, Modal,
     ModalItem, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
@@ -222,7 +222,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Render agent settings modal if showing
-    if let ModalState::AgentSettings(ref state) = app.modal_state {
+    if let ModalState::AgentSettings(ref mut state) = app.modal_state {
         render_agent_settings_modal(f, area, state);
     }
 
@@ -458,19 +458,28 @@ fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) 
     ));
 }
 
-fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
+fn render_agent_selector(f: &mut Frame, app: &mut App, area: Rect) {
+    use crate::ui::components::visible_items_in_content_area;
+
     let agents = app.filtered_agents();
     let all_agents = app.available_agents();
-    let selector_index = app.agent_selector_index();
-    let selector_filter = app.agent_selector_filter();
+
+    // Clamp selector index to valid range when list size changes
+    let item_count = agents.len();
+    if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
+        selector.clamp_index(item_count);
+    }
 
     // Calculate dynamic height based on content
     // +7 accounts for: header (2) + search (2) + vertical padding (3)
-    let item_count = agents.len().max(1);
-    let content_height = (item_count as u16 + 7).min(20);
+    let display_item_count = item_count.max(1);
+    let content_height = (display_item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
 
-    // Build items
+    let selector_index = app.agent_selector_index();
+    let selector_filter = app.agent_selector_filter().to_string();
+
+    // Build items - mark the selected one relative to the full list
     let items: Vec<ModalItem> = if agents.is_empty() {
         let msg = if all_agents.is_empty() {
             "No agents available"
@@ -496,15 +505,22 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let popup_area = Modal::new("Select Agent")
+    // Use render_frame to get the content area, then render items manually with scroll adjustment
+    let (popup_area, content_area) = Modal::new("Select Agent")
         .size(ModalSize {
             max_width: 55,
             height_percent,
         })
-        .search(selector_filter, "Search agents...")
-        .render(f, area, |f, content_area| {
-            render_modal_items(f, content_area, &items);
-        });
+        .search(&selector_filter, "Search agents...")
+        .render_frame(f, area);
+
+    // Calculate visible items from actual content area, then adjust scroll
+    let visible_items = visible_items_in_content_area(content_area);
+    if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
+        selector.adjust_scroll(visible_items.max(1));
+    }
+    let selector_scroll = app.agent_selector_scroll();
+    render_modal_items_with_scroll(f, content_area, &items, selector_scroll);
 
     // Render hints at bottom
     let hints_area = Rect::new(
@@ -518,17 +534,26 @@ fn render_agent_selector(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(hints, hints_area);
 }
 
-fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
+fn render_branch_selector(f: &mut Frame, app: &mut App, area: Rect) {
+    use crate::ui::components::visible_items_in_content_area;
+
     let branches = app.filtered_branches();
     let all_branches = app.available_branches();
-    let selector_index = app.branch_selector_index();
-    let selector_filter = app.branch_selector_filter();
+
+    // Clamp selector index to valid range when list size changes
+    let item_count = branches.len();
+    if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
+        selector.clamp_index(item_count);
+    }
 
     // Calculate dynamic height based on content
     // +7 accounts for: header (2) + search (2) + vertical padding (3)
-    let item_count = branches.len().max(1);
-    let content_height = (item_count as u16 + 7).min(20);
+    let display_item_count = item_count.max(1);
+    let content_height = (display_item_count as u16 + 7).min(20);
     let height_percent = (content_height as f32 / area.height as f32).min(0.6);
+
+    let selector_index = app.branch_selector_index();
+    let selector_filter = app.branch_selector_filter().to_string();
 
     let items: Vec<ModalItem> = if branches.is_empty() {
         let msg = if all_branches.is_empty() {
@@ -545,15 +570,22 @@ fn render_branch_selector(f: &mut Frame, app: &App, area: Rect) {
             .collect()
     };
 
-    let popup_area = Modal::new("Select Branch")
+    // Use render_frame to get the content area, then render items manually with scroll adjustment
+    let (popup_area, content_area) = Modal::new("Select Branch")
         .size(ModalSize {
             max_width: 55,
             height_percent,
         })
-        .search(selector_filter, "Search branches...")
-        .render(f, area, |f, content_area| {
-            render_modal_items(f, content_area, &items);
-        });
+        .search(&selector_filter, "Search branches...")
+        .render_frame(f, area);
+
+    // Calculate visible items from actual content area, then adjust scroll
+    let visible_items = visible_items_in_content_area(content_area);
+    if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
+        selector.adjust_scroll(visible_items.max(1));
+    }
+    let selector_scroll = app.branch_selector_scroll();
+    render_modal_items_with_scroll(f, content_area, &items, selector_scroll);
 
     let hints_area = Rect::new(
         popup_area.x + 2,
@@ -625,7 +657,7 @@ fn render_chat_actions_modal(f: &mut Frame, area: Rect, state: &ChatActionsState
 fn render_agent_settings_modal(
     f: &mut Frame,
     area: Rect,
-    state: &crate::ui::modal::AgentSettingsState,
+    state: &mut crate::ui::modal::AgentSettingsState,
 ) {
     use crate::ui::modal::AgentSettingsFocus;
     use ratatui::style::Modifier;
@@ -700,6 +732,10 @@ fn render_agent_settings_modal(
     // Render tool groups
     let tools_list_area = Rect::new(right_area.x, right_area.y + 1, right_area.width, right_area.height.saturating_sub(1));
 
+    // Adjust scroll offset using actual visible height from the computed tools_list_area
+    let visible_height = tools_list_area.height as usize;
+    state.adjust_tools_scroll(visible_height.max(1));
+
     if state.tool_groups.is_empty() {
         let no_tools = Paragraph::new("No tools available")
             .style(Style::default().fg(theme::TEXT_MUTED));
@@ -708,8 +744,10 @@ fn render_agent_settings_modal(
         let mut y_offset: u16 = 0;
         let mut cursor_pos: usize = 0;
         let visible_height = tools_list_area.height as usize;
+        let scroll_offset = state.tools_scroll;
 
         for group in &state.tool_groups {
+            // Check if we've rendered enough visible items
             if y_offset as usize >= visible_height {
                 break;
             }
@@ -717,75 +755,82 @@ fn render_agent_settings_modal(
             let is_cursor_on_group = cursor_pos == state.tools_cursor;
             let is_single_tool = group.tools.len() == 1;
 
-            // Group header or single tool
-            if is_single_tool {
-                // Single tool - show as checkbox
-                let tool = &group.tools[0];
-                let is_checked = state.selected_tools.contains(tool);
-                let prefix = if is_checked { "[x] " } else { "[ ] " };
-                let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
-                    Style::default().fg(theme::ACCENT_PRIMARY)
-                } else if is_checked {
-                    Style::default().fg(theme::TEXT_PRIMARY)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED)
-                };
-                let text = Paragraph::new(format!("{}{}", prefix, tool)).style(style);
-                let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
-                f.render_widget(text, item_area);
-            } else {
-                // Multi-tool group - show as expandable
-                let is_fully = group.is_fully_selected(&state.selected_tools);
-                let is_partial = group.is_partially_selected(&state.selected_tools);
-                let expand_icon = if group.expanded { "▼ " } else { "▶ " };
-                let check_icon = if is_fully { "[x] " } else if is_partial { "[-] " } else { "[ ] " };
-
-                let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
-                } else if is_fully {
-                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)
-                };
-                let text = Paragraph::new(format!("{}{}{} ({})", expand_icon, check_icon, group.name, group.tools.len())).style(style);
-                let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
-                f.render_widget(text, item_area);
-            }
-
-            y_offset += 1;
-            cursor_pos += 1;
-
-            // Render expanded tools
-            if group.expanded && !is_single_tool {
-                for tool in &group.tools {
-                    if y_offset as usize >= visible_height {
-                        break;
-                    }
-
-                    let is_cursor_on_tool = cursor_pos == state.tools_cursor;
+            // Only render if this item is within the visible window (after scroll offset)
+            if cursor_pos >= scroll_offset {
+                // Group header or single tool
+                if is_single_tool {
+                    // Single tool - show as checkbox
+                    let tool = &group.tools[0];
                     let is_checked = state.selected_tools.contains(tool);
-                    let prefix = if is_checked { "  [x] " } else { "  [ ] " };
-
-                    let style = if is_cursor_on_tool && state.focus == AgentSettingsFocus::Tools {
+                    let prefix = if is_checked { "[x] " } else { "[ ] " };
+                    let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
                         Style::default().fg(theme::ACCENT_PRIMARY)
                     } else if is_checked {
                         Style::default().fg(theme::TEXT_PRIMARY)
                     } else {
                         Style::default().fg(theme::TEXT_MUTED)
                     };
-
-                    // Show just the method name for MCP tools
-                    let display_name = if tool.starts_with("mcp__") {
-                        tool.split("__").last().unwrap_or(tool)
-                    } else {
-                        tool.as_str()
-                    };
-
-                    let text = Paragraph::new(format!("{}{}", prefix, display_name)).style(style);
+                    let text = Paragraph::new(format!("{}{}", prefix, tool)).style(style);
                     let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
                     f.render_widget(text, item_area);
+                } else {
+                    // Multi-tool group - show as expandable
+                    let is_fully = group.is_fully_selected(&state.selected_tools);
+                    let is_partial = group.is_partially_selected(&state.selected_tools);
+                    let expand_icon = if group.expanded { "▼ " } else { "▶ " };
+                    let check_icon = if is_fully { "[x] " } else if is_partial { "[-] " } else { "[ ] " };
 
-                    y_offset += 1;
+                    let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
+                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    } else if is_fully {
+                        Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)
+                    };
+                    let text = Paragraph::new(format!("{}{}{} ({})", expand_icon, check_icon, group.name, group.tools.len())).style(style);
+                    let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                    f.render_widget(text, item_area);
+                }
+                y_offset += 1;
+            }
+
+            cursor_pos += 1;
+
+            // Render expanded tools
+            if group.expanded && !is_single_tool {
+                for tool in &group.tools {
+                    // Check if we've rendered enough visible items
+                    if y_offset as usize >= visible_height {
+                        break;
+                    }
+
+                    // Only render if this item is within the visible window
+                    if cursor_pos >= scroll_offset {
+                        let is_cursor_on_tool = cursor_pos == state.tools_cursor;
+                        let is_checked = state.selected_tools.contains(tool);
+                        let prefix = if is_checked { "  [x] " } else { "  [ ] " };
+
+                        let style = if is_cursor_on_tool && state.focus == AgentSettingsFocus::Tools {
+                            Style::default().fg(theme::ACCENT_PRIMARY)
+                        } else if is_checked {
+                            Style::default().fg(theme::TEXT_PRIMARY)
+                        } else {
+                            Style::default().fg(theme::TEXT_MUTED)
+                        };
+
+                        // Show just the method name for MCP tools
+                        let display_name = if tool.starts_with("mcp__") {
+                            tool.split("__").last().unwrap_or(tool)
+                        } else {
+                            tool.as_str()
+                        };
+
+                        let text = Paragraph::new(format!("{}{}", prefix, display_name)).style(style);
+                        let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                        f.render_widget(text, item_area);
+                        y_offset += 1;
+                    }
+
                     cursor_pos += 1;
                 }
             }

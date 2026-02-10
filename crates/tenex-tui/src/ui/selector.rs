@@ -5,6 +5,8 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub struct SelectorState {
     pub index: usize,
     pub filter: String,
+    /// Scroll offset for visible window (items before this are not shown)
+    pub scroll_offset: usize,
 }
 
 impl SelectorState {
@@ -14,11 +16,32 @@ impl SelectorState {
 
     pub fn move_up(&mut self) {
         self.index = self.index.saturating_sub(1);
+        // If we moved above the visible window, scroll up
+        if self.index < self.scroll_offset {
+            self.scroll_offset = self.index;
+        }
     }
 
     pub fn move_down(&mut self, max_index: usize) {
         if self.index < max_index {
             self.index += 1;
+        }
+        // Note: scroll adjustment for moving down is handled via adjust_scroll or in render
+    }
+
+    /// Adjust scroll offset to keep the selected index visible within the given visible height.
+    /// Call this during render when you know the actual visible height.
+    pub fn adjust_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        // If selection is above the visible window, scroll up
+        if self.index < self.scroll_offset {
+            self.scroll_offset = self.index;
+        }
+        // If selection is below the visible window, scroll down
+        else if self.index >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.index.saturating_sub(visible_height - 1);
         }
     }
 
@@ -34,16 +57,19 @@ impl SelectorState {
     pub fn add_filter_char(&mut self, c: char) {
         self.filter.push(c);
         self.index = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn backspace_filter(&mut self) {
         self.filter.pop();
         self.index = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn clear(&mut self) {
         self.filter.clear();
         self.index = 0;
+        self.scroll_offset = 0;
     }
 
     pub fn filter_lowercase(&self) -> String {

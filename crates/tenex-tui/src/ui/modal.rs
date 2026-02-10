@@ -1117,6 +1117,10 @@ impl AgentSettingsState {
     pub fn move_cursor_up(&mut self) {
         if self.tools_cursor > 0 {
             self.tools_cursor -= 1;
+            // Scroll up if cursor moves above visible area
+            if self.tools_cursor < self.tools_scroll {
+                self.tools_scroll = self.tools_cursor;
+            }
         }
     }
 
@@ -1124,6 +1128,23 @@ impl AgentSettingsState {
         let max = self.visible_item_count();
         if self.tools_cursor + 1 < max {
             self.tools_cursor += 1;
+        }
+        // Note: scroll adjustment for moving down is handled via adjust_tools_scroll in render
+    }
+
+    /// Adjust scroll offset to keep the cursor visible within the given visible height.
+    /// Call this during render when you know the actual visible height.
+    pub fn adjust_tools_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        // If cursor is above the visible window, scroll up
+        if self.tools_cursor < self.tools_scroll {
+            self.tools_scroll = self.tools_cursor;
+        }
+        // If cursor is below the visible window, scroll down
+        else if self.tools_cursor >= self.tools_scroll + visible_height {
+            self.tools_scroll = self.tools_cursor.saturating_sub(visible_height - 1);
         }
     }
 }

@@ -399,9 +399,17 @@ fn render_modal_item(f: &mut Frame, area: Rect, item: &ModalItem) {
 
 /// Render a list of simple items (no sections)
 pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
+    render_modal_items_with_scroll(f, area, items, 0);
+}
+
+/// Render a list of simple items with scroll offset support
+pub fn render_modal_items_with_scroll(f: &mut Frame, area: Rect, items: &[ModalItem], scroll_offset: usize) {
     let content_area = layout::with_modal_padding(area);
 
-    for (idx, item) in items.iter().enumerate() {
+    // Skip items before the scroll offset
+    let visible_items = items.iter().skip(scroll_offset);
+
+    for (idx, item) in visible_items.enumerate() {
         if idx as u16 >= content_area.height {
             break;
         }
@@ -415,4 +423,12 @@ pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
 
         render_modal_item(f, item_area, item);
     }
+}
+
+/// Calculate the number of visible items in a modal content area.
+/// This accounts for modal padding and returns the actual height available for list items.
+/// Use this instead of hard-coded calculations like `modal_height.saturating_sub(9)`.
+pub fn visible_items_in_content_area(content_area: Rect) -> usize {
+    let padded = layout::with_modal_padding(content_area);
+    padded.height as usize
 }
