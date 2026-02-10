@@ -1761,6 +1761,14 @@ impl App {
         }
     }
 
+    /// Get agent selector scroll offset (from ModalState)
+    pub fn agent_selector_scroll(&self) -> usize {
+        match &self.modal_state {
+            ModalState::AgentSelector { selector } => selector.scroll_offset,
+            _ => 0,
+        }
+    }
+
     /// Open the agent selector modal
     pub fn open_agent_selector(&mut self) {
         self.modal_state = ModalState::AgentSelector {
@@ -1818,6 +1826,14 @@ impl App {
         match &self.modal_state {
             ModalState::BranchSelector { selector } => &selector.filter,
             _ => "",
+        }
+    }
+
+    /// Get branch selector scroll offset (from ModalState)
+    pub fn branch_selector_scroll(&self) -> usize {
+        match &self.modal_state {
+            ModalState::BranchSelector { selector } => selector.scroll_offset,
+            _ => 0,
         }
     }
 
