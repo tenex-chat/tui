@@ -19,7 +19,7 @@ use ratatui::{
 };
 use unicode_width::UnicodeWidthStr;
 
-pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
+pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
     f.render_widget(bg_block, area);
@@ -107,8 +107,14 @@ pub fn render_home(f: &mut Frame, app: &App, area: Rect) {
     }
 
     // Project settings modal overlay
-    if let ModalState::ProjectSettings(ref state) = app.modal_state {
-        super::render_project_settings(f, app, area, state);
+    // Take state out to avoid borrow conflict between mutable state and immutable app access
+    if matches!(app.modal_state, ModalState::ProjectSettings(_)) {
+        let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+            ModalState::ProjectSettings(s) => s,
+            _ => unreachable!(),
+        };
+        super::render_project_settings(f, app, area, &mut state);
+        app.modal_state = ModalState::ProjectSettings(state);
     }
 
     // Create project modal overlay
