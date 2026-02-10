@@ -122,6 +122,9 @@ enum Commands {
     /// List all agent definitions (kind:4199 events)
     ListAgentDefinitions,
 
+    /// List all MCP tools (kind:4200 events)
+    ListMCPTools,
+
     /// Show detailed project information (from kind:24010)
     ShowProject {
         /// Project slug (d-tag)
@@ -243,6 +246,7 @@ fn main() {
         }
         Some(Commands::Shutdown) => CliCommand::Shutdown,
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
+        Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
         Some(Commands::CreateProject { name, description, agent, mcp_tool_ids }) => {
             // Validate MCP event IDs

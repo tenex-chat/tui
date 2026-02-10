@@ -881,6 +881,30 @@ fn handle_request(
             (Response::success(id, serde_json::json!(agent_defs)), false)
         }
 
+        "list_mcp_tools" => {
+            let store = data_store.lock().unwrap();
+            let mcp_tools: Vec<_> = store
+                .get_mcp_tools()
+                .iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "id": tool.id,
+                        "pubkey": tool.pubkey,
+                        "d_tag": tool.d_tag,
+                        "name": tool.name,
+                        "description": tool.description,
+                        "command": tool.command,
+                        "parameters": tool.parameters,
+                        "capabilities": tool.capabilities,
+                        "server_url": tool.server_url,
+                        "version": tool.version,
+                        "created_at": tool.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(mcp_tools)), false)
+        }
+
         "show_project" => {
             let project_slug = request.params["project_slug"].as_str().unwrap_or("");
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
