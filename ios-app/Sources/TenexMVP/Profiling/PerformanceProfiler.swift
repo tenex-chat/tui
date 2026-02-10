@@ -553,11 +553,19 @@ struct PerformanceOverlayView: View {
     @StateObject private var memoryMonitor = MemoryMonitor.shared
     @StateObject private var frameMonitor = FrameRateMonitor.shared
     @State private var isExpanded = false
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
             // Compact indicator
-            Button(action: { withAnimation { isExpanded.toggle() } }) {
+            Button(action: {
+                if reduceMotion {
+                    isExpanded.toggle()
+                } else {
+                    withAnimation { isExpanded.toggle() }
+                }
+            }) {
                 HStack(spacing: 6) {
                     // FPS indicator
                     Text("\(Int(frameMonitor.currentFPS))")
@@ -582,7 +590,15 @@ struct PerformanceOverlayView: View {
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(.ultraThinMaterial)
+                .background {
+                    if reduceTransparency {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(.regularMaterial)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .glassEffect(.clear)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
@@ -683,7 +699,15 @@ struct PerformanceOverlayView: View {
                     }
                 }
                 .padding(10)
-                .background(.ultraThinMaterial)
+                .background {
+                    if reduceTransparency {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.regularMaterial)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .glassEffect(.clear)
+                    }
+                }
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .frame(width: 160)
             }

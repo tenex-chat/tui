@@ -51,20 +51,27 @@ struct StatsView: View {
 
 struct TabNavigationView: View {
     @Binding var selectedTab: StatsTab
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(StatsTab.allCases) { tab in
-                    TabPillButton(
-                        tab: tab,
-                        isSelected: selectedTab == tab,
-                        action: {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                selectedTab = tab
+            GlassEffectContainer {
+                HStack(spacing: 12) {
+                    ForEach(StatsTab.allCases) { tab in
+                        TabPillButton(
+                            tab: tab,
+                            isSelected: selectedTab == tab,
+                            action: {
+                                if reduceMotion {
+                                    selectedTab = tab
+                                } else {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        selectedTab = tab
+                                    }
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -72,6 +79,8 @@ struct TabNavigationView: View {
 }
 
 struct TabPillButton: View {
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+
     let tab: StatsTab
     let isSelected: Bool
     let action: () -> Void
@@ -87,14 +96,10 @@ struct TabPillButton: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(
-                isSelected
-                    ? Color.blue
-                    : Color.systemGray5
-            )
-            .foregroundColor(isSelected ? .white : .primary)
-            .clipShape(Capsule())
+            .foregroundStyle(isSelected ? .blue : .primary)
         }
+        .adaptiveGlassButtonStyle()
+        .clipShape(Capsule())
         .accessibilityLabel("\(tab.rawValue) tab")
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }

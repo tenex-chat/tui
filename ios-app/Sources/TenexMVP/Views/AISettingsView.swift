@@ -10,6 +10,7 @@ import SwiftUI
 struct AISettingsView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     // API Key states
     @State private var elevenLabsKeyInput = ""
@@ -202,7 +203,16 @@ struct AISettingsView: View {
                 if isLoadingSettings {
                     ProgressView("Loading settings...")
                         .padding()
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        .background {
+                            if reduceTransparency {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.regularMaterial)
+                            } else {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .glassEffect(.clear)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
         }

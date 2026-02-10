@@ -4,6 +4,7 @@ import SwiftUI
 /// Overlay view for voice dictation that shows recording state and transcription editing.
 struct DictationOverlayView: View {
     @Bindable var manager: DictationManager
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
     let onComplete: (String) -> Void
     let onCancel: () -> Void
 
@@ -62,7 +63,7 @@ struct DictationOverlayView: View {
                 }
             }
             .padding(20)
-            .background(.regularMaterial)
+            .glassEffect(reduceTransparency ? .clear : .regular)
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .shadow(radius: 20)
             .padding(.horizontal, 24)
@@ -78,6 +79,7 @@ struct RecordingView: View {
     let onCancel: () -> Void
 
     @State private var pulseAnimation = false
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         VStack(spacing: 16) {
@@ -87,7 +89,7 @@ struct RecordingView: View {
                     .fill(Color.red.opacity(0.3))
                     .frame(width: 80, height: 80)
                     .scaleEffect(pulseAnimation ? 1.2 : 1.0)
-                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
 
                 Circle()
                     .fill(Color.red)
@@ -98,7 +100,9 @@ struct RecordingView: View {
                     .foregroundStyle(.white)
             }
             .onAppear {
-                pulseAnimation = true
+                if !reduceMotion {
+                    pulseAnimation = true
+                }
             }
 
             Text("Listening...")

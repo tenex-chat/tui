@@ -1,5 +1,30 @@
 import SwiftUI
 
+// MARK: - Adaptive Button Style
+
+/// A ViewModifier that applies glass button style or bordered button style
+/// based on accessibility settings, working around Swift's type inference limitations
+/// with ternary operators on different ButtonStyle types.
+struct AdaptiveButtonStyle: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.buttonStyle(.bordered)
+        } else {
+            content.buttonStyle(.glass)
+        }
+    }
+}
+
+extension View {
+    /// Applies glass button style, or falls back to bordered style when
+    /// accessibility's reduce transparency is enabled.
+    func adaptiveGlassButtonStyle() -> some View {
+        modifier(AdaptiveButtonStyle())
+    }
+}
+
 // MARK: - Platform Color Extensions
 
 extension Color {
