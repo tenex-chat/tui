@@ -142,6 +142,10 @@ enum Commands {
         /// Agent IDs to include in the project (can be specified multiple times)
         #[arg(long, short = 'a')]
         agent: Vec<String>,
+        /// MCP tool event IDs to include in the project (can be specified multiple times)
+        /// Must be 64-character hex strings (32-byte event IDs)
+        #[arg(long = "mcp-event-id", short = 'm')]
+        mcp_tool_ids: Vec<String>,
     },
 
     /// Set agent settings (publishes kind:24020 event to override model/tools)
@@ -240,11 +244,33 @@ fn main() {
         Some(Commands::Shutdown) => CliCommand::Shutdown,
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
-        Some(Commands::CreateProject { name, description, agent }) => {
+        Some(Commands::CreateProject { name, description, agent, mcp_tool_ids }) => {
+            // Validate MCP event IDs
+            let validated_mcp_tool_ids: Vec<String> = mcp_tool_ids
+                .into_iter()
+                .map(|id| {
+                    let trimmed = id.trim().to_string();
+                    if trimmed.is_empty() {
+                        eprintln!("Error: MCP event ID cannot be empty");
+                        std::process::exit(1);
+                    }
+                    if trimmed.len() != 64 {
+                        eprintln!("Error: MCP event ID must be 64 hex characters (got {} characters): {}", trimmed.len(), trimmed);
+                        std::process::exit(1);
+                    }
+                    if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+                        eprintln!("Error: MCP event ID must contain only hex characters: {}", trimmed);
+                        std::process::exit(1);
+                    }
+                    trimmed
+                })
+                .collect();
+
             CliCommand::CreateProject {
                 name,
                 description,
                 agent_ids: agent,
+                mcp_tool_ids: validated_mcp_tool_ids,
             }
         }
         Some(Commands::SetAgentSettings { project_slug, agent_slug, model, tool, wait_for_project, wait }) => {
