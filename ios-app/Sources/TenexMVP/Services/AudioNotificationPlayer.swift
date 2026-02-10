@@ -201,6 +201,7 @@ import SwiftUI
 struct AudioPlayingIndicator: View {
     @ObservedObject var player = AudioNotificationPlayer.shared
     @State private var animationPhase = 0.0
+    @Environment(\.accessibilityReduceMotion) var reduceMotion
 
     var body: some View {
         if player.isPlaying {
@@ -229,10 +230,12 @@ struct AudioPlayingIndicator: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(.ultraThinMaterial, in: Capsule())
+            .background(Color(.systemGray4), in: Capsule())
             .onAppear {
-                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                    animationPhase = 1.0
+                if !reduceMotion {
+                    withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                        animationPhase = 1.0
+                    }
                 }
             }
         }

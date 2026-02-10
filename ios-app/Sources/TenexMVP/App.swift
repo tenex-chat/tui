@@ -831,6 +831,7 @@ struct MainTabView: View {
     @Binding var userNpub: String
     @Binding var isLoggedIn: Bool
     @EnvironmentObject var coreManager: TenexCoreManager
+    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     @State private var selectedTab = 0
     @State private var showNewConversation = false
@@ -862,42 +863,46 @@ struct MainTabView: View {
             #if os(iOS)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
-                    Button {
-                        selectedTab = 0
-                    } label: {
-                        Image(systemName: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
-                    }
-                    Button {
-                        selectedTab = 1
-                    } label: {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                    }
-                    Button {
-                        selectedTab = 2
-                    } label: {
-                        Image(systemName: selectedTab == 2 ? "folder.fill" : "folder")
-                    }
-                    Button {
-                        selectedTab = 3
-                    } label: {
-                        Image(systemName: selectedTab == 3 ? "tray.fill" : "tray")
-                    }
-                }
+                    GlassEffectContainer {
+                        Button {
+                            selectedTab = 0
+                        } label: {
+                            Label("Conversations", systemImage: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
+                        }
+                        .adaptiveGlassButtonStyle()
+                        Button {
+                            selectedTab = 1
+                        } label: {
+                            Label("Feed", systemImage: "dot.radiowaves.left.and.right")
+                        }
+                        .adaptiveGlassButtonStyle()
+                        Button {
+                            selectedTab = 2
+                        } label: {
+                            Label("Projects", systemImage: selectedTab == 2 ? "folder.fill" : "folder")
+                        }
+                        .adaptiveGlassButtonStyle()
+                        Button {
+                            selectedTab = 3
+                        } label: {
+                            Label("Inbox", systemImage: selectedTab == 3 ? "tray.fill" : "tray")
+                        }
+                        .adaptiveGlassButtonStyle()
 
-                ToolbarSpacer(.flexible, placement: .bottomBar)
+                        Spacer()
 
-                ToolbarItem(placement: .bottomBar) {
-                    Button {
-                        showSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                }
-                ToolbarItem(placement: .bottomBar) {
-                    Button {
-                        showNewConversation = true
-                    } label: {
-                        Image(systemName: "plus")
+                        Button {
+                            showSearch = true
+                        } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                        .adaptiveGlassButtonStyle()
+                        Button {
+                            showNewConversation = true
+                        } label: {
+                            Label("New", systemImage: "plus")
+                        }
+                        .adaptiveGlassButtonStyle()
                     }
                 }
             }
