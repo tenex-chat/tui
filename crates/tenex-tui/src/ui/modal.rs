@@ -336,6 +336,14 @@ pub enum ProjectSettingsAddMode {
     McpTool,
 }
 
+/// Which pane is focused in project settings (agents or tools)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ProjectSettingsFocus {
+    #[default]
+    Agents,
+    Tools,
+}
+
 /// State for project settings modal
 #[derive(Debug, Clone)]
 pub struct ProjectSettingsState {
@@ -346,9 +354,19 @@ pub struct ProjectSettingsState {
     pub original_mcp_tool_ids: Vec<String>,
     pub pending_mcp_tool_ids: Vec<String>,
     pub selector_index: usize,
+    /// Index for tools pane selection
+    pub tools_selector_index: usize,
+    /// Which pane is currently focused (agents or tools)
+    pub focus: ProjectSettingsFocus,
+    /// Scroll offset for the agents list
+    pub agents_scroll_offset: usize,
+    /// Scroll offset for the tools list
+    pub tools_scroll_offset: usize,
     pub in_add_mode: Option<ProjectSettingsAddMode>,
     pub add_filter: String,
     pub add_index: usize,
+    /// Cached visible height for list scrolling (computed during render, used by input handlers)
+    pub cached_visible_height: usize,
 }
 
 /// Step in the create project wizard
@@ -557,6 +575,9 @@ impl CreateAgentState {
     }
 }
 
+/// Default visible height fallback when no cached value is available
+pub const DEFAULT_LIST_VISIBLE_HEIGHT: usize = 10;
+
 impl ProjectSettingsState {
     pub fn new(project_a_tag: String, project_name: String, agent_ids: Vec<String>, mcp_tool_ids: Vec<String>) -> Self {
         Self {
@@ -567,10 +588,30 @@ impl ProjectSettingsState {
             original_mcp_tool_ids: mcp_tool_ids.clone(),
             pending_mcp_tool_ids: mcp_tool_ids,
             selector_index: 0,
+            tools_selector_index: 0,
+            focus: ProjectSettingsFocus::default(),
+            agents_scroll_offset: 0,
+            tools_scroll_offset: 0,
             in_add_mode: None,
             add_filter: String::new(),
             add_index: 0,
+            cached_visible_height: DEFAULT_LIST_VISIBLE_HEIGHT,
         }
+    }
+
+    /// Get the visible height to use for scroll calculations.
+    /// Uses cached value from render if available, otherwise falls back to default.
+    pub fn visible_height(&self) -> usize {
+        if self.cached_visible_height > 0 {
+            self.cached_visible_height
+        } else {
+            DEFAULT_LIST_VISIBLE_HEIGHT
+        }
+    }
+
+    /// Update the cached visible height (called during render)
+    pub fn set_visible_height(&mut self, height: usize) {
+        self.cached_visible_height = height;
     }
 
     pub fn has_changes(&self) -> bool {
@@ -610,9 +651,33 @@ impl ProjectSettingsState {
     pub fn remove_mcp_tool(&mut self, index: usize) {
         if index < self.pending_mcp_tool_ids.len() {
             self.pending_mcp_tool_ids.remove(index);
-            if self.selector_index >= self.pending_mcp_tool_ids.len() && self.selector_index > 0 {
-                self.selector_index -= 1;
+            if self.tools_selector_index >= self.pending_mcp_tool_ids.len() && self.tools_selector_index > 0 {
+                self.tools_selector_index -= 1;
             }
+        }
+    }
+
+    /// Adjust agents scroll offset to keep selector_index visible
+    pub fn adjust_agents_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.selector_index < self.agents_scroll_offset {
+            self.agents_scroll_offset = self.selector_index;
+        } else if self.selector_index >= self.agents_scroll_offset + visible_height {
+            self.agents_scroll_offset = self.selector_index.saturating_sub(visible_height - 1);
+        }
+    }
+
+    /// Adjust tools scroll offset to keep tools_selector_index visible
+    pub fn adjust_tools_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.tools_selector_index < self.tools_scroll_offset {
+            self.tools_scroll_offset = self.tools_selector_index;
+        } else if self.tools_selector_index >= self.tools_scroll_offset + visible_height {
+            self.tools_scroll_offset = self.tools_selector_index.saturating_sub(visible_height - 1);
         }
     }
 }

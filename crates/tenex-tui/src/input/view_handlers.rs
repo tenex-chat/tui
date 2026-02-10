@@ -774,7 +774,7 @@ fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
 }
 
 fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::ProjectSettingsAddMode;
+    use ui::modal::{ProjectSettingsAddMode, ProjectSettingsFocus};
     use ui::views::{available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
 
     let code = key.code;
@@ -844,15 +844,52 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 app.modal_state = ModalState::None;
                 return;
             }
+            // Left/Right arrows switch between panes
+            KeyCode::Left => {
+                state.focus = ProjectSettingsFocus::Agents;
+                // Re-adjust scroll when switching panes to keep selected item visible
+                state.adjust_agents_scroll(state.visible_height());
+            }
+            KeyCode::Right => {
+                state.focus = ProjectSettingsFocus::Tools;
+                // Re-adjust scroll when switching panes to keep selected item visible
+                state.adjust_tools_scroll(state.visible_height());
+            }
+            // Up/Down navigate within the focused pane
             KeyCode::Up => {
-                if state.selector_index > 0 {
-                    state.selector_index -= 1;
+                let visible_height = state.visible_height();
+                match state.focus {
+                    ProjectSettingsFocus::Agents => {
+                        if state.selector_index > 0 {
+                            state.selector_index -= 1;
+                            state.adjust_agents_scroll(visible_height);
+                        }
+                    }
+                    ProjectSettingsFocus::Tools => {
+                        if state.tools_selector_index > 0 {
+                            state.tools_selector_index -= 1;
+                            state.adjust_tools_scroll(visible_height);
+                        }
+                    }
                 }
             }
             KeyCode::Down => {
-                let count = state.pending_agent_ids.len();
-                if state.selector_index + 1 < count {
-                    state.selector_index += 1;
+                let visible_height = state.visible_height();
+                match state.focus {
+                    ProjectSettingsFocus::Agents => {
+                        let count = state.pending_agent_ids.len();
+                        if state.selector_index + 1 < count {
+                            state.selector_index += 1;
+                            state.adjust_agents_scroll(visible_height);
+                        }
+                    }
+                    ProjectSettingsFocus::Tools => {
+                        let count = state.pending_mcp_tool_ids.len();
+                        if state.tools_selector_index + 1 < count {
+                            state.tools_selector_index += 1;
+                            state.adjust_tools_scroll(visible_height);
+                        }
+                    }
                 }
             }
             KeyCode::Char('a') => {
@@ -866,19 +903,42 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                 state.add_index = 0;
             }
             KeyCode::Char('d') => {
-                if !state.pending_agent_ids.is_empty() {
-                    state.remove_agent(state.selector_index);
-                    if state.selector_index >= state.pending_agent_ids.len()
-                        && state.selector_index > 0
-                    {
-                        state.selector_index -= 1;
+                // Remove from the currently focused pane
+                let visible_height = state.visible_height();
+                match state.focus {
+                    ProjectSettingsFocus::Agents => {
+                        if !state.pending_agent_ids.is_empty() {
+                            state.remove_agent(state.selector_index);
+                            if state.selector_index >= state.pending_agent_ids.len()
+                                && state.selector_index > 0
+                            {
+                                state.selector_index -= 1;
+                            }
+                            state.adjust_agents_scroll(visible_height);
+                        }
+                    }
+                    ProjectSettingsFocus::Tools => {
+                        if !state.pending_mcp_tool_ids.is_empty() {
+                            state.remove_mcp_tool(state.tools_selector_index);
+                            if state.tools_selector_index >= state.pending_mcp_tool_ids.len()
+                                && state.tools_selector_index > 0
+                            {
+                                state.tools_selector_index -= 1;
+                            }
+                            state.adjust_tools_scroll(visible_height);
+                        }
                     }
                 }
             }
             KeyCode::Char('p') => {
-                if !state.pending_agent_ids.is_empty() && state.selector_index > 0 {
+                // Set PM only works in agents pane
+                if state.focus == ProjectSettingsFocus::Agents
+                    && !state.pending_agent_ids.is_empty()
+                    && state.selector_index > 0
+                {
                     state.set_pm(state.selector_index);
                     state.selector_index = 0;
+                    state.agents_scroll_offset = 0;
                 }
             }
             KeyCode::Enter => {
