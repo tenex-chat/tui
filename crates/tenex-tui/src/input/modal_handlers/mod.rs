@@ -81,6 +81,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle projects modal when open (for new thread or switching projects)
+    if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
+        selectors::handle_projects_modal_key(app, key)?;
+        return Ok(true);
+    }
+
     // Handle view raw event modal when open
     if matches!(app.modal_state, ModalState::ViewRawEvent { .. }) {
         view::handle_view_raw_event_modal_key(app, key);
