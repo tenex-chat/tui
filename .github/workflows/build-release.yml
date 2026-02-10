@@ -1,0 +1,153 @@
+name: Build & Release
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  RUST_TARGET: aarch64-apple-darwin
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache Rust build
+        uses: actions/cache@v4
+        with:
+          path: target
+          key: rust-${{ env.RUST_TARGET }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: rust-${{ env.RUST_TARGET }}-
+
+      - name: Build tenex-tui
+        run: cargo build -p tenex-tui --release --target ${{ env.RUST_TARGET }}
+
+      - name: Import signing certificate
+        env:
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          echo "$DEVELOPER_ID_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
+          security import $RUNNER_TEMP/certificate.p12 \
+            -P "$DEVELOPER_ID_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" login.keychain-db
+
+      - name: Sign binary
+        run: |
+          BINARY="target/${{ env.RUST_TARGET }}/release/tenex-tui"
+
+          cat > $RUNNER_TEMP/entitlements.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+            <true/>
+            <key>com.apple.security.cs.disable-library-validation</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+          codesign --force --sign "Developer ID Application" \
+            --timestamp \
+            --options runtime \
+            --entitlements $RUNNER_TEMP/entitlements.plist \
+            "$BINARY"
+
+          codesign --verify --verbose=2 "$BINARY"
+
+      - name: Create archive
+        run: |
+          BINARY="target/${{ env.RUST_TARGET }}/release/tenex-tui"
+          mkdir -p dist
+          cp "$BINARY" dist/tenex-tui
+          cd dist && zip ../tenex-tui-macos-arm64.zip tenex-tui
+
+      - name: Notarize
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: 456SHKPP26
+        run: |
+          RESULT=$(xcrun notarytool submit tenex-tui-macos-arm64.zip \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_ID_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait 2>&1)
+
+          echo "$RESULT"
+
+          SUB_ID=$(echo "$RESULT" | grep "id:" | head -1 | awk '{print $2}')
+
+          if echo "$RESULT" | grep -q "status: Invalid"; then
+            echo "Notarization failed. Fetching log..."
+            xcrun notarytool log "$SUB_ID" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_ID_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              notarization-log.json
+            cat notarization-log.json
+            exit 1
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenex-tui-macos-arm64
+          path: tenex-tui-macos-arm64.zip
+          if-no-files-found: ignore
+
+      - name: Create release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tenex-tui-macos-arm64.zip
+          generate_release_notes: true
+
+      - name: Create latest release (on master push)
+        if: github.ref == 'refs/heads/master' && !startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest Build
+          prerelease: true
+          files: tenex-tui-macos-arm64.zip
+          body: |
+            Automated build from master (${{ github.sha }}).
+
+            Download and extract:
+            ```
+            unzip tenex-tui-macos-arm64.zip
+            chmod +x tenex-tui
+            ./tenex-tui
+            ```
+
+      - name: Cleanup keychain
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/signing.keychain-db 2>/dev/null || true
