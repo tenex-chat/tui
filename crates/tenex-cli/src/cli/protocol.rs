@@ -93,6 +93,7 @@ pub enum CliCommand {
         name: String,
         description: String,
         agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
     },
     /// Set agent settings (kind:24020)
     SetAgentSettings {
@@ -149,12 +150,13 @@ impl CliCommand {
             CliCommand::ShowProject { project_slug, wait_for_project } => {
                 ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
             }
-            CliCommand::CreateProject { name, description, agent_ids } => (
+            CliCommand::CreateProject { name, description, agent_ids, mcp_tool_ids } => (
                 "create_project",
                 serde_json::json!({
                     "name": name,
                     "description": description,
-                    "agent_ids": agent_ids
+                    "agent_ids": agent_ids,
+                    "mcp_tool_ids": mcp_tool_ids
                 }),
             ),
             CliCommand::SetAgentSettings { project_slug, agent_slug, model, tools, wait_for_project, wait } => (
