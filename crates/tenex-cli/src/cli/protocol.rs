@@ -86,6 +86,8 @@ pub enum CliCommand {
     Shutdown,
     /// List all agent definitions (kind:4199)
     ListAgentDefinitions,
+    /// List all MCP tools (kind:4200)
+    ListMCPTools,
     /// Show detailed project information (kind:24010)
     ShowProject { project_slug: String, wait_for_project: bool },
     /// Create a new project (kind:31933)
@@ -147,6 +149,7 @@ impl CliCommand {
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
             CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
+            CliCommand::ListMCPTools => ("list_mcp_tools", serde_json::json!({})),
             CliCommand::ShowProject { project_slug, wait_for_project } => {
                 ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
             }
