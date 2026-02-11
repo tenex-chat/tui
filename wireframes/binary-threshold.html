@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Runtime - 24h Achievement Threshold</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1a1a2e;
+            color: #e5e7eb;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #e5e7eb;
+            font-size: 18px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #4b5563;
+            padding-bottom: 10px;
+        }
+
+        .legend {
+            margin-bottom: 25px;
+            padding: 10px;
+            background-color: #16213e;
+            border: 2px solid #4b5563;
+            font-size: 12px;
+        }
+
+        .legend-item {
+            display: inline-block;
+            margin-right: 20px;
+        }
+
+        .legend-box {
+            display: inline-block;
+            width: 30px;
+            height: 16px;
+            vertical-align: middle;
+            margin-right: 5px;
+        }
+
+        .legend-gray {
+            background-color: #4b5563;
+        }
+
+        .legend-green {
+            background-color: #22c55e;
+        }
+
+        .legend-green-dark {
+            background-color: #16a34a;
+        }
+
+        .chart-container {
+            background-color: #16213e;
+            border: 2px solid #4b5563;
+            padding: 15px;
+        }
+
+        .bar-row {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #374151;
+            position: relative;
+        }
+
+        .bar-row:last-child {
+            border-bottom: none;
+        }
+
+        .date-label {
+            width: 80px;
+            font-size: 12px;
+            color: #9ca3af;
+            text-align: right;
+            padding-right: 15px;
+        }
+
+        .bar-container {
+            flex: 1;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+        }
+
+        .bar {
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 5px;
+            font-size: 14px;
+            font-weight: bold;
+            transition: opacity 0.2s;
+            min-width: 2px;
+        }
+
+        .bar:hover {
+            opacity: 0.8;
+        }
+
+        .bar-below {
+            background-color: #4b5563;
+            color: #9ca3af;
+        }
+
+        .bar-success {
+            background-color: #22c55e;
+            color: #1a1a2e;
+        }
+
+        .bar-double {
+            background-color: #16a34a;
+            color: #1a1a2e;
+        }
+
+        .duration-label {
+            width: 80px;
+            font-size: 12px;
+            color: #9ca3af;
+            padding-left: 15px;
+            text-align: left;
+        }
+
+        .tooltip {
+            position: fixed;
+            background-color: #0f172a;
+            border: 2px solid #4b5563;
+            padding: 12px;
+            font-size: 12px;
+            color: #e5e7eb;
+            z-index: 1000;
+            display: none;
+            min-width: 180px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .tooltip-row {
+            margin-bottom: 5px;
+        }
+
+        .tooltip-row:last-child {
+            margin-bottom: 0;
+        }
+
+        .tooltip-label {
+            color: #9ca3af;
+        }
+
+        .tooltip-value {
+            color: #e5e7eb;
+            margin-left: 5px;
+        }
+
+        .tooltip-value-positive {
+            color: #22c55e;
+        }
+
+        .tooltip-value-negative {
+            color: #ef4444;
+        }
+
+        .stars {
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Daily Runtime - 24h Achievement Threshold</h1>
+
+        <div class="legend">
+            <span class="legend-item">
+                <span class="legend-box legend-gray"></span> Gray: Below 24h
+            </span>
+            <span class="legend-item">
+                <span class="legend-box legend-green"></span> Green ⭐: 24h+
+            </span>
+            <span class="legend-item">
+                <span class="legend-box legend-green-dark"></span> Green ⭐⭐: 48h+
+            </span>
+        </div>
+
+        <div class="chart-container" id="chart"></div>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        const data = [
+            {"date": "Today", "runtime_ms": 93960000, "runtime_hours": 26.1},
+            {"date": "Jan 28", "runtime_ms": 43200000, "runtime_hours": 12.0},
+            {"date": "Jan 27", "runtime_ms": 167640000, "runtime_hours": 46.57},
+            {"date": "Jan 26", "runtime_ms": 52200000, "runtime_hours": 14.5},
+            {"date": "Jan 25", "runtime_ms": 101160000, "runtime_hours": 28.1},
+            {"date": "Jan 24", "runtime_ms": 95040000, "runtime_hours": 26.4},
+            {"date": "Jan 23", "runtime_ms": 180000000, "runtime_hours": 50.0},
+            {"date": "Jan 22", "runtime_ms": 36000000, "runtime_hours": 10.0},
+            {"date": "Jan 21", "runtime_ms": 108000000, "runtime_hours": 30.0},
+            {"date": "Jan 20", "runtime_ms": 57600000, "runtime_hours": 16.0},
+            {"date": "Jan 19", "runtime_ms": 259200000, "runtime_hours": 72.0},
+            {"date": "Jan 18", "runtime_ms": 43200000, "runtime_hours": 12.0},
+            {"date": "Jan 17", "runtime_ms": 82800000, "runtime_hours": 23.0},
+            {"date": "Jan 16", "runtime_ms": 21600000, "runtime_hours": 6.0}
+        ];
+
+        const maxHours = 72; // For bar width scaling
+        const chart = document.getElementById('chart');
+        const tooltip = document.getElementById('tooltip');
+
+        function formatTime(ms) {
+            const hours = Math.floor(ms / 3600000);
+            const minutes = Math.floor((ms % 3600000) / 60000);
+            return `${hours}h ${minutes}m`;
+        }
+
+        function formatDelta(hours) {
+            const delta = hours - 24;
+            if (delta >= 0) {
+                return `+${delta.toFixed(2)}h`;
+            } else {
+                return `${delta.toFixed(2)}h`;
+            }
+        }
+
+        function createBar(item, index) {
+            const row = document.createElement('div');
+            row.className = 'bar-row';
+
+            const hours = item.runtime_hours;
+            const widthPercent = (hours / maxHours) * 100;
+
+            let barClass, stars = '';
+            if (hours >= 48) {
+                barClass = 'bar-double';
+                stars = '⭐⭐';
+            } else if (hours >= 24) {
+                barClass = 'bar-success';
+                stars = '⭐';
+            } else {
+                barClass = 'bar-below';
+                stars = '';
+            }
+
+            row.innerHTML = `
+                <div class="date-label">${item.date}</div>
+                <div class="bar-container" data-index="${index}">
+                    <div class="bar ${barClass}" style="width: ${Math.max(widthPercent, 2)}%;">
+                        ${stars}
+                    </div>
+                </div>
+                <div class="duration-label">${item.runtime_hours.toFixed(2)}h</div>
+            `;
+
+            const barContainer = row.querySelector('.bar-container');
+            barContainer.addEventListener('mouseenter', (e) => showTooltip(e, item, index));
+            barContainer.addEventListener('mousemove', (e) => moveTooltip(e));
+            barContainer.addEventListener('mouseleave', hideTooltip);
+
+            return row;
+        }
+
+        function showTooltip(e, item, index) {
+            const delta = formatDelta(item.runtime_hours);
+            const deltaClass = item.runtime_hours >= 24 ? 'tooltip-value-positive' : 'tooltip-value-negative';
+
+            tooltip.innerHTML = `
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Date:</span>
+                    <span class="tooltip-value">${item.date}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Runtime:</span>
+                    <span class="tooltip-value">${formatTime(item.runtime_ms)}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Delta from 24h:</span>
+                    <span class="tooltip-value ${deltaClass}">${delta}</span>
+                </div>
+                <div class="tooltip-row">
+                    <span class="tooltip-label">Achievement:</span>
+                    <span class="tooltip-value">
+                        ${item.runtime_hours >= 48 ? '⭐⭐ Double' : item.runtime_hours >= 24 ? '⭐ Success' : '✗ Below Goal'}
+                    </span>
+                </div>
+            `;
+
+            tooltip.style.display = 'block';
+            moveTooltip(e);
+        }
+
+        function moveTooltip(e) {
+            const x = e.clientX + 15;
+            const y = e.clientY + 15;
+
+            // Keep tooltip within viewport
+            const rect = tooltip.getBoundingClientRect();
+            const maxX = window.innerWidth - rect.width - 20;
+            const maxY = window.innerHeight - rect.height - 20;
+
+            tooltip.style.left = `${Math.min(x, maxX)}px`;
+            tooltip.style.top = `${Math.min(y, maxY)}px`;
+        }
+
+        function hideTooltip() {
+            tooltip.style.display = 'none';
+        }
+
+        // Render chart
+        data.forEach((item, index) => {
+            chart.appendChild(createBar(item, index));
+        });
+    </script>
+</body>
+</html>

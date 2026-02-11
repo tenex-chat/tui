@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Daily Runtime - Dual-Zone Blocks</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1a1a2e;
+            color: #e5e5e5;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .header {
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            font-size: 18px;
+            font-weight: normal;
+            margin-bottom: 15px;
+            color: #e5e5e5;
+            border-bottom: 1px solid #4b5563;
+            padding-bottom: 10px;
+        }
+
+        .legend {
+            font-size: 13px;
+            margin-bottom: 20px;
+            padding: 10px;
+            border: 2px solid #4b5563;
+            display: inline-block;
+        }
+
+        .legend span {
+            margin-right: 15px;
+        }
+
+        .legend .required-block {
+            color: #6b7280;
+            font-weight: bold;
+        }
+
+        .legend .bonus-block {
+            color: #22c55e;
+            font-weight: bold;
+        }
+
+        .chart-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            padding: 8px 12px;
+            border: 2px solid #4b5563;
+            position: relative;
+            cursor: pointer;
+        }
+
+        .chart-row:hover {
+            border-color: #6b7280;
+            background-color: #252540;
+        }
+
+        .date-label {
+            width: 90px;
+            font-size: 13px;
+            color: #9ca3af;
+            flex-shrink: 0;
+        }
+
+        .blocks-container {
+            flex: 1;
+            margin: 0 15px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            min-width: 200px;
+        }
+
+        .block {
+            display: inline-block;
+            width: 14px;
+            height: 18px;
+            line-height: 18px;
+            text-align: center;
+            font-size: 14px;
+            margin-right: 2px;
+        }
+
+        .block.required {
+            color: #6b7280;
+        }
+
+        .block.bonus {
+            color: #22c55e;
+        }
+
+        .duration-label {
+            width: 80px;
+            font-size: 13px;
+            color: #e5e5e5;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        .tooltip {
+            position: absolute;
+            background-color: #1a1a2e;
+            border: 2px solid #22c55e;
+            padding: 10px 15px;
+            font-size: 12px;
+            color: #e5e5e5;
+            z-index: 100;
+            display: none;
+            white-space: nowrap;
+            top: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .tooltip::after {
+            content: '';
+            position: absolute;
+            bottom: -6px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 6px solid #22c55e;
+        }
+
+        .chart-row:hover .tooltip {
+            display: block;
+        }
+
+        .tooltip-row {
+            margin: 2px 0;
+        }
+
+        .tooltip .bonus {
+            color: #22c55e;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Daily Runtime - Dual-Zone Blocks</h1>
+        </div>
+
+        <div class="legend">
+            <span><span class="required-block">▓</span> Required (24h)</span>
+            <span><span class="bonus-block">█</span> Bonus (over 24h)</span>
+        </div>
+
+        <div id="chart"></div>
+    </div>
+
+    <script>
+        const data = [
+            {date: "Today", runtime_ms: 93960000, runtime_hours: 26.1},
+            {date: "Jan 28", runtime_ms: 43200000, runtime_hours: 12.0},
+            {date: "Jan 27", runtime_ms: 167640000, runtime_hours: 46.57},
+            {date: "Jan 26", runtime_ms: 52200000, runtime_hours: 14.5},
+            {date: "Jan 25", runtime_ms: 101160000, runtime_hours: 28.1},
+            {date: "Jan 24", runtime_ms: 95040000, runtime_hours: 26.4},
+            {date: "Jan 23", runtime_ms: 180000000, runtime_hours: 50.0},
+            {date: "Jan 22", runtime_ms: 36000000, runtime_hours: 10.0},
+            {date: "Jan 21", runtime_ms: 108000000, runtime_hours: 30.0},
+            {date: "Jan 20", runtime_ms: 57600000, runtime_hours: 16.0},
+            {date: "Jan 19", runtime_ms: 259200000, runtime_hours: 72.0},
+            {date: "Jan 18", runtime_ms: 43200000, runtime_hours: 12.0},
+            {date: "Jan 17", runtime_ms: 82800000, runtime_hours: 23.0},
+            {date: "Jan 16", runtime_ms: 21600000, runtime_hours: 6.0}
+        ];
+
+        function generateBlocks(hours) {
+            const totalHours = Math.ceil(hours);
+            const requiredHours = Math.min(24, totalHours);
+            const bonusHours = Math.max(0, totalHours - 24);
+            
+            let blocks = '';
+            
+            // Required hours (first 24h)
+            for (let i = 0; i < requiredHours; i++) {
+                blocks += '<span class="block required">▓</span>';
+            }
+            
+            // Bonus hours (over 24h)
+            for (let i = 0; i < bonusHours; i++) {
+                blocks += '<span class="block bonus">█</span>';
+            }
+            
+            return blocks;
+        }
+
+        function formatDuration(hours) {
+            const h = Math.floor(hours);
+            const m = Math.round((hours - h) * 60);
+            return `${h}h ${m}m`;
+        }
+
+        function calculateBonus(hours) {
+            if (hours <= 24) {
+                return '0h';
+            }
+            const bonus = hours - 24;
+            const h = Math.floor(bonus);
+            const m = Math.round((bonus - h) * 60);
+            return `+${h}h ${m}m`;
+        }
+
+        function createTooltip(date, hours, bonus) {
+            const formattedHours = formatDuration(hours);
+            return `
+                <div class="tooltip">
+                    <div class="tooltip-row"><strong>${date}</strong></div>
+                    <div class="tooltip-row">Runtime: ${formattedHours}</div>
+                    <div class="tooltip-row bonus">Bonus: ${bonus}</div>
+                </div>
+            `;
+        }
+
+        function renderChart() {
+            const chart = document.getElementById('chart');
+            
+            data.forEach(row => {
+                const bonus = calculateBonus(row.runtime_hours);
+                const blocks = generateBlocks(row.runtime_hours);
+                const tooltip = createTooltip(row.date, row.runtime_hours, bonus);
+                
+                const chartRow = document.createElement('div');
+                chartRow.className = 'chart-row';
+                chartRow.innerHTML = `
+                    <div class="date-label">${row.date}</div>
+                    <div class="blocks-container">${blocks}</div>
+                    <div class="duration-label">${formatDuration(row.runtime_hours)}</div>
+                    ${tooltip}
+                `;
+                
+                chart.appendChild(chartRow);
+            });
+        }
+
+        renderChart();
+    </script>
+</body>
+</html>

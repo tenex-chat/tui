@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Gradient (Cost-Based)</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: #1a1a2e;
+            color: #e0e0e0;
+            font-family: 'Courier New', Courier, monospace;
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #3b82f6;
+            padding-bottom: 10px;
+        }
+
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+            font-size: 12px;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 12px;
+            border: 1px solid #666;
+        }
+
+        .legend-color.cool-blue { background-color: #3b82f6; }
+        .legend-color.cyan { background-color: #06b6d4; }
+        .legend-color.yellow { background-color: #eab308; }
+        .legend-color.orange-red { background-color: #ef4444; }
+
+        .chart-container {
+            border: 2px solid #333;
+            padding: 15px;
+        }
+
+        .bar-row {
+            display: flex;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #2a2a3e;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .bar-row:hover {
+            background-color: #2a2a3e;
+        }
+
+        .date-label {
+            width: 80px;
+            font-size: 12px;
+            flex-shrink: 0;
+        }
+
+        .bar-section {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            min-width: 0;
+        }
+
+        .bar {
+            height: 16px;
+            min-width: 4px;
+            transition: opacity 0.2s;
+        }
+
+        .bar:hover {
+            opacity: 0.8;
+        }
+
+        .bar.cool-blue { background-color: #3b82f6; }
+        .bar.cyan { background-color: #06b6d4; }
+        .bar.yellow { background-color: #eab308; }
+        .bar.orange-red { background-color: #ef4444; }
+
+        .duration-label {
+            width: 80px;
+            font-size: 12px;
+            text-align: right;
+            flex-shrink: 0;
+            color: #888;
+        }
+
+        .tooltip {
+            position: fixed;
+            background-color: #2a2a3e;
+            border: 2px solid #3b82f6;
+            padding: 12px;
+            font-size: 11px;
+            z-index: 1000;
+            display: none;
+            min-width: 200px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+
+        .tooltip-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .tooltip-label {
+            color: #888;
+        }
+
+        .tooltip-value {
+            color: #e0e0e0;
+        }
+
+        .tooltip-title {
+            font-weight: bold;
+            border-bottom: 1px solid #444;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+            color: #3b82f6;
+        }
+
+        .stats-summary {
+            margin-top: 20px;
+            padding: 12px;
+            border: 2px solid #333;
+            font-size: 12px;
+        }
+
+        .stats-summary-title {
+            color: #3b82f6;
+            margin-bottom: 8px;
+        }
+
+        .stats-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Temperature Gradient (Cost-Based)</h1>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color cool-blue"></div>
+                <span>$0-5/day</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color cyan"></div>
+                <span>$5-15/day</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color yellow"></div>
+                <span>$15-30/day</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color orange-red"></div>
+                <span>$30+/day</span>
+            </div>
+        </div>
+
+        <div class="chart-container" id="chart">
+            <!-- Bars will be rendered here -->
+        </div>
+
+        <div class="stats-summary">
+            <div class="stats-summary-title">14-Day Summary</div>
+            <div class="stats-row">
+                <span>Total Runtime:</span>
+                <span id="total-runtime">--</span>
+            </div>
+            <div class="stats-row">
+                <span>Total Cost:</span>
+                <span id="total-cost">--</span>
+            </div>
+            <div class="stats-row">
+                <span>Avg Daily Cost:</span>
+                <span id="avg-cost">--</span>
+            </div>
+            <div class="stats-row">
+                <span>Total Tokens:</span>
+                <span id="total-tokens">--</span>
+            </div>
+            <div class="stats-row">
+                <span>Total Messages:</span>
+                <span id="total-messages">--</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="tooltip" id="tooltip">
+        <div class="tooltip-title" id="tooltip-title"></div>
+        <div class="tooltip-row">
+            <span class="tooltip-label">Runtime:</span>
+            <span class="tooltip-value" id="tooltip-runtime"></span>
+        </div>
+        <div class="tooltip-row">
+            <span class="tooltip-label">Cost:</span>
+            <span class="tooltip-value" id="tooltip-cost"></span>
+        </div>
+        <div class="tooltip-row">
+            <span class="tooltip-label">Tokens:</span>
+            <span class="tooltip-value" id="tooltip-tokens"></span>
+        </div>
+        <div class="tooltip-row">
+            <span class="tooltip-label">Messages:</span>
+            <span class="tooltip-value" id="tooltip-messages"></span>
+        </div>
+        <div class="tooltip-row">
+            <span class="tooltip-label">Dominant Model:</span>
+            <span class="tooltip-value" id="tooltip-model"></span>
+        </div>
+    </div>
+
+    <script>
+        const data = [
+            {"date": "Today", "runtime_ms": 86580000, "cost": 12.45, "tokens": 452000, "messages": 234, "dominant_model": "GPT-4o"},
+            {"date": "Jan 28", "runtime_ms": 43200000, "cost": 3.87, "tokens": 189000, "messages": 112, "dominant_model": "Claude Sonnet"},
+            {"date": "Jan 27", "runtime_ms": 167640000, "cost": 38.92, "tokens": 876000, "messages": 567, "dominant_model": "GPT-4o"},
+            {"date": "Jan 26", "runtime_ms": 52200000, "cost": 8.23, "tokens": 234000, "messages": 156, "dominant_model": "Claude Sonnet"},
+            {"date": "Jan 25", "runtime_ms": 28800000, "cost": 2.15, "tokens": 98000, "messages": 67, "dominant_model": "GPT-4o"},
+            {"date": "Jan 24", "runtime_ms": 95040000, "cost": 18.76, "tokens": 512000, "messages": 298, "dominant_model": "o1"},
+            {"date": "Jan 23", "runtime_ms": 72000000, "cost": 42.15, "tokens": 689000, "messages": 412, "dominant_model": "o1"},
+            {"date": "Jan 22", "runtime_ms": 36000000, "cost": 4.56, "tokens": 145000, "messages": 89, "dominant_model": "Claude Sonnet"},
+            {"date": "Jan 21", "runtime_ms": 108000000, "cost": 25.89, "tokens": 623000, "messages": 345, "dominant_model": "GPT-4o"},
+            {"date": "Jan 20", "runtime_ms": 57600000, "cost": 7.34, "tokens": 267000, "messages": 178, "dominant_model": "Mixed"},
+            {"date": "Jan 19", "runtime_ms": 144000000, "cost": 52.67, "tokens": 745000, "messages": 489, "dominant_model": "o1"},
+            {"date": "Jan 18", "runtime_ms": 43200000, "cost": 5.12, "tokens": 201000, "messages": 123, "dominant_model": "Claude Sonnet"},
+            {"date": "Jan 17", "runtime_ms": 82800000, "cost": 16.78, "tokens": 445000, "messages": 267, "dominant_model": "GPT-4o"},
+            {"date": "Jan 16", "runtime_ms": 64800000, "cost": 9.23, "tokens": 312000, "messages": 198, "dominant_model": "Mixed"}
+        ];
+
+        function getCostClass(cost) {
+            if (cost < 5) return 'cool-blue';
+            if (cost < 15) return 'cyan';
+            if (cost < 30) return 'yellow';
+            return 'orange-red';
+        }
+
+        function formatDuration(ms) {
+            const hours = Math.floor(ms / 3600000);
+            const minutes = Math.floor((ms % 3600000) / 60000);
+            return `${hours}h ${minutes}m`;
+        }
+
+        function formatTokens(tokens) {
+            if (tokens >= 1000000) {
+                return (tokens / 1000000).toFixed(1) + 'M';
+            }
+            return (tokens / 1000).toFixed(0) + 'k';
+        }
+
+        const maxRuntime = Math.max(...data.map(d => d.runtime_ms));
+        const chart = document.getElementById('chart');
+        const tooltip = document.getElementById('tooltip');
+
+        data.forEach((day, index) => {
+            const barWidth = (day.runtime_ms / maxRuntime) * 50; // max 50 chars
+            const costClass = getCostClass(day.cost);
+
+            const row = document.createElement('div');
+            row.className = 'bar-row';
+            row.innerHTML = `
+                <div class="date-label">${day.date}</div>
+                <div class="bar-section">
+                    <div class="bar ${costClass}" style="width: ${barWidth}ch;"></div>
+                </div>
+                <div class="duration-label">${formatDuration(day.runtime_ms)}</div>
+            `;
+
+            row.addEventListener('mouseenter', (e) => {
+                const rect = row.getBoundingClientRect();
+                tooltip.style.left = (rect.right + 10) + 'px';
+                tooltip.style.top = (rect.top) + 'px';
+                tooltip.style.display = 'block';
+
+                document.getElementById('tooltip-title').textContent = day.date;
+                document.getElementById('tooltip-runtime').textContent = formatDuration(day.runtime_ms);
+                document.getElementById('tooltip-cost').textContent = '$' + day.cost.toFixed(2);
+                document.getElementById('tooltip-tokens').textContent = formatTokens(day.tokens);
+                document.getElementById('tooltip-messages').textContent = day.messages;
+                document.getElementById('tooltip-model').textContent = day.dominant_model;
+            });
+
+            row.addEventListener('mouseleave', () => {
+                tooltip.style.display = 'none';
+            });
+
+            chart.appendChild(row);
+        });
+
+        // Calculate and display summary stats
+        const totalRuntime = data.reduce((sum, d) => sum + d.runtime_ms, 0);
+        const totalCost = data.reduce((sum, d) => sum + d.cost, 0);
+        const totalTokens = data.reduce((sum, d) => sum + d.tokens, 0);
+        const totalMessages = data.reduce((sum, d) => sum + d.messages, 0);
+        const avgCost = totalCost / data.length;
+
+        document.getElementById('total-runtime').textContent = formatDuration(totalRuntime);
+        document.getElementById('total-cost').textContent = '$' + totalCost.toFixed(2);
+        document.getElementById('avg-cost').textContent = '$' + avgCost.toFixed(2) + '/day';
+        document.getElementById('total-tokens').textContent = formatTokens(totalTokens);
+        document.getElementById('total-messages').textContent = totalMessages;
+    </script>
+</body>
+</html>
