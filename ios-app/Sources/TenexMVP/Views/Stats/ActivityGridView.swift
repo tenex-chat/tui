@@ -60,36 +60,40 @@ struct ActivityGridView: View {
                             .foregroundColor(.secondary)
                     }
 
-                    ScrollView(.horizontal, showsIndicators: false) {
+                    ScrollView(.vertical, showsIndicators: false) {
                         VStack(alignment: .leading, spacing: 8) {
-                            // Day labels (every 3rd day to avoid clutter)
+                            // Hour labels header row (columns are hours)
                             HStack(spacing: 2) {
-                                // Empty space for row labels
+                                // Empty space for day labels column
                                 Color.clear
                                     .frame(width: 60)
 
-                                ForEach(0..<daysToShow, id: \.self) { dayOffset in
-                                    if dayOffset % 3 == 0 {
-                                        Text(dayLabel(for: dayOffset, todayStart: todayStart))
+                                // Hour labels (every 3rd hour to avoid clutter)
+                                ForEach(0..<hoursPerDay, id: \.self) { hour in
+                                    if hour % 3 == 0 {
+                                        Text(String(format: "%02d", hour))
                                             .font(.system(size: 10))
                                             .foregroundColor(.secondary)
-                                            .frame(width: CGFloat(hoursPerDay) * 12, alignment: .leading)
+                                            .frame(width: 12, alignment: .center)
+                                    } else {
+                                        Color.clear
+                                            .frame(width: 12)
                                     }
                                 }
                             }
 
-                            // Grid
-                            ForEach(0..<hoursPerDay, id: \.self) { hour in
+                            // Grid: each row is a day, each column is an hour
+                            ForEach((0..<daysToShow).reversed(), id: \.self) { dayOffset in
                                 HStack(spacing: 2) {
-                                    // Hour label
-                                    Text(String(format: "%02d:00", hour))
+                                    // Day label
+                                    Text(dayLabel(for: dayOffset, todayStart: todayStart))
                                         .font(.system(size: 10))
                                         .foregroundColor(.secondary)
                                         .frame(width: 50, alignment: .trailing)
                                         .padding(.trailing, 8)
 
-                                    // Day cells for this hour
-                                    ForEach((0..<daysToShow).reversed(), id: \.self) { dayOffset in
+                                    // Hour cells for this day (columns are hours 0-23)
+                                    ForEach(0..<hoursPerDay, id: \.self) { hour in
                                         ActivityCell(
                                             activity: Self.activityForHour(hour: hour, daysAgo: dayOffset, todayStart: todayStart, lookup: activityLookup),
                                             mode: visualizationMode
