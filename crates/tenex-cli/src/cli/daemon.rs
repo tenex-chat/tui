@@ -994,9 +994,10 @@ fn handle_request(
             (Response::success(id, response), false)
         }
 
-        "create_project" => {
+        "save_project" => {
             #[derive(Deserialize)]
-            struct CreateProjectParams {
+            struct SaveProjectParams {
+                slug: Option<String>,
                 name: String,
                 #[serde(default)]
                 description: String,
@@ -1006,11 +1007,11 @@ fn handle_request(
                 mcp_tool_ids: Vec<String>,
             }
 
-            let params: CreateProjectParams = match serde_json::from_value(request.params.clone()) {
+            let params: SaveProjectParams = match serde_json::from_value(request.params.clone()) {
                 Ok(p) => p,
                 Err(_) => {
                     return (
-                        Response::error(id, "INVALID_PARAMS", "Invalid create_project params"),
+                        Response::error(id, "INVALID_PARAMS", "Invalid save_project params"),
                         false,
                     );
                 }
@@ -1025,7 +1026,8 @@ fn handle_request(
             }
 
             if core_handle
-                .send(NostrCommand::CreateProject {
+                .send(NostrCommand::SaveProject {
+                    slug: params.slug,
                     name: name.to_string(),
                     description: params.description,
                     agent_ids: params.agent_ids,
@@ -1034,12 +1036,12 @@ fn handle_request(
                 .is_ok()
             {
                 (
-                    Response::success(id, serde_json::json!({"status": "created"})),
+                    Response::success(id, serde_json::json!({"status": "saved"})),
                     false,
                 )
             } else {
                 (
-                    Response::error(id, "CREATE_FAILED", "Failed to create project"),
+                    Response::error(id, "SAVE_FAILED", "Failed to save project"),
                     false,
                 )
             }

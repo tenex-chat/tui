@@ -982,19 +982,20 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                     }
                 }
                 KeyCode::Enter => {
-                    // Create the project with all tool IDs (manual + from agents)
+                    // Save the project with all tool IDs (manual + from agents)
                     if let Some(ref core_handle) = app.core_handle {
                         let all_tool_ids = state.all_mcp_tool_ids(app);
 
-                        if let Err(e) = core_handle.send(NostrCommand::CreateProject {
+                        if let Err(e) = core_handle.send(NostrCommand::SaveProject {
+                            slug: None, // Generate from name in TUI
                             name: state.name.clone(),
                             description: state.description.clone(),
                             agent_ids: state.agent_ids.clone(),
                             mcp_tool_ids: all_tool_ids,
                         }) {
-                            app.set_warning_status(&format!("Failed to create project: {}", e));
+                            app.set_warning_status(&format!("Failed to save project: {}", e));
                         } else {
-                            app.set_warning_status("Project created");
+                            app.set_warning_status("Project saved");
                         }
                     }
                     app.modal_state = ModalState::None;

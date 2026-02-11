@@ -90,8 +90,9 @@ pub enum CliCommand {
     ListMCPTools,
     /// Show detailed project information (kind:24010)
     ShowProject { project_slug: String, wait_for_project: bool },
-    /// Create a new project (kind:31933)
-    CreateProject {
+    /// Save a project - create new or update existing (kind:31933)
+    SaveProject {
+        slug: Option<String>,
         name: String,
         description: String,
         agent_ids: Vec<String>,
@@ -153,9 +154,10 @@ impl CliCommand {
             CliCommand::ShowProject { project_slug, wait_for_project } => {
                 ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
             }
-            CliCommand::CreateProject { name, description, agent_ids, mcp_tool_ids } => (
-                "create_project",
+            CliCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids } => (
+                "save_project",
                 serde_json::json!({
+                    "slug": slug,
                     "name": name,
                     "description": description,
                     "agent_ids": agent_ids,
