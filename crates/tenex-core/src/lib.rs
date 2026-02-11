@@ -11,6 +11,7 @@ pub mod nostr;
 pub mod runtime;
 pub mod search;
 pub mod secure_storage;
+pub mod slug;
 pub mod stats;
 pub mod store;
 pub mod streaming;

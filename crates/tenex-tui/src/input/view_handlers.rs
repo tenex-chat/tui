@@ -980,11 +980,12 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
                         let all_tool_ids = state.all_mcp_tool_ids(app);
 
                         if let Err(e) = core_handle.send(NostrCommand::SaveProject {
-                            slug: None, // Generate from name in TUI
+                            slug: None, // Generate from name
                             name: state.name.clone(),
                             description: state.description.clone(),
                             agent_ids: state.agent_ids.clone(),
                             mcp_tool_ids: all_tool_ids,
+                            client: Some("tenex-tui".to_string()),
                         }) {
                             app.set_warning_status(&format!("Failed to save project: {}", e));
                         } else {

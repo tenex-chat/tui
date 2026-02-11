@@ -161,7 +161,8 @@ impl CliCommand {
                     "name": name,
                     "description": description,
                     "agent_ids": agent_ids,
-                    "mcp_tool_ids": mcp_tool_ids
+                    "mcp_tool_ids": mcp_tool_ids,
+                    "client": "tenex-cli"
                 }),
             ),
             CliCommand::SetAgentSettings { project_slug, agent_slug, model, tools, wait_for_project, wait } => (

@@ -251,11 +251,15 @@ pub enum NostrCommand {
     /// Save a project - create new or update existing (kind:31933)
     SaveProject {
         /// Optional slug (d-tag). If not provided, generated from name.
+        /// Should be pre-normalized by the caller using slug::normalize_slug.
         slug: Option<String>,
         name: String,
         description: String,
         agent_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
+        #[allow(dead_code)]
+        client: Option<String>,
     },
     /// Create a new agent definition (kind:4199)
     CreateAgentDefinition {
@@ -487,9 +491,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
-                    NostrCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids } => {
+                    NostrCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids, client } => {
                         debug_log(&format!("Worker: Saving project {}", name));
-                        if let Err(e) = rt.block_on(self.handle_save_project(slug, name, description, agent_ids, mcp_tool_ids)) {
+                        if let Err(e) = rt.block_on(self.handle_save_project(slug, name, description, agent_ids, mcp_tool_ids, client)) {
                             tlog!("ERROR", "Failed to save project: {}", e);
                         }
                     }
@@ -1251,17 +1255,18 @@ impl NostrWorker {
         description: String,
         agent_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
+        client_tag: Option<String>,
     ) -> Result<()> {
+        use crate::slug::slug_from_name;
+
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        // Use provided slug or generate d-tag from name (lowercase, replace non-alphanumeric with dashes)
-        let d_tag = slug.unwrap_or_else(|| {
-            name.to_lowercase()
-                .chars()
-                .map(|c| if c.is_alphanumeric() { c } else { '-' })
-                .collect::<String>()
-        });
+        // Use provided slug or generate d-tag from name using consistent normalization
+        let d_tag = slug.unwrap_or_else(|| slug_from_name(&name));
+
+        // Determine client identifier
+        let client_name = client_tag.unwrap_or_else(|| "tenex".to_string());
 
         // Build the project event (kind 31933, NIP-33 replaceable)
         // Publishing with the same d-tag replaces/updates the existing project
@@ -1277,7 +1282,7 @@ impl NostrWorker {
             // NIP-89 client tag
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec!["tenex-tui".to_string()],
+                vec![client_name],
             ));
 
         // Add agent tags

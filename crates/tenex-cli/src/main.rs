@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use tenex_cli::cli::{is_daemon_running, run_daemon, send_command, socket_path, CliCommand, CliConfig};
 use tenex_core::config::CoreConfig;
+use tenex_core::slug::{validate_slug, SlugValidation};
 
 #[derive(Parser)]
 #[command(name = "tenex-cli")]
@@ -142,10 +143,13 @@ enum Commands {
     /// - Update an existing project's name, description, agents, or MCP tools
     ///
     /// The slug serves as the project's unique identifier (d-tag in NIP-33).
+    /// Slugs are normalized: lowercase, non-alphanumeric chars become dashes.
+    #[command(alias = "create-project")]
     SaveProject {
         /// Project slug (d-tag) - unique identifier for the project.
         /// If omitted, generated from the project name.
         /// Use the same slug to update an existing project.
+        /// Slugs are normalized: trimmed, lowercased, non-alphanumeric chars become dashes.
         #[arg(long, short = 's')]
         slug: Option<String>,
         /// Project name/title
@@ -263,6 +267,40 @@ fn main() {
         Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
         Some(Commands::SaveProject { slug, name, description, agent, mcp_tool_ids }) => {
+            // Validate and normalize name
+            let name_trimmed = name.trim();
+            if name_trimmed.is_empty() {
+                eprintln!("Error: Project name cannot be empty or whitespace-only");
+                std::process::exit(1);
+            }
+
+            // Validate and normalize slug (or generate from name)
+            let (final_slug, slug_was_generated) = if let Some(ref user_slug) = slug {
+                // User provided a slug - validate and normalize it
+                match validate_slug(user_slug) {
+                    SlugValidation::Valid(normalized) => (normalized, false),
+                    SlugValidation::Empty => {
+                        eprintln!("Error: Slug cannot be empty or whitespace-only");
+                        eprintln!("Hint: Either provide a valid slug with --slug, or omit it to auto-generate from the name");
+                        std::process::exit(1);
+                    }
+                    SlugValidation::OnlyDashes => {
+                        eprintln!("Error: Slug must contain at least one alphanumeric character");
+                        eprintln!("Hint: Slugs are normalized to lowercase with dashes. Got: '{}'", user_slug);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // No slug provided - generate from name
+                match validate_slug(name_trimmed) {
+                    SlugValidation::Valid(normalized) => (normalized, true),
+                    SlugValidation::Empty | SlugValidation::OnlyDashes => {
+                        eprintln!("Error: Cannot generate slug from name '{}' - name must contain at least one alphanumeric character", name_trimmed);
+                        std::process::exit(1);
+                    }
+                }
+            };
+
             // Validate MCP event IDs
             let validated_mcp_tool_ids: Vec<String> = mcp_tool_ids
                 .into_iter()
@@ -284,9 +322,14 @@ fn main() {
                 })
                 .collect();
 
+            // Show generated slug feedback if it was auto-generated
+            if slug_was_generated {
+                eprintln!("Using generated slug: {}", final_slug);
+            }
+
             CliCommand::SaveProject {
-                slug,
-                name,
+                slug: Some(final_slug),
+                name: name_trimmed.to_string(),
                 description,
                 agent_ids: agent,
                 mcp_tool_ids: validated_mcp_tool_ids,
