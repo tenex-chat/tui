@@ -250,8 +250,10 @@ pub enum NostrCommand {
         agent_ids: Vec<String>,
         mcp_tool_ids: Vec<String>,
     },
-    /// Create a new project (kind:31933)
-    CreateProject {
+    /// Save a project - create new or update existing (kind:31933)
+    SaveProject {
+        /// Optional slug (d-tag). If not provided, generated from name.
+        slug: Option<String>,
         name: String,
         description: String,
         agent_ids: Vec<String>,
@@ -487,10 +489,10 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
-                    NostrCommand::CreateProject { name, description, agent_ids, mcp_tool_ids } => {
-                        debug_log(&format!("Worker: Creating project {}", name));
-                        if let Err(e) = rt.block_on(self.handle_create_project(name, description, agent_ids, mcp_tool_ids)) {
-                            tlog!("ERROR", "Failed to create project: {}", e);
+                    NostrCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids } => {
+                        debug_log(&format!("Worker: Saving project {}", name));
+                        if let Err(e) = rt.block_on(self.handle_save_project(slug, name, description, agent_ids, mcp_tool_ids)) {
+                            tlog!("ERROR", "Failed to save project: {}", e);
                         }
                     }
                     NostrCommand::CreateAgentDefinition { name, description, role, instructions, version, source_id, is_fork } => {
@@ -1261,8 +1263,9 @@ impl NostrWorker {
         Ok(())
     }
 
-    async fn handle_create_project(
+    async fn handle_save_project(
         &self,
+        slug: Option<String>,
         name: String,
         description: String,
         agent_ids: Vec<String>,
@@ -1271,14 +1274,16 @@ impl NostrWorker {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
         let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        // Generate d-tag from name (lowercase, replace spaces with dashes)
-        let d_tag = name
-            .to_lowercase()
-            .chars()
-            .map(|c| if c.is_alphanumeric() { c } else { '-' })
-            .collect::<String>();
+        // Use provided slug or generate d-tag from name (lowercase, replace non-alphanumeric with dashes)
+        let d_tag = slug.unwrap_or_else(|| {
+            name.to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+        });
 
         // Build the project event (kind 31933, NIP-33 replaceable)
+        // Publishing with the same d-tag replaces/updates the existing project
         let mut event = EventBuilder::new(Kind::Custom(31933), &description)
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("d")),
@@ -1320,7 +1325,7 @@ impl NostrWorker {
             std::time::Duration::from_secs(5),
             client.send_event(&signed_event)
         ).await {
-            Ok(Ok(output)) => debug_log(&format!("Created project: {}", output.id())),
+            Ok(Ok(output)) => debug_log(&format!("Saved project: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send project to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending project to relay (saved locally)"),
         }

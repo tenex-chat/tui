@@ -134,19 +134,33 @@ enum Commands {
         wait: bool,
     },
 
-    /// Create a new project (kind:31933 event)
-    CreateProject {
-        /// Project name
+    /// Save a project (create new or update existing) (kind:31933 event)
+    ///
+    /// This command publishes a replaceable project event. If a project with the same
+    /// slug (d-tag) already exists, it will be replaced/updated. This allows you to:
+    /// - Create a new project with a unique slug
+    /// - Update an existing project's name, description, agents, or MCP tools
+    ///
+    /// The slug serves as the project's unique identifier (d-tag in NIP-33).
+    SaveProject {
+        /// Project slug (d-tag) - unique identifier for the project.
+        /// If omitted, generated from the project name.
+        /// Use the same slug to update an existing project.
+        #[arg(long, short = 's')]
+        slug: Option<String>,
+        /// Project name/title
         #[arg(long, short = 'n')]
         name: String,
         /// Project description
         #[arg(long, short = 'd', default_value = "")]
         description: String,
-        /// Agent IDs to include in the project (can be specified multiple times)
+        /// Agent IDs to include in the project (can be specified multiple times).
+        /// Updates replace all existing agents - include all desired agents.
         #[arg(long, short = 'a')]
         agent: Vec<String>,
-        /// MCP tool event IDs to include in the project (can be specified multiple times)
-        /// Must be 64-character hex strings (32-byte event IDs)
+        /// MCP tool event IDs to include in the project (can be specified multiple times).
+        /// Must be 64-character hex strings (32-byte event IDs).
+        /// Updates replace all existing MCP tools - include all desired tools.
         #[arg(long = "mcp-event-id", short = 'm')]
         mcp_tool_ids: Vec<String>,
     },
@@ -248,7 +262,7 @@ fn main() {
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
         Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
-        Some(Commands::CreateProject { name, description, agent, mcp_tool_ids }) => {
+        Some(Commands::SaveProject { slug, name, description, agent, mcp_tool_ids }) => {
             // Validate MCP event IDs
             let validated_mcp_tool_ids: Vec<String> = mcp_tool_ids
                 .into_iter()
@@ -270,7 +284,8 @@ fn main() {
                 })
                 .collect();
 
-            CliCommand::CreateProject {
+            CliCommand::SaveProject {
+                slug,
                 name,
                 description,
                 agent_ids: agent,
