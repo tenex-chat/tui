@@ -230,7 +230,7 @@ struct AudioPlayingIndicator: View {
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color(.systemGray4), in: Capsule())
+            .background(Color.systemGray4, in: Capsule())
             .onAppear {
                 if !reduceMotion {
                     withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {

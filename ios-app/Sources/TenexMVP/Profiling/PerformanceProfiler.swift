@@ -594,9 +594,12 @@ struct PerformanceOverlayView: View {
                     if reduceTransparency {
                         RoundedRectangle(cornerRadius: 6)
                             .fill(.regularMaterial)
-                    } else {
+                    } else if #available(iOS 26.0, macOS 26.0, *) {
                         RoundedRectangle(cornerRadius: 6)
                             .glassEffect(.clear)
+                    } else {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(.regularMaterial)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
@@ -703,9 +706,12 @@ struct PerformanceOverlayView: View {
                     if reduceTransparency {
                         RoundedRectangle(cornerRadius: 8)
                             .fill(.regularMaterial)
-                    } else {
+                    } else if #available(iOS 26.0, macOS 26.0, *) {
                         RoundedRectangle(cornerRadius: 8)
                             .glassEffect(.clear)
+                    } else {
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.regularMaterial)
                     }
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 8))

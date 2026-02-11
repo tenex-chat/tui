@@ -207,9 +207,12 @@ struct AISettingsView: View {
                             if reduceTransparency {
                                 RoundedRectangle(cornerRadius: 12)
                                     .fill(.regularMaterial)
-                            } else {
+                            } else if #available(iOS 26.0, macOS 26.0, *) {
                                 RoundedRectangle(cornerRadius: 12)
                                     .glassEffect(.clear)
+                            } else {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(.regularMaterial)
                             }
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 12))
