@@ -63,7 +63,7 @@ struct DictationOverlayView: View {
                 }
             }
             .padding(20)
-            .glassEffect(reduceTransparency ? .clear : .regular)
+            .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
             .clipShape(RoundedRectangle(cornerRadius: 20))
             .shadow(radius: 20)
             .padding(.horizontal, 24)

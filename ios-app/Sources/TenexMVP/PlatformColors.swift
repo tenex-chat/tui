@@ -11,8 +11,10 @@ struct AdaptiveButtonStyle: ViewModifier {
     func body(content: Content) -> some View {
         if reduceTransparency {
             content.buttonStyle(.bordered)
-        } else {
+        } else if #available(iOS 26.0, macOS 26.0, *) {
             content.buttonStyle(.glass)
+        } else {
+            content.buttonStyle(.bordered)
         }
     }
 }
@@ -22,6 +24,23 @@ extension View {
     /// accessibility's reduce transparency is enabled.
     func adaptiveGlassButtonStyle() -> some View {
         modifier(AdaptiveButtonStyle())
+    }
+}
+
+// MARK: - Availability-Guarded Glass Effect
+
+/// ViewModifier that applies glassEffect on iOS/macOS 26+, falls back to regularMaterial.
+struct AvailableGlassEffect: ViewModifier {
+    var reduceTransparency: Bool
+
+    func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(.regularMaterial)
+        } else if #available(iOS 26.0, macOS 26.0, *) {
+            content.glassEffect(.regular)
+        } else {
+            content.background(.regularMaterial)
+        }
     }
 }
 

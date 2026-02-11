@@ -55,24 +55,29 @@ struct TabNavigationView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            GlassEffectContainer {
-                HStack(spacing: 12) {
-                    ForEach(StatsTab.allCases) { tab in
-                        TabPillButton(
-                            tab: tab,
-                            isSelected: selectedTab == tab,
-                            action: {
-                                if reduceMotion {
+            let pills = HStack(spacing: 12) {
+                ForEach(StatsTab.allCases) { tab in
+                    TabPillButton(
+                        tab: tab,
+                        isSelected: selectedTab == tab,
+                        action: {
+                            if reduceMotion {
+                                selectedTab = tab
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.2)) {
                                     selectedTab = tab
-                                } else {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        selectedTab = tab
-                                    }
                                 }
                             }
-                        )
-                    }
+                        }
+                    )
                 }
+            }
+            if #available(iOS 26.0, macOS 26.0, *) {
+                GlassEffectContainer {
+                    pills
+                }
+            } else {
+                pills
             }
         }
     }
