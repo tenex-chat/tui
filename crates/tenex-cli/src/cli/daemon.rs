@@ -18,6 +18,7 @@ use tenex_core::config::CoreConfig;
 use tenex_core::models::PreferencesStorage;
 use tenex_core::nostr::set_log_path;
 use tenex_core::runtime::{CoreHandle, CoreRuntime};
+use tenex_core::slug::{validate_slug, SlugValidation};
 
 use super::config::CliConfig;
 use super::protocol::{Request, Response};
@@ -1003,6 +1004,9 @@ fn handle_request(
                 agent_ids: Vec<String>,
                 #[serde(default)]
                 mcp_tool_ids: Vec<String>,
+                /// Client identifier for the client tag (e.g., "tenex-cli", "tenex-tui")
+                #[serde(default)]
+                client: Option<String>,
             }
 
             let params: SaveProjectParams = match serde_json::from_value(request.params.clone()) {
@@ -1023,20 +1027,68 @@ fn handle_request(
                 );
             }
 
+            // Validate and normalize slug (or generate from name)
+            let (final_slug, slug_was_generated) = if let Some(ref user_slug) = params.slug {
+                // User provided a slug - validate and normalize it
+                match validate_slug(user_slug) {
+                    SlugValidation::Valid(normalized) => (normalized, false),
+                    SlugValidation::Empty => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_SLUG",
+                                "Slug cannot be empty or whitespace-only",
+                            ),
+                            false,
+                        );
+                    }
+                    SlugValidation::OnlyDashes => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_SLUG",
+                                "Slug must contain at least one alphanumeric character",
+                            ),
+                            false,
+                        );
+                    }
+                }
+            } else {
+                // No slug provided - generate from name
+                match validate_slug(name) {
+                    SlugValidation::Valid(normalized) => (normalized, true),
+                    SlugValidation::Empty | SlugValidation::OnlyDashes => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_NAME",
+                                "Cannot generate slug from name - name must contain at least one alphanumeric character",
+                            ),
+                            false,
+                        );
+                    }
+                }
+            };
+
+            // Use provided client identifier or default based on context
+            let client_tag = params.client.unwrap_or_else(|| "tenex-cli".to_string());
+
             if core_handle
                 .send(NostrCommand::SaveProject {
-                    slug: params.slug,
+                    slug: Some(final_slug.clone()),
                     name: name.to_string(),
                     description: params.description,
                     agent_ids: params.agent_ids,
                     mcp_tool_ids: params.mcp_tool_ids,
+                    client: Some(client_tag),
                 })
                 .is_ok()
             {
-                (
-                    Response::success(id, serde_json::json!({"status": "saved"})),
-                    false,
-                )
+                let mut response = serde_json::json!({"status": "saved", "slug": final_slug});
+                if slug_was_generated {
+                    response["slug_generated"] = serde_json::json!(true);
+                }
+                (Response::success(id, response), false)
             } else {
                 (
                     Response::error(id, "SAVE_FAILED", "Failed to save project"),
