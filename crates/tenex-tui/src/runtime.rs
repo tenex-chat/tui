@@ -2,6 +2,7 @@ use anyhow::Result;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use tenex_core::events::CoreEvent;
@@ -13,6 +14,14 @@ use crate::render::render;
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, Tui, View};
 use crate::ui::notifications::Notification;
+
+/// Result from background audio generation task
+enum AudioGenerationResult {
+    /// Audio generated successfully, contains path to the audio file
+    Success(PathBuf),
+    /// Audio generation failed or was skipped (not enabled, missing config, etc.)
+    Skipped(String),
+}
 
 fn log_diagnostic(msg: &str) {
     if let Ok(mut file) = std::fs::OpenOptions::new()
@@ -44,6 +53,10 @@ pub(crate) async fn run_app(
     // When a message is confirmed published to relay, we mark the draft as published
     let (publish_confirm_tx, mut publish_confirm_rx) = tokio::sync::mpsc::channel::<(String, String)>(100);
     app.set_publish_confirm_tx(publish_confirm_tx);
+
+    // Channel for receiving audio generation results from background tasks
+    // When a p-tag mention triggers audio generation, the result is sent here
+    let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel::<AudioGenerationResult>(10);
 
     // BULLETPROOF: Surface draft storage load/parse errors at startup
     if let Some(error) = app.draft_storage_last_error() {
@@ -82,6 +95,7 @@ pub(crate) async fn run_app(
     let mut tick_events: u64 = 0;
     let mut upload_events: u64 = 0;
     let mut publish_confirm_events: u64 = 0;
+    let mut audio_events: u64 = 0;
     let diag_start = Instant::now();
 
     while app.running {
@@ -91,7 +105,7 @@ pub(crate) async fn run_app(
         if loop_count % 1000 == 0 {
             let elapsed = diag_start.elapsed().as_secs();
             log_diagnostic(&format!(
-                "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={} publish_confirm={}",
+                "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={} publish_confirm={} audio={}",
                 loop_count,
                 elapsed,
                 if elapsed > 0 { loop_count / elapsed } else { loop_count },
@@ -99,7 +113,8 @@ pub(crate) async fn run_app(
                 ndb_events,
                 tick_events,
                 upload_events,
-                publish_confirm_events
+                publish_confirm_events,
+                audio_events
             ));
         }
 
@@ -194,7 +209,7 @@ pub(crate) async fn run_app(
             Some(note_keys) = core_runtime.next_note_keys() => {
                 ndb_events += 1;
                 let events = core_runtime.process_note_keys(&note_keys)?;
-                handle_core_events(app, events);
+                handle_core_events(app, events, audio_tx.clone());
 
                 // Check for pending new thread and navigate to it if found
                 check_pending_new_thread(app);
@@ -265,17 +280,39 @@ pub(crate) async fn run_app(
                     }
                 }
             }
+
+            // Handle audio generation results from background tasks
+            Some(result) = audio_rx.recv() => {
+                audio_events += 1;
+                match result {
+                    AudioGenerationResult::Success(audio_path) => {
+                        log_diagnostic(&format!("AUDIO: Generated notification audio: {:?}", audio_path));
+                        // Play the audio using the app's audio player
+                        if let Err(e) = app.audio_player.play(&audio_path) {
+                            log_diagnostic(&format!("AUDIO: Failed to play audio: {}", e));
+                        }
+                    }
+                    AudioGenerationResult::Skipped(reason) => {
+                        log_diagnostic(&format!("AUDIO: Skipped - {}", reason));
+                    }
+                }
+            }
         }
     }
     Ok(())
 }
 
-fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
+fn handle_core_events(
+    app: &mut App,
+    events: Vec<CoreEvent>,
+    audio_tx: tokio::sync::mpsc::Sender<AudioGenerationResult>,
+) {
     for event in events {
         match event {
             CoreEvent::Message(message) => {
                 let thread_id = message.thread_id.clone();
                 let message_pubkey = message.pubkey.clone();
+                let message_content = message.content.clone();
                 let p_tags = message.p_tags.clone();
 
                 // Mark tab as unread if it's not the active one
@@ -292,22 +329,32 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                         // Mark as waiting for user (tab indicator)
                         app.mark_tab_waiting_for_user(&thread_id);
 
+                        // Get thread title for notification (and audio generation)
+                        let thread_title = app.data_store.borrow()
+                            .get_thread_by_id(&thread_id)
+                            .map(|t| t.title.clone())
+                            .unwrap_or_else(|| "conversation".to_string());
+
                         // Push status bar notification if not viewing this thread
                         let is_viewing_thread = app.selected_thread()
                             .map(|t| t.id.as_str()) == Some(thread_id.as_str());
 
                         if !is_viewing_thread {
-                            // Get thread title for notification
-                            let thread_title = app.data_store.borrow()
-                                .get_thread_by_id(&thread_id)
-                                .map(|t| t.title.clone())
-                                .unwrap_or_else(|| "conversation".to_string());
-
                             // Use message_for_user notification with thread_id for jump-to support
                             // Duration is 30 seconds and includes hint about Alt+M hotkey
                             let notification_msg = format!("@ Message for you in {} · Alt+M to open", thread_title);
                             app.notify(Notification::message_for_user(notification_msg, thread_id.clone()));
                         }
+
+                        // Trigger audio notification generation (if enabled)
+                        // This runs in a background task to avoid blocking the UI
+                        trigger_audio_notification(
+                            app,
+                            audio_tx.clone(),
+                            message_pubkey.clone(),
+                            thread_title,
+                            message_content,
+                        );
                     }
                 }
 
@@ -361,6 +408,96 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
             }
         }
     }
+}
+
+/// Trigger audio notification generation in a background task.
+/// Checks if audio notifications are enabled and properly configured before spawning.
+fn trigger_audio_notification(
+    app: &App,
+    audio_tx: tokio::sync::mpsc::Sender<AudioGenerationResult>,
+    agent_pubkey: String,
+    conversation_title: String,
+    message_text: String,
+) {
+    // Check if audio notifications are enabled in preferences
+    let prefs = app.preferences.borrow();
+    let ai_settings = &prefs.prefs.ai_audio_settings;
+
+    if !ai_settings.enabled {
+        // Audio notifications disabled - skip silently (no log spam)
+        return;
+    }
+
+    // Check if API keys are configured
+    let elevenlabs_key = match prefs.get_elevenlabs_api_key() {
+        Some(key) => key,
+        None => {
+            log_diagnostic("AUDIO: ElevenLabs API key not configured, skipping audio notification");
+            return;
+        }
+    };
+
+    let openrouter_key = match prefs.get_openrouter_api_key() {
+        Some(key) => key,
+        None => {
+            log_diagnostic("AUDIO: OpenRouter API key not configured, skipping audio notification");
+            return;
+        }
+    };
+
+    // Check if voice IDs and model are configured
+    if ai_settings.selected_voice_ids.is_empty() {
+        log_diagnostic("AUDIO: No voices configured, skipping audio notification");
+        return;
+    }
+
+    if ai_settings.openrouter_model.is_none() {
+        log_diagnostic("AUDIO: OpenRouter model not configured, skipping audio notification");
+        return;
+    }
+
+    // Clone settings for the background task
+    let settings = ai_settings.clone();
+    drop(prefs); // Release borrow before spawning
+
+    // Get data directory for audio file storage
+    let data_dir = tenex_core::config::CoreConfig::default_data_dir();
+    let data_dir_str = data_dir.to_string_lossy().to_string();
+
+    // Spawn background task to generate audio
+    tokio::spawn(async move {
+        use tenex_core::ai::AudioNotificationManager;
+
+        let manager = AudioNotificationManager::new(&data_dir_str);
+
+        // Initialize audio notifications directory
+        if let Err(e) = manager.init() {
+            let _ = audio_tx.send(AudioGenerationResult::Skipped(
+                format!("Failed to init audio dir: {}", e)
+            )).await;
+            return;
+        }
+
+        // Generate the audio notification
+        match manager.generate_notification(
+            &agent_pubkey,
+            &conversation_title,
+            &message_text,
+            &elevenlabs_key,
+            &openrouter_key,
+            &settings,
+        ).await {
+            Ok(notification) => {
+                let path = PathBuf::from(&notification.audio_file_path);
+                let _ = audio_tx.send(AudioGenerationResult::Success(path)).await;
+            }
+            Err(e) => {
+                let _ = audio_tx.send(AudioGenerationResult::Skipped(
+                    format!("Generation failed: {}", e)
+                )).await;
+            }
+        }
+    });
 }
 
 /// Check if there are pending backend approvals and show modal

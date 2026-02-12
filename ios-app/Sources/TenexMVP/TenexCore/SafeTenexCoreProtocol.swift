@@ -91,6 +91,7 @@ protocol SafeTenexCoreProtocol: Actor {
     func setSelectedVoiceIds(voiceIds: [String]) throws
     func fetchElevenLabsVoices() throws -> [VoiceInfo]
     func fetchOpenRouterModels() throws -> [ModelInfo]
+    func generateAudioNotification(agentPubkey: String, conversationTitle: String, messageText: String) throws -> AudioNotificationInfo
 
     // MARK: - Misc
     func version() -> String
