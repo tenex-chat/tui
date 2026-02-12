@@ -404,6 +404,35 @@ class TenexCoreManager: ObservableObject {
         bumpDiagnosticsVersion()
     }
 
+    /// Trigger audio notification generation for a p-tag mention.
+    /// Runs in background to avoid blocking UI. Audio is played automatically when ready.
+    func triggerAudioNotification(
+        agentPubkey: String,
+        conversationTitle: String,
+        messageText: String
+    ) async {
+        do {
+            // Generate audio in background (blocking FFI call)
+            let notification = try await safeCore.generateAudioNotification(
+                agentPubkey: agentPubkey,
+                conversationTitle: conversationTitle,
+                messageText: messageText
+            )
+
+            // Play the generated audio using the shared audio player
+            await MainActor.run {
+                do {
+                    try AudioNotificationPlayer.shared.play(path: notification.audioFilePath)
+                } catch {
+                    print("[TenexCoreManager] Failed to play audio notification: \(error)")
+                }
+            }
+        } catch {
+            // Silently skip if audio generation fails (disabled, missing config, etc.)
+            print("[TenexCoreManager] Audio notification skipped: \(error)")
+        }
+    }
+
     @MainActor
     func recordLiveFeedItem(conversationId: String, message: MessageInfo) {
         if liveFeed.contains(where: { $0.id == message.id }) {
