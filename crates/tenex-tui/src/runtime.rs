@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers, MouseEventKind};
+use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseEventKind};
 use futures::StreamExt;
 use std::io::Write;
 use std::path::PathBuf;
@@ -12,7 +12,7 @@ use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadRe
 use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
-use crate::ui::{App, InputMode, ModalState, Tui, View};
+use crate::ui::{App, InputMode, Tui, View};
 use crate::ui::notifications::Notification;
 
 /// Result from background audio generation task
@@ -140,19 +140,20 @@ pub(crate) async fn run_app(
                                     app.pending_quit = true;
                                 }
                             } else if key.code == KeyCode::Char('v') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                                // Ctrl+V - check clipboard for image or pass through to modal
+                                // Ctrl+V - clipboard paste
                                 app.pending_quit = false;
-                                // Check if debug stats modal on e-tag query tab
-                                let is_debug_etag_input = matches!(
-                                    &app.modal_state,
-                                    ModalState::DebugStats(state) if state.active_tab == crate::ui::modal::DebugStatsTab::ETagQuery
-                                );
-                                if is_debug_etag_input {
-                                    // Let modal handler process the paste
-                                    handle_key(app, key, login_step, pending_nsec)?;
-                                } else if app.view == View::Chat && app.input_mode == InputMode::Editing {
+                                if app.view == View::Chat && app.input_mode == InputMode::Editing {
+                                    // Chat view: check for image in clipboard first, then text
                                     if let Some(keys) = app.keys.clone() {
                                         handle_clipboard_paste(app, &keys, upload_tx.clone());
+                                    }
+                                } else {
+                                    // Default: read clipboard text and dispatch as key events
+                                    // so any input that handles KeyCode::Char gets paste for free
+                                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                                        if let Ok(text) = clipboard.get_text() {
+                                            dispatch_paste_as_keys(app, &text, login_step, pending_nsec)?;
+                                        }
                                     }
                                 }
                             } else {
@@ -176,7 +177,7 @@ pub(crate) async fn run_app(
                             }
                         }
                         Event::Paste(text) => {
-                            // Handle paste event - only in Chat view with editing mode
+                            // Chat view with editing mode: smart paste (image detection, code formatting)
                             if app.view == View::Chat && app.input_mode == InputMode::Editing {
                                 if app.showing_attachment_modal {
                                     app.attachment_modal_editor_mut().handle_paste(&text);
@@ -193,11 +194,11 @@ pub(crate) async fn run_app(
                                         app.save_chat_draft();
                                     }
                                 }
-                            } else if app.input_mode == InputMode::Editing {
-                                // Simple paste for login/threads views
-                                for c in text.chars() {
-                                    app.enter_char(c);
-                                }
+                            } else {
+                                // Default: dispatch as key events through normal input handling.
+                                // Any input that handles KeyCode::Char gets paste for free —
+                                // no per-modal wiring needed.
+                                dispatch_paste_as_keys(app, &text, login_step, pending_nsec)?;
                             }
                         }
                         _ => {}
@@ -298,6 +299,27 @@ pub(crate) async fn run_app(
                 }
             }
         }
+    }
+    Ok(())
+}
+
+fn dispatch_paste_as_keys(
+    app: &mut App,
+    text: &str,
+    login_step: &mut LoginStep,
+    pending_nsec: &mut Option<String>,
+) -> Result<()> {
+    for c in text.chars() {
+        if c == '\n' || c == '\r' {
+            continue;
+        }
+        let key = KeyEvent {
+            code: KeyCode::Char(c),
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Press,
+            state: KeyEventState::NONE,
+        };
+        handle_key(app, key, login_step, pending_nsec)?;
     }
     Ok(())
 }

@@ -577,8 +577,6 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
     let type_str = match item.event_type {
         InboxEventType::Ask => "? Asked You",
         InboxEventType::Mention => "@ mentioned you",
-        InboxEventType::Reply => "Reply",
-        InboxEventType::ThreadReply => "Thread reply",
     };
 
     let title_style = if is_selected {

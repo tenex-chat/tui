@@ -33,7 +33,7 @@ final class TenexEventHandler: EventCallback {
 
                 // Trigger audio notification for mentions (high priority = p-tag mention)
                 // Run in background to avoid blocking the event handler
-                if item.priority == "high" && item.status == "waiting" {
+                if item.eventType == "mention" && item.status == "waiting" {
                     Task {
                         await coreManager.triggerAudioNotification(
                             agentPubkey: item.authorPubkey,

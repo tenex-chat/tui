@@ -1,26 +1,23 @@
 import SwiftUI
 
-// MARK: - Type-Safe Enums (replacing magic strings)
+// MARK: - Type-Safe Enums
 
-/// Maps to FFI priority field which encodes the TUI event type
-enum InboxPriority: String {
-    case high       // Mention type in TUI
-    case medium     // Reply/Nudge type
-    case low        // ThreadReply
-    case unknown    // Fallback for unexpected values
+/// Maps to FFI event_type field: "ask" or "mention"
+enum InboxEventType: String {
+    case ask
+    case mention
+    case unknown
 
     init(from string: String) {
-        self = InboxPriority(rawValue: string) ?? .unknown
+        self = InboxEventType(rawValue: string) ?? .unknown
     }
 
-    var eventTypeInfo: InboxEventTypeInfo {
+    var info: InboxEventTypeInfo {
         switch self {
-        case .high:
+        case .ask:
+            return InboxEventTypeInfo(icon: "questionmark.circle", label: "Question", shortLabel: "asked you", color: .orange)
+        case .mention:
             return InboxEventTypeInfo(icon: "at", label: "Mention", shortLabel: "mentioned you", color: .blue)
-        case .medium:
-            return InboxEventTypeInfo(icon: "arrow.turn.up.left", label: "Nudge", shortLabel: "nudge", color: .orange)
-        case .low:
-            return InboxEventTypeInfo(icon: "bubble.left.and.bubble.right", label: "Thread Reply", shortLabel: "thread reply", color: .gray)
         case .unknown:
             return InboxEventTypeInfo(icon: "bell", label: "Notification", shortLabel: "notification", color: .secondary)
         }
@@ -53,8 +50,8 @@ struct InboxEventTypeInfo {
 // MARK: - InboxItem Extensions (domain logic)
 
 extension InboxItem {
-    var priority_enum: InboxPriority {
-        InboxPriority(from: priority)
+    var eventTypeEnum: InboxEventType {
+        InboxEventType(from: eventType)
     }
 
     var status_enum: InboxStatus {
@@ -66,31 +63,26 @@ extension InboxItem {
     }
 
     var eventTypeInfo: InboxEventTypeInfo {
-        priority_enum.eventTypeInfo
+        eventTypeEnum.info
     }
 
     func matches(filter: InboxFilter) -> Bool {
-        filter.matchesPriority(priority_enum)
+        filter.matches(eventTypeEnum)
     }
 }
 
-// MARK: - Inbox Filter Tab (matches TUI event types)
+// MARK: - Inbox Filter Tab
 
 enum InboxFilter: String, CaseIterable {
     case all = "All"
+    case questions = "Questions"
     case mentions = "Mentions"
-    case nudges = "Nudges"
 
-    /// Maps to InboxPriority enum
-    func matchesPriority(_ priority: InboxPriority) -> Bool {
+    func matches(_ eventType: InboxEventType) -> Bool {
         switch self {
-        case .all:
-            return true
-        case .mentions:
-            return priority == .high
-        case .nudges:
-            // For nudges tab, we show medium priority items (Reply/Nudge type)
-            return priority == .medium
+        case .all: return true
+        case .questions: return eventType == .ask
+        case .mentions: return eventType == .mention
         }
     }
 }
@@ -153,7 +145,7 @@ struct InboxView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Tab filter bar (matches TUI: Mentions / Nudges / All)
+                // Tab filter bar: All / Questions / Mentions
                 filterTabBar
 
                 Divider()
@@ -254,10 +246,10 @@ struct InboxView: View {
         switch selectedFilter {
         case .all:
             return "No items waiting for your attention"
+        case .questions:
+            return "No questions to answer"
         case .mentions:
             return "No mentions to review"
-        case .nudges:
-            return "No nudges received"
         }
     }
 
