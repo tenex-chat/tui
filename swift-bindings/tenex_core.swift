@@ -3728,9 +3728,9 @@ public struct InboxItem {
      */
     public var authorPubkey: String
     /**
-     * Priority: high, medium, low
+     * Event type: ask, mention
      */
-    public var priority: String
+    public var eventType: String
     /**
      * Status: waiting, acknowledged, resolved
      */
@@ -3771,8 +3771,8 @@ public struct InboxItem {
          * Author pubkey (hex) for reply tagging
          */authorPubkey: String, 
         /**
-         * Priority: high, medium, low
-         */priority: String, 
+         * Event type: ask, mention
+         */eventType: String, 
         /**
          * Status: waiting, acknowledged, resolved
          */status: String, 
@@ -3793,7 +3793,7 @@ public struct InboxItem {
         self.content = content
         self.fromAgent = fromAgent
         self.authorPubkey = authorPubkey
-        self.priority = priority
+        self.eventType = eventType
         self.status = status
         self.createdAt = createdAt
         self.projectId = projectId
@@ -3824,7 +3824,7 @@ extension InboxItem: Equatable, Hashable {
         if lhs.authorPubkey != rhs.authorPubkey {
             return false
         }
-        if lhs.priority != rhs.priority {
+        if lhs.eventType != rhs.eventType {
             return false
         }
         if lhs.status != rhs.status {
@@ -3851,7 +3851,7 @@ extension InboxItem: Equatable, Hashable {
         hasher.combine(content)
         hasher.combine(fromAgent)
         hasher.combine(authorPubkey)
-        hasher.combine(priority)
+        hasher.combine(eventType)
         hasher.combine(status)
         hasher.combine(createdAt)
         hasher.combine(projectId)
@@ -3874,7 +3874,7 @@ public struct FfiConverterTypeInboxItem: FfiConverterRustBuffer {
                 content: FfiConverterString.read(from: &buf), 
                 fromAgent: FfiConverterString.read(from: &buf), 
                 authorPubkey: FfiConverterString.read(from: &buf), 
-                priority: FfiConverterString.read(from: &buf), 
+                eventType: FfiConverterString.read(from: &buf), 
                 status: FfiConverterString.read(from: &buf), 
                 createdAt: FfiConverterUInt64.read(from: &buf), 
                 projectId: FfiConverterOptionString.read(from: &buf), 
@@ -3889,7 +3889,7 @@ public struct FfiConverterTypeInboxItem: FfiConverterRustBuffer {
         FfiConverterString.write(value.content, into: &buf)
         FfiConverterString.write(value.fromAgent, into: &buf)
         FfiConverterString.write(value.authorPubkey, into: &buf)
-        FfiConverterString.write(value.priority, into: &buf)
+        FfiConverterString.write(value.eventType, into: &buf)
         FfiConverterString.write(value.status, into: &buf)
         FfiConverterUInt64.write(value.createdAt, into: &buf)
         FfiConverterOptionString.write(value.projectId, into: &buf)

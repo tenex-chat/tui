@@ -291,11 +291,9 @@ fn inbox_item_to_info(store: &AppDataStore, item: &crate::models::InboxItem) -> 
         item.project_a_tag.split(':').nth(2).map(String::from)
     };
 
-    let priority = match item.event_type {
-        crate::models::InboxEventType::Ask => "high".to_string(),
-        crate::models::InboxEventType::Mention => "high".to_string(),
-        crate::models::InboxEventType::Reply => "medium".to_string(),
-        crate::models::InboxEventType::ThreadReply => "low".to_string(),
+    let event_type = match item.event_type {
+        crate::models::InboxEventType::Ask => "ask".to_string(),
+        crate::models::InboxEventType::Mention => "mention".to_string(),
     };
 
     let status = if item.is_read {
@@ -312,7 +310,7 @@ fn inbox_item_to_info(store: &AppDataStore, item: &crate::models::InboxItem) -> 
         content: item.title.clone(),
         from_agent,
         author_pubkey: item.author_pubkey.clone(),
-        priority,
+        event_type,
         status,
         created_at: item.created_at,
         project_id,
@@ -838,8 +836,8 @@ pub struct InboxItem {
     pub from_agent: String,
     /// Author pubkey (hex) for reply tagging
     pub author_pubkey: String,
-    /// Priority: high, medium, low
-    pub priority: String,
+    /// Event type: ask, mention
+    pub event_type: String,
     /// Status: waiting, acknowledged, resolved
     pub status: String,
     /// Unix timestamp

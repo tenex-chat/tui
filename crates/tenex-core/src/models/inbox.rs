@@ -4,10 +4,6 @@ pub enum InboxEventType {
     Ask,
     /// P-tagged mention (kind:1 with p-tag but no "ask" tag)
     Mention,
-    /// Reply to user's message
-    Reply,
-    /// Reply in a thread user is participating in
-    ThreadReply,
 }
 
 use super::message::AskEvent;
