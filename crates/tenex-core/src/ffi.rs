@@ -3003,7 +3003,7 @@ impl TenexCore {
                 title,
                 content,
                 agent_pubkey,
-                branch: None,
+
                 nudge_ids,
                 reference_conversation_id: None,
                 fork_message_id: None,
@@ -3050,7 +3050,7 @@ impl TenexCore {
                 content,
                 agent_pubkey,
                 reply_to: None,
-                branch: None,
+
                 nudge_ids: Vec::new(),
                 ask_author_pubkey: None,
                 response_tx: Some(response_tx),
@@ -3100,7 +3100,7 @@ impl TenexCore {
                 content,
                 agent_pubkey: None,
                 reply_to: Some(ask_event_id),
-                branch: None,
+
                 nudge_ids: Vec::new(),
                 ask_author_pubkey: Some(ask_author_pubkey),
                 response_tx: Some(response_tx),

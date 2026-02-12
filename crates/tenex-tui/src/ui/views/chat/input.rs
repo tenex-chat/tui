@@ -152,13 +152,6 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .unwrap_or_else(|| ("none".to_string(), String::new()));
 
-    // Branch display (no % prefix)
-    let branch_display = app
-        .selected_branch
-        .as_ref()
-        .cloned()
-        .unwrap_or_default();
-
     let project_display = app
         .selected_project
         .as_ref()
@@ -351,10 +344,9 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
             .add_modifier(Modifier::BOLD)
     };
 
-    // Calculate context string for padding (without prefixes now)
-    let branch_str = if branch_display.is_empty() { String::new() } else { format!(" {}", branch_display) };
+    // Calculate context string for padding
     let nudge_str = format!(" {}", nudge_display);
-    let context_str = format!("{} {}{}{}{}{}", agent_display, agent_model_display, branch_str, project_display, nudge_str, scroll_indicator);
+    let context_str = format!("{} {}{}{}{}", agent_display, agent_model_display, project_display, nudge_str, scroll_indicator);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
@@ -382,17 +374,6 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(theme::TEXT_DIM).bg(input_bg)
     };
     context_spans.push(Span::styled(agent_model_display.clone(), model_style));
-
-    // Branch (highlighted if focused)
-    if !branch_display.is_empty() {
-        context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
-        let branch_style = if context_focus == Some(InputContextFocus::Branch) {
-            focused_style(theme::ACCENT_SUCCESS)
-        } else {
-            Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg)
-        };
-        context_spans.push(Span::styled(branch_display.clone(), branch_style));
-    }
 
     // Project (not selectable, always muted)
     context_spans.push(Span::styled(

@@ -289,21 +289,19 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (Nudge -> Branch -> Model -> Agent)
+        // Left = move to previous item (Nudge -> Model -> Agent)
         KeyCode::Left => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Agent, // Already at leftmost
                 InputContextFocus::Model => InputContextFocus::Agent,
-                InputContextFocus::Branch => InputContextFocus::Model,
-                InputContextFocus::Nudge => InputContextFocus::Branch,
+                InputContextFocus::Nudge => InputContextFocus::Model,
             });
         }
-        // Right = move to next item (Agent -> Model -> Branch -> Nudge)
+        // Right = move to next item (Agent -> Model -> Nudge)
         KeyCode::Right => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Model,
-                InputContextFocus::Model => InputContextFocus::Branch,
-                InputContextFocus::Branch => InputContextFocus::Nudge,
+                InputContextFocus::Model => InputContextFocus::Nudge,
                 InputContextFocus::Nudge => InputContextFocus::Nudge, // Already at rightmost
             });
         }
@@ -344,10 +342,6 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                         }
                     }
                 }
-                InputContextFocus::Branch => {
-                    app.input_context_focus = None;
-                    app.open_branch_selector();
-                }
                 InputContextFocus::Nudge => {
                     app.input_context_focus = None;
                     app.open_nudge_selector();
@@ -374,7 +368,6 @@ fn handle_send_message(app: &mut App) {
         {
             let project_a_tag = project.a_tag();
             let agent_pubkey = app.selected_agent().map(|a| a.pubkey.clone());
-            let branch = app.selected_branch.clone();
             // Per-tab isolated nudge selection
             let nudge_ids = app.selected_nudge_ids();
 
@@ -406,7 +399,6 @@ fn handle_send_message(app: &mut App) {
                     content,
                     agent_pubkey,
                     reply_to,
-                    branch,
                     nudge_ids,
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
@@ -470,7 +462,6 @@ fn handle_send_message(app: &mut App) {
                     title,
                     content,
                     agent_pubkey,
-                    branch,
                     nudge_ids,
                     reference_conversation_id,
                     fork_message_id,

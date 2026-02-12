@@ -76,8 +76,6 @@ pub enum HotkeyId {
 
     // === Chat View - Normal Mode ===
     MentionAgent,
-    SelectBranch,
-    SelectBranchAlt,       // Alt+B branch selector
     CopyMessage,
     ViewRawEvent,
     OpenTrace,
@@ -201,7 +199,6 @@ impl HotkeyContext {
             ModalState::CreateProject(_) => return HotkeyContext::CreateProjectModal,
             ModalState::CreateAgent(_) => return HotkeyContext::CreateAgentModal,
             ModalState::ExpandedEditor { .. } => return HotkeyContext::ExpandedEditorModal,
-            ModalState::BranchSelector { .. } => return HotkeyContext::AnyModal,
             ModalState::DraftNavigator(_) => return HotkeyContext::DraftNavigatorModal,
             ModalState::BackendApproval(_) => return HotkeyContext::AnyModal,
             ModalState::DebugStats(_) => return HotkeyContext::AnyModal,
@@ -709,20 +706,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Mention Agent",
         "Input",
         &[HotkeyContext::ChatNormal, HotkeyContext::ChatEditing],
-    ),
-    HotkeyBinding::new(
-        HotkeyId::SelectBranch,
-        KeyCode::Char('%'),
-        "Select Branch",
-        "Input",
-        &[HotkeyContext::ChatNormal, HotkeyContext::ChatEditing],
-    ),
-    HotkeyBinding::alt(
-        HotkeyId::SelectBranchAlt,
-        KeyCode::Char('b'),
-        "Select Branch",
-        "Input",
-        &[HotkeyContext::ChatNormal],
     ),
     HotkeyBinding::new(
         HotkeyId::CopyMessage,

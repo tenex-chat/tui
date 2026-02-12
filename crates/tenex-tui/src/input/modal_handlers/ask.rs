@@ -125,7 +125,6 @@ fn submit_ask_response(app: &mut App) {
             content: response_text,
             agent_pubkey: None,
             reply_to: Some(message_id),
-            branch: None,
             nudge_ids: vec![],
             ask_author_pubkey: Some(ask_author_pubkey),
             response_tx: None,

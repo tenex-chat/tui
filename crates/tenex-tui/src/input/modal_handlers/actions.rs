@@ -108,20 +108,14 @@ fn execute_project_action(
                 let project_name = state.project_name.clone();
                 app.selected_project = Some(project);
 
-                // Extract values before making mutable calls to avoid borrow issues
-                let (pm_agent, default_branch) = {
+                // Auto-select PM agent from status
+                let pm_agent = {
                     let store = app.data_store.borrow();
-                    if let Some(status) = store.get_project_status(&a_tag) {
-                        (status.pm_agent().cloned(), status.default_branch().map(String::from))
-                    } else {
-                        (None, None)
-                    }
+                    store.get_project_status(&a_tag)
+                        .and_then(|status| status.pm_agent().cloned())
                 };
                 if let Some(pm) = pm_agent {
                     app.set_selected_agent(Some(pm));
-                }
-                if app.selected_branch.is_none() {
-                    app.selected_branch = default_branch;
                 }
 
                 app.modal_state = ModalState::None;

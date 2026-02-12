@@ -296,21 +296,19 @@ pub static COMMANDS: &[Command] = &[
         available: |_| true,
         execute: |app| {
             if app.view == View::Chat {
-                // Chat view: new conversation with same project/agent/branch
+                // Chat view: new conversation with same project/agent
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
                     let project_name = project.name.clone();
                     let inherited_agent = app.selected_agent().cloned();
-                    let inherited_branch = app.selected_branch.clone();
 
                     app.save_chat_draft();
                     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
 
                     app.set_selected_agent(inherited_agent);
-                    app.selected_branch = inherited_branch;
                     app.chat_editor_mut().clear();
-                    app.set_warning_status("New conversation (same project, agent, and branch)");
+                    app.set_warning_status("New conversation (same project and agent)");
                 }
             } else {
                 // Home view: use the existing new_conversation_current_project function
@@ -440,15 +438,6 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::Chat && !app.available_agents().is_empty(),
         execute: |app| {
             app.open_agent_selector();
-        },
-    },
-    Command {
-        key: '%',
-        label: "Select branch",
-        section: "Input",
-        available: |app| app.view == View::Chat,
-        execute: |app| {
-            app.open_branch_selector();
         },
     },
     Command {
@@ -734,21 +723,14 @@ fn new_conversation_current_project(app: &mut App) {
     if let Some((a_tag, name, project)) = project_info {
         app.selected_project = Some(project);
 
-        // Auto-select PM agent and default branch from status
-        // Extract values before making mutable calls to avoid borrow issues
-        let (pm_agent, default_branch) = {
+        // Auto-select PM agent from status
+        let pm_agent = {
             let store = app.data_store.borrow();
-            if let Some(status) = store.get_project_status(&a_tag) {
-                (status.pm_agent().cloned(), status.default_branch().map(String::from))
-            } else {
-                (None, None)
-            }
+            store.get_project_status(&a_tag)
+                .and_then(|status| status.pm_agent().cloned())
         };
         if let Some(pm) = pm_agent {
             app.set_selected_agent(Some(pm));
-        }
-        if app.selected_branch.is_none() {
-            app.selected_branch = default_branch;
         }
 
         let tab_idx = app.open_draft_tab(&a_tag, &name);
@@ -1166,7 +1148,7 @@ fn copy_conversation_id(app: &mut App) {
 }
 
 /// Helper function to extract shared logic for creating contextual drafts (reference/fork).
-/// Opens a new draft tab with the same agent, branch, and project as the source conversation,
+/// Opens a new draft tab with the same agent and project as the source conversation,
 /// and adds a text attachment with the provided context message.
 /// Returns the source thread ID for use in status messages.
 fn open_contextual_draft(
@@ -1176,7 +1158,7 @@ fn open_contextual_draft(
     error_message: &str,
 ) -> Option<String> {
     // Get required context from current state
-    let (source_thread_id, project_a_tag, project_name, agent, branch) = {
+    let (source_thread_id, project_a_tag, project_name, agent) = {
         let thread = match app.selected_thread() {
             Some(t) => t,
             None => {
@@ -1196,18 +1178,16 @@ fn open_contextual_draft(
             project.a_tag(),
             project.name.clone(),
             app.selected_agent().cloned(),
-            app.selected_branch.clone(),
         )
     };
 
-    // Create new draft tab with same project/agent/branch
+    // Create new draft tab with same project/agent
     app.save_chat_draft();
     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
     app.switch_to_tab(tab_idx);
 
-    // Restore agent and branch from source conversation
+    // Restore agent from source conversation
     app.set_selected_agent(agent.clone());
-    app.selected_branch = branch;
 
     // Add context as a text attachment
     app.chat_editor_mut().add_text_attachment(context_message);
@@ -1227,7 +1207,7 @@ fn open_contextual_draft(
 
 /// Create a new conversation referencing the current one with a "context" tag.
 /// The new conversation:
-/// 1. Has the same agent, branch, and project as the current one
+/// 1. Has the same agent and project as the current one
 /// 2. Is pre-filled with a message instructing the agent to inspect the source conversation
 /// 3. Includes a "context" tag pointing to the source conversation's event ID
 ///    (NOTE: "context" is used instead of "q" because "q" is reserved for delegation/child links)
@@ -1270,7 +1250,7 @@ fn reference_conversation(app: &mut App) {
 
 /// Fork a conversation from a selected message.
 /// Creates a new conversation with:
-/// 1. Same agent, branch, and project as current conversation
+/// 1. Same agent and project as current conversation
 /// 2. A "fork" tag with both conversation ID and selected message ID
 /// 3. Pre-filled message instructing agent to use conversation_get with sinceId parameter
 fn fork_conversation(app: &mut App) {

@@ -130,7 +130,6 @@ pub struct ChatDraft {
     #[serde(default)]
     pub image_attachments: Vec<DraftImageAttachment>,
     pub selected_agent_pubkey: Option<String>,
-    pub selected_branch: Option<String>,
     pub last_modified: u64,
 
     /// Reference to a source conversation that this draft is created from
@@ -387,14 +386,13 @@ impl NamedDraftStorage {
 }
 
 impl ChatDraft {
-    /// A draft is considered empty only if it has no text, no attachments, no agent/branch selection,
+    /// A draft is considered empty only if it has no text, no attachments, no agent selection,
     /// AND no reference conversation. This ensures all state is persisted even if user hasn't typed anything yet.
     pub fn is_empty(&self) -> bool {
         self.text.trim().is_empty()
             && self.attachments.is_empty()
             && self.image_attachments.is_empty()
             && self.selected_agent_pubkey.is_none()
-            && self.selected_branch.is_none()
             && self.reference_conversation_id.is_none()
             && self.fork_message_id.is_none()
     }
@@ -423,7 +421,6 @@ impl ChatDraft {
             attachments: Vec::new(),
             image_attachments: Vec::new(),
             selected_agent_pubkey: None,
-            selected_branch: None,
             last_modified: now_secs(),
             reference_conversation_id: None,
             fork_message_id: None,
@@ -1268,7 +1265,6 @@ mod tests {
             attachments: vec![],
             image_attachments: vec![],
             selected_agent_pubkey: agent_pubkey.map(|s| s.to_string()),
-            selected_branch: Some("main".to_string()),
             last_modified: 1234567890,
             reference_conversation_id: None,
             fork_message_id: None,
@@ -1296,7 +1292,6 @@ mod tests {
 
         // Verify agent is preserved
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-pubkey-abc".to_string()));
-        assert_eq!(loaded.selected_branch, Some("main".to_string()));
         assert_eq!(loaded.text, "Hello world");
     }
 
@@ -1427,7 +1422,6 @@ mod tests {
         let loaded = storage.load("clear-test").expect("Should find draft");
         assert!(loaded.text.is_empty(), "Text should be cleared");
         assert_eq!(loaded.selected_agent_pubkey, Some("my-agent".to_string()), "Agent should be preserved");
-        assert_eq!(loaded.selected_branch, Some("main".to_string()), "Branch should be preserved");
         assert_eq!(loaded.message_sequence, 1, "Sequence should be incremented");
     }
 

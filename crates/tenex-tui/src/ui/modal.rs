@@ -1814,9 +1814,6 @@ pub enum ModalState {
     AgentSelector {
         selector: SelectorState,
     },
-    BranchSelector {
-        selector: SelectorState,
-    },
     ProjectsModal {
         selector: SelectorState,
         /// If true, selecting a project navigates to chat view to create a new thread

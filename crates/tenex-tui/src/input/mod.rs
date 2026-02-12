@@ -55,7 +55,6 @@ pub(crate) fn handle_key(
             app.modal_state,
             ModalState::CommandPalette(_)
                 | ModalState::AgentSelector { .. }
-                | ModalState::BranchSelector { .. }
                 | ModalState::ProjectsModal { .. }
                 | ModalState::CreateAgent(_)
                 | ModalState::CreateProject(_)

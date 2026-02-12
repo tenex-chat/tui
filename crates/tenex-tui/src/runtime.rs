@@ -351,9 +351,6 @@ fn handle_core_events(app: &mut App, events: Vec<CoreEvent>) {
                             app.set_selected_agent(Some(pm.clone()));
                         }
                     }
-                    if app.selected_branch.is_none() {
-                        app.selected_branch = status.default_branch().map(String::from);
-                    }
                 }
             }
             CoreEvent::PendingBackendApproval(pending) => {

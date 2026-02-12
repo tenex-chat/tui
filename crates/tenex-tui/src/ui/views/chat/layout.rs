@@ -176,11 +176,6 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         render_agent_selector(f, app, area);
     }
 
-    // Render branch selector popup if showing
-    if matches!(app.modal_state, ModalState::BranchSelector { .. }) {
-        render_branch_selector(f, app, area);
-    }
-
     // Render attachment modal if showing
     if app.is_attachment_modal_open() {
         render_attachment_modal(f, app, area);
@@ -532,84 +527,6 @@ fn render_agent_selector(f: &mut Frame, app: &mut App, area: Rect) {
     let hints = Paragraph::new("↑↓ navigate · enter select · esc cancel")
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
-}
-
-fn render_branch_selector(f: &mut Frame, app: &mut App, area: Rect) {
-    use crate::ui::components::visible_items_in_content_area;
-
-    let branches = app.filtered_branches();
-    let all_branches = app.available_branches();
-
-    // Clamp selector index to valid range when list size changes
-    let item_count = branches.len();
-    if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
-        selector.clamp_index(item_count);
-    }
-
-    // Calculate dynamic height based on content
-    // +7 accounts for: header (2) + search (2) + vertical padding (3)
-    let display_item_count = item_count.max(1);
-    let content_height = (display_item_count as u16 + 7).min(20);
-    let height_percent = (content_height as f32 / area.height as f32).min(0.6);
-
-    let selector_index = app.branch_selector_index();
-    let selector_filter = app.branch_selector_filter().to_string();
-
-    let items: Vec<ModalItem> = if branches.is_empty() {
-        let msg = if all_branches.is_empty() {
-            "No branches available"
-        } else {
-            "No matching branches"
-        };
-        vec![ModalItem::new(msg)]
-    } else {
-        branches
-            .iter()
-            .enumerate()
-            .map(|(i, branch)| ModalItem::new(branch).selected(i == selector_index))
-            .collect()
-    };
-
-    // Use render_frame to get the content area, then render items manually with scroll adjustment
-    let (popup_area, content_area) = Modal::new("Select Branch")
-        .size(ModalSize {
-            max_width: 55,
-            height_percent,
-        })
-        .search(&selector_filter, "Search branches...")
-        .render_frame(f, area);
-
-    // Calculate visible items from actual content area, then adjust scroll
-    let visible_items = visible_items_in_content_area(content_area);
-    if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
-        selector.adjust_scroll(visible_items.max(1));
-    }
-    let selector_scroll = app.branch_selector_scroll();
-    render_modal_items_with_scroll(f, content_area, &items, selector_scroll);
-
-    let hints_area = Rect::new(
-        popup_area.x + 2,
-        popup_area.y + popup_area.height.saturating_sub(2),
-        popup_area.width.saturating_sub(4),
-        1,
-    );
-    let hints = Paragraph::new("↑↓ navigate · enter select · esc cancel")
-        .style(Style::default().fg(theme::TEXT_MUTED));
-    f.render_widget(hints, hints_area);
-
-    // Render ask modal overlay if open
-    if let Some(modal_state) = app.ask_modal_state() {
-        use crate::ui::views::render_ask_modal;
-
-        // Create centered modal area (90% width, 85% height)
-        let modal_width = (area.width * 90) / 100;
-        let modal_height = (area.height * 85) / 100;
-        let modal_x = area.x + (area.width.saturating_sub(modal_width)) / 2;
-        let modal_y = area.y + (area.height.saturating_sub(modal_height)) / 2;
-        let modal_area = Rect::new(modal_x, modal_y, modal_width, modal_height);
-
-        render_ask_modal(f, modal_state, modal_area);
-    }
 }
 
 /// Render the chat actions modal (Ctrl+T /)

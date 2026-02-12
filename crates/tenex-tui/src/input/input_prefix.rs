@@ -23,9 +23,6 @@ pub enum PrefixTrigger {
     NudgeSelector,
     /// `#` - Open project selector modal
     ProjectSelector,
-    // Future prefix triggers can be added here:
-    // HashtagSearch,   // (consider alternative character)
-    // BranchSelector,  // `%` - Open branch selector
 }
 
 impl PrefixTrigger {
@@ -38,8 +35,6 @@ impl PrefixTrigger {
             '@' => Some(PrefixTrigger::AgentSelector),
             '/' => Some(PrefixTrigger::NudgeSelector),
             '#' => Some(PrefixTrigger::ProjectSelector),
-            // Add new prefix mappings here:
-            // '%' => Some(PrefixTrigger::BranchSelector),
             _ => None,
         }
     }
@@ -84,7 +79,5 @@ fn execute_prefix_trigger(app: &mut App, trigger: PrefixTrigger) {
         PrefixTrigger::ProjectSelector => {
             app.open_projects_selector_for_switch();
         }
-        // Handle future triggers here:
-        // PrefixTrigger::BranchSelector => app.open_branch_selector(),
     }
 }
