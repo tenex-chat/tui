@@ -75,12 +75,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle branch selector when open
-    if matches!(app.modal_state, ModalState::BranchSelector { .. }) {
-        selectors::handle_branch_selector_key(app, key)?;
-        return Ok(true);
-    }
-
     // Handle projects modal when open (for new thread or switching projects)
     if matches!(app.modal_state, ModalState::ProjectsModal { .. }) {
         selectors::handle_projects_modal_key(app, key)?;

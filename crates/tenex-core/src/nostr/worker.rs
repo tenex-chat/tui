@@ -218,7 +218,6 @@ pub enum NostrCommand {
         title: String,
         content: String,
         agent_pubkey: Option<String>,
-        branch: Option<String>,
         nudge_ids: Vec<String>,
         /// Optional reference to another conversation (adds "context" tag for referencing source conversations)
         reference_conversation_id: Option<String>,
@@ -233,7 +232,6 @@ pub enum NostrCommand {
         content: String,
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
-        branch: Option<String>,
         nudge_ids: Vec<String>,
         /// Pubkey of the ask event author (for p-tagging when replying to ask events)
         ask_author_pubkey: Option<String>,
@@ -451,9 +449,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, fork_message_id, response_tx } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, nudge_ids, reference_conversation_id, fork_message_id, response_tx } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, branch, nudge_ids, reference_conversation_id, fork_message_id)) {
+                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, nudge_ids, reference_conversation_id, fork_message_id)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -464,9 +462,9 @@ impl NostrWorker {
                             }
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey, response_tx } => {
+                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, ask_author_pubkey, response_tx } => {
                         tlog!("SEND", "Worker received PublishMessage command");
-                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, branch, nudge_ids, ask_author_pubkey)) {
+                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, ask_author_pubkey)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -966,7 +964,6 @@ impl NostrWorker {
         title: String,
         content: String,
         agent_pubkey: Option<String>,
-        branch: Option<String>,
         nudge_ids: Vec<String>,
         reference_conversation_id: Option<String>,
         fork_message_id: Option<String>,
@@ -996,14 +993,6 @@ impl NostrWorker {
             if let Ok(pk) = PublicKey::parse(&agent_pk) {
                 event = event.tag(Tag::public_key(pk));
             }
-        }
-
-        // Branch tag
-        if let Some(br) = branch {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
-                vec![br],
-            ));
         }
 
         // Nudge tags
@@ -1068,7 +1057,6 @@ impl NostrWorker {
         content: String,
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
-        branch: Option<String>,
         nudge_ids: Vec<String>,
         ask_author_pubkey: Option<String>,
     ) -> Result<String> {
@@ -1114,13 +1102,6 @@ impl NostrWorker {
             }
         }
 
-        // Branch tag
-        if let Some(br) = branch {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("branch")),
-                vec![br],
-            ));
-        }
 
         // Nudge tags
         for nudge_id in nudge_ids {

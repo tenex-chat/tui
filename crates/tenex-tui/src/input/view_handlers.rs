@@ -639,21 +639,14 @@ fn new_conversation_current_project(app: &mut App) {
     if let Some((a_tag, name, project)) = project_info {
         app.selected_project = Some(project);
 
-        // Auto-select PM agent and default branch from status
-        // Extract values before making mutable calls to avoid borrow issues
-        let (pm_agent, default_branch) = {
+        // Auto-select PM agent from status
+        let pm_agent = {
             let store = app.data_store.borrow();
-            if let Some(status) = store.get_project_status(&a_tag) {
-                (status.pm_agent().cloned(), status.default_branch().map(String::from))
-            } else {
-                (None, None)
-            }
+            store.get_project_status(&a_tag)
+                .and_then(|status| status.pm_agent().cloned())
         };
         if let Some(pm) = pm_agent {
             app.set_selected_agent(Some(pm));
-        }
-        if app.selected_branch.is_none() {
-            app.selected_branch = default_branch;
         }
 
         let tab_idx = app.open_draft_tab(&a_tag, &name);
@@ -1096,21 +1089,19 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                 return Ok(true);
             }
             HotkeyId::NewConversation => {
-                // New conversation with same project/agent/branch
+                // New conversation with same project/agent
                 if let Some(ref project) = app.selected_project {
                     let project_a_tag = project.a_tag();
                     let project_name = project.name.clone();
                     let inherited_agent = app.selected_agent().cloned();
-                    let inherited_branch = app.selected_branch.clone();
 
                     app.save_chat_draft();
                     let tab_idx = app.open_draft_tab(&project_a_tag, &project_name);
                     app.switch_to_tab(tab_idx);
 
                     app.set_selected_agent(inherited_agent);
-                    app.selected_branch = inherited_branch;
                     app.chat_editor_mut().clear();
-                    app.set_warning_status("New conversation (same project, agent, and branch)");
+                    app.set_warning_status("New conversation (same project and agent)");
                 }
                 return Ok(true);
             }
@@ -1120,10 +1111,6 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
             }
             HotkeyId::ShowHideArchived => {
                 app.toggle_show_archived();
-                return Ok(true);
-            }
-            HotkeyId::SelectBranchAlt => {
-                app.open_branch_selector();
                 return Ok(true);
             }
             HotkeyId::GoToHome => {

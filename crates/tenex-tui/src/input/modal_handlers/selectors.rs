@@ -25,25 +25,6 @@ pub(super) fn handle_agent_selector_key(app: &mut App, key: KeyEvent) -> Result<
     Ok(())
 }
 
-pub(super) fn handle_branch_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    let branches = app.filtered_branches();
-    let item_count = branches.len();
-
-    if let ModalState::BranchSelector { ref mut selector } = app.modal_state {
-        match handle_selector_key(selector, key, item_count, |idx| branches.get(idx).cloned()) {
-            SelectorAction::Selected(branch) => {
-                app.selected_branch = Some(branch);
-                app.modal_state = ModalState::None;
-            }
-            SelectorAction::Cancelled => {
-                app.modal_state = ModalState::None;
-            }
-            SelectorAction::Continue => {}
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let (online_projects, offline_projects) = app.filtered_projects();
     let all_projects: Vec<_> = online_projects
@@ -67,26 +48,20 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
             SelectorAction::Selected(project) => {
                 let a_tag = project.a_tag();
                 let needs_agent = for_new_thread || app.selected_agent().is_none();
-                let needs_branch = app.selected_branch.is_none();
                 app.selected_project = Some(project);
 
-                // Auto-select PM agent and default branch from status
+                // Auto-select PM agent from status
                 // Extract values before making mutable calls to avoid borrow issues
-                let (pm_agent, default_branch) = {
+                let pm_agent = {
                     let store = app.data_store.borrow();
                     if let Some(status) = store.get_project_status(&a_tag) {
-                        let pm = if needs_agent { status.pm_agent().cloned() } else { None };
-                        let branch = if needs_branch { status.default_branch().map(String::from) } else { None };
-                        (pm, branch)
+                        if needs_agent { status.pm_agent().cloned() } else { None }
                     } else {
-                        (None, None)
+                        None
                     }
                 };
                 if let Some(pm) = pm_agent {
                     app.set_selected_agent(Some(pm));
-                }
-                if let Some(branch) = default_branch {
-                    app.selected_branch = Some(branch);
                 }
 
                 app.modal_state = ModalState::None;

@@ -492,7 +492,6 @@ mod tests {
             attachments: vec![],
             image_attachments: vec![],
             selected_agent_pubkey: None,
-            selected_branch: None,
             last_modified: 1234567890,
             reference_conversation_id: None,
             fork_message_id: None,
@@ -508,7 +507,6 @@ mod tests {
 
         let mut draft = create_test_chat_draft("test-conv-123", "Hello, this is a test draft");
         draft.selected_agent_pubkey = Some("agent-pubkey".to_string());
-        draft.selected_branch = Some("main".to_string());
 
         // Save the draft
         let save_result = service.save_chat_draft(draft.clone());
@@ -521,7 +519,6 @@ mod tests {
         assert_eq!(loaded.conversation_id, "test-conv-123");
         assert_eq!(loaded.text, "Hello, this is a test draft");
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-pubkey".to_string()));
-        assert_eq!(loaded.selected_branch, Some("main".to_string()));
     }
 
     #[test]
@@ -599,7 +596,6 @@ mod tests {
             attachments: vec![],
             image_attachments: vec![],
             selected_agent_pubkey: None,
-            selected_branch: None,
             last_modified: 1234567890,
             reference_conversation_id: None,
             fork_message_id: None,
@@ -737,7 +733,6 @@ mod tests {
         // Create a draft with content and selections
         let mut draft = create_test_chat_draft("clear-test", "Some content to clear");
         draft.selected_agent_pubkey = Some("agent-123".to_string());
-        draft.selected_branch = Some("feature-branch".to_string());
         draft.reference_conversation_id = Some("ref-conv".to_string());
         draft.fork_message_id = Some("fork-msg".to_string());
 
@@ -752,9 +747,8 @@ mod tests {
         assert!(loaded.attachments.is_empty()); // Attachments cleared
         assert!(loaded.reference_conversation_id.is_none()); // Reference cleared
         assert!(loaded.fork_message_id.is_none()); // Fork message cleared
-        // Note: The underlying implementation preserves agent/branch but clears text
+        // Note: The underlying implementation preserves agent but clears text
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-123".to_string())); // Preserved
-        assert_eq!(loaded.selected_branch, Some("feature-branch".to_string())); // Preserved
     }
 
     #[test]
@@ -793,7 +787,6 @@ mod tests {
         draft.reference_conversation_id = Some("source-conv-123".to_string());
         draft.fork_message_id = Some("fork-msg-456".to_string());
         draft.selected_agent_pubkey = Some("agent-xyz".to_string());
-        draft.selected_branch = Some("feature-fork".to_string());
 
         // Save the draft
         service.save_chat_draft(draft).unwrap();
@@ -804,7 +797,6 @@ mod tests {
         assert_eq!(loaded.reference_conversation_id, Some("source-conv-123".to_string()));
         assert_eq!(loaded.fork_message_id, Some("fork-msg-456".to_string()));
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
-        assert_eq!(loaded.selected_branch, Some("feature-fork".to_string()));
 
         // Update the draft text and save again (simulating user typing)
         let mut updated_draft = loaded;
@@ -817,6 +809,5 @@ mod tests {
         assert_eq!(reloaded.reference_conversation_id, Some("source-conv-123".to_string()));
         assert_eq!(reloaded.fork_message_id, Some("fork-msg-456".to_string()));
         assert_eq!(reloaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
-        assert_eq!(reloaded.selected_branch, Some("feature-fork".to_string()));
     }
 }
