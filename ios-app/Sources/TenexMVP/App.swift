@@ -892,47 +892,45 @@ struct MainTabView: View {
             #if os(iOS)
             .toolbar {
                 ToolbarItemGroup(placement: .bottomBar) {
-                    GlassEffectContainer {
-                        Button {
-                            selectedTab = 0
-                        } label: {
-                            Label("Conversations", systemImage: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
-                        }
-                        .adaptiveGlassButtonStyle()
-                        Button {
-                            selectedTab = 1
-                        } label: {
-                            Label("Feed", systemImage: "dot.radiowaves.left.and.right")
-                        }
-                        .adaptiveGlassButtonStyle()
-                        Button {
-                            selectedTab = 2
-                        } label: {
-                            Label("Projects", systemImage: selectedTab == 2 ? "folder.fill" : "folder")
-                        }
-                        .adaptiveGlassButtonStyle()
-                        Button {
-                            selectedTab = 3
-                        } label: {
-                            Label("Inbox", systemImage: selectedTab == 3 ? "tray.fill" : "tray")
-                        }
-                        .adaptiveGlassButtonStyle()
-
-                        Spacer()
-
-                        Button {
-                            showSearch = true
-                        } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                        .adaptiveGlassButtonStyle()
-                        Button {
-                            showNewConversation = true
-                        } label: {
-                            Label("New", systemImage: "plus")
-                        }
-                        .adaptiveGlassButtonStyle()
+                    Button {
+                        selectedTab = 0
+                    } label: {
+                        Label("Conversations", systemImage: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
                     }
+                    .adaptiveGlassButtonStyle()
+                    Button {
+                        selectedTab = 1
+                    } label: {
+                        Label("Feed", systemImage: "dot.radiowaves.left.and.right")
+                    }
+                    .adaptiveGlassButtonStyle()
+                    Button {
+                        selectedTab = 2
+                    } label: {
+                        Label("Projects", systemImage: selectedTab == 2 ? "folder.fill" : "folder")
+                    }
+                    .adaptiveGlassButtonStyle()
+                    Button {
+                        selectedTab = 3
+                    } label: {
+                        Label("Inbox", systemImage: selectedTab == 3 ? "tray.fill" : "tray")
+                    }
+                    .adaptiveGlassButtonStyle()
+
+                    Spacer()
+
+                    Button {
+                        showSearch = true
+                    } label: {
+                        Label("Search", systemImage: "magnifyingglass")
+                    }
+                    .adaptiveGlassButtonStyle()
+                    Button {
+                        showNewConversation = true
+                    } label: {
+                        Label("New", systemImage: "plus")
+                    }
+                    .adaptiveGlassButtonStyle()
                 }
             }
             #else
