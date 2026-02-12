@@ -618,6 +618,26 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Generate audio notification for a message
+    /// Note: This is a blocking call that makes network requests to OpenRouter and ElevenLabs
+    func generateAudioNotification(
+        agentPubkey: String,
+        conversationTitle: String,
+        messageText: String
+    ) throws -> AudioNotificationInfo {
+        try profiler.measureFFI("generateAudioNotification") {
+            do {
+                return try core.generateAudioNotification(
+                    agentPubkey: agentPubkey,
+                    conversationTitle: conversationTitle,
+                    messageText: messageText
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Misc
 
     /// Get version string.
