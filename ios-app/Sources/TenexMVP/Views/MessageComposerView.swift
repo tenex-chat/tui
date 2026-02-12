@@ -312,6 +312,7 @@ struct MessageComposerView: View {
             .sheet(isPresented: $showProjectSelector) {
                 ProjectSelectorSheet(
                     projects: coreManager.projects,
+                    projectOnlineStatus: coreManager.projectOnlineStatus,
                     selectedProject: $selectedProject,
                     onDone: {
                         projectChanged()

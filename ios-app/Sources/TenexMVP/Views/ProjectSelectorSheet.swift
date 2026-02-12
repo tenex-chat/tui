@@ -9,6 +9,9 @@ struct ProjectSelectorSheet: View {
     /// Available projects to choose from
     let projects: [ProjectInfo]
 
+    /// Online status per project ID
+    var projectOnlineStatus: [String: Bool] = [:]
+
     /// Currently selected project (binding for single-select)
     @Binding var selectedProject: ProjectInfo?
 
@@ -58,6 +61,7 @@ struct ProjectSelectorSheet: View {
                         ForEach(filteredProjects, id: \.id) { project in
                             ProjectRowSelectView(
                                 project: project,
+                                isOnline: projectOnlineStatus[project.id] ?? false,
                                 isSelected: localSelectedProject?.id == project.id
                             ) {
                                 selectProject(project)
@@ -161,6 +165,7 @@ struct ProjectSelectorSheet: View {
 
 struct ProjectRowSelectView: View {
     let project: ProjectInfo
+    var isOnline: Bool = false
     let isSelected: Bool
     let onTap: () -> Void
 
@@ -172,9 +177,17 @@ struct ProjectRowSelectView: View {
 
                 // Project info
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(project.title)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
+                    HStack(spacing: 6) {
+                        Text(project.title)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+
+                        if isOnline {
+                            Circle()
+                                .fill(.green)
+                                .frame(width: 8, height: 8)
+                        }
+                    }
 
                     if let description = project.description, !description.isEmpty {
                         Text(description)

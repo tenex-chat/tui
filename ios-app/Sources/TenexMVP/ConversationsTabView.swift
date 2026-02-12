@@ -318,6 +318,7 @@ struct ConversationsTabView: View {
             .sheet(isPresented: $showFilterSheet) {
                 ProjectFilterSheet(
                     projects: coreManager.projects,
+                    projectOnlineStatus: coreManager.projectOnlineStatus,
                     selectedProjectIds: $selectedProjectIds
                 )
             }
@@ -371,6 +372,7 @@ struct ConversationsTabView: View {
             .sheet(isPresented: $showProjectPickerForNewConv) {
                 ProjectSelectorSheet(
                     projects: coreManager.projects,
+                    projectOnlineStatus: coreManager.projectOnlineStatus,
                     selectedProject: $projectForNewConversation,
                     onDone: {
                         if projectForNewConversation != nil {
@@ -589,6 +591,7 @@ private struct ConversationRowFull: View {
 
 private struct ProjectFilterSheet: View {
     let projects: [ProjectInfo]
+    let projectOnlineStatus: [String: Bool]
     @Binding var selectedProjectIds: Set<String>
     @Environment(\.dismiss) private var dismiss
 
@@ -633,6 +636,12 @@ private struct ProjectFilterSheet: View {
                             Text(project.title)
                                 .foregroundStyle(.primary)
                                 .lineLimit(1)
+
+                            if projectOnlineStatus[project.id] == true {
+                                Circle()
+                                    .fill(.green)
+                                    .frame(width: 8, height: 8)
+                            }
 
                             Spacer()
 

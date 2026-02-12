@@ -46,12 +46,20 @@ impl GeneralSetting {
 pub enum AiSetting {
     ElevenLabsApiKey,
     OpenRouterApiKey,
+    AudioEnabled,
+    SelectedVoiceIds,
+    OpenRouterModel,
+    AudioPrompt,
 }
 
 impl AiSetting {
     pub const ALL: &'static [AiSetting] = &[
         AiSetting::ElevenLabsApiKey,
         AiSetting::OpenRouterApiKey,
+        AiSetting::AudioEnabled,
+        AiSetting::SelectedVoiceIds,
+        AiSetting::OpenRouterModel,
+        AiSetting::AudioPrompt,
     ];
 
     pub const fn count() -> usize {
@@ -63,7 +71,7 @@ impl AiSetting {
     }
 }
 
-/// State for AI settings - only API keys for now
+/// State for AI settings
 #[derive(Debug, Clone)]
 pub struct AiSettingsState {
     /// Input for ElevenLabs API key (always masked in UI)
@@ -74,11 +82,23 @@ pub struct AiSettingsState {
     pub elevenlabs_key_exists: bool,
     /// Cached: whether OpenRouter key exists in secure storage (checked once on modal open)
     pub openrouter_key_exists: bool,
+    /// Cached: whether audio notifications are enabled
+    pub audio_enabled: bool,
+    /// Input for comma-separated voice IDs
+    pub voice_ids_input: String,
+    /// Input for OpenRouter model ID
+    pub openrouter_model_input: String,
+    /// Input for audio prompt
+    pub audio_prompt_input: String,
 }
 
 impl AiSettingsState {
-    pub fn new() -> Self {
-        // Check secure storage once when creating state (modal opens)
+    pub fn new(
+        audio_enabled: bool,
+        voice_ids: &[String],
+        openrouter_model: Option<&str>,
+        audio_prompt: &str,
+    ) -> Self {
         let elevenlabs_key_exists =
             tenex_core::SecureStorage::exists(tenex_core::SecureKey::ElevenLabsApiKey);
         let openrouter_key_exists =
@@ -89,15 +109,11 @@ impl AiSettingsState {
             openrouter_key_input: String::new(),
             elevenlabs_key_exists,
             openrouter_key_exists,
+            audio_enabled,
+            voice_ids_input: voice_ids.join(", "),
+            openrouter_model_input: openrouter_model.unwrap_or("").to_string(),
+            audio_prompt_input: audio_prompt.to_string(),
         }
-    }
-
-    pub fn has_elevenlabs_key(&self) -> bool {
-        !self.elevenlabs_key_input.is_empty()
-    }
-
-    pub fn has_openrouter_key(&self) -> bool {
-        !self.openrouter_key_input.is_empty()
     }
 }
 
@@ -119,14 +135,20 @@ pub struct AppSettingsState {
 }
 
 impl AppSettingsState {
-    pub fn new(current_jaeger_endpoint: &str) -> Self {
+    pub fn new(current_jaeger_endpoint: &str, preferences: &tenex_core::models::PreferencesStorage) -> Self {
+        let ai_settings = preferences.ai_audio_settings();
         Self {
             current_tab: SettingsTab::General,
             general_index: 0,
             ai_index: 0,
             editing: false,
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
-            ai: AiSettingsState::new(),
+            ai: AiSettingsState::new(
+                ai_settings.enabled,
+                &ai_settings.selected_voice_ids,
+                ai_settings.openrouter_model.as_deref(),
+                &ai_settings.audio_prompt,
+            ),
         }
     }
 
@@ -177,6 +199,27 @@ impl AppSettingsState {
         self.editing
             && self.current_tab == SettingsTab::AI
             && self.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey)
+    }
+
+    /// Check if voice IDs is being edited
+    pub fn editing_voice_ids(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::SelectedVoiceIds)
+    }
+
+    /// Check if OpenRouter model is being edited
+    pub fn editing_openrouter_model(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::OpenRouterModel)
+    }
+
+    /// Check if audio prompt is being edited
+    pub fn editing_audio_prompt(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::AudioPrompt)
     }
 
     pub fn move_up(&mut self) {

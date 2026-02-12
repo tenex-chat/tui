@@ -33,8 +33,12 @@ pub static COMMANDS: &[Command] = &[
         section: "System",
         available: |_| true,
         execute: |app| {
-            let current_endpoint = app.preferences.borrow().jaeger_endpoint().to_string();
-            app.modal_state = ModalState::AppSettings(modal::AppSettingsState::new(&current_endpoint));
+            let settings_state = {
+                let prefs = app.preferences.borrow();
+                let current_endpoint = prefs.jaeger_endpoint().to_string();
+                modal::AppSettingsState::new(&current_endpoint, &prefs)
+            };
+            app.modal_state = ModalState::AppSettings(settings_state);
         },
     },
     Command {

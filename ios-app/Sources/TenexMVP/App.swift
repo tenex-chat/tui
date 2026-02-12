@@ -395,6 +395,18 @@ class TenexCoreManager: ObservableObject {
                 }
             }
         }
+
+        // Re-sort projects: online first, then alphabetical
+        if !Task.isCancelled {
+            await MainActor.run {
+                self.projects.sort { a, b in
+                    let aOnline = self.projectOnlineStatus[a.id] ?? false
+                    let bOnline = self.projectOnlineStatus[b.id] ?? false
+                    if aOnline != bOnline { return aOnline }
+                    return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+                }
+            }
+        }
     }
 
     /// Signal a general update - used when the change type is not specific.
@@ -411,15 +423,25 @@ class TenexCoreManager: ObservableObject {
         conversationTitle: String,
         messageText: String
     ) async {
+        // Load API keys from iOS Keychain
+        let elevenlabsResult = await KeychainService.shared.loadElevenLabsApiKeyAsync()
+        let openrouterResult = await KeychainService.shared.loadOpenRouterApiKeyAsync()
+
+        guard case .success(let elevenlabsKey) = elevenlabsResult,
+              case .success(let openrouterKey) = openrouterResult else {
+            print("[TenexCoreManager] Audio notification skipped: API keys not configured in keychain")
+            return
+        }
+
         do {
-            // Generate audio in background (blocking FFI call)
             let notification = try await safeCore.generateAudioNotification(
                 agentPubkey: agentPubkey,
                 conversationTitle: conversationTitle,
-                messageText: messageText
+                messageText: messageText,
+                elevenlabsApiKey: elevenlabsKey,
+                openrouterApiKey: openrouterKey
             )
 
-            // Play the generated audio using the shared audio player
             await MainActor.run {
                 do {
                     try AudioNotificationPlayer.shared.play(path: notification.audioFilePath)
@@ -428,7 +450,6 @@ class TenexCoreManager: ObservableObject {
                 }
             }
         } catch {
-            // Silently skip if audio generation fails (disabled, missing config, etc.)
             print("[TenexCoreManager] Audio notification skipped: \(error)")
         }
     }
@@ -860,134 +881,42 @@ struct MainTabView: View {
     @Binding var userNpub: String
     @Binding var isLoggedIn: Bool
     @EnvironmentObject var coreManager: TenexCoreManager
-    @Environment(\.accessibilityReduceTransparency) var reduceTransparency
 
     @State private var selectedTab = 0
-    @State private var showNewConversation = false
-    @State private var showSearch = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                switch selectedTab {
-                case 0:
+        TabView(selection: $selectedTab) {
+            Tab("Conversations", systemImage: "bubble.left.and.bubble.right", value: 0) {
+                NavigationStack {
                     ConversationsTabView()
-                case 1:
+                        .environmentObject(coreManager)
+                }
+            }
+            Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
+                NavigationStack {
                     FeedView()
-                case 2:
-                    ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
-                case 3:
-                    InboxView()
-                default:
-                    ConversationsTabView()
+                        .environmentObject(coreManager)
                 }
             }
-            .environmentObject(coreManager)
-            .overlay(alignment: .topTrailing) {
-                // Audio player indicator overlay - shows when audio is playing
-                AudioPlayingIndicator()
-                    .padding(.top, 50)
-                    .padding(.trailing, 8)
-            }
-            #if os(iOS)
-            .toolbar {
-                ToolbarItemGroup(placement: .bottomBar) {
-                    Button {
-                        selectedTab = 0
-                    } label: {
-                        Label("Conversations", systemImage: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
-                    }
-                    .adaptiveGlassButtonStyle()
-                    Button {
-                        selectedTab = 1
-                    } label: {
-                        Label("Feed", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                    .adaptiveGlassButtonStyle()
-                    Button {
-                        selectedTab = 2
-                    } label: {
-                        Label("Projects", systemImage: selectedTab == 2 ? "folder.fill" : "folder")
-                    }
-                    .adaptiveGlassButtonStyle()
-                    Button {
-                        selectedTab = 3
-                    } label: {
-                        Label("Inbox", systemImage: selectedTab == 3 ? "tray.fill" : "tray")
-                    }
-                    .adaptiveGlassButtonStyle()
-
-                    Spacer()
-
-                    Button {
-                        showSearch = true
-                    } label: {
-                        Label("Search", systemImage: "magnifyingglass")
-                    }
-                    .adaptiveGlassButtonStyle()
-                    Button {
-                        showNewConversation = true
-                    } label: {
-                        Label("New", systemImage: "plus")
-                    }
-                    .adaptiveGlassButtonStyle()
-                }
-            }
-            #else
-            .toolbar {
-                ToolbarItemGroup(placement: .automatic) {
-                    Button {
-                        selectedTab = 0
-                    } label: {
-                        Image(systemName: selectedTab == 0 ? "bubble.left.and.bubble.right.fill" : "bubble.left.and.bubble.right")
-                    }
-                    Button {
-                        selectedTab = 1
-                    } label: {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                    }
-                    Button {
-                        selectedTab = 2
-                    } label: {
-                        Image(systemName: selectedTab == 2 ? "folder.fill" : "folder")
-                    }
-                    Button {
-                        selectedTab = 3
-                    } label: {
-                        Image(systemName: selectedTab == 3 ? "tray.fill" : "tray")
-                    }
-
-                    Spacer()
-
-                    Button {
-                        showSearch = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    Button {
-                        showNewConversation = true
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-            }
-            #endif
-        }
-        .sheet(isPresented: $showSearch) {
-            NavigationStack {
-                SearchView()
+            Tab("Projects", systemImage: "folder", value: 2) {
+                ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                     .environmentObject(coreManager)
             }
-        }
-        .sheet(isPresented: $showNewConversation) {
-            NavigationStack {
-                MessageComposerView(
-                    project: nil,
-                    conversationId: nil,
-                    conversationTitle: nil
-                )
-                .environmentObject(coreManager)
+            Tab("Inbox", systemImage: "tray", value: 3) {
+                InboxView()
+                    .environmentObject(coreManager)
             }
+            Tab("Search", systemImage: "magnifyingglass", value: 10) {
+                NavigationStack {
+                    SearchView()
+                        .environmentObject(coreManager)
+                }
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            AudioPlayingIndicator()
+                .padding(.top, 50)
+                .padding(.trailing, 8)
         }
     }
 }
