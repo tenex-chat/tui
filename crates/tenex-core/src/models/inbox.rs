@@ -13,6 +13,8 @@ pub struct InboxItem {
     pub id: String,
     pub event_type: InboxEventType,
     pub title: String,
+    /// Full message content (not truncated)
+    pub content: String,
     pub project_a_tag: String,
     pub author_pubkey: String,
     pub created_at: u64,

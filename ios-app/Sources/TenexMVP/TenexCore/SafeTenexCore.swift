@@ -528,28 +528,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Set ElevenLabs API key (stored in OS secure storage)
-    func setElevenLabsApiKey(key: String?) throws {
-        try profiler.measureFFI("setElevenlabsApiKey") {
-            do {
-                try core.setElevenlabsApiKey(key: key)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    /// Set OpenRouter API key (stored in OS secure storage)
-    func setOpenRouterApiKey(key: String?) throws {
-        try profiler.measureFFI("setOpenrouterApiKey") {
-            do {
-                try core.setOpenrouterApiKey(key: key)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
     /// Set whether audio notifications are enabled
     func setAudioNotificationsEnabled(enabled: Bool) throws {
         try profiler.measureFFI("setAudioNotificationsEnabled") {
@@ -596,10 +574,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Fetch available voices from ElevenLabs
     /// Note: This is a blocking call that makes a network request
-    func fetchElevenLabsVoices() throws -> [VoiceInfo] {
+    func fetchElevenLabsVoices(apiKey: String) throws -> [VoiceInfo] {
         try profiler.measureFFI("fetchElevenlabsVoices") {
             do {
-                return try core.fetchElevenlabsVoices()
+                return try core.fetchElevenlabsVoices(apiKey: apiKey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -608,10 +586,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
 
     /// Fetch available models from OpenRouter
     /// Note: This is a blocking call that makes a network request
-    func fetchOpenRouterModels() throws -> [ModelInfo] {
+    func fetchOpenRouterModels(apiKey: String) throws -> [ModelInfo] {
         try profiler.measureFFI("fetchOpenrouterModels") {
             do {
-                return try core.fetchOpenrouterModels()
+                return try core.fetchOpenrouterModels(apiKey: apiKey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -623,15 +601,41 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func generateAudioNotification(
         agentPubkey: String,
         conversationTitle: String,
-        messageText: String
+        messageText: String,
+        elevenlabsApiKey: String,
+        openrouterApiKey: String
     ) throws -> AudioNotificationInfo {
         try profiler.measureFFI("generateAudioNotification") {
             do {
                 return try core.generateAudioNotification(
                     agentPubkey: agentPubkey,
                     conversationTitle: conversationTitle,
-                    messageText: messageText
+                    messageText: messageText,
+                    elevenlabsApiKey: elevenlabsApiKey,
+                    openrouterApiKey: openrouterApiKey
                 )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// List all saved audio notifications
+    func listAudioNotifications() throws -> [AudioNotificationInfo] {
+        try profiler.measureFFI("listAudioNotifications") {
+            do {
+                return try core.listAudioNotifications()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Delete a saved audio notification by ID
+    func deleteAudioNotification(id: String) throws {
+        try profiler.measureFFI("deleteAudioNotification") {
+            do {
+                try core.deleteAudioNotification(id: id)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

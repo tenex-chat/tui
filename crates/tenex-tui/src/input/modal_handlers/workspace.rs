@@ -214,9 +214,14 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                     }
                     ui::modal::SettingsTab::AI => {
-                        // Restore AI settings inputs if needed
+                        // Restore AI settings inputs from preferences
                         state.ai.elevenlabs_key_input.clear();
                         state.ai.openrouter_key_input.clear();
+                        let prefs = app.preferences.borrow();
+                        let ai = prefs.ai_audio_settings();
+                        state.ai.voice_ids_input = ai.selected_voice_ids.join(", ");
+                        state.ai.openrouter_model_input = ai.openrouter_model.clone().unwrap_or_default();
+                        state.ai.audio_prompt_input = ai.audio_prompt.clone();
                     }
                 }
                 app.modal_state = ModalState::AppSettings(state);
@@ -269,7 +274,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
                                 let key = state.ai.elevenlabs_key_input.clone();
                                 if !key.is_empty() {
-                                    // Save the API key to secure storage
                                     match tenex_core::SecureStorage::set(
                                         tenex_core::SecureKey::ElevenLabsApiKey,
                                         &key
@@ -289,7 +293,6 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                                 let key = state.ai.openrouter_key_input.clone();
                                 if !key.is_empty() {
-                                    // Save the API key to secure storage
                                     match tenex_core::SecureStorage::set(
                                         tenex_core::SecureKey::OpenRouterApiKey,
                                         &key
@@ -306,15 +309,75 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                     }
                                 }
                             }
-                            None => {
+                            Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                                let ids: Vec<String> = state.ai.voice_ids_input
+                                    .split(',')
+                                    .map(|s| s.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                let result = app.preferences.borrow_mut().set_selected_voice_ids(ids);
+                                match result {
+                                    Ok(()) => {
+                                        app.set_warning_status("Voice IDs saved");
+                                        state.stop_editing();
+                                    }
+                                    Err(e) => {
+                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                    }
+                                }
+                            }
+                            Some(ui::modal::AiSetting::OpenRouterModel) => {
+                                let model = state.ai.openrouter_model_input.trim().to_string();
+                                let model_opt = if model.is_empty() { None } else { Some(model) };
+                                let result = app.preferences.borrow_mut().set_openrouter_model(model_opt);
+                                match result {
+                                    Ok(()) => {
+                                        app.set_warning_status("OpenRouter model saved");
+                                        state.stop_editing();
+                                    }
+                                    Err(e) => {
+                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                    }
+                                }
+                            }
+                            Some(ui::modal::AiSetting::AudioPrompt) => {
+                                let prompt = state.ai.audio_prompt_input.clone();
+                                let result = app.preferences.borrow_mut().set_audio_prompt(prompt);
+                                match result {
+                                    Ok(()) => {
+                                        app.set_warning_status("Audio prompt saved");
+                                        state.stop_editing();
+                                    }
+                                    Err(e) => {
+                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                    }
+                                }
+                            }
+                            Some(ui::modal::AiSetting::AudioEnabled) | None => {
                                 state.stop_editing();
                             }
                         }
                     }
                 }
             } else {
-                // Start editing the currently selected setting
-                state.start_editing();
+                // AudioEnabled: toggle immediately instead of entering edit mode
+                if state.current_tab == ui::modal::SettingsTab::AI
+                    && state.selected_ai_setting() == Some(ui::modal::AiSetting::AudioEnabled)
+                {
+                    let result = app.preferences.borrow_mut().toggle_audio_notifications();
+                    match result {
+                        Ok(new_state) => {
+                            state.ai.audio_enabled = new_state;
+                            let label = if new_state { "enabled" } else { "disabled" };
+                            app.set_warning_status(&format!("Audio notifications {}", label));
+                        }
+                        Err(e) => {
+                            app.set_warning_status(&format!("Failed to toggle: {}", e));
+                        }
+                    }
+                } else {
+                    state.start_editing();
+                }
             }
         }
         KeyCode::Char(c) if state.editing => {
@@ -336,7 +399,16 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                             state.ai.openrouter_key_input.push(c);
                         }
-                        None => {}
+                        Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                            state.ai.voice_ids_input.push(c);
+                        }
+                        Some(ui::modal::AiSetting::OpenRouterModel) => {
+                            state.ai.openrouter_model_input.push(c);
+                        }
+                        Some(ui::modal::AiSetting::AudioPrompt) => {
+                            state.ai.audio_prompt_input.push(c);
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -360,7 +432,16 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                             state.ai.openrouter_key_input.pop();
                         }
-                        None => {}
+                        Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                            state.ai.voice_ids_input.pop();
+                        }
+                        Some(ui::modal::AiSetting::OpenRouterModel) => {
+                            state.ai.openrouter_model_input.pop();
+                        }
+                        Some(ui::modal::AiSetting::AudioPrompt) => {
+                            state.ai.audio_prompt_input.pop();
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -372,7 +453,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
             state.move_down();
         }
         KeyCode::Delete if !state.editing => {
-            // Delete/clear API keys when not editing
+            // Delete/clear settings when not editing
             if state.current_tab == ui::modal::SettingsTab::AI {
                 match state.selected_ai_setting() {
                     Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
@@ -409,7 +490,31 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             app.set_warning_status("No OpenRouter API key to delete");
                         }
                     }
-                    None => {}
+                    Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                        let result = app.preferences.borrow_mut().set_selected_voice_ids(vec![]);
+                        match result {
+                            Ok(()) => {
+                                state.ai.voice_ids_input.clear();
+                                app.set_warning_status("Voice IDs cleared");
+                            }
+                            Err(e) => {
+                                app.set_warning_status(&format!("Failed to clear: {}", e));
+                            }
+                        }
+                    }
+                    Some(ui::modal::AiSetting::OpenRouterModel) => {
+                        let result = app.preferences.borrow_mut().set_openrouter_model(None);
+                        match result {
+                            Ok(()) => {
+                                state.ai.openrouter_model_input.clear();
+                                app.set_warning_status("OpenRouter model cleared");
+                            }
+                            Err(e) => {
+                                app.set_warning_status(&format!("Failed to clear: {}", e));
+                            }
+                        }
+                    }
+                    _ => {}
                 }
             }
         }

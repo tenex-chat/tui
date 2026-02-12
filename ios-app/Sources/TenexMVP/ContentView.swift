@@ -195,9 +195,19 @@ struct ProjectListView: View {
     @Binding var selectedProject: ProjectInfo?
     @EnvironmentObject var coreManager: TenexCoreManager
 
+    /// Projects sorted with online first, then alphabetical
+    private var sortedProjects: [ProjectInfo] {
+        projects.sorted { a, b in
+            let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
+            let bOnline = coreManager.projectOnlineStatus[b.id] ?? false
+            if aOnline != bOnline { return aOnline }
+            return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+        }
+    }
+
     var body: some View {
         List {
-            ForEach(projects, id: \.id) { project in
+            ForEach(sortedProjects, id: \.id) { project in
                 NavigationLink(value: project) {
                     ProjectRowView(project: project)
                         .environmentObject(coreManager)

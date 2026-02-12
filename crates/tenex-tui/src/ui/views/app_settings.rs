@@ -43,7 +43,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     match state.current_tab {
         SettingsTab::General => render_general_tab(f, app, content_area, state),
         SettingsTab::AI => render_ai_tab(f, content_area, state),
-    }
+    };
 
     // Hints at bottom
     render_hints(f, popup_area, state);
@@ -143,28 +143,16 @@ fn render_general_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsS
     f.render_widget(desc, desc_area);
 }
 
-/// Render AI tab content - API Keys only (other settings not yet implemented)
+/// Render AI tab content
 fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     let mut y_offset = area.y;
 
     // Section header: API Keys
-    let header_area = Rect::new(area.x, y_offset, area.width, 1);
-    let header = Paragraph::new(Line::from(vec![Span::styled(
-        "API Keys",
-        Style::default()
-            .fg(theme::ACCENT_WARNING)
-            .add_modifier(Modifier::ITALIC),
-    )]));
-    f.render_widget(header, header_area);
+    render_section_header(f, area.x, y_offset, area.width, "API Keys");
     y_offset += 2;
 
-    // Use cached key existence from state instead of checking storage every frame
-    let elevenlabs_key_exists = state.ai.elevenlabs_key_exists;
-    let openrouter_key_exists = state.ai.openrouter_key_exists;
-
     // 1. ElevenLabs API Key
-    let is_elevenlabs_selected = state.current_tab == SettingsTab::AI
-        && state.selected_ai_setting() == Some(AiSetting::ElevenLabsApiKey);
+    let is_elevenlabs_selected = state.selected_ai_setting() == Some(AiSetting::ElevenLabsApiKey);
     render_api_key_row(
         f,
         area.x,
@@ -175,13 +163,12 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         &state.ai.elevenlabs_key_input,
         is_elevenlabs_selected,
         state.editing_elevenlabs_key(),
-        elevenlabs_key_exists,
+        state.ai.elevenlabs_key_exists,
     );
     y_offset += 3;
 
     // 2. OpenRouter API Key
-    let is_openrouter_selected = state.current_tab == SettingsTab::AI
-        && state.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey);
+    let is_openrouter_selected = state.selected_ai_setting() == Some(AiSetting::OpenRouterApiKey);
     render_api_key_row(
         f,
         area.x,
@@ -192,8 +179,198 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         &state.ai.openrouter_key_input,
         is_openrouter_selected,
         state.editing_openrouter_key(),
-        openrouter_key_exists,
+        state.ai.openrouter_key_exists,
     );
+    y_offset += 3;
+
+    // Section header: Audio Notifications
+    render_section_header(f, area.x, y_offset, area.width, "Audio Notifications");
+    y_offset += 2;
+
+    // 3. Audio Enabled toggle
+    let is_audio_selected = state.selected_ai_setting() == Some(AiSetting::AudioEnabled);
+    render_toggle_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Audio Notifications:",
+        "Enable/disable AI audio notifications (Enter to toggle)",
+        state.ai.audio_enabled,
+        is_audio_selected,
+    );
+    y_offset += 3;
+
+    // 4. Selected Voice IDs
+    let is_voices_selected = state.selected_ai_setting() == Some(AiSetting::SelectedVoiceIds);
+    render_text_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Voice IDs:",
+        "Comma-separated ElevenLabs voice IDs for agent voices",
+        &state.ai.voice_ids_input,
+        is_voices_selected,
+        state.editing_voice_ids(),
+    );
+    y_offset += 3;
+
+    // 5. OpenRouter Model
+    let is_model_selected = state.selected_ai_setting() == Some(AiSetting::OpenRouterModel);
+    render_text_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "OpenRouter Model:",
+        "Model ID for text-to-speech prompt processing",
+        &state.ai.openrouter_model_input,
+        is_model_selected,
+        state.editing_openrouter_model(),
+    );
+    y_offset += 3;
+
+    // 6. Audio Prompt
+    let is_prompt_selected = state.selected_ai_setting() == Some(AiSetting::AudioPrompt);
+    render_text_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Audio Prompt:",
+        "System prompt for making text audio-friendly",
+        &state.ai.audio_prompt_input,
+        is_prompt_selected,
+        state.editing_audio_prompt(),
+    );
+}
+
+/// Render a section header
+fn render_section_header(f: &mut Frame, x: u16, y: u16, width: u16, title: &str) {
+    let header_area = Rect::new(x, y, width, 1);
+    let header = Paragraph::new(Line::from(vec![Span::styled(
+        title,
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC),
+    )]));
+    f.render_widget(header, header_area);
+}
+
+/// Render a toggle (ON/OFF) row
+fn render_toggle_row(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    description: &str,
+    enabled: bool,
+    is_selected: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    let border_char = if is_selected { "▌" } else { "│" };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
+
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    spans.push(Span::styled(format!(" {}", label), label_style));
+
+    let (toggle_text, toggle_color) = if enabled {
+        (" [ON]", theme::ACCENT_SUCCESS)
+    } else {
+        (" [OFF]", theme::TEXT_DIM)
+    };
+    spans.push(Span::styled(
+        toggle_text,
+        Style::default().fg(toggle_color).add_modifier(Modifier::BOLD),
+    ));
+
+    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
+    f.render_widget(row, row_area);
+
+    let desc_area = Rect::new(x + 2, y + 1, width.saturating_sub(2), 1);
+    let desc = Paragraph::new(description).style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(desc, desc_area);
+}
+
+/// Render a text setting row (non-secret, shows actual value)
+fn render_text_setting_row(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    description: &str,
+    value: &str,
+    is_selected: bool,
+    is_editing: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    let border_char = if is_selected { "▌" } else { "│" };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
+
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    spans.push(Span::styled(format!(" {}", label), label_style));
+
+    if is_editing {
+        spans.push(Span::styled(
+            format!(" {}_", value),
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::UNDERLINED),
+        ));
+    } else {
+        let display = if value.is_empty() {
+            "(not set)"
+        } else {
+            value
+        };
+        // Truncate long values for display
+        let max_len = width.saturating_sub(label.len() as u16 + 5) as usize;
+        let truncated = if display.len() > max_len && max_len > 3 {
+            format!("{}...", &display[..max_len - 3])
+        } else {
+            display.to_string()
+        };
+        spans.push(Span::styled(
+            format!(" {}", truncated),
+            Style::default().fg(theme::ACCENT_SPECIAL),
+        ));
+    }
+
+    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
+    f.render_widget(row, row_area);
+
+    let desc_area = Rect::new(x + 2, y + 1, width.saturating_sub(2), 1);
+    let desc = Paragraph::new(description).style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(desc, desc_area);
 }
 
 /// Helper to render an API key row with masked display (always masked, even during edit)
@@ -293,11 +470,19 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)),
         ];
 
-        // Show Delete hint on AI tab
+        // Show Delete hint on AI tab for clearable settings
         if state.current_tab == SettingsTab::AI {
-            hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-            hints.push(Span::styled("Del", Style::default().fg(theme::ACCENT_WARNING)));
-            hints.push(Span::styled(" clear key", Style::default().fg(theme::TEXT_MUTED)));
+            match state.selected_ai_setting() {
+                Some(AiSetting::ElevenLabsApiKey)
+                | Some(AiSetting::OpenRouterApiKey)
+                | Some(AiSetting::SelectedVoiceIds)
+                | Some(AiSetting::OpenRouterModel) => {
+                    hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
+                    hints.push(Span::styled("Del", Style::default().fg(theme::ACCENT_WARNING)));
+                    hints.push(Span::styled(" clear", Style::default().fg(theme::TEXT_MUTED)));
+                }
+                _ => {}
+            }
         }
 
         hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));

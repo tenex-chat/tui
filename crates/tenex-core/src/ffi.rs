@@ -307,7 +307,7 @@ fn inbox_item_to_info(store: &AppDataStore, item: &crate::models::InboxItem) -> 
     InboxItem {
         id: item.id.clone(),
         title: item.title.clone(),
-        content: item.title.clone(),
+        content: item.content.clone(),
         from_agent,
         author_pubkey: item.author_pubkey.clone(),
         event_type,
@@ -1312,52 +1312,12 @@ impl FfiPreferencesStorage {
     }
 
     // AI Audio Settings methods
-    fn set_elevenlabs_api_key(&mut self, key: Option<String>) -> Result<(), String> {
-        use crate::secure_storage::{SecureKey, SecureStorage};
-
-        match key {
-            Some(k) if !k.is_empty() => {
-                SecureStorage::set(SecureKey::ElevenLabsApiKey, &k)
-                    .map_err(|e| format!("Failed to store API key: {}", e))?;
-            }
-            _ => {
-                // Empty or None means delete
-                SecureStorage::delete(SecureKey::ElevenLabsApiKey)
-                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
-            }
-        }
-
-        // Save preferences (triggers resave without API keys)
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))?;
-        Ok(())
-    }
-
-    fn set_openrouter_api_key(&mut self, key: Option<String>) -> Result<(), String> {
-        use crate::secure_storage::{SecureKey, SecureStorage};
-
-        match key {
-            Some(k) if !k.is_empty() => {
-                SecureStorage::set(SecureKey::OpenRouterApiKey, &k)
-                    .map_err(|e| format!("Failed to store API key: {}", e))?;
-            }
-            _ => {
-                // Empty or None means delete
-                SecureStorage::delete(SecureKey::OpenRouterApiKey)
-                    .map_err(|e| format!("Failed to delete API key: {}", e))?;
-            }
-        }
-
-        // Save preferences (triggers resave without API keys)
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))?;
-        Ok(())
-    }
-
-    fn get_elevenlabs_api_key(&self) -> Option<String> {
+    pub fn get_elevenlabs_api_key(&self) -> Option<String> {
         use crate::secure_storage::{SecureKey, SecureStorage};
         SecureStorage::get(SecureKey::ElevenLabsApiKey).ok()
     }
 
-    fn get_openrouter_api_key(&self) -> Option<String> {
+    pub fn get_openrouter_api_key(&self) -> Option<String> {
         use crate::secure_storage::{SecureKey, SecureStorage};
         SecureStorage::get(SecureKey::OpenRouterApiKey).ok()
     }
@@ -3630,30 +3590,6 @@ impl TenexCore {
         })
     }
 
-    /// Set ElevenLabs API key (stored in OS secure storage)
-    pub fn set_elevenlabs_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
-
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_elevenlabs_api_key(key)
-            .map_err(|e| TenexError::Internal { message: e })?;
-        Ok(())
-    }
-
-    /// Set OpenRouter API key (stored in OS secure storage)
-    pub fn set_openrouter_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
-
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_openrouter_api_key(key)
-            .map_err(|e| TenexError::Internal { message: e })?;
-        Ok(())
-    }
-
     /// Set selected voice IDs
     pub fn set_selected_voice_ids(&self, voice_ids: Vec<String>) -> Result<(), TenexError> {
         let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
@@ -3704,18 +3640,9 @@ impl TenexCore {
 
     /// Fetch available voices from ElevenLabs
     /// Note: This is a blocking call that will wait for the async operation to complete
-    pub fn fetch_elevenlabs_voices(&self) -> Result<Vec<VoiceInfo>, TenexError> {
-        // Get API key from secure storage (not from settings struct)
-        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
-        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
-
-        let api_key = prefs_storage.get_elevenlabs_api_key()
-            .ok_or_else(|| TenexError::Internal {
-                message: "ElevenLabs API key not configured".to_string(),
-            })?;
-
+    /// The api_key parameter allows callers (e.g. iOS) to pass the key directly
+    /// rather than relying on the Rust keyring which doesn't work on iOS.
+    pub fn fetch_elevenlabs_voices(&self, api_key: String) -> Result<Vec<VoiceInfo>, TenexError> {
         let client = crate::ai::ElevenLabsClient::new(api_key);
 
         // Use shared Tokio runtime (not per-call creation)
@@ -3735,18 +3662,8 @@ impl TenexCore {
 
     /// Fetch available models from OpenRouter
     /// Note: This is a blocking call that will wait for the async operation to complete
-    pub fn fetch_openrouter_models(&self) -> Result<Vec<ModelInfo>, TenexError> {
-        // Get API key from secure storage (not from settings struct)
-        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
-        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
-
-        let api_key = prefs_storage.get_openrouter_api_key()
-            .ok_or_else(|| TenexError::Internal {
-                message: "OpenRouter API key not configured".to_string(),
-            })?;
-
+    /// The api_key parameter allows callers (e.g. iOS) to pass the key directly.
+    pub fn fetch_openrouter_models(&self, api_key: String) -> Result<Vec<ModelInfo>, TenexError> {
         let client = crate::ai::OpenRouterClient::new(api_key);
 
         // Use shared Tokio runtime (not per-call creation)
@@ -3766,11 +3683,14 @@ impl TenexCore {
 
     /// Generate audio notification for a message
     /// Note: This is a blocking call that will wait for the async operation to complete
+    /// API keys are passed directly so iOS can provide them from its native Keychain.
     pub fn generate_audio_notification(
         &self,
         agent_pubkey: String,
         conversation_title: String,
         message_text: String,
+        elevenlabs_api_key: String,
+        openrouter_api_key: String,
     ) -> Result<AudioNotificationInfo, TenexError> {
         let settings = self.get_ai_audio_settings()?;
 
@@ -3797,22 +3717,12 @@ impl TenexCore {
         let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
         let ai_settings = &prefs_storage.prefs.ai_audio_settings;
 
-        // Get API keys from secure storage
-        let elevenlabs_key = prefs_storage.get_elevenlabs_api_key()
-            .ok_or_else(|| TenexError::Internal {
-                message: "ElevenLabs API key not configured".to_string(),
-            })?;
-        let openrouter_key = prefs_storage.get_openrouter_api_key()
-            .ok_or_else(|| TenexError::Internal {
-                message: "OpenRouter API key not configured".to_string(),
-            })?;
-
         let notification = runtime.block_on(manager.generate_notification(
             &agent_pubkey,
             &conversation_title,
             &message_text,
-            &elevenlabs_key,
-            &openrouter_key,
+            &elevenlabs_api_key,
+            &openrouter_api_key,
             ai_settings,
         )).map_err(|e| TenexError::Internal {
             message: format!("Failed to generate audio notification: {}", e),
