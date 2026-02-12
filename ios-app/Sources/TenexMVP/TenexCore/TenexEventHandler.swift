@@ -31,6 +31,18 @@ final class TenexEventHandler: EventCallback {
             case .inboxUpsert(let item):
                 coreManager.applyInboxUpsert(item)
 
+                // Trigger audio notification for mentions (high priority = p-tag mention)
+                // Run in background to avoid blocking the event handler
+                if item.priority == "high" && item.status == "waiting" {
+                    Task {
+                        await coreManager.triggerAudioNotification(
+                            agentPubkey: item.authorPubkey,
+                            conversationTitle: item.title,
+                            messageText: item.content
+                        )
+                    }
+                }
+
             case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
                 coreManager.applyProjectStatusChanged(
                     projectId: projectId,
