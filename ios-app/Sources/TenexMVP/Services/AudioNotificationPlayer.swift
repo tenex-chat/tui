@@ -8,11 +8,18 @@ enum AudioPlaybackState: Equatable {
     case paused
 }
 
+/// A queued audio notification waiting to be played
+struct QueuedAudioItem: Identifiable {
+    let id = UUID()
+    let notification: AudioNotificationInfo
+    let conversationId: String?
+}
+
 /// Service for playing audio notifications using AVAudioPlayer
 /// Handles:
 /// - Playing MP3 files from the audio_notifications directory
 /// - Playback state management
-/// - Replay functionality
+/// - Audio queue (new notifications enqueue instead of interrupting)
 /// - Metadata tracking for Now Playing bar
 @MainActor
 final class AudioNotificationPlayer: NSObject, ObservableObject {
@@ -21,7 +28,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     /// Current playback state (observable for UI updates)
     @Published private(set) var playbackState: AudioPlaybackState = .idle
 
-    /// Metadata from the audio notification
+    /// Metadata from the currently playing audio notification
     @Published private(set) var currentAgentPubkey: String?
     @Published private(set) var currentConversationTitle: String?
     @Published private(set) var currentTextSnippet: String?
@@ -30,9 +37,17 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     /// Published progress (0.0 to 1.0), updated by timer for SwiftUI reactivity
     @Published private(set) var playbackProgress: Double = 0
 
+    /// Audio queue — upcoming notifications waiting to play
+    @Published private(set) var queue: [QueuedAudioItem] = []
+
     /// Whether audio is currently playing
     var isPlaying: Bool {
         playbackState == .playing
+    }
+
+    /// Whether there are items waiting in the queue
+    var hasQueue: Bool {
+        !queue.isEmpty
     }
 
     // MARK: - Private Properties
@@ -91,34 +106,64 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         progressTimer = nil
     }
 
+    // MARK: - Queue Management
+
+    /// Enqueue an audio notification. If nothing is playing, starts immediately.
+    /// If something is already playing, adds to the queue.
+    func enqueue(notification: AudioNotificationInfo, conversationId: String?) {
+        if playbackState == .idle {
+            do {
+                try playImmediate(notification: notification, conversationId: conversationId)
+            } catch {
+                print("[AudioNotificationPlayer] Failed to play: \(error)")
+                playNext()
+            }
+        } else {
+            queue.append(QueuedAudioItem(notification: notification, conversationId: conversationId))
+        }
+    }
+
+    /// Skip the current track and play the next queued item
+    func skipToNext() {
+        stopCurrentPlayback()
+        playNext()
+    }
+
+    /// Remove a specific item from the queue by ID
+    func removeFromQueue(id: UUID) {
+        queue.removeAll { $0.id == id }
+    }
+
+    /// Clear the entire queue (does not stop current playback)
+    func clearQueue() {
+        queue.removeAll()
+    }
+
     // MARK: - Playback Control
 
-    /// Play an audio notification with full metadata
-    func play(notification: AudioNotificationInfo, conversationId: String?) throws {
+    /// Play an audio notification immediately (internal — use enqueue() from outside)
+    private func playImmediate(notification: AudioNotificationInfo, conversationId: String?) throws {
         let fileURL = URL(fileURLWithPath: notification.audioFilePath)
-        try play(url: fileURL)
-        // Set metadata AFTER play(url:) succeeds — play(url:) calls stop() which clears metadata
+        try playURL(fileURL)
+        // Set metadata AFTER playURL succeeds — playURL calls stopCurrentPlayback() which clears metadata
         currentAgentPubkey = notification.agentPubkey
         currentConversationTitle = notification.conversationTitle
         currentTextSnippet = notification.massagedText
         currentConversationId = conversationId
     }
 
-    /// Play an audio file from the given path
+    /// Play an audio file from the given path (no queue, no metadata)
     func play(path: String) throws {
         let fileURL = URL(fileURLWithPath: path)
-        try play(url: fileURL)
+        try playURL(fileURL)
     }
 
-    /// Play an audio file from a URL
-    func play(url: URL) throws {
-        // Stop any current playback
-        stop()
+    /// Play an audio file from a URL (low-level)
+    private func playURL(_ url: URL) throws {
+        stopCurrentPlayback()
 
-        // Activate audio session only when we actually need to play
         activateAudioSession()
 
-        // Create and configure the audio player
         audioPlayer = try AVAudioPlayer(contentsOf: url)
         audioPlayer?.delegate = self
         audioPlayer?.prepareToPlay()
@@ -128,7 +173,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             throw AudioPlayerError.initializationFailed
         }
 
-        // Start playback
         if player.play() {
             currentFilePath = url
             playbackState = .playing
@@ -140,15 +184,38 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         }
     }
 
-    /// Stop the current playback
+    /// Stop all playback and clear the queue
     func stop() {
+        stopCurrentPlayback()
+        queue.removeAll()
+        deactivateAudioSession()
+    }
+
+    /// Stop only the current track (used internally for advancing queue)
+    private func stopCurrentPlayback() {
         stopProgressTimer()
         audioPlayer?.stop()
         audioPlayer = nil
         playbackState = .idle
         playbackProgress = 0
         clearMetadata()
-        deactivateAudioSession()
+    }
+
+    /// Play the next item in the queue, or go idle if empty
+    private func playNext() {
+        guard !queue.isEmpty else {
+            playbackState = .idle
+            deactivateAudioSession()
+            return
+        }
+
+        let next = queue.removeFirst()
+        do {
+            try playImmediate(notification: next.notification, conversationId: next.conversationId)
+        } catch {
+            print("[AudioNotificationPlayer] Failed to play queued item: \(error)")
+            playNext()
+        }
     }
 
     /// Pause the current playback
@@ -176,17 +243,9 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             resume()
         case .idle:
             if let path = currentFilePath {
-                try? play(url: path)
+                try? playURL(path)
             }
         }
-    }
-
-    /// Replay the last audio file
-    func replay() throws {
-        guard let path = currentFilePath else {
-            throw AudioPlayerError.noFileToReplay
-        }
-        try play(url: path)
     }
 
     /// Get the current playback time in seconds
@@ -215,23 +274,21 @@ extension AudioNotificationPlayer: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
             self.stopProgressTimer()
-            self.playbackState = .idle
             self.playbackProgress = 0
             self.clearMetadata()
-            self.deactivateAudioSession()
+            self.playNext()
         }
     }
 
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         Task { @MainActor in
             self.stopProgressTimer()
-            self.playbackState = .idle
             self.playbackProgress = 0
             self.clearMetadata()
-            self.deactivateAudioSession()
             if let error = error {
                 print("[AudioNotificationPlayer] Decode error: \(error)")
             }
+            self.playNext()
         }
     }
 }
