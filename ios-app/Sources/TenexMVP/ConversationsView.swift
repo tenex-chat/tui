@@ -4,7 +4,6 @@ struct ConversationsView: View {
     let project: ProjectInfo
     @EnvironmentObject var coreManager: TenexCoreManager
     @State private var selectedConversation: ConversationFullInfo?
-    @State private var showReports = false
     @State private var showNewConversation = false
     /// Hide scheduled conversations (synced with ConversationsTabView preference)
     @AppStorage("hideScheduled") private var hideScheduled = true
@@ -76,11 +75,6 @@ struct ConversationsView: View {
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button(action: { showReports = true }) {
-                    Label("Reports", systemImage: "doc.richtext")
-                }
-            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button(action: { showNewConversation = true }) {
                     Image(systemName: "plus")
@@ -112,17 +106,6 @@ struct ConversationsView: View {
                 }
             )
             .environmentObject(coreManager)
-        }
-        .sheet(isPresented: $showReports) {
-            NavigationStack {
-                ReportsView(project: project)
-                    .environmentObject(coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Done") { showReports = false }
-                        }
-                    }
-            }
         }
     }
 }
