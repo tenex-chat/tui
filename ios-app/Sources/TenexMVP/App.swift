@@ -153,13 +153,18 @@ class TenexCoreManager: ObservableObject {
 
     // MARK: - Event Callback Registration
 
+    /// Timestamp (Unix seconds) when the event callback was registered.
+    /// Used to filter out stale inbox items that arrived before this session started.
+    private(set) var sessionStartTimestamp: UInt64 = 0
+
     /// Register the event callback for push-based updates.
     /// Call this after successful login to enable real-time updates.
     func registerEventCallback() {
+        sessionStartTimestamp = UInt64(Date().timeIntervalSince1970)
         let handler = TenexEventHandler(coreManager: self)
         eventHandler = handler
         core.setEventCallback(callback: handler)
-        print("[TenexCoreManager] Event callback registered")
+        print("[TenexCoreManager] Event callback registered, sessionStart=\(sessionStartTimestamp)")
     }
 
     /// Unregister the event callback.
@@ -445,11 +450,7 @@ class TenexCoreManager: ObservableObject {
             )
 
             await MainActor.run {
-                do {
-                    try AudioNotificationPlayer.shared.play(notification: notification, conversationId: conversationId)
-                } catch {
-                    print("[TenexCoreManager] Failed to play audio notification: \(error)")
-                }
+                AudioNotificationPlayer.shared.enqueue(notification: notification, conversationId: conversationId)
             }
         } catch {
             print("[TenexCoreManager] Audio notification skipped: \(error)")
@@ -887,43 +888,92 @@ struct MainTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
     @State private var selectedTab = 0
+    @State private var previousTab = 0
+    @State private var showProjectPickerForNewConv = false
+    @State private var projectForNewConversation: ProjectInfo?
+    @State private var showNewConversation = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            Tab("Conversations", systemImage: "bubble.left.and.bubble.right", value: 0) {
+            Tab(value: 0) {
                 NavigationStack {
                     ConversationsTabView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "bubble.left.and.bubble.right")
             }
-            Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
+            Tab(value: 1) {
                 NavigationStack {
                     FeedView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "dot.radiowaves.left.and.right")
             }
-            Tab("Projects", systemImage: "folder", value: 2) {
+            Tab(value: 2) {
                 ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "folder")
             }
-            Tab("Inbox", systemImage: "tray", value: 3) {
+            Tab(value: 3) {
                 InboxView()
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "tray")
             }
-            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+            Tab(value: 4) {
                 ReportsTabView()
                     .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "doc.richtext")
             }
-            Tab("Search", systemImage: "magnifyingglass", value: 10) {
+            Tab(value: 10) {
                 NavigationStack {
                     SearchView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Image(systemName: "magnifyingglass")
+            }
+            Tab(value: 99) {
+                Color.clear
+            } label: {
+                Image(systemName: "plus")
+            }
+        }
+        .onChange(of: selectedTab) { _, newValue in
+            if newValue == 99 {
+                selectedTab = previousTab
+                showProjectPickerForNewConv = true
+            } else {
+                previousTab = newValue
+            }
+        }
+        .sheet(isPresented: $showProjectPickerForNewConv) {
+            ProjectSelectorSheet(
+                projects: coreManager.projects,
+                projectOnlineStatus: coreManager.projectOnlineStatus,
+                selectedProject: $projectForNewConversation,
+                onDone: {
+                    if projectForNewConversation != nil {
+                        showProjectPickerForNewConv = false
+                        showNewConversation = true
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showNewConversation) {
+            if let project = projectForNewConversation {
+                MessageComposerView(project: project)
+                    .environmentObject(coreManager)
             }
         }
     }
