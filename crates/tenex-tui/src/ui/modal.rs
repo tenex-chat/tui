@@ -10,15 +10,17 @@ use tenex_core::models::NamedDraft;
 pub enum SettingsTab {
     General,
     AI,
+    Appearance,
 }
 
 impl SettingsTab {
-    pub const ALL: &'static [SettingsTab] = &[SettingsTab::General, SettingsTab::AI];
+    pub const ALL: &'static [SettingsTab] = &[SettingsTab::General, SettingsTab::AI, SettingsTab::Appearance];
 
     pub fn label(&self) -> &'static str {
         match self {
             SettingsTab::General => "General",
             SettingsTab::AI => "AI",
+            SettingsTab::Appearance => "Appearance",
         }
     }
 }
@@ -67,6 +69,28 @@ impl AiSetting {
     }
 
     pub fn from_index(index: usize) -> Option<AiSetting> {
+        Self::ALL.get(index).copied()
+    }
+}
+
+/// Settings in the Appearance tab
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppearanceSetting {
+    TimeFilter,
+    HideScheduled,
+}
+
+impl AppearanceSetting {
+    pub const ALL: &'static [AppearanceSetting] = &[
+        AppearanceSetting::TimeFilter,
+        AppearanceSetting::HideScheduled,
+    ];
+
+    pub const fn count() -> usize {
+        Self::ALL.len()
+    }
+
+    pub fn from_index(index: usize) -> Option<AppearanceSetting> {
         Self::ALL.get(index).copied()
     }
 }
@@ -126,6 +150,8 @@ pub struct AppSettingsState {
     pub general_index: usize,
     /// Selected setting index in AI tab
     pub ai_index: usize,
+    /// Selected setting index in Appearance tab
+    pub appearance_index: usize,
     /// Whether a field is currently being edited
     pub editing: bool,
     /// The current value being edited for jaeger endpoint
@@ -141,6 +167,7 @@ impl AppSettingsState {
             current_tab: SettingsTab::General,
             general_index: 0,
             ai_index: 0,
+            appearance_index: 0,
             editing: false,
             jaeger_endpoint_input: current_jaeger_endpoint.to_string(),
             ai: AiSettingsState::new(
@@ -178,6 +205,11 @@ impl AppSettingsState {
     /// Get selected setting in AI tab
     pub fn selected_ai_setting(&self) -> Option<AiSetting> {
         AiSetting::from_index(self.ai_index)
+    }
+
+    /// Get selected setting in Appearance tab
+    pub fn selected_appearance_setting(&self) -> Option<AppearanceSetting> {
+        AppearanceSetting::from_index(self.appearance_index)
     }
 
     /// Check if jaeger endpoint is being edited
@@ -234,6 +266,11 @@ impl AppSettingsState {
                     self.ai_index -= 1;
                 }
             }
+            SettingsTab::Appearance => {
+                if self.appearance_index > 0 {
+                    self.appearance_index -= 1;
+                }
+            }
         }
     }
 
@@ -247,6 +284,11 @@ impl AppSettingsState {
             SettingsTab::AI => {
                 if self.ai_index + 1 < AiSetting::count() {
                     self.ai_index += 1;
+                }
+            }
+            SettingsTab::Appearance => {
+                if self.appearance_index + 1 < AppearanceSetting::count() {
+                    self.appearance_index += 1;
                 }
             }
         }
