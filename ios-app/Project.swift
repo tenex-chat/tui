@@ -21,7 +21,8 @@ let project = Project(
                 "CFBundleIconFile": "AppIcon",
                 "CFBundleIconName": "AppIcon",
                 "NSMicrophoneUsageDescription": "TENEX needs microphone access for voice dictation",
-                "NSSpeechRecognitionUsageDescription": "TENEX uses speech recognition for voice-to-text dictation"
+                "NSSpeechRecognitionUsageDescription": "TENEX uses speech recognition for voice-to-text dictation",
+                "UIBackgroundModes": ["audio"]
             ]),
             sources: [
                 "Sources/TenexMVP/**/*.swift",

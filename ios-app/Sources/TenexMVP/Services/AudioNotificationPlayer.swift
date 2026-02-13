@@ -40,19 +40,29 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
 
     private override init() {
         super.init()
-        configureAudioSession()
     }
 
     // MARK: - Audio Session Configuration
 
-    private func configureAudioSession() {
+    private func activateAudioSession() {
         #if os(iOS)
         do {
             let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .default)
+            try audioSession.setCategory(.playback, mode: .default, options: .duckOthers)
             try audioSession.setActive(true)
         } catch {
-            print("[AudioNotificationPlayer] Failed to configure audio session: \(error)")
+            print("[AudioNotificationPlayer] Failed to activate audio session: \(error)")
+        }
+        #endif
+    }
+
+    private func deactivateAudioSession() {
+        #if os(iOS)
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("[AudioNotificationPlayer] Failed to deactivate audio session: \(error)")
         }
         #endif
     }
@@ -74,12 +84,16 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         // Stop any current playback
         stop()
 
+        // Activate audio session only when we actually need to play
+        activateAudioSession()
+
         // Create and configure the audio player
         audioPlayer = try AVAudioPlayer(contentsOf: url)
         audioPlayer?.delegate = self
         audioPlayer?.prepareToPlay()
 
         guard let player = audioPlayer else {
+            deactivateAudioSession()
             throw AudioPlayerError.initializationFailed
         }
 
@@ -89,6 +103,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             currentFileName = url.deletingPathExtension().lastPathComponent
             playbackState = .playing
         } else {
+            deactivateAudioSession()
             throw AudioPlayerError.playbackFailed
         }
     }
@@ -98,6 +113,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         audioPlayer?.stop()
         audioPlayer = nil
         playbackState = .idle
+        deactivateAudioSession()
     }
 
     /// Pause the current playback
@@ -161,12 +177,14 @@ extension AudioNotificationPlayer: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
             self.playbackState = .idle
+            self.deactivateAudioSession()
         }
     }
 
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         Task { @MainActor in
             self.playbackState = .idle
+            self.deactivateAudioSession()
             if let error = error {
                 print("[AudioNotificationPlayer] Decode error: \(error)")
             }
