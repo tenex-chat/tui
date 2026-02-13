@@ -1,7 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::jaeger;
-use crate::ui::modal::GeneralSetting;
+use crate::ui::modal::{AppearanceSetting, GeneralSetting};
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -223,6 +223,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         state.ai.openrouter_model_input = ai.openrouter_model.clone().unwrap_or_default();
                         state.ai.audio_prompt_input = ai.audio_prompt.clone();
                     }
+                    ui::modal::SettingsTab::Appearance => {
+                        // Appearance settings are toggles/selects, no editing to restore
+                    }
                 }
                 app.modal_state = ModalState::AppSettings(state);
             } else {
@@ -358,12 +361,17 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             }
                         }
                     }
+                    ui::modal::SettingsTab::Appearance => {
+                        // Appearance settings don't use text editing - stop editing mode
+                        state.stop_editing();
+                    }
                 }
             } else {
-                // AudioEnabled: toggle immediately instead of entering edit mode
+                // Handle toggle/cycle settings that don't require edit mode
                 if state.current_tab == ui::modal::SettingsTab::AI
                     && state.selected_ai_setting() == Some(ui::modal::AiSetting::AudioEnabled)
                 {
+                    // AudioEnabled: toggle immediately instead of entering edit mode
                     let result = app.preferences.borrow_mut().toggle_audio_notifications();
                     match result {
                         Ok(new_state) => {
@@ -374,6 +382,20 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Err(e) => {
                             app.set_warning_status(&format!("Failed to toggle: {}", e));
                         }
+                    }
+                } else if state.current_tab == ui::modal::SettingsTab::Appearance {
+                    // Appearance tab settings are toggles/cycles - handle directly
+                    match state.selected_appearance_setting() {
+                        Some(AppearanceSetting::TimeFilter) => {
+                            app.cycle_time_filter();
+                            let label = app.home.time_filter.map(|tf| tf.label()).unwrap_or("All");
+                            app.set_warning_status(&format!("Time filter: {}", label));
+                        }
+                        Some(AppearanceSetting::HideScheduled) => {
+                            // toggle_hide_scheduled() sends its own notification
+                            app.toggle_hide_scheduled();
+                        }
+                        None => {}
                     }
                 } else {
                     state.start_editing();
@@ -411,6 +433,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         _ => {}
                     }
                 }
+                ui::modal::SettingsTab::Appearance => {
+                    // Appearance settings don't have text editing
+                }
             }
         }
         KeyCode::Backspace if state.editing => {
@@ -443,6 +468,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                         _ => {}
                     }
+                }
+                ui::modal::SettingsTab::Appearance => {
+                    // Appearance settings don't have text editing
                 }
             }
         }
