@@ -16,7 +16,7 @@ pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
     };
 
     // Get nudge count for navigation
-    let nudge_count = app.data_store.borrow().nudges.len();
+    let nudge_count = app.data_store.borrow().content.nudges.len();
 
     match key.code {
         KeyCode::Esc => {
@@ -42,7 +42,7 @@ pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
             // Copy selected nudge (pre-populate wizard with nudge data to create a new one)
             let nudge_id = get_selected_nudge_id(app, &state);
             if let Some(id) = nudge_id {
-                let nudge = app.data_store.borrow().nudges.get(&id).cloned();
+                let nudge = app.data_store.borrow().content.nudges.get(&id).cloned();
                 if let Some(nudge) = nudge {
                     app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
                 } else {
@@ -91,6 +91,7 @@ fn get_selected_nudge_id(app: &App, state: &ui::modal::NudgeListState) -> Option
     let filter_lower = state.filter.to_lowercase();
 
     let mut filtered: Vec<&tenex_core::models::Nudge> = data_store
+        .content
         .nudges
         .values()
         .filter(|n| {
@@ -468,7 +469,7 @@ pub(super) fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
             // The visible height in detail view is approximately 20 lines
             // (80% modal height minus ~10 lines for header, metadata, borders, hints)
             let visible_height = 20;
-            let nudge = app.data_store.borrow().nudges.get(&state.nudge_id).cloned();
+            let nudge = app.data_store.borrow().content.nudges.get(&state.nudge_id).cloned();
             let max_scroll = nudge
                 .map(|n| n.content.lines().count().saturating_sub(visible_height))
                 .unwrap_or(0);
@@ -479,7 +480,7 @@ pub(super) fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('e') => {
             // Copy this nudge (pre-populate wizard with nudge data to create a new one)
             // Note: Nostr events are immutable - we can't edit, only copy and create new
-            let nudge = app.data_store.borrow().nudges.get(&state.nudge_id).cloned();
+            let nudge = app.data_store.borrow().content.nudges.get(&state.nudge_id).cloned();
             if let Some(nudge) = nudge {
                 app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
             } else {

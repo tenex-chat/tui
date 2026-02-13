@@ -14,7 +14,7 @@ use ratatui::{
 /// Render the nudge delete confirmation dialog
 pub fn render_nudge_delete_confirm(f: &mut Frame, app: &App, area: Rect, state: &NudgeDeleteConfirmState) {
     let data_store = app.data_store.borrow();
-    let nudge = data_store.nudges.get(&state.nudge_id);
+    let nudge = data_store.content.nudges.get(&state.nudge_id);
 
     let nudge_title = nudge.map(|n| n.title.as_str()).unwrap_or("Unknown");
     let title = "Delete Nudge";
