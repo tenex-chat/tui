@@ -140,10 +140,16 @@ struct AISettingsView: View {
                     Section {
                         TextEditor(text: $audioPrompt)
                             .frame(minHeight: 100)
-                        Button("Save Prompt") {
-                            saveAudioPrompt()
+                        HStack {
+                            Button("Save Prompt") {
+                                saveAudioPrompt()
+                            }
+                            .disabled(audioPrompt.isEmpty)
+                            Spacer()
+                            Button("Reset Prompt", role: .destructive) {
+                                resetAudioPrompt()
+                            }
                         }
-                        .disabled(audioPrompt.isEmpty)
                     } header: {
                         Text("Audio Prompt")
                     } footer: {
@@ -434,6 +440,23 @@ struct AISettingsView: View {
         }
     }
 
+    private func resetAudioPrompt() {
+        Task {
+            let defaultPrompt = await coreManager.safeCore.getDefaultAudioPrompt()
+            do {
+                try await coreManager.safeCore.setAudioPrompt(prompt: defaultPrompt)
+                await MainActor.run {
+                    audioPrompt = defaultPrompt
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = "Failed to reset prompt: \(error.localizedDescription)"
+                    showError = true
+                }
+            }
+        }
+    }
+
     private func saveSelectedModel(previousModel: String?) {
         Task {
             do {
@@ -491,7 +514,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let voices = try await coreManager.safeCore.fetchElevenLabsVoices(apiKey: apiKey)
+                let voices = try await TenexDirect.fetchElevenLabsVoices(apiKey: apiKey)
                 await MainActor.run {
                     availableVoices = voices
                     isLoadingVoices = false
@@ -521,7 +544,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let models = try await coreManager.safeCore.fetchOpenRouterModels(apiKey: apiKey)
+                let models = try await TenexDirect.fetchOpenRouterModels(apiKey: apiKey)
                 await MainActor.run {
                     availableModels = models
                     isLoadingModels = false

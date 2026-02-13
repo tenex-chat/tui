@@ -630,26 +630,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func clearEventCallback() 
     
     /**
-     * Delete an audio notification by ID
-     */
-    func deleteAudioNotification(id: String) throws 
-    
-    /**
-     * Fetch available voices from ElevenLabs
-     * Note: This is a blocking call that will wait for the async operation to complete
-     * The api_key parameter allows callers (e.g. iOS) to pass the key directly
-     * rather than relying on the Rust keyring which doesn't work on iOS.
-     */
-    func fetchElevenlabsVoices(apiKey: String) throws  -> [VoiceInfo]
-    
-    /**
-     * Fetch available models from OpenRouter
-     * Note: This is a blocking call that will wait for the async operation to complete
-     * The api_key parameter allows callers (e.g. iOS) to pass the key directly.
-     */
-    func fetchOpenrouterModels(apiKey: String) throws  -> [ModelInfo]
-    
-    /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
      * API keys are passed directly so iOS can provide them from its native Keychain.
@@ -731,6 +711,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Returns None if not logged in.
      */
     func getCurrentUser()  -> UserInfo?
+    
+    /**
+     * Get the default audio prompt
+     */
+    func getDefaultAudioPrompt()  -> String
     
     /**
      * Get all descendant conversation IDs for a conversation (includes children, grandchildren, etc.)
@@ -879,11 +864,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Check if a thread is collapsed.
      */
     func isThreadCollapsed(threadId: String)  -> Bool
-    
-    /**
-     * List all audio notifications
-     */
-    func listAudioNotifications() throws  -> [AudioNotificationInfo]
     
     /**
      * Login with an nsec (Nostr secret key in bech32 format).
@@ -1201,43 +1181,6 @@ open func clearEventCallback()  {try! rustCall() {
 }
     
     /**
-     * Delete an audio notification by ID
-     */
-open func deleteAudioNotification(id: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_delete_audio_notification(self.uniffiClonePointer(),
-        FfiConverterString.lower(id),$0
-    )
-}
-}
-    
-    /**
-     * Fetch available voices from ElevenLabs
-     * Note: This is a blocking call that will wait for the async operation to complete
-     * The api_key parameter allows callers (e.g. iOS) to pass the key directly
-     * rather than relying on the Rust keyring which doesn't work on iOS.
-     */
-open func fetchElevenlabsVoices(apiKey: String)throws  -> [VoiceInfo]  {
-    return try  FfiConverterSequenceTypeVoiceInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_fetch_elevenlabs_voices(self.uniffiClonePointer(),
-        FfiConverterString.lower(apiKey),$0
-    )
-})
-}
-    
-    /**
-     * Fetch available models from OpenRouter
-     * Note: This is a blocking call that will wait for the async operation to complete
-     * The api_key parameter allows callers (e.g. iOS) to pass the key directly.
-     */
-open func fetchOpenrouterModels(apiKey: String)throws  -> [ModelInfo]  {
-    return try  FfiConverterSequenceTypeModelInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_fetch_openrouter_models(self.uniffiClonePointer(),
-        FfiConverterString.lower(apiKey),$0
-    )
-})
-}
-    
-    /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
      * API keys are passed directly so iOS can provide them from its native Keychain.
@@ -1386,6 +1329,16 @@ open func getConversationsByIds(conversationIds: [String]) -> [ConversationFullI
 open func getCurrentUser() -> UserInfo?  {
     return try!  FfiConverterOptionTypeUserInfo.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_get_current_user(self.uniffiClonePointer(),$0
+    )
+})
+}
+    
+    /**
+     * Get the default audio prompt
+     */
+open func getDefaultAudioPrompt() -> String  {
+    return try!  FfiConverterString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_get_default_audio_prompt(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -1645,16 +1598,6 @@ open func isThreadCollapsed(threadId: String) -> Bool  {
     return try!  FfiConverterBool.lift(try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_is_thread_collapsed(self.uniffiClonePointer(),
         FfiConverterString.lower(threadId),$0
-    )
-})
-}
-    
-    /**
-     * List all audio notifications
-     */
-open func listAudioNotifications()throws  -> [AudioNotificationInfo]  {
-    return try  FfiConverterSequenceTypeAudioNotificationInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_list_audio_notifications(self.uniffiClonePointer(),$0
     )
 })
 }
@@ -8239,6 +8182,38 @@ fileprivate struct FfiConverterSequenceTypeAskQuestionInfo: FfiConverterRustBuff
         return seq
     }
 }
+/**
+ * Delete an audio notification by ID (pure filesystem operation).
+ */
+public func deleteAudioNotification(id: String)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_func_delete_audio_notification(
+        FfiConverterString.lower(id),$0
+    )
+}
+}
+public func fetchElevenlabsVoices(apiKey: String)throws  -> [VoiceInfo]  {
+    return try  FfiConverterSequenceTypeVoiceInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_func_fetch_elevenlabs_voices(
+        FfiConverterString.lower(apiKey),$0
+    )
+})
+}
+public func fetchOpenrouterModels(apiKey: String)throws  -> [ModelInfo]  {
+    return try  FfiConverterSequenceTypeModelInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_func_fetch_openrouter_models(
+        FfiConverterString.lower(apiKey),$0
+    )
+})
+}
+/**
+ * List all audio notifications (pure filesystem read).
+ */
+public func listAudioNotifications()throws  -> [AudioNotificationInfo]  {
+    return try  FfiConverterSequenceTypeAudioNotificationInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_func_list_audio_notifications($0
+    )
+})
+}
 
 private enum InitializationResult {
     case ok
@@ -8254,6 +8229,18 @@ private let initializationResult: InitializationResult = {
     let scaffolding_contract_version = ffi_tenex_core_uniffi_contract_version()
     if bindings_contract_version != scaffolding_contract_version {
         return InitializationResult.contractVersionMismatch
+    }
+    if (uniffi_tenex_core_checksum_func_delete_audio_notification() != 4489) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_func_fetch_elevenlabs_voices() != 12887) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_func_fetch_openrouter_models() != 62190) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_func_list_audio_notifications() != 41129) {
+        return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_answer_ask() != 25528) {
         return InitializationResult.apiChecksumMismatch
@@ -8274,15 +8261,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_delete_audio_notification() != 959) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_fetch_elevenlabs_voices() != 1855) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_fetch_openrouter_models() != 4394) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_audio_notification() != 5454) {
@@ -8319,6 +8297,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_current_user() != 48890) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_get_default_audio_prompt() != 13237) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_descendant_conversation_ids() != 50389) {
@@ -8379,9 +8360,6 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_is_thread_collapsed() != 43840) {
-        return InitializationResult.apiChecksumMismatch
-    }
-    if (uniffi_tenex_core_checksum_method_tenexcore_list_audio_notifications() != 64639) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_login() != 8995) {

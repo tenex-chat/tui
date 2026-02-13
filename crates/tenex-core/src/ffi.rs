@@ -3652,6 +3652,11 @@ impl TenexCore {
         Ok(())
     }
 
+    /// Get the default audio prompt
+    pub fn get_default_audio_prompt(&self) -> String {
+        crate::models::project_draft::default_audio_prompt()
+    }
+
     /// Set audio prompt
     pub fn set_audio_prompt(&self, prompt: String) -> Result<(), TenexError> {
         let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
@@ -3674,49 +3679,6 @@ impl TenexCore {
         prefs_storage.set_audio_notifications_enabled(enabled)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
-    }
-
-    /// Fetch available voices from ElevenLabs
-    /// Note: This is a blocking call that will wait for the async operation to complete
-    /// The api_key parameter allows callers (e.g. iOS) to pass the key directly
-    /// rather than relying on the Rust keyring which doesn't work on iOS.
-    pub fn fetch_elevenlabs_voices(&self, api_key: String) -> Result<Vec<VoiceInfo>, TenexError> {
-        let client = crate::ai::ElevenLabsClient::new(api_key);
-
-        // Use shared Tokio runtime (not per-call creation)
-        let runtime = get_tokio_runtime();
-
-        let voices = runtime.block_on(client.get_voices()).map_err(|e| TenexError::Internal {
-            message: format!("Failed to fetch voices: {}", e),
-        })?;
-
-        Ok(voices.into_iter().map(|v| VoiceInfo {
-            voice_id: v.voice_id,
-            name: v.name,
-            category: v.category,
-            description: v.description,
-        }).collect())
-    }
-
-    /// Fetch available models from OpenRouter
-    /// Note: This is a blocking call that will wait for the async operation to complete
-    /// The api_key parameter allows callers (e.g. iOS) to pass the key directly.
-    pub fn fetch_openrouter_models(&self, api_key: String) -> Result<Vec<ModelInfo>, TenexError> {
-        let client = crate::ai::OpenRouterClient::new(api_key);
-
-        // Use shared Tokio runtime (not per-call creation)
-        let runtime = get_tokio_runtime();
-
-        let models = runtime.block_on(client.get_models()).map_err(|e| TenexError::Internal {
-            message: format!("Failed to fetch models: {}", e),
-        })?;
-
-        Ok(models.into_iter().map(|m| ModelInfo {
-            id: m.id,
-            name: m.name,
-            description: m.description,
-            context_length: m.context_length,
-        }).collect())
     }
 
     /// Generate audio notification for a message
@@ -3778,38 +3740,77 @@ impl TenexCore {
         })
     }
 
-    /// List all audio notifications
-    pub fn list_audio_notifications(&self) -> Result<Vec<AudioNotificationInfo>, TenexError> {
-        let data_dir = get_data_dir();
-        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+}
 
-        let notifications = manager.list_notifications().map_err(|e| TenexError::Internal {
-            message: format!("Failed to list audio notifications: {}", e),
-        })?;
+// Standalone FFI functions — no TenexCore instance needed, bypasses actor serialization.
 
-        Ok(notifications.into_iter().map(|n| AudioNotificationInfo {
-            id: n.id,
-            agent_pubkey: n.agent_pubkey,
-            conversation_title: n.conversation_title,
-            original_text: n.original_text,
-            massaged_text: n.massaged_text,
-            voice_id: n.voice_id,
-            audio_file_path: n.audio_file_path,
-            created_at: n.created_at,
-        }).collect())
-    }
+/// List all audio notifications (pure filesystem read).
+#[uniffi::export]
+pub fn list_audio_notifications() -> Result<Vec<AudioNotificationInfo>, TenexError> {
+    let data_dir = get_data_dir();
+    let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
 
-    /// Delete an audio notification by ID
-    pub fn delete_audio_notification(&self, id: String) -> Result<(), TenexError> {
-        let data_dir = get_data_dir();
-        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+    let notifications = manager.list_notifications().map_err(|e| TenexError::Internal {
+        message: format!("Failed to list audio notifications: {}", e),
+    })?;
 
-        manager.delete_notification(&id).map_err(|e| TenexError::Internal {
-            message: format!("Failed to delete audio notification: {}", e),
-        })?;
+    Ok(notifications.into_iter().map(|n| AudioNotificationInfo {
+        id: n.id,
+        agent_pubkey: n.agent_pubkey,
+        conversation_title: n.conversation_title,
+        original_text: n.original_text,
+        massaged_text: n.massaged_text,
+        voice_id: n.voice_id,
+        audio_file_path: n.audio_file_path,
+        created_at: n.created_at,
+    }).collect())
+}
 
-        Ok(())
-    }
+/// Delete an audio notification by ID (pure filesystem operation).
+#[uniffi::export]
+pub fn delete_audio_notification(id: String) -> Result<(), TenexError> {
+    let data_dir = get_data_dir();
+    let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+
+    manager.delete_notification(&id).map_err(|e| TenexError::Internal {
+        message: format!("Failed to delete audio notification: {}", e),
+    })?;
+
+    Ok(())
+}
+
+#[uniffi::export]
+pub fn fetch_elevenlabs_voices(api_key: String) -> Result<Vec<VoiceInfo>, TenexError> {
+    let client = crate::ai::ElevenLabsClient::new(api_key);
+    let runtime = get_tokio_runtime();
+
+    let voices = runtime.block_on(client.get_voices()).map_err(|e| TenexError::Internal {
+        message: format!("Failed to fetch voices: {}", e),
+    })?;
+
+    Ok(voices.into_iter().map(|v| VoiceInfo {
+        voice_id: v.voice_id,
+        name: v.name,
+        category: v.category,
+        description: v.description,
+    }).collect())
+}
+
+#[uniffi::export]
+pub fn fetch_openrouter_models(api_key: String) -> Result<Vec<ModelInfo>, TenexError> {
+    let client = crate::ai::OpenRouterClient::new(api_key);
+    let runtime = get_tokio_runtime();
+
+    let models = runtime.block_on(client.get_models()).map_err(|e| TenexError::Internal {
+        message: format!("Failed to fetch models: {}", e),
+    })?;
+
+    Ok(models.into_iter().map(|m| ModelInfo {
+        id: m.id,
+        name: m.name,
+        description: m.description,
+        context_length: m.context_length,
+    }).collect())
 }
 
 // Private implementation methods for TenexCore (not exposed via UniFFI)

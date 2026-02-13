@@ -539,6 +539,11 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Get the default audio prompt
+    func getDefaultAudioPrompt() -> String {
+        core.getDefaultAudioPrompt()
+    }
+
     /// Set audio prompt template
     func setAudioPrompt(prompt: String) throws {
         try profiler.measureFFI("setAudioPrompt") {
@@ -572,30 +577,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Fetch available voices from ElevenLabs
-    /// Note: This is a blocking call that makes a network request
-    func fetchElevenLabsVoices(apiKey: String) throws -> [VoiceInfo] {
-        try profiler.measureFFI("fetchElevenlabsVoices") {
-            do {
-                return try core.fetchElevenlabsVoices(apiKey: apiKey)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    /// Fetch available models from OpenRouter
-    /// Note: This is a blocking call that makes a network request
-    func fetchOpenRouterModels(apiKey: String) throws -> [ModelInfo] {
-        try profiler.measureFFI("fetchOpenrouterModels") {
-            do {
-                return try core.fetchOpenrouterModels(apiKey: apiKey)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
     /// Generate audio notification for a message
     /// Note: This is a blocking call that makes network requests to OpenRouter and ElevenLabs
     func generateAudioNotification(
@@ -620,27 +601,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// List all saved audio notifications
-    func listAudioNotifications() throws -> [AudioNotificationInfo] {
-        try profiler.measureFFI("listAudioNotifications") {
-            do {
-                return try core.listAudioNotifications()
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    /// Delete a saved audio notification by ID
-    func deleteAudioNotification(id: String) throws {
-        try profiler.measureFFI("deleteAudioNotification") {
-            do {
-                try core.deleteAudioNotification(id: id)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
 
     // MARK: - Misc
 
