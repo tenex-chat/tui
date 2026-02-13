@@ -1,6 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use crate::store::content_store::ContentStore;
+use crate::store::inbox_store::InboxStore;
 use crate::store::reports_store::ReportsStore;
 use crate::store::trust_store::TrustStore;
 use crate::store::{AgentTrackingState, RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
@@ -31,8 +32,7 @@ pub struct AppDataStore {
     pub profiles: HashMap<String, String>,                  // pubkey -> display name
 
     // Inbox - events that p-tag the current user
-    pub inbox_items: Vec<InboxItem>,
-    inbox_read_ids: HashSet<String>,
+    pub inbox: InboxStore,
     pub user_pubkey: Option<String>,
 
     // Agent chatter feed - kind:1 events a-tagging our projects
@@ -85,8 +85,7 @@ impl AppDataStore {
             threads_by_project: HashMap::new(),
             messages_by_thread: HashMap::new(),
             profiles: HashMap::new(),
-            inbox_items: Vec::new(),
-            inbox_read_ids: HashSet::new(),
+            inbox: InboxStore::new(),
             user_pubkey: None,
             agent_chatter: Vec::new(),
             operations_by_event: HashMap::new(),
@@ -130,8 +129,7 @@ impl AppDataStore {
         self.threads_by_project.clear();
         self.messages_by_thread.clear();
         self.profiles.clear();
-        self.inbox_items.clear();
-        self.inbox_read_ids.clear();
+        self.inbox.clear();
         self.user_pubkey = None;
         self.agent_chatter.clear();
         self.operations_by_event.clear();
@@ -186,7 +184,7 @@ impl AppDataStore {
                     continue;
                 }
                 // Skip already-read items
-                if self.inbox_read_ids.contains(&message.id) {
+                if self.inbox.is_read(&message.id) {
                     continue;
                 }
                 inbox_candidates.push((thread_id.clone(), message.clone()));
@@ -237,13 +235,13 @@ impl AppDataStore {
                         thread_id: Some(thread_id.clone()),
                         ask_event: message.ask_event.clone(),
                     };
-                    self.inbox_items.push(inbox_item);
+                    self.inbox.push_raw(inbox_item);
                 }
             }
         }
 
         // Sort inbox by created_at descending (most recent first)
-        self.inbox_items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        self.inbox.sort();
     }
 
     /// Rebuild all data from nostrdb (called on startup)
@@ -1641,8 +1639,8 @@ impl AppDataStore {
                     // This is a message from the current user - check if it replies to an inbox item
                     let reply_to_ids = Self::extract_e_tag_ids(note);
                     for reply_to_id in &reply_to_ids {
-                        if self.inbox_items.iter().any(|item| item.id == *reply_to_id) {
-                            self.mark_inbox_read(reply_to_id);
+                        if self.inbox.contains(reply_to_id) {
+                            self.inbox.mark_read(reply_to_id);
                         }
                     }
                 }
@@ -2185,24 +2183,14 @@ impl AppDataStore {
         None
     }
 
-    // ===== Inbox Methods =====
+    // ===== Inbox Methods (delegated to InboxStore) =====
 
     pub fn get_inbox_items(&self) -> &[InboxItem] {
-        &self.inbox_items
+        self.inbox.get_items()
     }
 
     pub fn add_inbox_item(&mut self, item: InboxItem) {
-        // Check if already read (persisted)
-        let is_read = self.inbox_read_ids.contains(&item.id);
-        let mut item = item;
-        item.is_read = is_read;
-
-        // Deduplicate by id
-        if !self.inbox_items.iter().any(|i| i.id == item.id) {
-            // Insert sorted by created_at (most recent first)
-            let pos = self.inbox_items.partition_point(|i| i.created_at > item.created_at);
-            self.inbox_items.insert(pos, item);
-        }
+        self.inbox.add_item(item);
     }
 
     /// Check if a note should be added to inbox and add it if so.
@@ -2249,10 +2237,7 @@ impl AppDataStore {
     }
 
     pub fn mark_inbox_read(&mut self, id: &str) {
-        if let Some(item) = self.inbox_items.iter_mut().find(|i| i.id == id) {
-            item.is_read = true;
-        }
-        self.inbox_read_ids.insert(id.to_string());
+        self.inbox.mark_read(id);
     }
 
     // ===== Agent Chatter Methods =====
