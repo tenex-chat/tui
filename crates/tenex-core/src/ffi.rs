@@ -3614,6 +3614,44 @@ impl TenexCore {
         Ok(())
     }
 
+    /// Set ElevenLabs API key (stored in OS secure storage)
+    pub fn set_elevenlabs_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        if let Some(key_value) = key {
+            SecureStorage::set(SecureKey::ElevenLabsApiKey, &key_value)
+                .map_err(|e| TenexError::Internal {
+                    message: format!("Failed to store ElevenLabs API key: {}", e)
+                })?;
+        } else {
+            // If key is None, delete the existing key
+            SecureStorage::delete(SecureKey::ElevenLabsApiKey)
+                .map_err(|e| TenexError::Internal {
+                    message: format!("Failed to delete ElevenLabs API key: {}", e)
+                })?;
+        }
+        Ok(())
+    }
+
+    /// Set OpenRouter API key (stored in OS secure storage)
+    pub fn set_openrouter_api_key(&self, key: Option<String>) -> Result<(), TenexError> {
+        use crate::secure_storage::{SecureKey, SecureStorage};
+
+        if let Some(key_value) = key {
+            SecureStorage::set(SecureKey::OpenRouterApiKey, &key_value)
+                .map_err(|e| TenexError::Internal {
+                    message: format!("Failed to store OpenRouter API key: {}", e)
+                })?;
+        } else {
+            // If key is None, delete the existing key
+            SecureStorage::delete(SecureKey::OpenRouterApiKey)
+                .map_err(|e| TenexError::Internal {
+                    message: format!("Failed to delete OpenRouter API key: {}", e)
+                })?;
+        }
+        Ok(())
+    }
+
     /// Set audio prompt
     pub fn set_audio_prompt(&self, prompt: String) -> Result<(), TenexError> {
         let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {

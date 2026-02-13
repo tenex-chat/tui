@@ -956,6 +956,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func setCollapsedThreadIds(threadIds: [String]) 
     
     /**
+     * Set ElevenLabs API key (stored in OS secure storage)
+     */
+    func setElevenlabsApiKey(key: String?) throws 
+    
+    /**
      * Register a callback to receive event notifications.
      * Call this after login to enable push-based updates.
      *
@@ -969,6 +974,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Calling this again will replace the previous callback.
      */
     func setEventCallback(callback: EventCallback) 
+    
+    /**
+     * Set OpenRouter API key (stored in OS secure storage)
+     */
+    func setOpenrouterApiKey(key: String?) throws 
     
     /**
      * Set OpenRouter model
@@ -1776,6 +1786,16 @@ open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
 }
     
     /**
+     * Set ElevenLabs API key (stored in OS secure storage)
+     */
+open func setElevenlabsApiKey(key: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_elevenlabs_api_key(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(key),$0
+    )
+}
+}
+    
+    /**
      * Register a callback to receive event notifications.
      * Call this after login to enable push-based updates.
      *
@@ -1791,6 +1811,16 @@ open func setCollapsedThreadIds(threadIds: [String])  {try! rustCall() {
 open func setEventCallback(callback: EventCallback)  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_set_event_callback(self.uniffiClonePointer(),
         FfiConverterCallbackInterfaceEventCallback_lower(callback),$0
+    )
+}
+}
+    
+    /**
+     * Set OpenRouter API key (stored in OS secure storage)
+     */
+open func setOpenrouterApiKey(key: String?)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_openrouter_api_key(self.uniffiClonePointer(),
+        FfiConverterOptionString.lower(key),$0
     )
 }
 }
@@ -8381,7 +8411,13 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids() != 12347) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_elevenlabs_api_key() != 26328) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_event_callback() != 600) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_api_key() != 36887) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_model() != 18970) {

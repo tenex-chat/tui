@@ -1,5 +1,26 @@
 # iOS App - Agent Guidelines
 
+## ⚠️ CRITICAL: Tuist Project - DO NOT Edit .pbxproj Directly
+
+**This is a Tuist-managed project.** The `TenexMVP.xcodeproj/project.pbxproj` file is **auto-generated** and gitignored.
+
+### Adding New Swift Files
+When adding new Swift files to the project:
+1. **Just create the file** in the correct directory under `Sources/TenexMVP/`
+2. **Run `tuist generate`** to regenerate the Xcode project
+3. The glob pattern `Sources/TenexMVP/**/*.swift` in `Project.swift` will automatically include all Swift files
+
+**NEVER:**
+- Manually edit `project.pbxproj` - changes will be lost on regeneration
+- Try to add file references directly to Xcode
+
+**ALWAYS:**
+- Create Swift files in the proper directory structure
+- Run `tuist generate` after adding/removing files
+- Edit `Project.swift` for configuration changes (dependencies, settings, etc.)
+
+---
+
 ## Overview
 
 Native iOS app built with:
