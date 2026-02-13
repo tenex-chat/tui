@@ -3,6 +3,7 @@ pub mod app_data_store;
 pub mod content_store;
 pub mod db;
 pub mod inbox_store;
+pub mod operations_store;
 pub mod reports_store;
 pub mod trust_store;
 pub mod events;
