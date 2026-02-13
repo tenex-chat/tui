@@ -172,3 +172,166 @@ impl ContentStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_agent_def(id: &str, name: &str, created_at: u64) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            role: String::new(),
+            instructions: String::new(),
+            picture: None,
+            version: None,
+            model: None,
+            tools: vec![],
+            mcp_servers: vec![],
+            use_criteria: vec![],
+            created_at,
+        }
+    }
+
+    fn make_test_mcp_tool(id: &str, name: &str, created_at: u64) -> MCPTool {
+        MCPTool {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            command: String::new(),
+            parameters: None,
+            capabilities: vec![],
+            server_url: None,
+            version: None,
+            created_at,
+        }
+    }
+
+    fn make_test_nudge(id: &str, title: &str, created_at: u64) -> Nudge {
+        Nudge {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            content: String::new(),
+            hashtags: vec![],
+            created_at,
+            allowed_tools: vec![],
+            denied_tools: vec![],
+            only_tools: vec![],
+            supersedes: None,
+        }
+    }
+
+    fn make_test_lesson(id: &str, title: &str, created_at: u64) -> Lesson {
+        Lesson {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            title: title.to_string(),
+            content: "lesson content".to_string(),
+            detailed: None,
+            reasoning: None,
+            metacognition: None,
+            reflection: None,
+            category: None,
+            created_at,
+        }
+    }
+
+    #[test]
+    fn test_empty_store_returns_empty() {
+        let store = ContentStore::new();
+        assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_mcp_tools().is_empty());
+        assert!(store.get_nudges().is_empty());
+        assert!(store.get_lesson("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_agent_definitions_sorted_descending() {
+        let mut store = ContentStore::new();
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
+        store.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
+        store.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
+
+        let defs = store.get_agent_definitions();
+        assert_eq!(defs.len(), 3);
+        assert_eq!(defs[0].name, "Newer Agent");
+        assert_eq!(defs[1].name, "Middle Agent");
+        assert_eq!(defs[2].name, "Older Agent");
+    }
+
+    #[test]
+    fn test_agent_definition_lookup() {
+        let mut store = ContentStore::new();
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
+
+        assert!(store.get_agent_definition("a1").is_some());
+        assert_eq!(store.get_agent_definition("a1").unwrap().name, "Agent One");
+        assert!(store.get_agent_definition("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_mcp_tools_sorted_descending() {
+        let mut store = ContentStore::new();
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
+        store.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
+
+        let tools = store.get_mcp_tools();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "New Tool");
+        assert_eq!(tools[1].name, "Old Tool");
+    }
+
+    #[test]
+    fn test_mcp_tool_lookup() {
+        let mut store = ContentStore::new();
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
+
+        assert!(store.get_mcp_tool("t1").is_some());
+        assert!(store.get_mcp_tool("missing").is_none());
+    }
+
+    #[test]
+    fn test_nudges_sorted_descending() {
+        let mut store = ContentStore::new();
+        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
+        store.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
+
+        let nudges = store.get_nudges();
+        assert_eq!(nudges.len(), 2);
+        assert_eq!(nudges[0].title, "New Nudge");
+        assert_eq!(nudges[1].title, "Old Nudge");
+    }
+
+    #[test]
+    fn test_lesson_lookup() {
+        let mut store = ContentStore::new();
+        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
+
+        assert!(store.get_lesson("l1").is_some());
+        assert_eq!(store.get_lesson("l1").unwrap().title, "Lesson One");
+        assert!(store.get_lesson("missing").is_none());
+    }
+
+    #[test]
+    fn test_cleared_on_clear() {
+        let mut store = ContentStore::new();
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
+        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
+
+        store.clear();
+
+        assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_mcp_tools().is_empty());
+        assert!(store.get_nudges().is_empty());
+        assert!(store.get_lesson("l1").is_none());
+    }
+}

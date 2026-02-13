@@ -75,7 +75,7 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
         View::Chat => ui::views::render_chat(f, app, chunks[1]),
         View::LessonViewer => {
             if let Some(ref lesson_id) = app.viewing_lesson_id.clone() {
-                if let Some(lesson) = app.data_store.borrow().get_lesson(lesson_id) {
+                if let Some(lesson) = app.data_store.borrow().content.get_lesson(lesson_id) {
                     ui::views::render_lesson_viewer(f, app, chunks[1], lesson);
                 }
             }
@@ -92,7 +92,7 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
             (View::Chat, InputMode::Normal) => {
                 // Check if selected item (thread or delegation) has active operations
                 let is_busy = app.get_stop_target_thread_id()
-                    .map(|id| app.data_store.borrow().is_event_busy(&id))
+                    .map(|id| app.data_store.borrow().operations.is_event_busy(&id))
                     .unwrap_or(false);
                 if is_busy {
                     "Ctrl+T commands · . stop".to_string()

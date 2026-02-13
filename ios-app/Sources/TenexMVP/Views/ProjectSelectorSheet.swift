@@ -31,15 +31,17 @@ struct ProjectSelectorSheet: View {
     // MARK: - Computed
 
     private var filteredProjects: [ProjectInfo] {
-        if searchText.isEmpty {
-            return projects
+        let base = searchText.isEmpty ? projects : projects.filter { project in
+            let lowercasedSearch = searchText.lowercased()
+            return project.title.lowercased().contains(lowercasedSearch) ||
+                project.id.lowercased().contains(lowercasedSearch) ||
+                (project.description?.lowercased().contains(lowercasedSearch) ?? false)
         }
-
-        let lowercasedSearch = searchText.lowercased()
-        return projects.filter { project in
-            project.title.lowercased().contains(lowercasedSearch) ||
-            project.id.lowercased().contains(lowercasedSearch) ||
-            (project.description?.lowercased().contains(lowercasedSearch) ?? false)
+        return base.sorted { a, b in
+            let aOnline = projectOnlineStatus[a.id] ?? false
+            let bOnline = projectOnlineStatus[b.id] ?? false
+            if aOnline != bOnline { return aOnline }
+            return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
         }
     }
 

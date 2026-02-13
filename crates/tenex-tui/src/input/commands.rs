@@ -226,7 +226,7 @@ pub static COMMANDS: &[Command] = &[
             let items = app.inbox_items();
             if let Some(item) = items.get(app.current_selection()) {
                 let item_id = item.id.clone();
-                app.data_store.borrow_mut().mark_inbox_read(&item_id);
+                app.data_store.borrow_mut().inbox.mark_read(&item_id);
             }
         },
     },
@@ -240,7 +240,7 @@ pub static COMMANDS: &[Command] = &[
         execute: |app| {
             let items = app.inbox_items();
             for item in items {
-                app.data_store.borrow_mut().mark_inbox_read(&item.id);
+                app.data_store.borrow_mut().inbox.mark_read(&item.id);
             }
         },
     },
@@ -377,7 +377,7 @@ pub static COMMANDS: &[Command] = &[
             }
             let (online, _) = app.filtered_projects();
             if let Some(project) = online.get(app.sidebar_project_index) {
-                app.data_store.borrow().is_project_busy(&project.a_tag())
+                app.data_store.borrow().operations.is_project_busy(&project.a_tag())
             } else {
                 false
             }
@@ -621,7 +621,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
-                if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
+                if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::fork_from(&agent));
                 }
@@ -635,7 +635,7 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
-                if let Some(agent) = app.data_store.borrow().get_agent_definition(agent_id) {
+                if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::clone_from(&agent));
                 }
@@ -875,13 +875,13 @@ fn stop_agents(app: &mut App) {
     if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
         let (is_busy, project_a_tag) = {
             let store = app.data_store.borrow();
-            let is_busy = store.is_event_busy(&stop_thread_id);
+            let is_busy = store.operations.is_event_busy(&stop_thread_id);
             let project_a_tag = store.find_project_for_thread(&stop_thread_id);
             (is_busy, project_a_tag)
         };
         if is_busy {
             if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                let working_agents = app.data_store.borrow().get_working_agents(&stop_thread_id);
+                let working_agents = app.data_store.borrow().operations.get_working_agents(&stop_thread_id);
                 if let Err(e) = core_handle.send(NostrCommand::StopOperations {
                     project_a_tag: a_tag,
                     event_ids: vec![stop_thread_id.clone()],

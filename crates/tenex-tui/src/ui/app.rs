@@ -2224,7 +2224,7 @@ impl App {
     /// you should see it regardless of project filtering.
     /// NOTE: A hard cap of 48 hours is always applied to keep the inbox focused on recent items.
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
-        let items = self.data_store.borrow().get_inbox_items().to_vec();
+        let items = self.data_store.borrow().inbox.get_items().to_vec();
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -2265,7 +2265,7 @@ impl App {
         let store = self.data_store.borrow();
         let filter = self.report_search_filter.to_lowercase();
 
-        store.get_reports()
+        store.reports.get_reports()
             .into_iter()
             .filter(|r| self.visible_projects.contains(&r.project_a_tag))
             .filter(|r| {
@@ -2861,7 +2861,7 @@ impl App {
     pub fn filtered_agent_definitions(&self) -> Vec<AgentDefinition> {
         let filter = &self.home.agent_browser_filter;
         self.data_store.borrow()
-            .get_agent_definitions()
+            .content.get_agent_definitions()
             .into_iter()
             .filter(|d| {
                 fuzzy_matches(&d.name, filter) ||
@@ -2875,7 +2875,7 @@ impl App {
     /// Get all agent definitions
     pub fn all_agent_definitions(&self) -> Vec<AgentDefinition> {
         self.data_store.borrow()
-            .get_agent_definitions()
+            .content.get_agent_definitions()
             .into_iter()
             .cloned()
             .collect()
@@ -2884,7 +2884,7 @@ impl App {
     /// Get agent definitions filtered by a custom filter string
     pub fn agent_definitions_filtered_by(&self, filter: &str) -> Vec<AgentDefinition> {
         self.data_store.borrow()
-            .get_agent_definitions()
+            .content.get_agent_definitions()
             .into_iter()
             .filter(|d| {
                 filter.is_empty() ||
@@ -2899,7 +2899,7 @@ impl App {
     /// Get a specific agent definition by ID
     pub fn get_agent_definition(&self, id: &str) -> Option<AgentDefinition> {
         self.data_store.borrow()
-            .get_agent_definition(id)
+            .content.get_agent_definition(id)
             .cloned()
     }
 
@@ -2908,7 +2908,7 @@ impl App {
     /// Get all MCP tools, sorted by created_at descending
     pub fn get_mcp_tools(&self) -> Vec<MCPTool> {
         self.data_store.borrow()
-            .get_mcp_tools()
+            .content.get_mcp_tools()
             .into_iter()
             .cloned()
             .collect()
@@ -2917,14 +2917,14 @@ impl App {
     /// Get a specific MCP tool by ID
     pub fn get_mcp_tool(&self, id: &str) -> Option<MCPTool> {
         self.data_store.borrow()
-            .get_mcp_tool(id)
+            .content.get_mcp_tool(id)
             .cloned()
     }
 
     /// Get MCP tools filtered by a custom filter string
     pub fn mcp_tools_filtered_by(&self, filter: &str) -> Vec<MCPTool> {
         self.data_store.borrow()
-            .get_mcp_tools()
+            .content.get_mcp_tools()
             .into_iter()
             .filter(|tool| {
                 filter.is_empty() ||
@@ -3302,7 +3302,7 @@ impl App {
             _ => "",
         };
         self.data_store.borrow()
-            .get_nudges()
+            .content.get_nudges()
             .into_iter()
             .filter(|n| {
                 fuzzy_matches(&n.title, filter) ||
@@ -3838,7 +3838,7 @@ impl App {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
         drop(prefs);
-        self.data_store.borrow_mut().set_trusted_backends(approved, blocked);
+        self.data_store.borrow_mut().trust.set_trusted_backends(approved, blocked);
     }
 
     // ===== Sidebar Search Methods =====
@@ -4011,7 +4011,7 @@ impl App {
                 // Parse a_tag using shared helper
                 if let Some(coord) = ReportCoordinate::parse(a_tag) {
                     // Look up the report to get its title
-                    let title = store.get_report(&coord.slug)
+                    let title = store.reports.get_report(&coord.slug)
                         .map(|r| r.title.clone())
                         .unwrap_or_else(|| coord.slug.clone());
 

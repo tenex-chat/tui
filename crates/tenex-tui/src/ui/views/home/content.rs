@@ -178,7 +178,7 @@ fn render_card_content(
     let (project_name, is_busy, first_recipient, hierarchical_runtime) = {
         let store = app.data_store.borrow();
         let project_name = store.get_project_name(a_tag);
-        let is_busy = store.is_event_busy(&thread.id);
+        let is_busy = store.operations.is_event_busy(&thread.id);
         // Get first recipient only (avoid allocating full Vec when we only need first)
         let first_recipient: Option<(String, String)> = thread.p_tags.first()
             .map(|pk| (store.get_profile_name(pk), pk.clone()));
@@ -911,7 +911,7 @@ fn render_feed_card(
 /// Render the Active Work tab showing currently active operations
 pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
     let data_store = app.data_store.borrow();
-    let operations = data_store.get_all_active_operations();
+    let operations = data_store.operations.get_all_active_operations();
 
     if operations.is_empty() {
         let empty_lines = vec![

@@ -175,3 +175,111 @@ impl OperationsStore {
             .collect()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::OperationsStatus;
+
+    fn make_test_operations_status(event_id: &str, project: &str, agents: Vec<&str>, created_at: u64) -> OperationsStatus {
+        OperationsStatus {
+            nostr_event_id: format!("nostr-{}", event_id),
+            event_id: event_id.to_string(),
+            agent_pubkeys: agents.into_iter().map(|s| s.to_string()).collect(),
+            project_coordinate: project.to_string(),
+            created_at,
+            thread_id: None,
+            llm_runtime_secs: None,
+        }
+    }
+
+    #[test]
+    fn test_empty_store() {
+        let store = OperationsStore::new();
+        assert!(store.get_working_agents("ev1").is_empty());
+        assert!(!store.is_event_busy("ev1"));
+        assert_eq!(store.get_active_operations_count("proj1"), 0);
+        assert!(store.get_active_event_ids("proj1").is_empty());
+        assert!(!store.is_project_busy("proj1"));
+        assert!(store.get_all_active_operations().is_empty());
+        assert_eq!(store.active_operations_count(), 0);
+    }
+
+    #[test]
+    fn test_working_agents() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
+        );
+
+        let agents = store.get_working_agents("ev1");
+        assert_eq!(agents.len(), 2);
+        assert!(store.is_event_busy("ev1"));
+        assert!(!store.is_event_busy("ev2"));
+    }
+
+    #[test]
+    fn test_per_project_counts() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
+        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a2"], 200));
+        store.operations_by_event.insert("ev3".to_string(), make_test_operations_status("ev3", "proj2", vec!["a3"], 300));
+
+        assert_eq!(store.get_active_operations_count("proj1"), 2);
+        assert_eq!(store.get_active_operations_count("proj2"), 1);
+        assert!(store.is_project_busy("proj1"));
+        assert!(store.is_project_busy("proj2"));
+        assert!(!store.is_project_busy("proj3"));
+
+        let proj1_events = store.get_active_event_ids("proj1");
+        assert_eq!(proj1_events.len(), 2);
+    }
+
+    #[test]
+    fn test_empty_agents_not_counted() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec![], 100));
+        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a1"], 200));
+
+        assert_eq!(store.get_active_operations_count("proj1"), 1);
+        assert!(!store.is_event_busy("ev1"));
+        assert!(store.is_event_busy("ev2"));
+        assert_eq!(store.active_operations_count(), 1);
+    }
+
+    #[test]
+    fn test_all_active_sorted_by_created_at() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 300));
+        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a2"], 100));
+        store.operations_by_event.insert("ev3".to_string(), make_test_operations_status("ev3", "proj1", vec!["a3"], 200));
+
+        let all = store.get_all_active_operations();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].event_id, "ev2");
+        assert_eq!(all[1].event_id, "ev3");
+        assert_eq!(all[2].event_id, "ev1");
+    }
+
+    #[test]
+    fn test_project_working_agents_deduped() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100));
+        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["agent1"], 200));
+
+        let agents = store.get_project_working_agents("proj1");
+        assert_eq!(agents.len(), 2);
+    }
+
+    #[test]
+    fn test_cleared_on_clear() {
+        let mut store = OperationsStore::new();
+        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
+
+        store.clear();
+
+        assert!(store.get_all_active_operations().is_empty());
+        assert_eq!(store.active_operations_count(), 0);
+    }
+}

@@ -59,7 +59,7 @@ pub fn render_report_viewer(f: &mut Frame, app: &App, area: Rect, state: &Report
 fn render_header(f: &mut Frame, app: &App, state: &ReportViewerState, area: Rect) {
     let store = app.data_store.borrow();
     let author_name = store.get_profile_name(&state.report.author);
-    let versions = store.get_report_versions(&state.report.slug);
+    let versions = store.reports.get_report_versions(&state.report.slug);
     let version_count = versions.len();
     drop(store);
 
@@ -120,7 +120,7 @@ fn render_document_content(f: &mut Frame, app: &App, state: &ReportViewerState, 
         ReportViewMode::Current => render_markdown(&state.report.content),
         ReportViewMode::Changes => {
             let previous = app.data_store.borrow()
-                .get_previous_report_version(&state.report.slug, &state.report.id)
+                .reports.get_previous_report_version(&state.report.slug, &state.report.id)
                 .map(|r| r.content.clone());
             render_diff_view(&state.report.content, previous.as_deref())
         }
@@ -284,7 +284,7 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
 
 fn get_document_threads(app: &App, report: &tenex_core::models::Report) -> Vec<tenex_core::models::Thread> {
     let a_tag = report.a_tag();
-    app.data_store.borrow().get_document_threads(&a_tag).to_vec()
+    app.data_store.borrow().reports.get_document_threads(&a_tag).to_vec()
 }
 
 fn render_help_bar(f: &mut Frame, state: &ReportViewerState, area: Rect) {

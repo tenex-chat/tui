@@ -101,13 +101,13 @@ pub enum ActivityVisualization {
 /// Render the Stats tab content with a dashboard layout featuring subtabs
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // Get today's runtime first (requires mutable borrow)
-    let today_runtime = app.data_store.borrow_mut().get_today_unique_runtime();
+    let today_runtime = app.data_store.borrow_mut().statistics.get_today_unique_runtime();
 
     // Get stats data from the data store (immutable borrow)
     let data_store = app.data_store.borrow();
 
     // 1. Runtime by day (last STATS_WINDOW_DAYS days)
-    let runtime_by_day = data_store.get_runtime_by_day(STATS_WINDOW_DAYS);
+    let runtime_by_day = data_store.statistics.get_runtime_by_day(STATS_WINDOW_DAYS);
 
     // 2. Total cost (past COST_WINDOW_DAYS)
     // Use saturating_sub for safe arithmetic in case of clock skew
@@ -903,11 +903,11 @@ fn render_activity_grid(
 ) {
     let (title, data) = match visualization {
         ActivityVisualization::Tokens => {
-            let tokens_data = data_store.get_tokens_by_hour(view_mode.num_hours());
+            let tokens_data = data_store.statistics.get_tokens_by_hour(view_mode.num_hours());
             ("LLM Token Usage", tokens_data)
         }
         ActivityVisualization::Messages => {
-            let messages_data = data_store.get_message_count_by_hour(view_mode.num_hours());
+            let messages_data = data_store.statistics.get_message_count_by_hour(view_mode.num_hours());
             ("Message Activity", messages_data)
         }
     };

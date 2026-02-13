@@ -132,3 +132,152 @@ impl ReportsStore {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_report(slug: &str, project_a_tag: &str, created_at: u64) -> Report {
+        Report {
+            id: format!("report-{}-{}", slug, created_at),
+            slug: slug.to_string(),
+            project_a_tag: project_a_tag.to_string(),
+            author: "author1".to_string(),
+            title: format!("Report {}", slug),
+            summary: String::new(),
+            content: "Report content".to_string(),
+            hashtags: vec![],
+            created_at,
+            reading_time_mins: 1,
+        }
+    }
+
+    fn make_test_thread(id: &str, pubkey: &str, last_activity: u64) -> Thread {
+        Thread {
+            id: id.to_string(),
+            title: format!("Thread {}", id),
+            content: String::new(),
+            pubkey: pubkey.to_string(),
+            last_activity,
+            effective_last_activity: last_activity,
+            status_label: None,
+            status_current_activity: None,
+            summary: None,
+            parent_conversation_id: None,
+            p_tags: vec![],
+            ask_event: None,
+            is_scheduled: false,
+        }
+    }
+
+    #[test]
+    fn test_empty_store() {
+        let store = ReportsStore::new();
+        assert!(store.get_reports().is_empty());
+        assert!(store.get_report("slug").is_none());
+        assert!(store.get_reports_by_project("proj").is_empty());
+        assert!(store.get_document_threads("doc").is_empty());
+    }
+
+    #[test]
+    fn test_sorted_by_created_at_descending() {
+        let mut store = ReportsStore::new();
+        store.add_report(make_test_report("slug-a", "proj1", 100));
+        store.add_report(make_test_report("slug-b", "proj1", 300));
+        store.add_report(make_test_report("slug-c", "proj1", 200));
+
+        let reports = store.get_reports();
+        assert_eq!(reports.len(), 3);
+        assert_eq!(reports[0].slug, "slug-b");
+        assert_eq!(reports[1].slug, "slug-c");
+        assert_eq!(reports[2].slug, "slug-a");
+    }
+
+    #[test]
+    fn test_filtered_by_project() {
+        let mut store = ReportsStore::new();
+        store.add_report(make_test_report("slug-a", "proj1", 100));
+        store.add_report(make_test_report("slug-b", "proj2", 200));
+        store.add_report(make_test_report("slug-c", "proj1", 300));
+
+        let proj1_reports = store.get_reports_by_project("proj1");
+        assert_eq!(proj1_reports.len(), 2);
+        assert_eq!(proj1_reports[0].slug, "slug-c");
+        assert_eq!(proj1_reports[1].slug, "slug-a");
+
+        let proj2_reports = store.get_reports_by_project("proj2");
+        assert_eq!(proj2_reports.len(), 1);
+    }
+
+    #[test]
+    fn test_version_history() {
+        let mut store = ReportsStore::new();
+
+        let v1 = Report {
+            id: "v1-id".to_string(),
+            slug: "my-report".to_string(),
+            project_a_tag: "proj1".to_string(),
+            author: "author".to_string(),
+            title: "Version 1".to_string(),
+            summary: String::new(),
+            content: "v1 content".to_string(),
+            hashtags: vec![],
+            created_at: 100,
+            reading_time_mins: 1,
+        };
+        let v2 = Report {
+            id: "v2-id".to_string(),
+            slug: "my-report".to_string(),
+            project_a_tag: "proj1".to_string(),
+            author: "author".to_string(),
+            title: "Version 2".to_string(),
+            summary: String::new(),
+            content: "v2 content".to_string(),
+            hashtags: vec![],
+            created_at: 200,
+            reading_time_mins: 1,
+        };
+
+        store.add_report(v1);
+        store.add_report(v2);
+
+        let latest = store.get_report("my-report").unwrap();
+        assert_eq!(latest.title, "Version 2");
+
+        let versions = store.get_report_versions("my-report");
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].id, "v2-id");
+        assert_eq!(versions[1].id, "v1-id");
+
+        let prev = store.get_previous_report_version("my-report", "v2-id");
+        assert!(prev.is_some());
+        assert_eq!(prev.unwrap().id, "v1-id");
+
+        assert!(store.get_previous_report_version("my-report", "v1-id").is_none());
+    }
+
+    #[test]
+    fn test_document_threads() {
+        let mut store = ReportsStore::new();
+        let thread = make_test_thread("t1", "pk1", 100);
+        store.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
+
+        let threads = store.get_document_threads("doc-atag");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "t1");
+
+        assert!(store.get_document_threads("missing").is_empty());
+    }
+
+    #[test]
+    fn test_cleared_on_clear() {
+        let mut store = ReportsStore::new();
+        store.add_report(make_test_report("slug", "proj1", 100));
+        store.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
+
+        store.clear();
+
+        assert!(store.get_reports().is_empty());
+        assert!(store.get_document_threads("doc").is_empty());
+    }
+}

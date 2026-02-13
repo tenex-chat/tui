@@ -167,6 +167,7 @@ struct ConversationsTabView: View {
     @State private var showDiagnostics = false
     @State private var showAISettings = false
     @State private var showAudioQueue = false
+    @State private var audioNotificationsEnabled = false
     @State private var showStats = false
     @State private var showArchived = false
     /// Hide scheduled conversations (those with scheduled-task-id tag)
@@ -290,18 +291,7 @@ struct ConversationsTabView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(action: { showFilterSheet = true }) {
-                        Label(filterButtonLabel, systemImage: selectedProjectIds.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 12) {
-                        Button(action: { showStats = true }) {
-                            Text(runtimeText)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(coreManager.hasActiveAgents ? .green : .secondary)
-                        }
                         Menu {
                             Toggle(isOn: $showArchived) {
                                 Label("Show Archived", systemImage: "archivebox")
@@ -314,22 +304,47 @@ struct ConversationsTabView: View {
                                 Label("Show Scheduled", systemImage: "calendar.badge.clock")
                             }
 
+                            Toggle(isOn: $audioNotificationsEnabled) {
+                                Label("Audio Notifications", systemImage: "speaker.wave.2")
+                            }
+                            .onChange(of: audioNotificationsEnabled) { _, enabled in
+                                Task {
+                                    try? await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
+                                }
+                            }
+
                             Divider()
 
-                            Button(action: { showDiagnostics = true }) {
-                                Label("Diagnostics", systemImage: "gauge.with.needle")
+                            Button(action: { showAudioQueue = true }) {
+                                Label("Audio Queue", systemImage: "list.bullet")
                             }
 
                             Button(action: { showAISettings = true }) {
                                 Label("AI Settings", systemImage: "waveform")
                             }
 
-                            Button(action: { showAudioQueue = true }) {
-                                Label("Audio Queue", systemImage: "list.bullet")
+                            Button(action: { showDiagnostics = true }) {
+                                Label("Diagnostics", systemImage: "gauge.with.needle")
                             }
                         } label: {
                             Image(systemName: "person.circle")
                                 .font(.title3)
+                        }
+                        Button(action: { showStats = true }) {
+                            Text(runtimeText)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
+                                .foregroundStyle(coreManager.hasActiveAgents ? .green : .secondary)
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 12) {
+                        Button(action: { showProjectPickerForNewConv = true }) {
+                            Image(systemName: "plus")
+                        }
+                        Button(action: { showFilterSheet = true }) {
+                            Label(filterButtonLabel, systemImage: selectedProjectIds.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                         }
                     }
                 }
@@ -411,6 +426,9 @@ struct ConversationsTabView: View {
                 rebuildHierarchy()
                 await updateRuntime()
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+                if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
+                    audioNotificationsEnabled = settings.enabled
+                }
             }
             .onChange(of: coreManager.conversations) { _, _ in
                 rebuildHierarchy()

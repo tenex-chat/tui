@@ -908,99 +908,49 @@ struct MainTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
     @State private var selectedTab = 0
-    @State private var showProjectPickerForNewConv = false
-    @State private var projectForNewConversation: ProjectInfo?
-    @State private var showNewConversation = false
 
     var body: some View {
-        ZStack {
-            tabPanel(tag: 0) {
+        TabView(selection: $selectedTab) {
+            Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
                 NavigationStack {
                     ConversationsTabView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
             }
-            tabPanel(tag: 1) {
+
+            Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
                 NavigationStack {
                     FeedView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
             }
-            tabPanel(tag: 2) {
+
+            Tab("Projects", systemImage: "folder", value: 2) {
                 ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
-            tabPanel(tag: 3) {
+
+            Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
-            tabPanel(tag: 10) {
+
+            Tab(value: 10, role: .search) {
                 NavigationStack {
                     SearchView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
+            } label: {
+                Label("Search", systemImage: "magnifyingglass")
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            HStack {
-                GlassEffectContainer {
-                    HStack(spacing: 0) {
-                        tabButton(icon: "bubble.left.and.bubble.right", tag: 0)
-                        tabButton(icon: "dot.radiowaves.left.and.right", tag: 1)
-                        tabButton(icon: "folder", tag: 2)
-                        tabButton(icon: "tray", tag: 3)
-                        tabButton(icon: "magnifyingglass", tag: 10)
-                    }
-                }
-
-                Spacer()
-
-                Button { showProjectPickerForNewConv = true } label: {
-                    Image(systemName: "plus")
-                }
-                .buttonStyle(.glass)
-            }
-            .padding(.horizontal)
-        }
-        .sheet(isPresented: $showProjectPickerForNewConv) {
-            ProjectSelectorSheet(
-                projects: coreManager.projects,
-                projectOnlineStatus: coreManager.projectOnlineStatus,
-                selectedProject: $projectForNewConversation,
-                onDone: {
-                    if projectForNewConversation != nil {
-                        showProjectPickerForNewConv = false
-                        showNewConversation = true
-                    }
-                }
-            )
-        }
-        .sheet(isPresented: $showNewConversation) {
-            if let project = projectForNewConversation {
-                MessageComposerView(project: project)
-                    .environmentObject(coreManager)
-            }
-        }
-    }
-
-    // MARK: - Tab Panel
-
-    @ViewBuilder
-    private func tabPanel<Content: View>(tag: Int, @ViewBuilder content: () -> Content) -> some View {
-        content()
-            .opacity(selectedTab == tag ? 1 : 0)
-            .allowsHitTesting(selectedTab == tag)
-    }
-
-    private func tabButton(icon: String, tag: Int) -> some View {
-        Button { selectedTab = tag } label: {
-            Image(systemName: icon)
-        }
-        .buttonStyle(.glass)
+        .tabViewStyle(.sidebarAdaptable)
+        .tabBarMinimizeBehavior(.onScrollDown)
+        .ignoresSafeArea(.keyboard)
     }
 }

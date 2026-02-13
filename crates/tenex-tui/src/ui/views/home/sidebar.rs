@@ -764,7 +764,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(i);
-        let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
@@ -834,7 +834,7 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let a_tag = project.a_tag();
         let is_visible = app.visible_projects.contains(&a_tag);
         let is_focused = selected_project_index == Some(online_count + i);
-        let is_busy = app.data_store.borrow().is_project_busy(&a_tag);
+        let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
         let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
