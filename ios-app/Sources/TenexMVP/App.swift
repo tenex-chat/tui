@@ -895,32 +895,32 @@ struct MainTabView: View {
                     ConversationsTabView()
                         .environmentObject(coreManager)
                 }
+                .nowPlayingInset(coreManager: coreManager)
             }
             Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
                 NavigationStack {
                     FeedView()
                         .environmentObject(coreManager)
                 }
+                .nowPlayingInset(coreManager: coreManager)
             }
             Tab("Projects", systemImage: "folder", value: 2) {
                 ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                     .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
             }
             Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
                     .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
             }
             Tab("Search", systemImage: "magnifyingglass", value: 10) {
                 NavigationStack {
                     SearchView()
                         .environmentObject(coreManager)
                 }
+                .nowPlayingInset(coreManager: coreManager)
             }
-        }
-        .safeAreaInset(edge: .bottom) {
-            NowPlayingBar()
-                .environmentObject(coreManager)
-                .animation(.spring(duration: 0.3), value: AudioNotificationPlayer.shared.playbackState != .idle)
         }
     }
 }
