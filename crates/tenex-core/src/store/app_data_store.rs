@@ -2,9 +2,10 @@ use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use crate::store::content_store::ContentStore;
 use crate::store::inbox_store::InboxStore;
+use crate::store::operations_store::OperationsStore;
 use crate::store::reports_store::ReportsStore;
 use crate::store::trust_store::TrustStore;
-use crate::store::{AgentTrackingState, RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
+use crate::store::{RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -38,9 +39,8 @@ pub struct AppDataStore {
     // Agent chatter feed - kind:1 events a-tagging our projects
     pub agent_chatter: Vec<AgentChatter>,
 
-    // Operations status - kind:24133 events
-    // Maps event_id -> OperationsStatus (which agents are working on which events)
-    operations_by_event: HashMap<String, OperationsStatus>,
+    // Operations status and agent tracking
+    pub operations: OperationsStore,
 
     // Pending subscriptions for new projects (drained by CoreRuntime)
     pending_project_subscriptions: Vec<String>,
@@ -68,9 +68,6 @@ pub struct AppDataStore {
     // Maps day_start_timestamp -> total runtime_ms (from llm-runtime tags)
     runtime_by_day_counts: HashMap<u64, u64>,
 
-    // Real-time agent tracking - tracks active agents and estimates unconfirmed runtime.
-    // In-memory only, resets on app restart. See agent_tracking.rs for details.
-    pub agent_tracking: AgentTrackingState,
 }
 
 impl AppDataStore {
@@ -88,14 +85,13 @@ impl AppDataStore {
             inbox: InboxStore::new(),
             user_pubkey: None,
             agent_chatter: Vec::new(),
-            operations_by_event: HashMap::new(),
+            operations: OperationsStore::new(),
             pending_project_subscriptions: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             messages_by_day_counts: HashMap::new(),
             llm_activity_by_hour: HashMap::new(),
             runtime_by_day_counts: HashMap::new(),
-            agent_tracking: AgentTrackingState::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -132,14 +128,13 @@ impl AppDataStore {
         self.inbox.clear();
         self.user_pubkey = None;
         self.agent_chatter.clear();
-        self.operations_by_event.clear();
+        self.operations.clear();
         self.pending_project_subscriptions.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
         self.messages_by_day_counts.clear();
         self.llm_activity_by_hour.clear();
         self.runtime_by_day_counts.clear();
-        self.agent_tracking.clear();
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
@@ -1338,7 +1333,7 @@ impl AppDataStore {
             4199 => { self.content.handle_agent_definition_event(note); None }
             4200 => { self.content.handle_mcp_tool_event(note); None }
             4201 => { self.content.handle_nudge_event(note); None }
-            24133 => { self.handle_operations_status_event(note); None }
+            24133 => { self.operations.handle_operations_status_event(note); None }
             30023 => {
                 let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
                 self.reports.handle_report_event(note, &known_a_tags);
@@ -1454,11 +1449,8 @@ impl AppDataStore {
     }
 
     /// Handle an operations status event from pre-parsed Value (kind:24133)
-    /// Updates in-memory operations_by_event storage
     fn handle_operations_status_event_value(&mut self, event: &serde_json::Value) {
-        if let Some(status) = OperationsStatus::from_value(event) {
-            self.upsert_operations_status(status);
-        }
+        self.operations.handle_operations_status_event_value(event);
     }
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
@@ -1669,7 +1661,7 @@ impl AppDataStore {
                 // This ensures unconfirmed runtime only tracks time since the last kind:1 confirmation
                 // The recency guard prevents stale/backfilled messages from resetting active timers
                 if has_llm_runtime {
-                    self.agent_tracking
+                    self.operations.agent_tracking
                         .reset_unconfirmed_timer(&thread_id, &message_pubkey, message_created_at);
                 }
 
@@ -2338,192 +2330,69 @@ impl AppDataStore {
 
     // ===== Operations Status Methods (kind:24133) =====
 
-    fn handle_operations_status_event(&mut self, note: &Note) {
-        if let Some(status) = OperationsStatus::from_note(note) {
-            self.upsert_operations_status(status);
-        }
-    }
+    // ===== Operations Methods (delegated to OperationsStore) =====
 
-    /// Shared helper to upsert an OperationsStatus into the store.
-    /// Handles both JSON and Note-based event paths to eliminate duplication.
-    /// Also updates agent_tracking state for real-time active agent counts.
-    ///
-    /// ## Event Semantics:
-    /// Each 24133 event is an authoritative snapshot of active agents for a conversation.
-    /// The nostr_event_id (the 24133 event's own ID) is used for:
-    /// 1. Same-second ordering (tiebreaker when timestamps match)
-    /// 2. Runtime deduplication (prevent double-counting on replays)
-    fn upsert_operations_status(&mut self, status: OperationsStatus) {
-        let event_id = status.event_id.clone();
-        let nostr_event_id = status.nostr_event_id.clone();
-
-        // Use thread_id (conversation root) for tracking, falling back to event_id
-        // This ensures per-conversation (not per-event) timestamp tracking
-        let conversation_id = status.thread_id.as_deref().unwrap_or(&status.event_id);
-
-        // Update agent tracking state for real-time monitoring
-        // We pass None for current_project to track ALL active agents across all projects
-        // (status bar should show green when ANY agent is active on ANY project)
-        let processed = self.agent_tracking.process_24133_event(
-            conversation_id,
-            &nostr_event_id, // Pass nostr_event_id for same-second ordering
-            &status.agent_pubkeys,
-            status.created_at,
-            &status.project_coordinate,
-            None, // Track all projects, not filtered
-        );
-
-        // Skip processing if event was rejected (stale/out-of-order)
-        if !processed {
-            return;
-        }
-
-        // If llm-runtime tag is present, add confirmed runtime (with deduplication)
-        if let Some(runtime_secs) = status.llm_runtime_secs {
-            // add_confirmed_runtime handles deduplication by nostr_event_id internally
-            self.agent_tracking.add_confirmed_runtime(&nostr_event_id, runtime_secs);
-        }
-
-        // If no agents are working, remove the entry (event is no longer being processed)
-        if status.agent_pubkeys.is_empty() {
-            self.operations_by_event.remove(&event_id);
-        } else {
-            // Only update if this event is newer than what we have
-            if let Some(existing) = self.operations_by_event.get(&event_id) {
-                if existing.created_at > status.created_at {
-                    return; // Keep the newer one
-                }
-            }
-            self.operations_by_event.insert(event_id, status);
-        }
-    }
-
-    /// Get agent pubkeys currently working on a specific event
     pub fn get_working_agents(&self, event_id: &str) -> Vec<String> {
-        self.operations_by_event
-            .get(event_id)
-            .map(|s| s.agent_pubkeys.clone())
-            .unwrap_or_default()
+        self.operations.get_working_agents(event_id)
     }
 
-    /// Check if any agents are working on a specific event
     pub fn is_event_busy(&self, event_id: &str) -> bool {
-        self.operations_by_event
-            .get(event_id)
-            .map(|s| !s.agent_pubkeys.is_empty())
-            .unwrap_or(false)
+        self.operations.is_event_busy(event_id)
     }
 
-    /// Get count of active operations for a project
     pub fn get_active_operations_count(&self, project_a_tag: &str) -> usize {
-        self.operations_by_event
-            .values()
-            .filter(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
-            .count()
+        self.operations.get_active_operations_count(project_a_tag)
     }
 
-    /// Get all event IDs with active operations for a project
     pub fn get_active_event_ids(&self, project_a_tag: &str) -> Vec<String> {
-        self.operations_by_event
-            .iter()
-            .filter(|(_, s)| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
-            .map(|(id, _)| id.clone())
-            .collect()
+        self.operations.get_active_event_ids(project_a_tag)
     }
 
-    /// Get all agent pubkeys currently working on any event for a project
     pub fn get_project_working_agents(&self, project_a_tag: &str) -> Vec<String> {
-        let mut agents: HashSet<String> = HashSet::new();
-        for status in self.operations_by_event.values() {
-            if status.project_coordinate == project_a_tag && !status.agent_pubkeys.is_empty() {
-                agents.extend(status.agent_pubkeys.iter().cloned());
-            }
-        }
-        agents.into_iter().collect()
+        self.operations.get_project_working_agents(project_a_tag)
     }
 
-    /// Check if a project has any active operations
     pub fn is_project_busy(&self, project_a_tag: &str) -> bool {
-        self.operations_by_event
-            .values()
-            .any(|s| s.project_coordinate == project_a_tag && !s.agent_pubkeys.is_empty())
+        self.operations.is_project_busy(project_a_tag)
     }
 
-    /// Get all active operations across all projects, sorted by created_at (oldest first)
     pub fn get_all_active_operations(&self) -> Vec<&OperationsStatus> {
-        let mut operations: Vec<&OperationsStatus> = self.operations_by_event
-            .values()
-            .filter(|s| !s.agent_pubkeys.is_empty())
-            .collect();
-        operations.sort_by_key(|s| s.created_at);
-        operations
+        self.operations.get_all_active_operations()
     }
 
-    /// Count active operations without allocation or sorting
     pub fn active_operations_count(&self) -> usize {
-        self.operations_by_event
-            .values()
-            .filter(|s| !s.agent_pubkeys.is_empty())
-            .count()
+        self.operations.active_operations_count()
     }
 
-    // ===== Real-Time Agent Tracking Methods =====
-
-    /// Check if any agents are currently active (across all projects).
-    /// Used to determine status bar color (green = active, red = inactive).
     pub fn has_active_agents(&self) -> bool {
-        self.agent_tracking.has_active_agents()
+        self.operations.has_active_agents()
     }
 
-    /// Get the count of active agent instances.
-    /// Example: agent1 + agent2 on conv1, agent1 on conv2 = 3 instances.
     pub fn active_agent_count(&self) -> usize {
-        self.agent_tracking.active_agent_count()
+        self.operations.active_agent_count()
     }
 
-    /// Get only the confirmed runtime in seconds (from llm-runtime tags).
-    /// This excludes the estimated unconfirmed runtime from active agents.
     #[cfg(test)]
     pub fn confirmed_runtime_secs(&self) -> u64 {
-        self.agent_tracking.confirmed_runtime_secs()
+        self.operations.confirmed_runtime_secs()
     }
 
-    /// Get the unconfirmed (estimated) runtime in seconds from currently active agents.
-    /// This is the runtime growth since agents started working (not yet reported via llm-runtime).
-    /// Used to augment RuntimeHierarchy's today runtime with real-time estimates.
     pub fn unconfirmed_runtime_secs(&self) -> u64 {
-        self.agent_tracking.unconfirmed_runtime_secs()
+        self.operations.unconfirmed_runtime_secs()
     }
 
-    /// Get statusbar runtime data: cumulative runtime in milliseconds and active agent status.
-    ///
-    /// Returns `(runtime_ms, has_active_agents)` where:
-    /// - `runtime_ms`: Today's total unique runtime (persistent Nostr data) + estimated runtime
-    ///   from currently active agents, all in milliseconds.
-    /// - `has_active_agents`: Whether any agents are currently working (for status color).
-    ///
-    /// This is the single source of truth for statusbar runtime display, eliminating
-    /// duplicate assembly logic across render files. The `* 1000` conversion from seconds
-    /// to milliseconds happens here, in one place.
     pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool, usize) {
         let today_runtime_ms = self.get_today_unique_runtime();
-        let unconfirmed_runtime_ms = self.agent_tracking.unconfirmed_runtime_secs() * 1000;
+        let unconfirmed_runtime_ms = self.operations.unconfirmed_runtime_secs() * 1000;
         let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
-        let has_active_agents = self.agent_tracking.has_active_agents();
-        let active_agent_count = self.agent_tracking.active_agent_count();
+        let has_active_agents = self.operations.has_active_agents();
+        let active_agent_count = self.operations.active_agent_count();
         (cumulative_runtime_ms, has_active_agents, active_agent_count)
     }
 
-    /// Get active agents for a specific conversation.
-    /// Returns agent pubkeys currently working on the conversation.
-    /// Used for integration testing authoritative replacement semantics.
     #[cfg(test)]
     pub fn get_active_agents_for_conversation(&self, conversation_id: &str) -> Vec<String> {
-        self.agent_tracking
-            .get_active_agents_for_conversation(conversation_id)
-            .into_iter()
-            .map(|s| s.to_string())
-            .collect()
+        self.operations.get_active_agents_for_conversation(conversation_id)
     }
 
     /// Get thread info for an event ID (could be thread root or message within thread).
@@ -3878,7 +3747,7 @@ mod tests {
             let agent_pubkey = keys.public_key().to_hex();
 
             // Simulate agent starting work on a conversation
-            store.agent_tracking.process_24133_event(
+            store.operations.agent_tracking.process_24133_event(
                 "conv1",
                 "event1",
                 &[agent_pubkey.clone()],
@@ -3890,7 +3759,7 @@ mod tests {
             // Wait to accumulate unconfirmed runtime
             thread::sleep(Duration::from_millis(1100));
 
-            let runtime_before_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_before_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_before_reset >= 1,
                 "Expected unconfirmed runtime >= 1 second before reset, got {}",
@@ -3899,10 +3768,10 @@ mod tests {
 
             // Simulate a kind:1 message with llm-runtime tag arriving
             // (call reset_unconfirmed_timer directly as handle_message_event would)
-            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1100);
+            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1100);
 
             // Verify that unconfirmed runtime was reset (should be near 0)
-            let runtime_after_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_after_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_reset < 1,
                 "Expected unconfirmed runtime < 1 second after llm-runtime reset, got {}",
@@ -3912,7 +3781,7 @@ mod tests {
             // Wait again to accumulate more unconfirmed runtime
             thread::sleep(Duration::from_millis(1100));
 
-            let runtime_before_non_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_before_non_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_before_non_reset >= 1,
                 "Expected unconfirmed runtime >= 1 second before testing no reset, got {}",
@@ -3923,7 +3792,7 @@ mod tests {
             // Runtime should continue accumulating
 
             // Verify that unconfirmed runtime was NOT reset (should still be >= 1)
-            let runtime_after_non_reset = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_after_non_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_non_reset >= 1,
                 "Expected unconfirmed runtime >= 1 second when no reset happens, got {}",
@@ -3932,13 +3801,13 @@ mod tests {
 
             // Test recency guard: stale message should not reset timer
             thread::sleep(Duration::from_millis(500));
-            let runtime_before_stale = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_before_stale = store.operations.agent_tracking.unconfirmed_runtime_secs();
 
             // Try to reset with a stale timestamp (older than last reset at 1100)
-            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1050);
+            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1050);
 
             // Runtime should NOT have been reset (blocked by recency guard)
-            let runtime_after_stale = store.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_after_stale = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_stale >= runtime_before_stale,
                 "Stale message should not reset timer: before {}, after {}",
@@ -3947,8 +3816,8 @@ mod tests {
             );
 
             // Reset with a newer timestamp should work
-            store.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1200);
-            let runtime_after_newer = store.agent_tracking.unconfirmed_runtime_secs();
+            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1200);
+            let runtime_after_newer = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_newer < 1,
                 "Newer message should reset timer, got {}",
@@ -5401,7 +5270,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
         );
@@ -5418,15 +5287,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev2".to_string(),
             make_test_operations_status("ev2", "proj1", vec!["a2"], 200),
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev3".to_string(),
             make_test_operations_status("ev3", "proj2", vec!["a3"], 300),
         );
@@ -5447,11 +5316,11 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec![], 100), // empty agents
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev2".to_string(),
             make_test_operations_status("ev2", "proj1", vec!["a1"], 200),
         );
@@ -5468,15 +5337,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 300),
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev2".to_string(),
             make_test_operations_status("ev2", "proj1", vec!["a2"], 100),
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev3".to_string(),
             make_test_operations_status("ev3", "proj1", vec!["a3"], 200),
         );
@@ -5495,11 +5364,11 @@ mod tests {
         let mut store = AppDataStore::new(db.ndb.clone());
 
         // Same agent working on two events in same project
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
         );
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev2".to_string(),
             make_test_operations_status("ev2", "proj1", vec!["agent1"], 200),
         );
@@ -5515,7 +5384,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.operations_by_event.insert(
+        store.operations.operations_by_event.insert(
             "ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
         );
@@ -5691,7 +5560,7 @@ mod tests {
             .push(make_test_message("m1", "pk1", "t1", "hello", 100));
         store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
         store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.operations_by_event.insert("ev1".to_string(),
+        store.operations.operations_by_event.insert("ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
         store.reports.add_report(make_test_report("slug", "proj1", 100));
         store.trust.approved_backends.insert("pk1".to_string());
