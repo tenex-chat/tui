@@ -100,11 +100,23 @@ struct MessageComposerView: View {
         availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
     }
 
-    /// Find the project with the most recent conversation activity
-    private func projectWithMostRecentActivity() -> ProjectInfo? {
-        guard !coreManager.conversations.isEmpty else { return nil }
+    /// Hide scheduled conversations preference (synced with ConversationsTabView)
+    @AppStorage("hideScheduled") private var hideScheduled = true
 
-        let mostRecentConv = coreManager.conversations
+    /// Find the project with the most recent conversation activity
+    /// Respects hideScheduled preference to match prior behavior
+    private func projectWithMostRecentActivity() -> ProjectInfo? {
+        var candidates = coreManager.conversations
+
+        // When hideScheduled is enabled, exclude scheduled conversations
+        // to match the filtering behavior in ConversationsTabView
+        if hideScheduled {
+            candidates = candidates.filter { !$0.isScheduled }
+        }
+
+        guard !candidates.isEmpty else { return nil }
+
+        let mostRecentConv = candidates
             .max(by: { $0.effectiveLastActivity < $1.effectiveLastActivity })
 
         guard let conv = mostRecentConv else { return nil }
