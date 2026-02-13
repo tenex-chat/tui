@@ -17,7 +17,7 @@ struct ToolCallRow: View {
         HStack(spacing: 8) {
             // Tool icon
             Image(systemName: displayInfo.icon)
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 .frame(width: 16)
 

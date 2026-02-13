@@ -134,7 +134,7 @@ struct NudgeSelectorSheet: View {
     private var emptyStateView: some View {
         VStack(spacing: 16) {
             Image(systemName: searchText.isEmpty ? "list.bullet.clipboard" : "magnifyingglass")
-                .font(.system(size: 40))
+                .font(.system(.largeTitle))
                 .foregroundStyle(.secondary)
 
             if searchText.isEmpty {

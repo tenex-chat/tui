@@ -37,7 +37,7 @@ struct AgentConfigSheet: View {
                 } else if let error = loadError {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 40))
+                            .font(.system(.largeTitle))
                             .foregroundStyle(.orange)
                         Text("Failed to load options")
                             .font(.headline)

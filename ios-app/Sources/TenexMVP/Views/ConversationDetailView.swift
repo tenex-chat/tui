@@ -144,7 +144,7 @@ struct ConversationDetailView: View {
 
                 // Runtime
                 Text(viewModel.formattedRuntime)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.headline)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }
@@ -466,7 +466,7 @@ struct TodoRowView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: statusIcon)
-                .font(.system(size: 16))
+                .font(.body)
                 .foregroundStyle(statusColor)
                 .frame(width: 20)
 
@@ -540,7 +540,7 @@ struct TodoCompletionPill: View {
     var body: some View {
         HStack(spacing: style == .large ? 4 : 2) {
             Image(systemName: "checkmark.circle.fill")
-                .font(.system(size: style == .large ? 12 : 10))
+                .font(style == .large ? .caption : .caption2)
             Text("\(count)")
                 .font(style == .large ? .caption : .caption2)
                 .fontWeight(style == .large ? .medium : .regular)

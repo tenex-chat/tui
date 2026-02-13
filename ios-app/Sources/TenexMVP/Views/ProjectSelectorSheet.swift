@@ -126,7 +126,7 @@ struct ProjectSelectorSheet: View {
     private var emptyStateView: some View {
         VStack(spacing: 16) {
             Image(systemName: searchText.isEmpty ? "folder.badge.questionmark" : "magnifyingglass")
-                .font(.system(size: 40))
+                .font(.system(.largeTitle))
                 .foregroundStyle(.secondary)
 
             if searchText.isEmpty {

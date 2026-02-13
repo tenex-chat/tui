@@ -88,7 +88,7 @@ private struct FeedEmptyStateView: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "dot.radiowaves.left.and.right")
-                .font(.system(size: 44))
+                .font(.system(.largeTitle))
                 .foregroundStyle(.secondary)
             Text("No events yet")
                 .font(.title3)
