@@ -18,23 +18,14 @@ pub(super) fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
         let chunks = Layout::vertical([
             Constraint::Length(3), // Search input
             Constraint::Min(5),    // Projects list
-            Constraint::Length(4), // Filter section
         ])
         .split(area);
 
         render_sidebar_search_input(f, app, chunks[0]);
         render_projects_list(f, app, chunks[1]);
-        render_filters_section(f, app, chunks[2]);
     } else {
-        // Normal layout without search
-        let chunks = Layout::vertical([
-            Constraint::Min(5),    // Projects list
-            Constraint::Length(4), // Filter section
-        ])
-        .split(area);
-
-        render_projects_list(f, app, chunks[0]);
-        render_filters_section(f, app, chunks[1]);
+        // Normal layout without search - just projects list
+        render_projects_list(f, app, area);
     }
 }
 
@@ -906,61 +897,6 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(list, area);
-}
-
-/// Render the filters section below projects
-fn render_filters_section(f: &mut Frame, app: &App, area: Rect) {
-    let mut lines: Vec<Line> = Vec::new();
-
-    // Separator line
-    lines.push(Line::from(Span::styled(
-        "─ Filters ─",
-        Style::default().fg(theme::TEXT_MUTED),
-    )));
-
-    // Time filter
-    let time_label = app.home.time_filter
-        .map(|tf| tf.label())
-        .unwrap_or("All");
-    let time_style = if app.home.time_filter.is_some() {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    let time_indicator = if app.home.time_filter.is_some() {
-        format!(" {}", card::CHECKMARK)
-    } else {
-        String::new()
-    };
-    lines.push(Line::from(vec![
-        Span::styled("[f] ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(format!("Time: {}{}", time_label, time_indicator), time_style),
-    ]));
-
-    // Scheduled filter
-    let scheduled_style = if app.hide_scheduled {
-        Style::default().fg(theme::ACCENT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_MUTED)
-    };
-    let scheduled_label = if app.hide_scheduled { "Hidden" } else { "Visible" };
-    let scheduled_indicator = if app.hide_scheduled {
-        format!(" {}", card::CHECKMARK)
-    } else {
-        String::new()
-    };
-    lines.push(Line::from(vec![
-        Span::styled("[S] ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(format!("Scheduled: {}{}", scheduled_label, scheduled_indicator), scheduled_style),
-    ]));
-
-    let filter_widget = Paragraph::new(lines)
-        .block(Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(4, 4, 0, 1))) // left, right, top, bottom
-        .style(Style::default().bg(theme::BG_SIDEBAR));
-
-    f.render_widget(filter_widget, area);
 }
 
 pub(super) fn render_bottom_padding(f: &mut Frame, area: Rect) {
