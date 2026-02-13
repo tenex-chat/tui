@@ -1,6 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use crate::store::content_store::ContentStore;
+use crate::store::trust_store::TrustStore;
 use crate::store::{AgentTrackingState, RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -18,6 +19,7 @@ pub struct AppDataStore {
 
     // Sub-stores
     pub content: ContentStore,
+    pub trust: TrustStore,
 
     // Core app data
     pub projects: Vec<Project>,
@@ -48,11 +50,6 @@ pub struct AppDataStore {
 
     // Pending subscriptions for new projects (drained by CoreRuntime)
     pending_project_subscriptions: Vec<String>,
-
-    // Backend trust state
-    approved_backends: HashSet<String>,
-    blocked_backends: HashSet<String>,
-    pending_backend_approvals: Vec<PendingBackendApproval>,
 
     // Thread root index - maps project a_tag -> set of known thread root event IDs
     // This avoids expensive full-table scans when loading threads
@@ -87,6 +84,7 @@ impl AppDataStore {
         let mut store = Self {
             ndb,
             content: ContentStore::new(),
+            trust: TrustStore::new(),
             projects: Vec::new(),
             project_statuses: HashMap::new(),
             threads_by_project: HashMap::new(),
@@ -101,9 +99,6 @@ impl AppDataStore {
             document_threads: HashMap::new(),
             operations_by_event: HashMap::new(),
             pending_project_subscriptions: Vec::new(),
-            approved_backends: HashSet::new(),
-            blocked_backends: HashSet::new(),
-            pending_backend_approvals: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
             messages_by_day_counts: HashMap::new(),
@@ -136,6 +131,7 @@ impl AppDataStore {
     /// will repopulate with the new user's filtered view.
     pub fn clear(&mut self) {
         self.content.clear();
+        self.trust.clear();
         self.projects.clear();
         self.project_statuses.clear();
         self.threads_by_project.clear();
@@ -150,9 +146,6 @@ impl AppDataStore {
         self.document_threads.clear();
         self.operations_by_event.clear();
         self.pending_project_subscriptions.clear();
-        self.approved_backends.clear();
-        self.blocked_backends.clear();
-        self.pending_backend_approvals.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
         self.messages_by_day_counts.clear();
@@ -1499,12 +1492,11 @@ impl AppDataStore {
     /// Handle a project status event from pre-parsed Value (kind:24010)
     fn handle_project_status_event_value(&mut self, event: &serde_json::Value) {
         if let Some(status) = ProjectStatus::from_value(event) {
-            let event_created_at = status.created_at;
             let backend_pubkey = status.backend_pubkey.clone();
             let should_update = self
                 .project_statuses
                 .get(&status.project_coordinate)
-                .map(|existing| event_created_at >= existing.created_at)
+                .map(|existing| status.created_at >= existing.created_at)
                 .unwrap_or(true);
             let mut status = status;
             let now = std::time::SystemTime::now()
@@ -1513,41 +1505,20 @@ impl AppDataStore {
                 .unwrap_or(0);
             status.last_seen_at = now;
 
-            // Check trust status
-            if self.blocked_backends.contains(&backend_pubkey) {
+            if self.trust.is_blocked(&backend_pubkey) {
                 return;
             }
 
-            if self.approved_backends.contains(&backend_pubkey) {
+            if self.trust.is_approved(&backend_pubkey) {
                 if should_update {
                     self.project_statuses.insert(status.project_coordinate.clone(), status);
                 }
                 return;
             }
 
-            // Unknown backend - queue for approval (or update existing pending with newer status)
-            if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
-                p.backend_pubkey == backend_pubkey && p.project_a_tag == status.project_coordinate
-            }) {
-                // Update with newer status only
-                if event_created_at >= existing.status.created_at {
-                    existing.status = status;
-                }
-            } else {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-
-                let pending = PendingBackendApproval {
-                    backend_pubkey: backend_pubkey.clone(),
-                    project_a_tag: status.project_coordinate.clone(),
-                    first_seen: now,
-                    status,
-                };
-
-                self.pending_backend_approvals.push(pending);
-            }
+            // Unknown backend - queue for approval
+            let project_coord = status.project_coordinate.clone();
+            self.trust.queue_or_update_pending(&backend_pubkey, &project_coord, status);
         }
     }
 
@@ -1561,21 +1532,17 @@ impl AppDataStore {
 
     fn handle_status_event(&mut self, note: &Note) -> Option<crate::events::CoreEvent> {
         let mut status = ProjectStatus::from_note(note)?;
-        let event_created_at = status.created_at;
-        let backend_pubkey = &status.backend_pubkey;
+        let backend_pubkey = status.backend_pubkey.clone();
 
-        // Check trust status
-        if self.blocked_backends.contains(backend_pubkey) {
-            // Silently ignore blocked backends
+        if self.trust.is_blocked(&backend_pubkey) {
             return None;
         }
 
-        if self.approved_backends.contains(backend_pubkey) {
-            // Approved backend - process normally
+        if self.trust.is_approved(&backend_pubkey) {
             let should_update = self
                 .project_statuses
                 .get(&status.project_coordinate)
-                .map(|existing| event_created_at >= existing.created_at)
+                .map(|existing| status.created_at >= existing.created_at)
                 .unwrap_or(true);
             if should_update {
                 let now = std::time::SystemTime::now()
@@ -1590,31 +1557,25 @@ impl AppDataStore {
             return None;
         }
 
-        // Unknown backend - queue for approval (or update existing pending with newer status)
-        if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
-            p.backend_pubkey == *backend_pubkey && p.project_a_tag == status.project_coordinate
-        }) {
-            // Update with newer status
-            if event_created_at >= existing.status.created_at {
-                existing.status = status;
-            }
-            return None; // Already pending, don't emit another event
+        // Unknown backend - check if already pending
+        let already_pending = self.trust.has_pending_approval(&backend_pubkey, &status.project_coordinate);
+        self.trust.queue_or_update_pending(&backend_pubkey, &status.project_coordinate, status.clone());
+
+        if already_pending {
+            None
+        } else {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let pending = PendingBackendApproval {
+                backend_pubkey,
+                project_a_tag: status.project_coordinate.clone(),
+                first_seen: now,
+                status,
+            };
+            Some(crate::events::CoreEvent::PendingBackendApproval(pending))
         }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let pending = PendingBackendApproval {
-            backend_pubkey: backend_pubkey.clone(),
-            project_a_tag: status.project_coordinate.clone(),
-            first_seen: now,
-            status,
-        };
-
-        self.pending_backend_approvals.push(pending.clone());
-        Some(crate::events::CoreEvent::PendingBackendApproval(pending))
     }
 
     fn handle_profile_event(&mut self, note: &Note) {
@@ -3037,30 +2998,16 @@ impl AppDataStore {
 
     // ===== Backend Trust Methods =====
 
-    /// Set the trusted backends from preferences (called on init)
-    /// Status data will only be populated when 24010 events arrive through subscriptions
+    // ===== Trust Delegation Methods =====
+
     pub fn set_trusted_backends(&mut self, approved: HashSet<String>, blocked: HashSet<String>) {
-        self.approved_backends = approved;
-        self.blocked_backends = blocked;
-        // NOTE: We intentionally do NOT query nostrdb for cached 24010 events here.
-        // Status data flows ONLY through handle_status_event when events arrive
-        // from subscriptions, ensuring trust validation is always applied.
+        self.trust.set_trusted_backends(approved, blocked);
     }
 
-    /// Add a backend to the approved list and apply any pending status events
     pub fn add_approved_backend(&mut self, pubkey: &str) {
-        self.blocked_backends.remove(pubkey);
-        self.approved_backends.insert(pubkey.to_string());
-
-        // Extract and apply pending statuses for this backend before removing them
-        let pending_statuses: Vec<_> = self.pending_backend_approvals
-            .iter()
-            .filter(|p| p.backend_pubkey == pubkey)
-            .map(|p| p.status.clone())
-            .collect();
-
-        for status in pending_statuses {
-            let mut status = status;
+        let pending_statuses = self.trust.add_approved(pubkey);
+        // Cross-cutting: apply pending statuses to project_statuses
+        for mut status in pending_statuses {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -3068,37 +3015,21 @@ impl AppDataStore {
             status.last_seen_at = now;
             self.project_statuses.insert(status.project_coordinate.clone(), status);
         }
-
-        // Remove from pending approvals
-        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
     }
 
-    /// Add a backend to the blocked list
     pub fn add_blocked_backend(&mut self, pubkey: &str) {
-        self.approved_backends.remove(pubkey);
-        self.blocked_backends.insert(pubkey.to_string());
-
-        // Remove from pending approvals
-        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
+        self.trust.add_blocked(pubkey);
     }
 
-    /// Drain pending backend approvals (called by TUI to show modals)
     pub fn drain_pending_backend_approvals(&mut self) -> Vec<PendingBackendApproval> {
-        std::mem::take(&mut self.pending_backend_approvals)
+        self.trust.drain_pending()
     }
 
-    /// Check if a specific backend/project approval is pending.
     pub fn has_pending_backend_approval(&self, backend_pubkey: &str, project_a_tag: &str) -> bool {
-        self.pending_backend_approvals.iter().any(|p| {
-            p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag
-        })
+        self.trust.has_pending_approval(backend_pubkey, project_a_tag)
     }
 
-    /// Approve a batch of pending backends and apply their cached statuses.
-    /// Returns the number of unique backend pubkeys approved.
     pub fn approve_pending_backends(&mut self, pending: Vec<PendingBackendApproval>) -> u32 {
-        use std::collections::HashSet;
-
         let mut approved_pubkeys: HashSet<String> = HashSet::new();
 
         for approval in pending {
@@ -3119,9 +3050,8 @@ impl AppDataStore {
         approved_pubkeys.len() as u32
     }
 
-    /// Check if there are pending backend approvals
     pub fn has_pending_backend_approvals(&self) -> bool {
-        !self.pending_backend_approvals.is_empty()
+        self.trust.has_pending_approvals()
     }
 }
 
@@ -5202,9 +5132,9 @@ mod tests {
 
         store.set_trusted_backends(approved, blocked);
 
-        assert!(store.approved_backends.contains("pk1"));
-        assert!(store.approved_backends.contains("pk2"));
-        assert!(store.blocked_backends.contains("pk3"));
+        assert!(store.trust.approved_backends.contains("pk1"));
+        assert!(store.trust.approved_backends.contains("pk2"));
+        assert!(store.trust.blocked_backends.contains("pk3"));
     }
 
     #[test]
@@ -5213,11 +5143,11 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.blocked_backends.insert("pk1".to_string());
+        store.trust.blocked_backends.insert("pk1".to_string());
         store.add_approved_backend("pk1");
 
-        assert!(store.approved_backends.contains("pk1"));
-        assert!(!store.blocked_backends.contains("pk1"));
+        assert!(store.trust.approved_backends.contains("pk1"));
+        assert!(!store.trust.blocked_backends.contains("pk1"));
     }
 
     #[test]
@@ -5226,11 +5156,11 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.approved_backends.insert("pk1".to_string());
+        store.trust.approved_backends.insert("pk1".to_string());
         store.add_blocked_backend("pk1");
 
-        assert!(!store.approved_backends.contains("pk1"));
-        assert!(store.blocked_backends.contains("pk1"));
+        assert!(!store.trust.approved_backends.contains("pk1"));
+        assert!(store.trust.blocked_backends.contains("pk1"));
     }
 
     #[test]
@@ -5255,7 +5185,7 @@ mod tests {
             },
         };
 
-        store.pending_backend_approvals.push(approval);
+        store.trust.pending_backend_approvals.push(approval);
 
         assert!(store.has_pending_backend_approvals());
         assert!(store.has_pending_backend_approval("pk1", "31933:pk:proj1"));
@@ -5273,7 +5203,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.pending_backend_approvals.push(PendingBackendApproval {
+        store.trust.pending_backend_approvals.push(PendingBackendApproval {
             backend_pubkey: "pk1".to_string(),
             project_a_tag: "proj1".to_string(),
             first_seen: 100,
@@ -5291,8 +5221,8 @@ mod tests {
 
         store.add_blocked_backend("pk1");
 
-        assert!(store.pending_backend_approvals.is_empty());
-        assert!(store.blocked_backends.contains("pk1"));
+        assert!(store.trust.pending_backend_approvals.is_empty());
+        assert!(store.trust.blocked_backends.contains("pk1"));
     }
 
     #[test]
@@ -5301,7 +5231,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.pending_backend_approvals.push(PendingBackendApproval {
+        store.trust.pending_backend_approvals.push(PendingBackendApproval {
             backend_pubkey: "pk1".to_string(),
             project_a_tag: "31933:pk:proj1".to_string(),
             first_seen: 100,
@@ -5319,8 +5249,8 @@ mod tests {
 
         store.add_approved_backend("pk1");
 
-        assert!(store.approved_backends.contains("pk1"));
-        assert!(store.pending_backend_approvals.is_empty());
+        assert!(store.trust.approved_backends.contains("pk1"));
+        assert!(store.trust.pending_backend_approvals.is_empty());
         assert!(store.project_statuses.contains_key("31933:pk:proj1"));
     }
 
@@ -5330,9 +5260,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.approved_backends.insert("pk1".to_string());
-        store.blocked_backends.insert("pk2".to_string());
-        store.pending_backend_approvals.push(PendingBackendApproval {
+        store.trust.approved_backends.insert("pk1".to_string());
+        store.trust.blocked_backends.insert("pk2".to_string());
+        store.trust.pending_backend_approvals.push(PendingBackendApproval {
             backend_pubkey: "pk3".to_string(),
             project_a_tag: "proj".to_string(),
             first_seen: 100,
@@ -5350,9 +5280,9 @@ mod tests {
 
         store.clear();
 
-        assert!(store.approved_backends.is_empty());
-        assert!(store.blocked_backends.is_empty());
-        assert!(store.pending_backend_approvals.is_empty());
+        assert!(store.trust.approved_backends.is_empty());
+        assert!(store.trust.blocked_backends.is_empty());
+        assert!(store.trust.pending_backend_approvals.is_empty());
     }
 
     // ===== C. Reports Tests =====
@@ -5876,7 +5806,7 @@ mod tests {
         store.operations_by_event.insert("ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
         store.add_report(make_test_report("slug", "proj1", 100));
-        store.approved_backends.insert("pk1".to_string());
+        store.trust.approved_backends.insert("pk1".to_string());
         store.user_pubkey = Some("user1".to_string());
 
         store.clear();
@@ -5888,7 +5818,7 @@ mod tests {
         assert!(store.get_inbox_items().is_empty());
         assert!(store.get_all_active_operations().is_empty());
         assert!(store.get_reports().is_empty());
-        assert!(store.approved_backends.is_empty());
+        assert!(store.trust.approved_backends.is_empty());
         assert!(store.user_pubkey.is_none());
     }
 
