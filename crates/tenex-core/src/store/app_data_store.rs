@@ -1,5 +1,6 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
+use crate::store::content_store::ContentStore;
 use crate::store::{AgentTrackingState, RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
@@ -15,6 +16,9 @@ const DEFAULT_PAGINATION_BATCH_SIZE: i32 = 10_000;
 pub struct AppDataStore {
     ndb: Arc<Ndb>,
 
+    // Sub-stores
+    pub content: ContentStore,
+
     // Core app data
     pub projects: Vec<Project>,
     pub project_statuses: HashMap<String, ProjectStatus>,  // keyed by project a_tag
@@ -29,18 +33,6 @@ pub struct AppDataStore {
 
     // Agent chatter feed - kind:1 events a-tagging our projects
     pub agent_chatter: Vec<AgentChatter>,
-
-    // Agent lessons - kind:4129 events
-    pub lessons: HashMap<String, Lesson>,  // keyed by lesson id
-
-    // Agent definitions - kind:4199 events
-    pub agent_definitions: HashMap<String, AgentDefinition>,  // keyed by id
-
-    // Nudges - kind:4201 events
-    pub nudges: HashMap<String, Nudge>,  // keyed by id
-
-    // MCP Tools - kind:4200 events
-    pub mcp_tools: HashMap<String, MCPTool>,  // keyed by id
 
     // Reports - kind:30023 events (articles/documents)
     // Key: report slug (d-tag) -> latest version
@@ -94,6 +86,7 @@ impl AppDataStore {
     pub fn new(ndb: Arc<Ndb>) -> Self {
         let mut store = Self {
             ndb,
+            content: ContentStore::new(),
             projects: Vec::new(),
             project_statuses: HashMap::new(),
             threads_by_project: HashMap::new(),
@@ -103,10 +96,6 @@ impl AppDataStore {
             inbox_read_ids: HashSet::new(),
             user_pubkey: None,
             agent_chatter: Vec::new(),
-            lessons: HashMap::new(),
-            agent_definitions: HashMap::new(),
-            nudges: HashMap::new(),
-            mcp_tools: HashMap::new(),
             reports: HashMap::new(),
             reports_all_versions: HashMap::new(),
             document_threads: HashMap::new(),
@@ -146,6 +135,7 @@ impl AppDataStore {
     /// After logout and re-login with different account, rebuild_from_ndb()
     /// will repopulate with the new user's filtered view.
     pub fn clear(&mut self) {
+        self.content.clear();
         self.projects.clear();
         self.project_statuses.clear();
         self.threads_by_project.clear();
@@ -155,10 +145,6 @@ impl AppDataStore {
         self.inbox_read_ids.clear();
         self.user_pubkey = None;
         self.agent_chatter.clear();
-        self.lessons.clear();
-        self.agent_definitions.clear();
-        self.nudges.clear();
-        self.mcp_tools.clear();
         self.reports.clear();
         self.reports_all_versions.clear();
         self.document_threads.clear();
@@ -349,14 +335,10 @@ impl AppDataStore {
             threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
         }
 
-        // Load agent definitions (kind:4199)
-        self.load_agent_definitions();
-
-        // Load MCP tools (kind:4200)
-        self.load_mcp_tools();
-
-        // Load nudges (kind:4201)
-        self.load_nudges();
+        // Load content definitions (kind:4199, 4200, 4201)
+        self.content.load_agent_definitions(&self.ndb);
+        self.content.load_mcp_tools(&self.ndb);
+        self.content.load_nudges(&self.ndb);
 
         // NOTE: Ephemeral events (kind:24010, 24133) are intentionally NOT loaded from nostrdb.
         // They are only received via live subscriptions and stored in memory.
@@ -364,89 +346,6 @@ impl AppDataStore {
 
         // Load reports (kind:30023)
         self.load_reports();
-    }
-
-    /// Load all agent definitions from nostrdb
-    fn load_agent_definitions(&mut self) {
-        use nostrdb::{Filter, Transaction};
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        let filter = Filter::new().kinds([4199]).build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
-            return;
-        };
-
-        // Loading agent definitions (kind:4199)
-
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(agent_def) = AgentDefinition::from_note(&note) {
-                    self.agent_definitions.insert(agent_def.id.clone(), agent_def);
-                }
-            }
-        }
-    }
-
-    /// Load all MCP tools from nostrdb
-    fn load_mcp_tools(&mut self) {
-        use nostrdb::{Filter, Transaction};
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        let filter = Filter::new().kinds([4200]).build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
-            return;
-        };
-
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(tool) = MCPTool::from_note(&note) {
-                    self.mcp_tools.insert(tool.id.clone(), tool);
-                }
-            }
-        }
-    }
-
-    /// Load all nudges from nostrdb
-    fn load_nudges(&mut self) {
-        use nostrdb::{Filter, Transaction};
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        let filter = Filter::new().kinds([4201]).build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
-            return;
-        };
-
-        // Loading nudges (kind:4201)
-        // First pass: collect all nudges and their supersedes relationships
-        let mut all_nudges: Vec<Nudge> = Vec::new();
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(nudge) = Nudge::from_note(&note) {
-                    all_nudges.push(nudge);
-                }
-            }
-        }
-
-        // Sort by created_at to process in chronological order
-        all_nudges.sort_by_key(|n| n.created_at);
-
-        // Second pass: insert nudges, honoring supersedes
-        for nudge in all_nudges {
-            // Remove superseded nudge if present
-            if let Some(ref superseded_id) = nudge.supersedes {
-                self.nudges.remove(superseded_id);
-            }
-            self.nudges.insert(nudge.id.clone(), nudge);
-        }
     }
 
     /// Load reports from nostrdb (kind:30023) that belong to known projects
@@ -1512,9 +1411,9 @@ impl AppDataStore {
             24010 => self.handle_status_event(note),
             513 => { self.handle_metadata_event(note); None }
             4129 => { self.handle_lesson_event(note); None }
-            4199 => { self.handle_agent_definition_event(note); None }
-            4200 => { self.handle_mcp_tool_event(note); None }
-            4201 => { self.handle_nudge_event(note); None }
+            4199 => { self.content.handle_agent_definition_event(note); None }
+            4200 => { self.content.handle_mcp_tool_event(note); None }
+            4201 => { self.content.handle_nudge_event(note); None }
             24133 => { self.handle_operations_status_event(note); None }
             30023 => { self.handle_report_event(note); None }
             _ => None
@@ -2484,10 +2383,8 @@ impl AppDataStore {
     // ===== Lesson Methods =====
 
     fn handle_lesson_event(&mut self, note: &Note) {
-        if let Some(lesson) = Lesson::from_note(note) {
-            let lesson_id = lesson.id.clone();
-
-            // Add to agent chatter feed
+        // Store lesson in content sub-store, get ref back for agent_chatter cross-cut
+        if let Some(lesson) = self.content.insert_lesson(note) {
             let chatter = AgentChatter::Lesson {
                 id: lesson.id.clone(),
                 title: lesson.title.clone(),
@@ -2497,83 +2394,41 @@ impl AppDataStore {
                 category: lesson.category.clone(),
             };
             self.add_agent_chatter(chatter);
-
-            // Store lesson
-            self.lessons.insert(lesson_id, lesson);
         }
     }
+
+    // ===== Content Delegation Methods =====
 
     pub fn get_lesson(&self, lesson_id: &str) -> Option<&Lesson> {
-        self.lessons.get(lesson_id)
+        self.content.get_lesson(lesson_id)
     }
 
-    // ===== Agent Definition Methods =====
-
-    fn handle_agent_definition_event(&mut self, note: &Note) {
-        if let Some(agent_def) = AgentDefinition::from_note(note) {
-            self.agent_definitions.insert(agent_def.id.clone(), agent_def);
-        }
-    }
-
-    /// Get all agent definitions, sorted by created_at descending (most recent first)
     pub fn get_agent_definitions(&self) -> Vec<&AgentDefinition> {
-        let mut defs: Vec<_> = self.agent_definitions.values().collect();
-        defs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        defs
+        self.content.get_agent_definitions()
     }
 
     pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
-        self.agent_definitions.get(id)
+        self.content.get_agent_definition(id)
     }
 
-    // ===== MCP Tool Methods (kind:4200) =====
-
-    fn handle_mcp_tool_event(&mut self, note: &Note) {
-        if let Some(tool) = MCPTool::from_note(note) {
-            self.mcp_tools.insert(tool.id.clone(), tool);
-        }
-    }
-
-    // ===== Nudge Methods (kind:4201) =====
-
-    fn handle_nudge_event(&mut self, note: &Note) {
-        if let Some(nudge) = Nudge::from_note(note) {
-            // Honor supersedes tag - remove the old nudge if this one supersedes it
-            if let Some(ref superseded_id) = nudge.supersedes {
-                self.nudges.remove(superseded_id);
-            }
-            self.nudges.insert(nudge.id.clone(), nudge);
-        }
-    }
-
-    /// Get all nudges, sorted by created_at descending (most recent first)
     pub fn get_nudges(&self) -> Vec<&Nudge> {
-        let mut nudges: Vec<_> = self.nudges.values().collect();
-        nudges.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        nudges
+        self.content.get_nudges()
     }
 
     pub fn get_nudge(&self, id: &str) -> Option<&Nudge> {
-        self.nudges.get(id)
+        self.content.get_nudge(id)
     }
-
-    // ===== MCP Tool Methods (kind:4200) =====
 
     pub fn insert_mcp_tool(&mut self, note: &Note) {
-        if let Some(tool) = MCPTool::from_note(note) {
-            self.mcp_tools.insert(tool.id.clone(), tool);
-        }
+        self.content.insert_mcp_tool(note);
     }
 
-    /// Get all MCP tools, sorted by created_at descending (most recent first)
     pub fn get_mcp_tools(&self) -> Vec<&MCPTool> {
-        let mut tools: Vec<_> = self.mcp_tools.values().collect();
-        tools.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        tools
+        self.content.get_mcp_tools()
     }
 
     pub fn get_mcp_tool(&self, id: &str) -> Option<&MCPTool> {
-        self.mcp_tools.get(id)
+        self.content.get_mcp_tool(id)
     }
 
     // ===== Report Methods (kind:30023) =====
@@ -5236,9 +5091,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
-        store.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
-        store.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
+        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
+        store.content.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
+        store.content.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
 
         let defs = store.get_agent_definitions();
         assert_eq!(defs.len(), 3);
@@ -5253,7 +5108,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
+        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
 
         assert!(store.get_agent_definition("a1").is_some());
         assert_eq!(store.get_agent_definition("a1").unwrap().name, "Agent One");
@@ -5266,8 +5121,8 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
-        store.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
+        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
+        store.content.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
 
         let tools = store.get_mcp_tools();
         assert_eq!(tools.len(), 2);
@@ -5281,7 +5136,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
+        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
 
         assert!(store.get_mcp_tool("t1").is_some());
         assert!(store.get_mcp_tool("missing").is_none());
@@ -5293,8 +5148,8 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
-        store.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
+        store.content.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
+        store.content.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
 
         let nudges = store.get_nudges();
         assert_eq!(nudges.len(), 2);
@@ -5308,7 +5163,7 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
+        store.content.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
 
         assert!(store.get_lesson("l1").is_some());
         assert_eq!(store.get_lesson("l1").unwrap().title, "Lesson One");
@@ -5321,10 +5176,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
-        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
-        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
+        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
+        store.content.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store.content.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
 
         store.clear();
 
@@ -6016,7 +5871,7 @@ mod tests {
             .push(make_test_thread("t1", "pk1", 100));
         store.messages_by_thread.entry("t1".to_string()).or_default()
             .push(make_test_message("m1", "pk1", "t1", "hello", 100));
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
         store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         store.operations_by_event.insert("ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
