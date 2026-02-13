@@ -1040,11 +1040,9 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                     use crate::ui::components::SidebarSelection;
                     match selection {
                         SidebarSelection::Delegation(thread_id) => {
-                            // Navigate to the delegated conversation
                             app.push_delegation(&thread_id);
                         }
                         SidebarSelection::Report(a_tag) => {
-                            // Open the report viewer using shared coordinate parser
                             use crate::ui::components::ReportCoordinate;
                             if let Some(coord) = ReportCoordinate::parse(&a_tag) {
                                 let report = app.data_store.borrow().get_report(&coord.slug).cloned();

@@ -206,6 +206,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         actions::render_hotkey_help_modal(f, area);
     }
 
+    // Render report viewer modal if showing
+    if let ModalState::ReportViewer(ref state) = app.modal_state {
+        super::super::render_report_viewer(f, app, area, state);
+    }
+
     // Render nudge selector modal if showing
     if let ModalState::NudgeSelector(ref state) = app.modal_state {
         super::super::render_nudge_selector(f, app, area, state);
