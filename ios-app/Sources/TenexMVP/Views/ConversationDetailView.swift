@@ -866,15 +866,13 @@ struct FullConversationSheet: View {
             }
             #endif
             .sheet(isPresented: $showComposer) {
-                NavigationStack {
-                    MessageComposerView(
-                        project: project,
-                        conversationId: conversation.id,
-                        conversationTitle: conversation.title,
-                        initialAgentPubkey: lastAgentPubkey
-                    )
-                    .environmentObject(coreManager)
-                }
+                MessageComposerView(
+                    project: project,
+                    conversationId: conversation.id,
+                    conversationTitle: conversation.title,
+                    initialAgentPubkey: lastAgentPubkey
+                )
+                .environmentObject(coreManager)
             }
         }
     }

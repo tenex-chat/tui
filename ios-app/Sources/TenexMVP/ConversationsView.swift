@@ -105,15 +105,13 @@ struct ConversationsView: View {
         }
         #endif
         .sheet(isPresented: $showNewConversation) {
-            NavigationStack {
-                MessageComposerView(
-                    project: project,
-                    onSend: { _ in
-                        // Data will auto-refresh via push-based updates
-                    }
-                )
-                .environmentObject(coreManager)
-            }
+            MessageComposerView(
+                project: project,
+                onSend: { _ in
+                    // Data will auto-refresh via push-based updates
+                }
+            )
+            .environmentObject(coreManager)
         }
         .sheet(isPresented: $showReports) {
             NavigationStack {
@@ -427,16 +425,14 @@ struct MessagesView: View {
                 availableAgents = cache[project.id] ?? []
             }
             .sheet(isPresented: $showReplyComposer) {
-                NavigationStack {
-                    MessageComposerView(
-                        project: project,
-                        conversationId: conversation.id,
-                        conversationTitle: conversation.title,
-                        initialAgentPubkey: lastAgentPubkey,
-                        onSend: { _ in }
-                    )
-                    .environmentObject(coreManager)
-                }
+                MessageComposerView(
+                    project: project,
+                    conversationId: conversation.id,
+                    conversationTitle: conversation.title,
+                    initialAgentPubkey: lastAgentPubkey,
+                    onSend: { _ in }
+                )
+                .environmentObject(coreManager)
             }
         }
     }

@@ -364,14 +364,7 @@ struct ConversationsTabView: View {
                 }
             }
             .sheet(isPresented: $showAISettings) {
-                NavigationStack {
-                    AISettingsView()
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Done") { showAISettings = false }
-                            }
-                        }
-                }
+                AISettingsView()
             }
             .sheet(isPresented: $showStats) {
                 NavigationStack {
@@ -398,10 +391,8 @@ struct ConversationsTabView: View {
             }
             .sheet(isPresented: $showNewConversation) {
                 if let project = projectForNewConversation {
-                    NavigationStack {
-                        MessageComposerView(project: project)
-                            .environmentObject(coreManager)
-                    }
+                    MessageComposerView(project: project)
+                        .environmentObject(coreManager)
                 }
             }
             .task {

@@ -58,15 +58,13 @@ struct ContentView: View {
                 Text(logoutErrorMessage)
             }
             .sheet(isPresented: $showNewConversation) {
-                NavigationStack {
-                    MessageComposerView(
-                        project: nil,
-                        onSend: { _ in
-                            // Data updates via push-based callbacks
-                        }
-                    )
-                    .environmentObject(coreManager)
-                }
+                MessageComposerView(
+                    project: nil,
+                    onSend: { _ in
+                        // Data updates via push-based callbacks
+                    }
+                )
+                .environmentObject(coreManager)
             }
         }
     }
