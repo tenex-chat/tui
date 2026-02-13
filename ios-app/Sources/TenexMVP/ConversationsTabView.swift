@@ -166,6 +166,7 @@ struct ConversationsTabView: View {
     @State private var showFilterSheet = false
     @State private var showDiagnostics = false
     @State private var showAISettings = false
+    @State private var showAudioQueue = false
     @State private var showStats = false
     @State private var showArchived = false
     /// Hide scheduled conversations (those with scheduled-task-id tag)
@@ -322,6 +323,10 @@ struct ConversationsTabView: View {
                             Button(action: { showAISettings = true }) {
                                 Label("AI Settings", systemImage: "waveform")
                             }
+
+                            Button(action: { showAudioQueue = true }) {
+                                Label("Audio Queue", systemImage: "list.bullet")
+                            }
                         } label: {
                             Image(systemName: "person.circle")
                                 .font(.title3)
@@ -362,6 +367,10 @@ struct ConversationsTabView: View {
                             }
                         }
                 }
+            }
+            .sheet(isPresented: $showAudioQueue) {
+                AudioQueueSheet()
+                    .environmentObject(coreManager)
             }
             .sheet(isPresented: $showAISettings) {
                 AISettingsView()

@@ -21,6 +21,25 @@ struct NowPlayingBar: View {
     @ObservedObject var player = AudioNotificationPlayer.shared
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @State private var showQueueSheet = false
+
+    /// Look up the conversation from coreManager data
+    private var conversation: ConversationFullInfo? {
+        guard let id = player.currentConversationId else { return nil }
+        return coreManager.conversations.first { $0.id == id }
+    }
+
+    /// Real conversation title from live data
+    private var conversationTitle: String {
+        conversation?.title ?? player.currentConversationTitle ?? "Audio Notification"
+    }
+
+    /// Project title for the subtitle
+    private var projectTitle: String? {
+        guard let aTag = conversation?.projectATag else { return nil }
+        let projectId = TenexCoreManager.projectId(fromATag: aTag)
+        return coreManager.projects.first { $0.id == projectId }?.title
+    }
 
     /// Resolve agent display name from pubkey
     private var agentName: String? {
@@ -29,45 +48,41 @@ struct NowPlayingBar: View {
         return name.isEmpty ? nil : AgentNameFormatter.format(name)
     }
 
-    /// Build subtitle: "Agent Name: text snippet..." or just text snippet
-    private var subtitle: String? {
-        let parts: [String] = [
-            agentName,
-            player.currentTextSnippet.map { "\"\($0)\"" }
-        ].compactMap { $0 }
-
-        guard !parts.isEmpty else { return nil }
-        return parts.joined(separator: ": ")
-    }
-
     var body: some View {
         if player.playbackState != .idle {
             VStack(spacing: 0) {
                 HStack(spacing: 12) {
-                    // Agent avatar
-                    AgentAvatarView(
-                        agentName: agentName ?? "Agent",
-                        pubkey: player.currentAgentPubkey,
-                        size: 36,
-                        fontSize: 13,
-                        showBorder: false
-                    )
-                    .environmentObject(coreManager)
+                    // Tappable area: avatar + text opens queue sheet
+                    Button {
+                        showQueueSheet = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            AgentAvatarView(
+                                agentName: agentName ?? "Agent",
+                                pubkey: player.currentAgentPubkey,
+                                size: 36,
+                                fontSize: 13,
+                                showBorder: false
+                            )
+                            .environmentObject(coreManager)
 
-                    // Title + subtitle
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(player.currentConversationTitle ?? "Audio Notification")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .lineLimit(1)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(conversationTitle)
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .lineLimit(1)
 
-                        if let subtitle {
-                            Text(subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                                if let projectTitle {
+                                    Text(projectTitle)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
                         }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
 
                     Spacer()
 
@@ -77,23 +92,38 @@ struct NowPlayingBar: View {
                     } label: {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.title3)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
-                    // Stop button
+                    // Skip to next (only when queue has items)
+                    if player.hasQueue {
+                        Button {
+                            player.skipToNext()
+                        } label: {
+                            Image(systemName: "forward.fill")
+                                .font(.title3)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+
+                    // Stop button (stops all + clears queue)
                     Button {
                         player.stop()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.title3)
                             .foregroundStyle(.secondary)
-                            .frame(width: 32, height: 32)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 16)
-                .padding(.vertical, 10)
+                .padding(.vertical, 6)
 
                 // Progress bar
                 GeometryReader { geometry in
@@ -104,12 +134,140 @@ struct NowPlayingBar: View {
                 .frame(height: 3)
                 .background(Color.primary.opacity(0.1))
             }
+            .contentShape(Rectangle())
             .clipShape(RoundedRectangle(cornerRadius: 16))
             .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
             .shadow(color: .black.opacity(0.1), radius: 8, x: 0, y: -2)
             .padding(.horizontal, 8)
             .padding(.bottom, 4)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+            .sheet(isPresented: $showQueueSheet) {
+                AudioQueueSheet()
+                    .environmentObject(coreManager)
+            }
         }
+    }
+}
+
+// MARK: - Audio Queue Sheet
+
+struct AudioQueueSheet: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @ObservedObject var player = AudioNotificationPlayer.shared
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                // Currently playing
+                if player.playbackState != .idle {
+                    Section("Now Playing") {
+                        HStack(spacing: 12) {
+                            Image(systemName: "speaker.wave.2.fill")
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 24)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(resolveConversationTitle(conversationId: player.currentConversationId, fallback: player.currentConversationTitle))
+                                    .font(.subheadline)
+                                    .fontWeight(.semibold)
+                                    .lineLimit(1)
+
+                                if let project = resolveProjectTitle(conversationId: player.currentConversationId) {
+                                    Text(project)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Queue
+                if !player.queue.isEmpty {
+                    Section("Up Next (\(player.queue.count))") {
+                        ForEach(player.queue) { item in
+                            HStack(spacing: 12) {
+                                AgentAvatarView(
+                                    agentName: resolveAgentName(pubkey: item.notification.agentPubkey) ?? "Agent",
+                                    pubkey: item.notification.agentPubkey,
+                                    size: 28,
+                                    fontSize: 11,
+                                    showBorder: false
+                                )
+                                .environmentObject(coreManager)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(resolveConversationTitle(conversationId: item.conversationId, fallback: item.notification.conversationTitle))
+                                        .font(.subheadline)
+                                        .lineLimit(1)
+
+                                    if let project = resolveProjectTitle(conversationId: item.conversationId) {
+                                        Text(project)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
+                                }
+
+                                Spacer()
+
+                                Button {
+                                    player.removeFromQueue(id: item.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                } else {
+                    Section {
+                        Text("Queue is empty")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("Audio Queue")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    if !player.queue.isEmpty {
+                        Button("Clear All") {
+                            player.clearQueue()
+                        }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func resolveAgentName(pubkey: String?) -> String? {
+        guard let pubkey else { return nil }
+        let name = coreManager.safeCore.getProfileName(pubkey: pubkey)
+        return name.isEmpty ? nil : AgentNameFormatter.format(name)
+    }
+
+    private func resolveConversationTitle(conversationId: String?, fallback: String?) -> String {
+        if let id = conversationId,
+           let conv = coreManager.conversations.first(where: { $0.id == id }) {
+            return conv.title
+        }
+        return fallback ?? "Audio Notification"
+    }
+
+    private func resolveProjectTitle(conversationId: String?) -> String? {
+        guard let id = conversationId,
+              let conv = coreManager.conversations.first(where: { $0.id == id }) else { return nil }
+        let projectId = TenexCoreManager.projectId(fromATag: conv.projectATag)
+        return coreManager.projects.first { $0.id == projectId }?.title
     }
 }
