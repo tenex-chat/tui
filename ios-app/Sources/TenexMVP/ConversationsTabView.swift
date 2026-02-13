@@ -168,6 +168,8 @@ struct ConversationsTabView: View {
     @State private var showAISettings = false
     @State private var showStats = false
     @State private var showArchived = false
+    /// Hide scheduled conversations (those with scheduled-task-id tag)
+    @AppStorage("hideScheduled") private var hideScheduled = true
     @State private var selectedConversation: ConversationFullInfo?
     @State private var runtimeText: String = "0m"
     @State private var showProjectPickerForNewConv = false
@@ -207,13 +209,18 @@ struct ConversationsTabView: View {
         }
     }
 
-    /// Filtered conversations based on selected projects and archived status
+    /// Filtered conversations based on selected projects, archived status, and scheduled status
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 
         // Filter by archived status
         if !showArchived {
             conversations = conversations.filter { !$0.isArchived }
+        }
+
+        // Filter by scheduled status
+        if hideScheduled {
+            conversations = conversations.filter { !$0.isScheduled }
         }
 
         // Filter by selected projects
@@ -297,6 +304,13 @@ struct ConversationsTabView: View {
                         Menu {
                             Toggle(isOn: $showArchived) {
                                 Label("Show Archived", systemImage: "archivebox")
+                            }
+
+                            Toggle(isOn: Binding(
+                                get: { !hideScheduled },
+                                set: { hideScheduled = !$0 }
+                            )) {
+                                Label("Show Scheduled", systemImage: "calendar.badge.clock")
                             }
 
                             Divider()
@@ -407,6 +421,13 @@ struct ConversationsTabView: View {
             }
             .onChange(of: selectedProjectIds) { _, _ in
                 rebuildHierarchy()
+            }
+            .onChange(of: hideScheduled) { _, _ in
+                rebuildHierarchy()
+                // Preload cache for newly visible conversations when showing scheduled
+                Task {
+                    await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+                }
             }
         }
     }
@@ -548,6 +569,21 @@ private struct ConversationRowFull: View {
                     .environmentObject(coreManager)
 
                     Spacer()
+
+                    // Scheduled badge (shows when conversation has scheduled-task-id tag)
+                    if conversation.isScheduled {
+                        HStack(spacing: 2) {
+                            Image(systemName: "clock")
+                                .font(.caption2)
+                            Text("Scheduled")
+                        }
+                        .font(.caption2)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.15))
+                        .foregroundStyle(.purple)
+                        .clipShape(Capsule())
+                    }
 
                     // Status badge
                     if let status = conversation.status {
