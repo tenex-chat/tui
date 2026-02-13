@@ -914,6 +914,10 @@ struct MainTabView: View {
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
+            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+                ReportsTabView()
+                    .environmentObject(coreManager)
+            }
             Tab("Search", systemImage: "magnifyingglass", value: 10) {
                 NavigationStack {
                     SearchView()
