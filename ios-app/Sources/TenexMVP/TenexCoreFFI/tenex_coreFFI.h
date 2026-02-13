@@ -542,9 +542,19 @@ void uniffi_tenex_core_fn_method_tenexcore_set_audio_prompt(void*_Nonnull ptr, R
 void uniffi_tenex_core_fn_method_tenexcore_set_collapsed_thread_ids(void*_Nonnull ptr, RustBuffer thread_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_ELEVENLABS_API_KEY
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_ELEVENLABS_API_KEY
+void uniffi_tenex_core_fn_method_tenexcore_set_elevenlabs_api_key(void*_Nonnull ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_EVENT_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_EVENT_CALLBACK
 void uniffi_tenex_core_fn_method_tenexcore_set_event_callback(void*_Nonnull ptr, uint64_t callback, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_OPENROUTER_API_KEY
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_OPENROUTER_API_KEY
+void uniffi_tenex_core_fn_method_tenexcore_set_openrouter_api_key(void*_Nonnull ptr, RustBuffer key, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_OPENROUTER_MODEL
@@ -1189,9 +1199,21 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_collapsed_thread_ids(vo
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_ELEVENLABS_API_KEY
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_ELEVENLABS_API_KEY
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_elevenlabs_api_key(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_EVENT_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_EVENT_CALLBACK
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_event_callback(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_OPENROUTER_API_KEY
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_OPENROUTER_API_KEY
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_openrouter_api_key(void
     
 );
 #endif
