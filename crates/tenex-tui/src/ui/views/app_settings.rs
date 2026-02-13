@@ -214,6 +214,21 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     );
     y_offset += 3;
 
+    // 3b. TTS Inactivity Threshold
+    let is_threshold_selected = state.selected_ai_setting() == Some(AiSetting::TtsInactivityThreshold);
+    render_text_setting_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "TTS Inactivity Threshold:",
+        "Seconds of inactivity before TTS fires (default: 120)",
+        &state.ai.tts_inactivity_threshold_input,
+        is_threshold_selected,
+        state.editing_tts_inactivity_threshold(),
+    );
+    y_offset += 3;
+
     // 4. Selected Voice IDs
     let is_voices_selected = state.selected_ai_setting() == Some(AiSetting::SelectedVoiceIds);
     render_text_setting_row(

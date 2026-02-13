@@ -49,6 +49,7 @@ pub enum AiSetting {
     ElevenLabsApiKey,
     OpenRouterApiKey,
     AudioEnabled,
+    TtsInactivityThreshold,
     SelectedVoiceIds,
     OpenRouterModel,
     AudioPrompt,
@@ -59,6 +60,7 @@ impl AiSetting {
         AiSetting::ElevenLabsApiKey,
         AiSetting::OpenRouterApiKey,
         AiSetting::AudioEnabled,
+        AiSetting::TtsInactivityThreshold,
         AiSetting::SelectedVoiceIds,
         AiSetting::OpenRouterModel,
         AiSetting::AudioPrompt,
@@ -295,6 +297,8 @@ pub struct AiSettingsState {
     pub openrouter_model_input: String,
     /// Input for audio prompt
     pub audio_prompt_input: String,
+    /// Input for TTS inactivity threshold (seconds)
+    pub tts_inactivity_threshold_input: String,
 }
 
 impl AiSettingsState {
@@ -303,6 +307,7 @@ impl AiSettingsState {
         voice_ids: &[String],
         openrouter_model: Option<&str>,
         audio_prompt: &str,
+        tts_inactivity_threshold_secs: u64,
     ) -> Self {
         let elevenlabs_key_exists =
             tenex_core::SecureStorage::exists(tenex_core::SecureKey::ElevenLabsApiKey);
@@ -318,6 +323,7 @@ impl AiSettingsState {
             voice_ids_input: voice_ids.join(", "),
             openrouter_model_input: openrouter_model.unwrap_or("").to_string(),
             audio_prompt_input: audio_prompt.to_string(),
+            tts_inactivity_threshold_input: tts_inactivity_threshold_secs.to_string(),
         }
     }
 }
@@ -360,6 +366,7 @@ impl AppSettingsState {
                 &ai_settings.selected_voice_ids,
                 ai_settings.openrouter_model.as_deref(),
                 &ai_settings.audio_prompt,
+                ai_settings.tts_inactivity_threshold_secs,
             ),
             voice_browser: None,
             model_browser: None,
@@ -439,6 +446,13 @@ impl AppSettingsState {
         self.editing
             && self.current_tab == SettingsTab::AI
             && self.selected_ai_setting() == Some(AiSetting::AudioPrompt)
+    }
+
+    /// Check if TTS inactivity threshold is being edited
+    pub fn editing_tts_inactivity_threshold(&self) -> bool {
+        self.editing
+            && self.current_tab == SettingsTab::AI
+            && self.selected_ai_setting() == Some(AiSetting::TtsInactivityThreshold)
     }
 
     pub fn move_up(&mut self) {

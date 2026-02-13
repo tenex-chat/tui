@@ -860,6 +860,11 @@ struct MessageComposerView: View {
 
                 isSending = false
 
+                // Record user activity for TTS inactivity gating
+                if let convId = conversationId {
+                    coreManager.recordUserActivity(conversationId: convId)
+                }
+
                 // Clear draft on success
                 await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
                 // Notify and dismiss after delete completes

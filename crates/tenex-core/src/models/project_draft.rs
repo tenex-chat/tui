@@ -131,12 +131,19 @@ pub struct AiAudioSettings {
     /// Enable/disable audio notifications
     #[serde(default)]
     pub enabled: bool,
+    /// Seconds of inactivity before TTS fires (skip if user was recently active)
+    #[serde(default = "default_tts_inactivity_threshold")]
+    pub tts_inactivity_threshold_secs: u64,
     /// Legacy fields for migration (ignored, will be removed on next save)
     /// These are only used during one-time migration from JSON to secure storage
     #[serde(default, skip_serializing)]
     pub(crate) elevenlabs_api_key: Option<String>,
     #[serde(default, skip_serializing)]
     pub(crate) openrouter_api_key: Option<String>,
+}
+
+pub fn default_tts_inactivity_threshold() -> u64 {
+    120
 }
 
 pub fn default_audio_prompt() -> String {
@@ -150,6 +157,7 @@ impl Default for AiAudioSettings {
             openrouter_model: None,
             audio_prompt: default_audio_prompt(),
             enabled: false,
+            tts_inactivity_threshold_secs: default_tts_inactivity_threshold(),
             elevenlabs_api_key: None,
             openrouter_api_key: None,
         }
@@ -571,6 +579,11 @@ impl PreferencesStorage {
 
     pub fn set_audio_notifications_enabled(&mut self, enabled: bool) -> Result<(), String> {
         self.prefs.ai_audio_settings.enabled = enabled;
+        self.save_to_file_with_result()
+    }
+
+    pub fn set_tts_inactivity_threshold(&mut self, secs: u64) -> Result<(), String> {
+        self.prefs.ai_audio_settings.tts_inactivity_threshold_secs = secs;
         self.save_to_file_with_result()
     }
 

@@ -520,7 +520,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     selectedVoiceIds: settings.selectedVoiceIds,
                     openrouterModel: settings.openrouterModel,
                     audioPrompt: settings.audioPrompt,
-                    enabled: settings.enabled
+                    enabled: settings.enabled,
+                    ttsInactivityThresholdSecs: settings.ttsInactivityThresholdSecs
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
@@ -533,6 +534,17 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("setAudioNotificationsEnabled") {
             do {
                 try core.setAudioNotificationsEnabled(enabled: enabled)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set TTS inactivity threshold (seconds of inactivity before TTS fires)
+    func setTtsInactivityThreshold(secs: UInt64) throws {
+        try profiler.measureFFI("setTtsInactivityThreshold") {
+            do {
+                try core.setTtsInactivityThreshold(secs: secs)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

@@ -982,6 +982,11 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func setTrustedBackends(approved: [String], blocked: [String]) throws 
     
     /**
+     * Set TTS inactivity threshold (seconds of inactivity before TTS fires)
+     */
+    func setTtsInactivityThreshold(secs: UInt64) throws 
+    
+    /**
      * Set which projects are visible in the Conversations tab.
      * Pass empty array to show all projects.
      */
@@ -1806,6 +1811,16 @@ open func setTrustedBackends(approved: [String], blocked: [String])throws   {try
 }
     
     /**
+     * Set TTS inactivity threshold (seconds of inactivity before TTS fires)
+     */
+open func setTtsInactivityThreshold(secs: UInt64)throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_set_tts_inactivity_threshold(self.uniffiClonePointer(),
+        FfiConverterUInt64.lower(secs),$0
+    )
+}
+}
+    
+    /**
      * Set which projects are visible in the Conversations tab.
      * Pass empty array to show all projects.
      */
@@ -2113,16 +2128,18 @@ public struct AiAudioSettingsInfo {
     public var openrouterModel: String?
     public var audioPrompt: String
     public var enabled: Bool
+    public var ttsInactivityThresholdSecs: UInt64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(elevenlabsApiKeyConfigured: Bool, openrouterApiKeyConfigured: Bool, selectedVoiceIds: [String], openrouterModel: String?, audioPrompt: String, enabled: Bool) {
+    public init(elevenlabsApiKeyConfigured: Bool, openrouterApiKeyConfigured: Bool, selectedVoiceIds: [String], openrouterModel: String?, audioPrompt: String, enabled: Bool, ttsInactivityThresholdSecs: UInt64) {
         self.elevenlabsApiKeyConfigured = elevenlabsApiKeyConfigured
         self.openrouterApiKeyConfigured = openrouterApiKeyConfigured
         self.selectedVoiceIds = selectedVoiceIds
         self.openrouterModel = openrouterModel
         self.audioPrompt = audioPrompt
         self.enabled = enabled
+        self.ttsInactivityThresholdSecs = ttsInactivityThresholdSecs
     }
 }
 
@@ -2151,6 +2168,9 @@ extension AiAudioSettingsInfo: Equatable, Hashable {
         if lhs.enabled != rhs.enabled {
             return false
         }
+        if lhs.ttsInactivityThresholdSecs != rhs.ttsInactivityThresholdSecs {
+            return false
+        }
         return true
     }
 
@@ -2161,6 +2181,7 @@ extension AiAudioSettingsInfo: Equatable, Hashable {
         hasher.combine(openrouterModel)
         hasher.combine(audioPrompt)
         hasher.combine(enabled)
+        hasher.combine(ttsInactivityThresholdSecs)
     }
 }
 
@@ -2178,7 +2199,8 @@ public struct FfiConverterTypeAiAudioSettingsInfo: FfiConverterRustBuffer {
                 selectedVoiceIds: FfiConverterSequenceString.read(from: &buf), 
                 openrouterModel: FfiConverterOptionString.read(from: &buf), 
                 audioPrompt: FfiConverterString.read(from: &buf), 
-                enabled: FfiConverterBool.read(from: &buf)
+                enabled: FfiConverterBool.read(from: &buf), 
+                ttsInactivityThresholdSecs: FfiConverterUInt64.read(from: &buf)
         )
     }
 
@@ -2189,6 +2211,7 @@ public struct FfiConverterTypeAiAudioSettingsInfo: FfiConverterRustBuffer {
         FfiConverterOptionString.write(value.openrouterModel, into: &buf)
         FfiConverterString.write(value.audioPrompt, into: &buf)
         FfiConverterBool.write(value.enabled, into: &buf)
+        FfiConverterUInt64.write(value.ttsInactivityThresholdSecs, into: &buf)
     }
 }
 
@@ -8405,6 +8428,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends() != 54253) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_set_tts_inactivity_threshold() != 15286) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_visible_projects() != 3693) {
