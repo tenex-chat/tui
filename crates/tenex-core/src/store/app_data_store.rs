@@ -158,6 +158,7 @@ impl AppDataStore {
         self.lessons.clear();
         self.agent_definitions.clear();
         self.nudges.clear();
+        self.mcp_tools.clear();
         self.reports.clear();
         self.reports_all_versions.clear();
         self.document_threads.clear();
@@ -169,6 +170,7 @@ impl AppDataStore {
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
         self.messages_by_day_counts.clear();
+        self.llm_activity_by_hour.clear();
         self.runtime_by_day_counts.clear();
         self.agent_tracking.clear();
     }
@@ -5084,5 +5086,972 @@ mod tests {
             "COST_WINDOW_DAYS window should include boundary: expected 3.00, got {}",
             result
         );
+    }
+
+    // ===== Test Helpers for Decomposition Safety Net =====
+
+    fn make_test_thread(id: &str, pubkey: &str, last_activity: u64) -> Thread {
+        Thread {
+            id: id.to_string(),
+            title: format!("Thread {}", id),
+            content: String::new(),
+            pubkey: pubkey.to_string(),
+            last_activity,
+            effective_last_activity: last_activity,
+            status_label: None,
+            status_current_activity: None,
+            summary: None,
+            parent_conversation_id: None,
+            p_tags: vec![],
+            ask_event: None,
+            is_scheduled: false,
+        }
+    }
+
+    fn make_test_report(slug: &str, project_a_tag: &str, created_at: u64) -> Report {
+        Report {
+            id: format!("report-{}-{}", slug, created_at),
+            slug: slug.to_string(),
+            project_a_tag: project_a_tag.to_string(),
+            author: "author1".to_string(),
+            title: format!("Report {}", slug),
+            summary: String::new(),
+            content: "Report content".to_string(),
+            hashtags: vec![],
+            created_at,
+            reading_time_mins: 1,
+        }
+    }
+
+    fn make_test_agent_def(id: &str, name: &str, created_at: u64) -> AgentDefinition {
+        AgentDefinition {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            role: String::new(),
+            instructions: String::new(),
+            picture: None,
+            version: None,
+            model: None,
+            tools: vec![],
+            mcp_servers: vec![],
+            use_criteria: vec![],
+            created_at,
+        }
+    }
+
+    fn make_test_nudge(id: &str, title: &str, created_at: u64) -> Nudge {
+        Nudge {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            content: String::new(),
+            hashtags: vec![],
+            created_at,
+            allowed_tools: vec![],
+            denied_tools: vec![],
+            only_tools: vec![],
+            supersedes: None,
+        }
+    }
+
+    fn make_test_mcp_tool(id: &str, name: &str, created_at: u64) -> MCPTool {
+        MCPTool {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            d_tag: id.to_string(),
+            name: name.to_string(),
+            description: String::new(),
+            command: String::new(),
+            parameters: None,
+            capabilities: vec![],
+            server_url: None,
+            version: None,
+            created_at,
+        }
+    }
+
+    fn make_test_inbox_item(id: &str, event_type: InboxEventType, created_at: u64) -> InboxItem {
+        InboxItem {
+            id: id.to_string(),
+            event_type,
+            title: format!("Inbox {}", id),
+            content: "content".to_string(),
+            project_a_tag: "31933:pk:proj1".to_string(),
+            author_pubkey: "author1".to_string(),
+            created_at,
+            is_read: false,
+            thread_id: None,
+            ask_event: None,
+        }
+    }
+
+    fn make_test_operations_status(event_id: &str, project: &str, agents: Vec<&str>, created_at: u64) -> OperationsStatus {
+        OperationsStatus {
+            nostr_event_id: format!("nostr-{}", event_id),
+            event_id: event_id.to_string(),
+            agent_pubkeys: agents.into_iter().map(|s| s.to_string()).collect(),
+            project_coordinate: project.to_string(),
+            created_at,
+            thread_id: None,
+            llm_runtime_secs: None,
+        }
+    }
+
+    fn make_test_lesson(id: &str, title: &str, created_at: u64) -> Lesson {
+        Lesson {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            title: title.to_string(),
+            content: "lesson content".to_string(),
+            detailed: None,
+            reasoning: None,
+            metacognition: None,
+            reflection: None,
+            category: None,
+            created_at,
+        }
+    }
+
+    // ===== A. Content/Definitions Tests =====
+
+    #[test]
+    fn test_content_empty_store_returns_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_mcp_tools().is_empty());
+        assert!(store.get_nudges().is_empty());
+        assert!(store.get_lesson("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_content_agent_definitions_sorted_descending() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
+        store.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
+        store.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
+
+        let defs = store.get_agent_definitions();
+        assert_eq!(defs.len(), 3);
+        assert_eq!(defs[0].name, "Newer Agent");
+        assert_eq!(defs[1].name, "Middle Agent");
+        assert_eq!(defs[2].name, "Older Agent");
+    }
+
+    #[test]
+    fn test_content_agent_definition_lookup() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
+
+        assert!(store.get_agent_definition("a1").is_some());
+        assert_eq!(store.get_agent_definition("a1").unwrap().name, "Agent One");
+        assert!(store.get_agent_definition("nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_content_mcp_tools_sorted_descending() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
+        store.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
+
+        let tools = store.get_mcp_tools();
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0].name, "New Tool");
+        assert_eq!(tools[1].name, "Old Tool");
+    }
+
+    #[test]
+    fn test_content_mcp_tool_lookup() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
+
+        assert!(store.get_mcp_tool("t1").is_some());
+        assert!(store.get_mcp_tool("missing").is_none());
+    }
+
+    #[test]
+    fn test_content_nudges_sorted_descending() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
+        store.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
+
+        let nudges = store.get_nudges();
+        assert_eq!(nudges.len(), 2);
+        assert_eq!(nudges[0].title, "New Nudge");
+        assert_eq!(nudges[1].title, "Old Nudge");
+    }
+
+    #[test]
+    fn test_content_lesson_lookup() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
+
+        assert!(store.get_lesson("l1").is_some());
+        assert_eq!(store.get_lesson("l1").unwrap().title, "Lesson One");
+        assert!(store.get_lesson("missing").is_none());
+    }
+
+    #[test]
+    fn test_content_cleared_on_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
+        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
+
+        store.clear();
+
+        assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_mcp_tools().is_empty());
+        assert!(store.get_nudges().is_empty());
+        assert!(store.get_lesson("l1").is_none());
+    }
+
+    // ===== B. Trust Tests =====
+
+    #[test]
+    fn test_trust_set_trusted_backends() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let approved: HashSet<String> = ["pk1".to_string(), "pk2".to_string()].into();
+        let blocked: HashSet<String> = ["pk3".to_string()].into();
+
+        store.set_trusted_backends(approved, blocked);
+
+        assert!(store.approved_backends.contains("pk1"));
+        assert!(store.approved_backends.contains("pk2"));
+        assert!(store.blocked_backends.contains("pk3"));
+    }
+
+    #[test]
+    fn test_trust_add_approved_removes_from_blocked() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.blocked_backends.insert("pk1".to_string());
+        store.add_approved_backend("pk1");
+
+        assert!(store.approved_backends.contains("pk1"));
+        assert!(!store.blocked_backends.contains("pk1"));
+    }
+
+    #[test]
+    fn test_trust_add_blocked_removes_from_approved() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.approved_backends.insert("pk1".to_string());
+        store.add_blocked_backend("pk1");
+
+        assert!(!store.approved_backends.contains("pk1"));
+        assert!(store.blocked_backends.contains("pk1"));
+    }
+
+    #[test]
+    fn test_trust_pending_approvals_queued_and_drained() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let approval = PendingBackendApproval {
+            backend_pubkey: "pk1".to_string(),
+            project_a_tag: "31933:pk:proj1".to_string(),
+            first_seen: 100,
+            status: ProjectStatus {
+                project_coordinate: "31933:pk:proj1".to_string(),
+                agents: vec![],
+                branches: vec![],
+                all_models: vec![],
+                all_tools: vec![],
+                created_at: 100,
+                backend_pubkey: "pk1".to_string(),
+                last_seen_at: 100,
+            },
+        };
+
+        store.pending_backend_approvals.push(approval);
+
+        assert!(store.has_pending_backend_approvals());
+        assert!(store.has_pending_backend_approval("pk1", "31933:pk:proj1"));
+        assert!(!store.has_pending_backend_approval("pk1", "other_project"));
+        assert!(!store.has_pending_backend_approval("pk2", "31933:pk:proj1"));
+
+        let drained = store.drain_pending_backend_approvals();
+        assert_eq!(drained.len(), 1);
+        assert!(!store.has_pending_backend_approvals());
+    }
+
+    #[test]
+    fn test_trust_blocking_removes_pending_approvals() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.pending_backend_approvals.push(PendingBackendApproval {
+            backend_pubkey: "pk1".to_string(),
+            project_a_tag: "proj1".to_string(),
+            first_seen: 100,
+            status: ProjectStatus {
+                project_coordinate: "proj1".to_string(),
+                agents: vec![],
+                branches: vec![],
+                all_models: vec![],
+                all_tools: vec![],
+                created_at: 100,
+                backend_pubkey: "pk1".to_string(),
+                last_seen_at: 100,
+            },
+        });
+
+        store.add_blocked_backend("pk1");
+
+        assert!(store.pending_backend_approvals.is_empty());
+        assert!(store.blocked_backends.contains("pk1"));
+    }
+
+    #[test]
+    fn test_trust_approving_applies_pending_statuses() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.pending_backend_approvals.push(PendingBackendApproval {
+            backend_pubkey: "pk1".to_string(),
+            project_a_tag: "31933:pk:proj1".to_string(),
+            first_seen: 100,
+            status: ProjectStatus {
+                project_coordinate: "31933:pk:proj1".to_string(),
+                agents: vec![],
+                branches: vec![],
+                all_models: vec![],
+                all_tools: vec![],
+                created_at: 100,
+                backend_pubkey: "pk1".to_string(),
+                last_seen_at: 100,
+            },
+        });
+
+        store.add_approved_backend("pk1");
+
+        assert!(store.approved_backends.contains("pk1"));
+        assert!(store.pending_backend_approvals.is_empty());
+        assert!(store.project_statuses.contains_key("31933:pk:proj1"));
+    }
+
+    #[test]
+    fn test_trust_cleared_on_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.approved_backends.insert("pk1".to_string());
+        store.blocked_backends.insert("pk2".to_string());
+        store.pending_backend_approvals.push(PendingBackendApproval {
+            backend_pubkey: "pk3".to_string(),
+            project_a_tag: "proj".to_string(),
+            first_seen: 100,
+            status: ProjectStatus {
+                project_coordinate: "proj".to_string(),
+                agents: vec![],
+                branches: vec![],
+                all_models: vec![],
+                all_tools: vec![],
+                created_at: 100,
+                backend_pubkey: "pk3".to_string(),
+                last_seen_at: 100,
+            },
+        });
+
+        store.clear();
+
+        assert!(store.approved_backends.is_empty());
+        assert!(store.blocked_backends.is_empty());
+        assert!(store.pending_backend_approvals.is_empty());
+    }
+
+    // ===== C. Reports Tests =====
+
+    #[test]
+    fn test_reports_empty_store() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        assert!(store.get_reports().is_empty());
+        assert!(store.get_report("slug").is_none());
+        assert!(store.get_reports_by_project("proj").is_empty());
+        assert!(store.get_document_threads("doc").is_empty());
+    }
+
+    #[test]
+    fn test_reports_sorted_by_created_at_descending() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_report(make_test_report("slug-a", "proj1", 100));
+        store.add_report(make_test_report("slug-b", "proj1", 300));
+        store.add_report(make_test_report("slug-c", "proj1", 200));
+
+        let reports = store.get_reports();
+        assert_eq!(reports.len(), 3);
+        assert_eq!(reports[0].slug, "slug-b");
+        assert_eq!(reports[1].slug, "slug-c");
+        assert_eq!(reports[2].slug, "slug-a");
+    }
+
+    #[test]
+    fn test_reports_filtered_by_project() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_report(make_test_report("slug-a", "proj1", 100));
+        store.add_report(make_test_report("slug-b", "proj2", 200));
+        store.add_report(make_test_report("slug-c", "proj1", 300));
+
+        let proj1_reports = store.get_reports_by_project("proj1");
+        assert_eq!(proj1_reports.len(), 2);
+        assert_eq!(proj1_reports[0].slug, "slug-c");
+        assert_eq!(proj1_reports[1].slug, "slug-a");
+
+        let proj2_reports = store.get_reports_by_project("proj2");
+        assert_eq!(proj2_reports.len(), 1);
+    }
+
+    #[test]
+    fn test_reports_version_history() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Two versions of the same slug
+        let v1 = Report {
+            id: "v1-id".to_string(),
+            slug: "my-report".to_string(),
+            project_a_tag: "proj1".to_string(),
+            author: "author".to_string(),
+            title: "Version 1".to_string(),
+            summary: String::new(),
+            content: "v1 content".to_string(),
+            hashtags: vec![],
+            created_at: 100,
+            reading_time_mins: 1,
+        };
+        let v2 = Report {
+            id: "v2-id".to_string(),
+            slug: "my-report".to_string(),
+            project_a_tag: "proj1".to_string(),
+            author: "author".to_string(),
+            title: "Version 2".to_string(),
+            summary: String::new(),
+            content: "v2 content".to_string(),
+            hashtags: vec![],
+            created_at: 200,
+            reading_time_mins: 1,
+        };
+
+        store.add_report(v1);
+        store.add_report(v2);
+
+        // Latest version should be v2
+        let latest = store.get_report("my-report").unwrap();
+        assert_eq!(latest.title, "Version 2");
+
+        // All versions
+        let versions = store.get_report_versions("my-report");
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].id, "v2-id"); // newest first
+        assert_eq!(versions[1].id, "v1-id");
+
+        // Previous version
+        let prev = store.get_previous_report_version("my-report", "v2-id");
+        assert!(prev.is_some());
+        assert_eq!(prev.unwrap().id, "v1-id");
+
+        // No previous for oldest
+        assert!(store.get_previous_report_version("my-report", "v1-id").is_none());
+    }
+
+    #[test]
+    fn test_reports_document_threads() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let thread = make_test_thread("t1", "pk1", 100);
+        store.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
+
+        let threads = store.get_document_threads("doc-atag");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "t1");
+
+        assert!(store.get_document_threads("missing").is_empty());
+    }
+
+    #[test]
+    fn test_reports_cleared_on_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_report(make_test_report("slug", "proj1", 100));
+        store.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
+
+        store.clear();
+
+        assert!(store.get_reports().is_empty());
+        assert!(store.get_document_threads("doc").is_empty());
+    }
+
+    // ===== D. Inbox Tests =====
+
+    #[test]
+    fn test_inbox_add_and_sort_order() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.add_inbox_item(make_test_inbox_item("i3", InboxEventType::Mention, 300));
+        store.add_inbox_item(make_test_inbox_item("i2", InboxEventType::Ask, 200));
+
+        let items = store.get_inbox_items();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].id, "i3"); // most recent first
+        assert_eq!(items[1].id, "i2");
+        assert_eq!(items[2].id, "i1");
+    }
+
+    #[test]
+    fn test_inbox_deduplication() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 200)); // same id
+
+        assert_eq!(store.get_inbox_items().len(), 1);
+    }
+
+    #[test]
+    fn test_inbox_mark_read() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        assert!(!store.get_inbox_items()[0].is_read);
+
+        store.mark_inbox_read("i1");
+        assert!(store.get_inbox_items()[0].is_read);
+    }
+
+    #[test]
+    fn test_inbox_read_state_persists_for_new_items() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Mark as read before adding
+        store.mark_inbox_read("i1");
+
+        // Adding item with same id should be marked as read
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        assert!(store.get_inbox_items()[0].is_read);
+    }
+
+    #[test]
+    fn test_inbox_cleared_on_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.clear();
+
+        assert!(store.get_inbox_items().is_empty());
+    }
+
+    // ===== E. Operations Tests =====
+
+    #[test]
+    fn test_operations_empty_store() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        assert!(store.get_working_agents("ev1").is_empty());
+        assert!(!store.is_event_busy("ev1"));
+        assert_eq!(store.get_active_operations_count("proj1"), 0);
+        assert!(store.get_active_event_ids("proj1").is_empty());
+        assert!(!store.is_project_busy("proj1"));
+        assert!(store.get_all_active_operations().is_empty());
+        assert_eq!(store.active_operations_count(), 0);
+    }
+
+    #[test]
+    fn test_operations_working_agents() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
+        );
+
+        let agents = store.get_working_agents("ev1");
+        assert_eq!(agents.len(), 2);
+        assert!(store.is_event_busy("ev1"));
+        assert!(!store.is_event_busy("ev2"));
+    }
+
+    #[test]
+    fn test_operations_per_project_counts() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a2"], 200),
+        );
+        store.operations_by_event.insert(
+            "ev3".to_string(),
+            make_test_operations_status("ev3", "proj2", vec!["a3"], 300),
+        );
+
+        assert_eq!(store.get_active_operations_count("proj1"), 2);
+        assert_eq!(store.get_active_operations_count("proj2"), 1);
+        assert!(store.is_project_busy("proj1"));
+        assert!(store.is_project_busy("proj2"));
+        assert!(!store.is_project_busy("proj3"));
+
+        let proj1_events = store.get_active_event_ids("proj1");
+        assert_eq!(proj1_events.len(), 2);
+    }
+
+    #[test]
+    fn test_operations_empty_agents_not_counted() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec![], 100), // empty agents
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a1"], 200),
+        );
+
+        assert_eq!(store.get_active_operations_count("proj1"), 1);
+        assert!(!store.is_event_busy("ev1"));
+        assert!(store.is_event_busy("ev2"));
+        assert_eq!(store.active_operations_count(), 1);
+    }
+
+    #[test]
+    fn test_operations_all_active_sorted_by_created_at() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 300),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a2"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev3".to_string(),
+            make_test_operations_status("ev3", "proj1", vec!["a3"], 200),
+        );
+
+        let all = store.get_all_active_operations();
+        assert_eq!(all.len(), 3);
+        assert_eq!(all[0].event_id, "ev2"); // oldest first
+        assert_eq!(all[1].event_id, "ev3");
+        assert_eq!(all[2].event_id, "ev1");
+    }
+
+    #[test]
+    fn test_operations_project_working_agents_deduped() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Same agent working on two events in same project
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["agent1"], 200),
+        );
+
+        let agents = store.get_project_working_agents("proj1");
+        // agent1 appears in both events, but should be deduped
+        assert_eq!(agents.len(), 2); // agent1, agent2
+    }
+
+    #[test]
+    fn test_operations_cleared_on_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
+        );
+
+        store.clear();
+
+        assert!(store.get_all_active_operations().is_empty());
+        assert_eq!(store.active_operations_count(), 0);
+    }
+
+    // ===== F. Statistics Tests =====
+    // (Note: increment_* methods are private, so we test through public getters
+    //  by directly populating the pre-aggregated hashmaps)
+
+    #[test]
+    fn test_statistics_messages_by_day_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let (user, all) = store.get_messages_by_day(7);
+        assert!(user.is_empty());
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn test_statistics_messages_by_day_zero_days() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let (user, all) = store.get_messages_by_day(0);
+        assert!(user.is_empty());
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn test_statistics_messages_by_day_window() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let today_start = (now / 86400) * 86400;
+
+        // Insert data for today and yesterday
+        store.messages_by_day_counts.insert(today_start, (5, 10));
+        store.messages_by_day_counts.insert(today_start - 86400, (3, 7));
+        // Insert data for 10 days ago (should not appear in 3-day window)
+        store.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
+
+        let (user, all) = store.get_messages_by_day(3);
+        assert_eq!(user.len(), 2); // today + yesterday
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_statistics_tokens_by_hour_window() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Use a fixed reference hour for deterministic test
+        let reference_hour_start: u64 = 86400 * 100; // day 100, hour 0
+        let day_start = (reference_hour_start / 86400) * 86400;
+
+        // Insert tokens for hour 0 of day 100
+        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+
+        let tokens = store.get_tokens_by_hour_from(reference_hour_start, 24);
+        assert_eq!(tokens.get(&reference_hour_start), Some(&500));
+    }
+
+    #[test]
+    fn test_statistics_message_count_by_hour() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        let reference_hour_start: u64 = 86400 * 100;
+        let day_start = (reference_hour_start / 86400) * 86400;
+
+        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+
+        let counts = store.get_message_count_by_hour_from(reference_hour_start, 24);
+        assert_eq!(counts.get(&reference_hour_start), Some(&10));
+    }
+
+    #[test]
+    fn test_statistics_zero_hours_returns_empty() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let tokens = store.get_tokens_by_hour_from(86400, 0);
+        assert!(tokens.is_empty());
+
+        let counts = store.get_message_count_by_hour_from(86400, 0);
+        assert!(counts.is_empty());
+    }
+
+    // ===== G. Core Cross-Cutting Tests =====
+
+    #[test]
+    fn test_core_projects_threads_messages() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        assert!(store.get_projects().is_empty());
+        assert!(store.get_threads("proj1").is_empty());
+        assert!(store.get_messages("thread1").is_empty());
+
+        store.projects.push(Project {
+            id: "p1".to_string(),
+            name: "Project One".to_string(),
+            pubkey: "pk".to_string(),
+            participants: vec![],
+            agent_ids: vec![],
+            mcp_tool_ids: vec![],
+            created_at: 100,
+        });
+
+        assert_eq!(store.get_projects().len(), 1);
+    }
+
+    #[test]
+    fn test_core_thread_by_id_cross_project() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.threads_by_project.entry("proj1".to_string()).or_default()
+            .push(make_test_thread("t1", "pk1", 100));
+        store.threads_by_project.entry("proj2".to_string()).or_default()
+            .push(make_test_thread("t2", "pk1", 200));
+
+        // Should find thread in project1
+        let t1 = store.get_thread_by_id("t1");
+        assert!(t1.is_some());
+        assert_eq!(t1.unwrap().id, "t1");
+
+        // Should find thread in project2
+        let t2 = store.get_thread_by_id("t2");
+        assert!(t2.is_some());
+
+        // Missing thread
+        assert!(store.get_thread_by_id("t3").is_none());
+    }
+
+    #[test]
+    fn test_core_clear_resets_everything() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        // Populate multiple domains
+        store.projects.push(Project {
+            id: "p1".to_string(),
+            name: "Proj".to_string(),
+            pubkey: "pk".to_string(),
+            participants: vec![],
+            agent_ids: vec![],
+            mcp_tool_ids: vec![],
+            created_at: 0,
+        });
+        store.threads_by_project.entry("proj1".to_string()).or_default()
+            .push(make_test_thread("t1", "pk1", 100));
+        store.messages_by_thread.entry("t1".to_string()).or_default()
+            .push(make_test_message("m1", "pk1", "t1", "hello", 100));
+        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.operations_by_event.insert("ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
+        store.add_report(make_test_report("slug", "proj1", 100));
+        store.approved_backends.insert("pk1".to_string());
+        store.user_pubkey = Some("user1".to_string());
+
+        store.clear();
+
+        assert!(store.get_projects().is_empty());
+        assert!(store.get_threads("proj1").is_empty());
+        assert!(store.get_messages("t1").is_empty());
+        assert!(store.get_agent_definitions().is_empty());
+        assert!(store.get_inbox_items().is_empty());
+        assert!(store.get_all_active_operations().is_empty());
+        assert!(store.get_reports().is_empty());
+        assert!(store.approved_backends.is_empty());
+        assert!(store.user_pubkey.is_none());
+    }
+
+    #[test]
+    fn test_core_get_threads_returns_slice() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.threads_by_project.entry("proj1".to_string()).or_default()
+            .push(make_test_thread("t1", "pk1", 100));
+        store.threads_by_project.entry("proj1".to_string()).or_default()
+            .push(make_test_thread("t2", "pk1", 200));
+
+        let threads = store.get_threads("proj1");
+        assert_eq!(threads.len(), 2);
+
+        let empty = store.get_threads("nonexistent");
+        assert!(empty.is_empty());
     }
 }
