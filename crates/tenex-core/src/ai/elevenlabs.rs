@@ -66,7 +66,7 @@ impl ElevenLabsClient {
 
         let body = serde_json::json!({
             "text": text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": "eleven_v3",
             "voice_settings": {
                 "stability": 0.5,
                 "similarity_boost": 0.75,

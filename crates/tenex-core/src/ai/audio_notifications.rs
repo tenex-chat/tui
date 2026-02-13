@@ -121,7 +121,10 @@ impl AudioNotificationManager {
             .await
             .context("Failed to massage text for audio")?;
 
-        // Step 2: Generate audio using ElevenLabs
+        // Step 2: Safety-strip any residual markdown the LLM may have left
+        let massaged_text = strip_residual_markdown(&massaged_text);
+
+        // Step 3: Generate audio using ElevenLabs
         let elevenlabs_client = ElevenLabsClient::new(elevenlabs_key.to_string());
         let audio_bytes = elevenlabs_client
             .text_to_speech(&massaged_text, &voice_id)
@@ -248,6 +251,69 @@ impl AudioNotificationManager {
 
         Ok(deleted_count)
     }
+}
+
+/// Strip any residual markdown the LLM may have left in the massaged text.
+fn strip_residual_markdown(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+
+    // Remove code blocks first (``` ... ```)
+    let mut remaining = text;
+    while let Some(start) = remaining.find("```") {
+        result.push_str(&remaining[..start]);
+        remaining = &remaining[start + 3..];
+        if let Some(end) = remaining.find("```") {
+            remaining = &remaining[end + 3..];
+        } else {
+            break;
+        }
+    }
+    result.push_str(remaining);
+
+    // Remove inline code backticks (keep content)
+    result = result.replace('`', "");
+
+    // Remove bold/italic markers: ***, **, *
+    // Process longest first so *** doesn't leave stray *
+    result = result.replace("***", "");
+    result = result.replace("**", "");
+    result = result.replace("___", "");
+    result = result.replace("__", "");
+
+    // Remove lone * and _ used for emphasis (but not in contractions like don't)
+    // Only strip * that appear at word boundaries
+    let chars: Vec<char> = result.chars().collect();
+    let mut cleaned = String::with_capacity(result.len());
+    for (i, &ch) in chars.iter().enumerate() {
+        if ch == '*' {
+            continue;
+        }
+        if ch == '_' {
+            let prev_alpha = i > 0 && chars[i - 1].is_alphanumeric();
+            let next_alpha = i + 1 < chars.len() && chars[i + 1].is_alphanumeric();
+            // Keep underscores that are between alphanumeric chars (part of identifiers)
+            if prev_alpha && next_alpha {
+                cleaned.push(ch);
+            }
+            continue;
+        }
+        cleaned.push(ch);
+    }
+
+    // Remove markdown header markers at line starts
+    let lines: Vec<&str> = cleaned.lines().collect();
+    let stripped_lines: Vec<String> = lines.iter().map(|line| {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with('#') {
+            trimmed.trim_start_matches('#').trim_start().to_string()
+        } else {
+            line.to_string()
+        }
+    }).collect();
+    cleaned = stripped_lines.join(" ");
+
+    // Collapse whitespace
+    cleaned.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
