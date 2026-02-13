@@ -549,7 +549,7 @@ pub static COMMANDS: &[Command] = &[
                 && app.input_mode == InputMode::Normal
                 && app
                     .selected_thread()
-                    .map(|t| app.data_store.borrow().is_event_busy(&t.id))
+                    .map(|t| app.data_store.borrow().operations.is_event_busy(&t.id))
                     .unwrap_or(false)
         },
         execute: stop_agents,
