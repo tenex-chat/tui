@@ -12,7 +12,7 @@ use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadRe
 use crate::input::handle_key;
 use crate::render::render;
 use crate::ui::views::login::LoginStep;
-use crate::ui::{App, InputMode, Tui, View};
+use crate::ui::{App, InputMode, ModalState, Tui, View};
 use crate::ui::notifications::Notification;
 
 /// Result from background audio generation task
@@ -21,6 +21,12 @@ enum AudioGenerationResult {
     Success(PathBuf),
     /// Audio generation failed or was skipped (not enabled, missing config, etc.)
     Skipped(String),
+}
+
+/// Result from background voice/model browse fetch tasks
+pub(crate) enum BrowseResult {
+    Voices(Result<Vec<tenex_core::ai::Voice>, String>),
+    Models(Result<Vec<tenex_core::ai::Model>, String>),
 }
 
 fn log_diagnostic(msg: &str) {
@@ -57,6 +63,10 @@ pub(crate) async fn run_app(
     // Channel for receiving audio generation results from background tasks
     // When a p-tag mention triggers audio generation, the result is sent here
     let (audio_tx, mut audio_rx) = tokio::sync::mpsc::channel::<AudioGenerationResult>(10);
+
+    // Channel for receiving voice/model browse results from background fetch tasks
+    let (browse_tx, mut browse_rx) = tokio::sync::mpsc::channel::<BrowseResult>(4);
+    app.browse_tx = Some(browse_tx);
 
     // BULLETPROOF: Surface draft storage load/parse errors at startup
     if let Some(error) = app.draft_storage_last_error() {
@@ -295,6 +305,51 @@ pub(crate) async fn run_app(
                     }
                     AudioGenerationResult::Skipped(reason) => {
                         log_diagnostic(&format!("AUDIO: Skipped - {}", reason));
+                    }
+                }
+            }
+
+            // Handle voice/model browse results from background fetch tasks
+            Some(result) = browse_rx.recv() => {
+                use crate::ui::modal::{VoiceBrowseItem, ModelBrowseItem};
+
+                match &mut app.modal_state {
+                    ModalState::AppSettings(ref mut state) => {
+                        match result {
+                            BrowseResult::Voices(Ok(voices)) => {
+                                if let Some(ref mut browser) = state.voice_browser {
+                                    browser.loading = false;
+                                    browser.items = voices.into_iter().map(|v| VoiceBrowseItem {
+                                        voice_id: v.voice_id,
+                                        name: v.name,
+                                        category: v.category,
+                                        description: v.description,
+                                    }).collect();
+                                }
+                            }
+                            BrowseResult::Voices(Err(e)) => {
+                                state.voice_browser = None;
+                                app.set_warning_status(&format!("Failed to fetch voices: {}", e));
+                            }
+                            BrowseResult::Models(Ok(models)) => {
+                                if let Some(ref mut browser) = state.model_browser {
+                                    browser.loading = false;
+                                    browser.items = models.into_iter().map(|m| ModelBrowseItem {
+                                        id: m.id,
+                                        name: m.name,
+                                        description: m.description,
+                                        context_length: m.context_length,
+                                    }).collect();
+                                }
+                            }
+                            BrowseResult::Models(Err(e)) => {
+                                state.model_browser = None;
+                                app.set_warning_status(&format!("Failed to fetch models: {}", e));
+                            }
+                        }
+                    }
+                    _ => {
+                        // Modal was closed before results arrived — discard
                     }
                 }
             }

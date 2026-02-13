@@ -1,7 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::jaeger;
-use crate::ui::modal::{AppearanceSetting, GeneralSetting};
+use crate::runtime::BrowseResult;
+use crate::ui::modal::{AppearanceSetting, GeneralSetting, ModelBrowserState, VoiceBrowserState};
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
@@ -189,6 +190,20 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
     };
 
     let mut state = state;
+
+    // Delegate to voice browser if active
+    if state.voice_browser.is_some() {
+        handle_voice_browser_key(app, &mut state, key);
+        app.modal_state = ModalState::AppSettings(state);
+        return;
+    }
+
+    // Delegate to model browser if active
+    if state.model_browser.is_some() {
+        handle_model_browser_key(app, &mut state, key);
+        app.modal_state = ModalState::AppSettings(state);
+        return;
+    }
 
     match key.code {
         KeyCode::Tab if !state.editing => {
@@ -397,6 +412,52 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                         None => {}
                     }
+                } else if state.current_tab == ui::modal::SettingsTab::AI
+                    && state.selected_ai_setting() == Some(ui::modal::AiSetting::SelectedVoiceIds)
+                {
+                    // Open voice browser if API key exists
+                    let key = app.preferences.borrow().get_elevenlabs_api_key();
+                    if let Some(api_key) = key {
+                        let current_ids: Vec<String> = state.ai.voice_ids_input
+                            .split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        state.voice_browser = Some(VoiceBrowserState::new(current_ids));
+                        // Spawn background fetch
+                        if let Some(tx) = app.browse_tx.clone() {
+                            tokio::spawn(async move {
+                                let client = tenex_core::ai::ElevenLabsClient::new(api_key);
+                                let result = client.get_voices().await.map_err(|e| e.to_string());
+                                let _ = tx.send(BrowseResult::Voices(result)).await;
+                            });
+                        }
+                    } else {
+                        app.set_warning_status("Set ElevenLabs API key first");
+                    }
+                } else if state.current_tab == ui::modal::SettingsTab::AI
+                    && state.selected_ai_setting() == Some(ui::modal::AiSetting::OpenRouterModel)
+                {
+                    // Open model browser if API key exists
+                    let key = app.preferences.borrow().get_openrouter_api_key();
+                    if let Some(api_key) = key {
+                        let current_model = if state.ai.openrouter_model_input.trim().is_empty() {
+                            None
+                        } else {
+                            Some(state.ai.openrouter_model_input.trim().to_string())
+                        };
+                        state.model_browser = Some(ModelBrowserState::new(current_model));
+                        // Spawn background fetch
+                        if let Some(tx) = app.browse_tx.clone() {
+                            tokio::spawn(async move {
+                                let client = tenex_core::ai::OpenRouterClient::new(api_key);
+                                let result = client.get_models().await.map_err(|e| e.to_string());
+                                let _ = tx.send(BrowseResult::Models(result)).await;
+                            });
+                        }
+                    } else {
+                        app.set_warning_status("Set OpenRouter API key first");
+                    }
                 } else {
                     state.start_editing();
                 }
@@ -550,4 +611,125 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
     }
 
     app.modal_state = ModalState::AppSettings(state);
+}
+
+fn handle_voice_browser_key(
+    app: &mut App,
+    state: &mut ui::modal::AppSettingsState,
+    key: KeyEvent,
+) {
+    let browser = match state.voice_browser.as_mut() {
+        Some(b) => b,
+        None => return,
+    };
+
+    if browser.loading {
+        // Only allow Esc while loading
+        if key.code == KeyCode::Esc {
+            state.voice_browser = None;
+        }
+        return;
+    }
+
+    let filtered_count = browser.filtered_items().len();
+
+    match key.code {
+        KeyCode::Esc => {
+            state.voice_browser = None;
+        }
+        KeyCode::Up => {
+            browser.move_up();
+        }
+        KeyCode::Down => {
+            browser.move_down(filtered_count);
+        }
+        KeyCode::Char(' ') => {
+            // Toggle selection on current item
+            let filtered = browser.filtered_items();
+            if let Some(item) = filtered.get(browser.selected_index) {
+                let voice_id = item.voice_id.clone();
+                browser.toggle_voice(&voice_id);
+            }
+        }
+        KeyCode::Enter => {
+            // Confirm selection — save voice IDs
+            let ids = browser.selected_voice_ids.clone();
+            let result = app.preferences.borrow_mut().set_selected_voice_ids(ids.clone());
+            match result {
+                Ok(()) => {
+                    state.ai.voice_ids_input = ids.join(", ");
+                    app.set_warning_status(&format!("{} voice(s) saved", ids.len()));
+                }
+                Err(e) => {
+                    app.set_warning_status(&format!("Failed to save: {}", e));
+                }
+            }
+            state.voice_browser = None;
+        }
+        KeyCode::Char(c) => {
+            browser.add_filter_char(c);
+        }
+        KeyCode::Backspace => {
+            browser.backspace_filter();
+        }
+        _ => {}
+    }
+}
+
+fn handle_model_browser_key(
+    app: &mut App,
+    state: &mut ui::modal::AppSettingsState,
+    key: KeyEvent,
+) {
+    let browser = match state.model_browser.as_mut() {
+        Some(b) => b,
+        None => return,
+    };
+
+    if browser.loading {
+        if key.code == KeyCode::Esc {
+            state.model_browser = None;
+        }
+        return;
+    }
+
+    let filtered_count = browser.filtered_items().len();
+
+    match key.code {
+        KeyCode::Esc => {
+            state.model_browser = None;
+        }
+        KeyCode::Up => {
+            browser.move_up();
+        }
+        KeyCode::Down => {
+            browser.move_down(filtered_count);
+        }
+        KeyCode::Enter => {
+            // Select current model
+            let filtered = browser.filtered_items();
+            if let Some(item) = filtered.get(browser.selected_index) {
+                let model_id = item.id.clone();
+                let result = app.preferences.borrow_mut().set_openrouter_model(Some(model_id.clone()));
+                match result {
+                    Ok(()) => {
+                        state.ai.openrouter_model_input = model_id.clone();
+                        let display = item.name.as_deref().unwrap_or(&model_id);
+                        app.set_warning_status(&format!("Model set: {}", display));
+                    }
+                    Err(e) => {
+                        app.set_warning_status(&format!("Failed to save: {}", e));
+                    }
+                }
+            }
+            state.model_browser = None;
+        }
+        KeyCode::Char(c) => {
+            browser.add_filter_char(c);
+        }
+        KeyCode::Backspace => {
+            browser.backspace_filter();
+        }
+        _ => {}
+    }
 }

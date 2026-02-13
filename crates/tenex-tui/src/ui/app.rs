@@ -324,6 +324,8 @@ pub struct App {
     pub stats_subtab: StatsSubtab,
     /// Audio player for notification sounds
     pub audio_player: AudioPlayer,
+    /// Channel sender for voice/model browse results from background fetch tasks
+    pub browse_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::BrowseResult>>,
 }
 
 impl App {
@@ -405,6 +407,7 @@ impl App {
             publish_confirm_tx: None,
             stats_subtab: StatsSubtab::default(),
             audio_player: AudioPlayer::new(),
+            browse_tx: None,
         }
     }
 

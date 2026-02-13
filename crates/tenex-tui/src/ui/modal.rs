@@ -95,6 +95,187 @@ impl AppearanceSetting {
     }
 }
 
+/// An ElevenLabs voice available for selection
+#[derive(Debug, Clone)]
+pub struct VoiceBrowseItem {
+    pub voice_id: String,
+    pub name: String,
+    pub category: Option<String>,
+    pub description: Option<String>,
+}
+
+/// State for the voice browser overlay within AI settings
+#[derive(Debug, Clone)]
+pub struct VoiceBrowserState {
+    pub loading: bool,
+    pub items: Vec<VoiceBrowseItem>,
+    pub filter: String,
+    pub selected_index: usize,
+    pub scroll_offset: usize,
+    pub selected_voice_ids: Vec<String>,
+}
+
+impl VoiceBrowserState {
+    pub fn new(current_ids: Vec<String>) -> Self {
+        Self {
+            loading: true,
+            items: Vec::new(),
+            filter: String::new(),
+            selected_index: 0,
+            scroll_offset: 0,
+            selected_voice_ids: current_ids,
+        }
+    }
+
+    pub fn filtered_items(&self) -> Vec<&VoiceBrowseItem> {
+        if self.filter.is_empty() {
+            self.items.iter().collect()
+        } else {
+            let filter_lower = self.filter.to_lowercase();
+            self.items
+                .iter()
+                .filter(|v| {
+                    v.name.to_lowercase().contains(&filter_lower)
+                        || v.category.as_deref().unwrap_or("").to_lowercase().contains(&filter_lower)
+                        || v.voice_id.to_lowercase().contains(&filter_lower)
+                })
+                .collect()
+        }
+    }
+
+    pub fn toggle_voice(&mut self, voice_id: &str) {
+        if let Some(pos) = self.selected_voice_ids.iter().position(|id| id == voice_id) {
+            self.selected_voice_ids.remove(pos);
+        } else {
+            self.selected_voice_ids.push(voice_id.to_string());
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+            if self.selected_index < self.scroll_offset {
+                self.scroll_offset = self.selected_index;
+            }
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn adjust_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
+        }
+    }
+
+    pub fn add_filter_char(&mut self, c: char) {
+        self.filter.push(c);
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+
+    pub fn backspace_filter(&mut self) {
+        self.filter.pop();
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+}
+
+/// An OpenRouter model available for selection
+#[derive(Debug, Clone)]
+pub struct ModelBrowseItem {
+    pub id: String,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub context_length: Option<u32>,
+}
+
+/// State for the model browser overlay within AI settings
+#[derive(Debug, Clone)]
+pub struct ModelBrowserState {
+    pub loading: bool,
+    pub items: Vec<ModelBrowseItem>,
+    pub filter: String,
+    pub selected_index: usize,
+    pub scroll_offset: usize,
+    pub selected_model_id: Option<String>,
+}
+
+impl ModelBrowserState {
+    pub fn new(current_model: Option<String>) -> Self {
+        Self {
+            loading: true,
+            items: Vec::new(),
+            filter: String::new(),
+            selected_index: 0,
+            scroll_offset: 0,
+            selected_model_id: current_model,
+        }
+    }
+
+    pub fn filtered_items(&self) -> Vec<&ModelBrowseItem> {
+        if self.filter.is_empty() {
+            self.items.iter().collect()
+        } else {
+            let filter_lower = self.filter.to_lowercase();
+            self.items
+                .iter()
+                .filter(|m| {
+                    m.id.to_lowercase().contains(&filter_lower)
+                        || m.name.as_deref().unwrap_or("").to_lowercase().contains(&filter_lower)
+                })
+                .collect()
+        }
+    }
+
+    pub fn move_up(&mut self) {
+        if self.selected_index > 0 {
+            self.selected_index -= 1;
+            if self.selected_index < self.scroll_offset {
+                self.scroll_offset = self.selected_index;
+            }
+        }
+    }
+
+    pub fn move_down(&mut self, max: usize) {
+        if self.selected_index + 1 < max {
+            self.selected_index += 1;
+        }
+    }
+
+    pub fn adjust_scroll(&mut self, visible_height: usize) {
+        if visible_height == 0 {
+            return;
+        }
+        if self.selected_index < self.scroll_offset {
+            self.scroll_offset = self.selected_index;
+        } else if self.selected_index >= self.scroll_offset + visible_height {
+            self.scroll_offset = self.selected_index.saturating_sub(visible_height - 1);
+        }
+    }
+
+    pub fn add_filter_char(&mut self, c: char) {
+        self.filter.push(c);
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+
+    pub fn backspace_filter(&mut self) {
+        self.filter.pop();
+        self.selected_index = 0;
+        self.scroll_offset = 0;
+    }
+}
+
 /// State for AI settings
 #[derive(Debug, Clone)]
 pub struct AiSettingsState {
@@ -158,6 +339,10 @@ pub struct AppSettingsState {
     pub jaeger_endpoint_input: String,
     /// AI settings state
     pub ai: AiSettingsState,
+    /// Active voice browser overlay (None = not browsing)
+    pub voice_browser: Option<VoiceBrowserState>,
+    /// Active model browser overlay (None = not browsing)
+    pub model_browser: Option<ModelBrowserState>,
 }
 
 impl AppSettingsState {
@@ -176,6 +361,8 @@ impl AppSettingsState {
                 ai_settings.openrouter_model.as_deref(),
                 &ai_settings.audio_prompt,
             ),
+            voice_browser: None,
+            model_browser: None,
         }
     }
 

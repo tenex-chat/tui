@@ -1,7 +1,7 @@
 //! App Settings modal view - global application settings accessible via comma key
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::{AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, SettingsTab};
+use crate::ui::modal::{AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, ModelBrowserState, SettingsTab, VoiceBrowserState};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -146,6 +146,18 @@ fn render_general_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsS
 
 /// Render AI tab content
 fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
+    // Voice browser overlay takes over the entire tab area
+    if let Some(ref browser) = state.voice_browser {
+        render_voice_browser(f, area, browser);
+        return;
+    }
+
+    // Model browser overlay takes over the entire tab area
+    if let Some(ref browser) = state.model_browser {
+        render_model_browser(f, area, browser);
+        return;
+    }
+
     let mut y_offset = area.y;
 
     // Section header: API Keys
@@ -210,7 +222,7 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         y_offset,
         area.width,
         "Voice IDs:",
-        "Comma-separated ElevenLabs voice IDs for agent voices",
+        "Enter to browse voices · or edit IDs manually",
         &state.ai.voice_ids_input,
         is_voices_selected,
         state.editing_voice_ids(),
@@ -225,7 +237,7 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         y_offset,
         area.width,
         "OpenRouter Model:",
-        "Model ID for text-to-speech prompt processing",
+        "Enter to browse models · or edit ID manually",
         &state.ai.openrouter_model_input,
         is_model_selected,
         state.editing_openrouter_model(),
@@ -534,6 +546,45 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
         1,
     );
 
+    // Voice browser hints
+    if state.voice_browser.is_some() {
+        let hint_spans = vec![
+            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Space", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" confirm", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("type to filter", Style::default().fg(theme::TEXT_DIM)),
+        ];
+        f.render_widget(Paragraph::new(Line::from(hint_spans)), hints_area);
+        return;
+    }
+
+    // Model browser hints
+    if state.model_browser.is_some() {
+        let hint_spans = vec![
+            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" select", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled("type to filter", Style::default().fg(theme::TEXT_DIM)),
+        ];
+        f.render_widget(Paragraph::new(Line::from(hint_spans)), hints_area);
+        return;
+    }
+
     let hint_spans = if state.editing {
         vec![
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
@@ -596,4 +647,209 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
 
     let hints = Paragraph::new(Line::from(hint_spans));
     f.render_widget(hints, hints_area);
+}
+
+/// Render the voice browser overlay
+fn render_voice_browser(f: &mut Frame, area: Rect, browser: &VoiceBrowserState) {
+    // Header: title + selected count
+    let selected_count = browser.selected_voice_ids.len();
+    let header_area = Rect::new(area.x, area.y, area.width, 1);
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Select Voices",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  ({} selected)", selected_count),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
+    ]));
+    f.render_widget(header, header_area);
+
+    // Search input
+    let search_area = Rect::new(area.x, area.y + 1, area.width, 1);
+    let search_display = if browser.filter.is_empty() {
+        Span::styled("Type to filter...", Style::default().fg(theme::TEXT_DIM))
+    } else {
+        Span::styled(
+            format!("Filter: {}_", browser.filter),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        )
+    };
+    f.render_widget(Paragraph::new(Line::from(vec![search_display])), search_area);
+
+    // Loading state
+    if browser.loading {
+        let loading_area = Rect::new(area.x, area.y + 3, area.width, 1);
+        let loading = Paragraph::new("Loading voices...")
+            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC));
+        f.render_widget(loading, loading_area);
+        return;
+    }
+
+    // Voice list
+    let list_y = area.y + 3;
+    let list_height = area.height.saturating_sub(3) as usize;
+    let filtered = browser.filtered_items();
+
+    if filtered.is_empty() {
+        let empty_area = Rect::new(area.x, list_y, area.width, 1);
+        let msg = if browser.filter.is_empty() { "No voices available" } else { "No matching voices" };
+        f.render_widget(
+            Paragraph::new(msg).style(Style::default().fg(theme::TEXT_DIM)),
+            empty_area,
+        );
+        return;
+    }
+
+    // Compute scroll window
+    let scroll_offset = browser.scroll_offset.min(filtered.len().saturating_sub(1));
+    let visible_end = (scroll_offset + list_height).min(filtered.len());
+
+    for (i, item) in filtered[scroll_offset..visible_end].iter().enumerate() {
+        let abs_index = scroll_offset + i;
+        let row_y = list_y + i as u16;
+        if row_y >= area.y + area.height {
+            break;
+        }
+        let row_area = Rect::new(area.x, row_y, area.width, 1);
+
+        let is_selected = abs_index == browser.selected_index;
+        let is_checked = browser.selected_voice_ids.contains(&item.voice_id);
+
+        let checkbox = if is_checked { "[x] " } else { "[ ] " };
+        let checkbox_color = if is_checked { theme::ACCENT_SUCCESS } else { theme::TEXT_DIM };
+
+        let cursor = if is_selected { ">" } else { " " };
+        let cursor_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_DIM };
+
+        let name_style = if is_selected {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let mut spans = vec![
+            Span::styled(cursor, Style::default().fg(cursor_color)),
+            Span::styled(checkbox, Style::default().fg(checkbox_color)),
+            Span::styled(&item.name, name_style),
+        ];
+
+        if let Some(ref cat) = item.category {
+            spans.push(Span::styled(
+                format!("  ({})", cat),
+                Style::default().fg(theme::TEXT_DIM),
+            ));
+        }
+
+        f.render_widget(Paragraph::new(Line::from(spans)), row_area);
+    }
+}
+
+/// Render the model browser overlay
+fn render_model_browser(f: &mut Frame, area: Rect, browser: &ModelBrowserState) {
+    // Header
+    let header_area = Rect::new(area.x, area.y, area.width, 1);
+    let current = browser.selected_model_id.as_deref().unwrap_or("none");
+    let header = Paragraph::new(Line::from(vec![
+        Span::styled(
+            "Select Model",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!("  (current: {})", current),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
+    ]));
+    f.render_widget(header, header_area);
+
+    // Search input
+    let search_area = Rect::new(area.x, area.y + 1, area.width, 1);
+    let search_display = if browser.filter.is_empty() {
+        Span::styled("Type to filter...", Style::default().fg(theme::TEXT_DIM))
+    } else {
+        Span::styled(
+            format!("Filter: {}_", browser.filter),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        )
+    };
+    f.render_widget(Paragraph::new(Line::from(vec![search_display])), search_area);
+
+    // Loading state
+    if browser.loading {
+        let loading_area = Rect::new(area.x, area.y + 3, area.width, 1);
+        let loading = Paragraph::new("Loading models...")
+            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC));
+        f.render_widget(loading, loading_area);
+        return;
+    }
+
+    // Model list
+    let list_y = area.y + 3;
+    let list_height = area.height.saturating_sub(3) as usize;
+    let filtered = browser.filtered_items();
+
+    if filtered.is_empty() {
+        let empty_area = Rect::new(area.x, list_y, area.width, 1);
+        let msg = if browser.filter.is_empty() { "No models available" } else { "No matching models" };
+        f.render_widget(
+            Paragraph::new(msg).style(Style::default().fg(theme::TEXT_DIM)),
+            empty_area,
+        );
+        return;
+    }
+
+    // Compute scroll window
+    let scroll_offset = browser.scroll_offset.min(filtered.len().saturating_sub(1));
+    let visible_end = (scroll_offset + list_height).min(filtered.len());
+
+    for (i, item) in filtered[scroll_offset..visible_end].iter().enumerate() {
+        let abs_index = scroll_offset + i;
+        let row_y = list_y + i as u16;
+        if row_y >= area.y + area.height {
+            break;
+        }
+        let row_area = Rect::new(area.x, row_y, area.width, 1);
+
+        let is_selected = abs_index == browser.selected_index;
+        let is_current = browser.selected_model_id.as_deref() == Some(&item.id);
+
+        let radio = if is_current { "(o) " } else { "( ) " };
+        let radio_color = if is_current { theme::ACCENT_SUCCESS } else { theme::TEXT_DIM };
+
+        let cursor = if is_selected { ">" } else { " " };
+        let cursor_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_DIM };
+
+        let name_style = if is_selected {
+            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme::TEXT_PRIMARY)
+        };
+
+        let display_name = item.name.as_deref().unwrap_or(&item.id);
+
+        let mut spans = vec![
+            Span::styled(cursor, Style::default().fg(cursor_color)),
+            Span::styled(radio, Style::default().fg(radio_color)),
+            Span::styled(display_name, name_style),
+        ];
+
+        // Show context length if available
+        if let Some(ctx_len) = item.context_length {
+            let ctx_display = if ctx_len >= 1_000_000 {
+                format!("  {}M ctx", ctx_len / 1_000_000)
+            } else if ctx_len >= 1_000 {
+                format!("  {}K ctx", ctx_len / 1_000)
+            } else {
+                format!("  {} ctx", ctx_len)
+            };
+            spans.push(Span::styled(ctx_display, Style::default().fg(theme::TEXT_DIM)));
+        }
+
+        f.render_widget(Paragraph::new(Line::from(spans)), row_area);
+    }
 }
