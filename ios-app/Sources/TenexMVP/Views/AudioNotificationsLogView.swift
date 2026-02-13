@@ -55,18 +55,13 @@ struct AudioNotificationsLogView: View {
     private func loadNotifications() {
         Task {
             do {
-                let result = try await coreManager.safeCore.listAudioNotifications()
-                await MainActor.run {
-                    // Sort newest first
-                    notifications = result.sorted { $0.createdAt > $1.createdAt }
-                    isLoading = false
-                }
+                let result = try await TenexDirect.listAudioNotifications()
+                notifications = result.sorted { $0.createdAt > $1.createdAt }
+                isLoading = false
             } catch {
-                await MainActor.run {
-                    isLoading = false
-                    errorMessage = "Failed to load notifications: \(error.localizedDescription)"
-                    showError = true
-                }
+                isLoading = false
+                errorMessage = "Failed to load notifications: \(error.localizedDescription)"
+                showError = true
             }
         }
     }
@@ -78,12 +73,10 @@ struct AudioNotificationsLogView: View {
         Task {
             for notification in toDelete {
                 do {
-                    try await coreManager.safeCore.deleteAudioNotification(id: notification.id)
+                    try await TenexDirect.deleteAudioNotification(id: notification.id)
                 } catch {
-                    await MainActor.run {
-                        errorMessage = "Failed to delete notification: \(error.localizedDescription)"
-                        showError = true
-                    }
+                    errorMessage = "Failed to delete notification: \(error.localizedDescription)"
+                    showError = true
                 }
             }
         }
@@ -144,13 +137,10 @@ private struct AudioNotificationDetailView: View {
                 Button {
                     try? player.play(path: notification.audioFilePath)
                 } label: {
+                    let isThisPlaying = player.isPlaying && player.currentTextSnippet == notification.massagedText
                     Label(
-                        player.isPlaying && player.currentFileName == URL(fileURLWithPath: notification.audioFilePath).deletingPathExtension().lastPathComponent
-                            ? "Playing..."
-                            : "Play Audio",
-                        systemImage: player.isPlaying && player.currentFileName == URL(fileURLWithPath: notification.audioFilePath).deletingPathExtension().lastPathComponent
-                            ? "speaker.wave.3.fill"
-                            : "play.circle.fill"
+                        isThisPlaying ? "Playing..." : "Play Audio",
+                        systemImage: isThisPlaying ? "speaker.wave.3.fill" : "play.circle.fill"
                     )
                 }
 

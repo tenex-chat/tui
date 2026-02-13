@@ -446,11 +446,17 @@ struct ConversationsTabView: View {
 /// The cache is preloaded in ConversationsTabView.task for all visible conversations.
 private struct ConversationRowFull: View {
     @EnvironmentObject var coreManager: TenexCoreManager
+    @ObservedObject var player = AudioNotificationPlayer.shared
     let conversation: ConversationFullInfo
     let projectTitle: String?
     /// Whether this conversation or any of its descendants has active work
     let isHierarchicallyActive: Bool
     let onSelect: (ConversationFullInfo) -> Void
+
+    /// Whether this conversation is currently playing audio
+    private var isPlayingAudio: Bool {
+        player.playbackState != .idle && player.currentConversationId == conversation.id
+    }
 
     /// Get cached hierarchy data (O(1) lookup, no FFI calls)
     private var cachedHierarchy: ConversationHierarchyCache.ConversationHierarchy? {
@@ -500,6 +506,13 @@ private struct ConversationRowFull: View {
                     Text(conversation.title)
                         .font(.headline)
                         .lineLimit(2)
+
+                    if isPlayingAudio {
+                        Image(systemName: "speaker.wave.2.fill")
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                            .symbolEffect(.variableColor.iterative, isActive: player.isPlaying)
+                    }
 
                     Spacer()
 

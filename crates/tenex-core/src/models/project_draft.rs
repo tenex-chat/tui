@@ -139,7 +139,7 @@ pub struct AiAudioSettings {
     pub(crate) openrouter_api_key: Option<String>,
 }
 
-fn default_audio_prompt() -> String {
+pub fn default_audio_prompt() -> String {
     "Rephrase the message for an audio listener. Output ONLY the rephrased text — no preamble, no commentary, no meta-text. Capture the meaning and context concisely as natural speech. Reference the conversation title naturally if provided. Use ALL CAPS for words the original emphasized with bold or italic. Omit code blocks, URLs, pubkeys, and other visual-only content — summarize their intent instead.".to_string()
 }
 

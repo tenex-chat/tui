@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 
 /// Audio playback state
-enum AudioPlaybackState {
+enum AudioPlaybackState: Equatable {
     case idle
     case playing
     case paused
@@ -13,7 +13,7 @@ enum AudioPlaybackState {
 /// - Playing MP3 files from the audio_notifications directory
 /// - Playback state management
 /// - Replay functionality
-/// - UI status indicator support
+/// - Metadata tracking for Now Playing bar
 @MainActor
 final class AudioNotificationPlayer: NSObject, ObservableObject {
     // MARK: - Published Properties
@@ -21,8 +21,14 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     /// Current playback state (observable for UI updates)
     @Published private(set) var playbackState: AudioPlaybackState = .idle
 
-    /// Currently playing or last played file name
-    @Published private(set) var currentFileName: String?
+    /// Metadata from the audio notification
+    @Published private(set) var currentAgentPubkey: String?
+    @Published private(set) var currentConversationTitle: String?
+    @Published private(set) var currentTextSnippet: String?
+    @Published private(set) var currentConversationId: String?
+
+    /// Published progress (0.0 to 1.0), updated by timer for SwiftUI reactivity
+    @Published private(set) var playbackProgress: Double = 0
 
     /// Whether audio is currently playing
     var isPlaying: Bool {
@@ -33,6 +39,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
 
     private var audioPlayer: AVAudioPlayer?
     private var currentFilePath: URL?
+    private var progressTimer: Timer?
 
     // MARK: - Singleton
 
@@ -67,19 +74,41 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         #endif
     }
 
+    // MARK: - Progress Timer
+
+    private func startProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self, let player = self.audioPlayer, player.duration > 0 else { return }
+                self.playbackProgress = player.currentTime / player.duration
+            }
+        }
+    }
+
+    private func stopProgressTimer() {
+        progressTimer?.invalidate()
+        progressTimer = nil
+    }
+
     // MARK: - Playback Control
 
+    /// Play an audio notification with full metadata
+    func play(notification: AudioNotificationInfo, conversationId: String?) throws {
+        currentAgentPubkey = notification.agentPubkey
+        currentConversationTitle = notification.conversationTitle
+        currentTextSnippet = notification.massagedText
+        currentConversationId = conversationId
+        try play(path: notification.audioFilePath)
+    }
+
     /// Play an audio file from the given path
-    /// - Parameter path: Full path to the audio file
-    /// - Throws: Error if playback fails
     func play(path: String) throws {
         let fileURL = URL(fileURLWithPath: path)
         try play(url: fileURL)
     }
 
     /// Play an audio file from a URL
-    /// - Parameter url: URL to the audio file
-    /// - Throws: Error if playback fails
     func play(url: URL) throws {
         // Stop any current playback
         stop()
@@ -100,8 +129,9 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         // Start playback
         if player.play() {
             currentFilePath = url
-            currentFileName = url.deletingPathExtension().lastPathComponent
             playbackState = .playing
+            playbackProgress = 0
+            startProgressTimer()
         } else {
             deactivateAudioSession()
             throw AudioPlayerError.playbackFailed
@@ -110,9 +140,12 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
 
     /// Stop the current playback
     func stop() {
+        stopProgressTimer()
         audioPlayer?.stop()
         audioPlayer = nil
         playbackState = .idle
+        playbackProgress = 0
+        clearMetadata()
         deactivateAudioSession()
     }
 
@@ -120,6 +153,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     func pause() {
         audioPlayer?.pause()
         playbackState = .paused
+        stopProgressTimer()
     }
 
     /// Resume paused playback
@@ -127,6 +161,7 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         if playbackState == .paused, let player = audioPlayer {
             player.play()
             playbackState = .playing
+            startProgressTimer()
         }
     }
 
@@ -138,7 +173,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         case .paused:
             resume()
         case .idle:
-            // If there's a previous file, replay it
             if let path = currentFilePath {
                 try? play(url: path)
             }
@@ -146,7 +180,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
     }
 
     /// Replay the last audio file
-    /// - Throws: Error if no file to replay or playback fails
     func replay() throws {
         guard let path = currentFilePath else {
             throw AudioPlayerError.noFileToReplay
@@ -164,10 +197,13 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         audioPlayer?.duration ?? 0
     }
 
-    /// Get playback progress (0.0 to 1.0)
-    var progress: Double {
-        guard let player = audioPlayer, player.duration > 0 else { return 0 }
-        return player.currentTime / player.duration
+    // MARK: - Private Helpers
+
+    private func clearMetadata() {
+        currentAgentPubkey = nil
+        currentConversationTitle = nil
+        currentTextSnippet = nil
+        currentConversationId = nil
     }
 }
 
@@ -176,14 +212,20 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
 extension AudioNotificationPlayer: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            self.stopProgressTimer()
             self.playbackState = .idle
+            self.playbackProgress = 0
+            self.clearMetadata()
             self.deactivateAudioSession()
         }
     }
 
     nonisolated func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: Error?) {
         Task { @MainActor in
+            self.stopProgressTimer()
             self.playbackState = .idle
+            self.playbackProgress = 0
+            self.clearMetadata()
             self.deactivateAudioSession()
             if let error = error {
                 print("[AudioNotificationPlayer] Decode error: \(error)")
@@ -209,99 +251,4 @@ enum AudioPlayerError: LocalizedError {
             return "No audio file to replay"
         }
     }
-}
-
-// MARK: - Audio Playing Indicator View
-
-import SwiftUI
-
-/// A view that shows when audio is playing
-struct AudioPlayingIndicator: View {
-    @ObservedObject var player = AudioNotificationPlayer.shared
-    @State private var animationPhase = 0.0
-    @Environment(\.accessibilityReduceMotion) var reduceMotion
-
-    var body: some View {
-        if player.isPlaying {
-            HStack(spacing: 4) {
-                // Animated speaker icon
-                Image(systemName: animationPhase > 0.5 ? "speaker.wave.3.fill" : "speaker.wave.2.fill")
-                    .foregroundStyle(.green)
-                    .font(.caption)
-
-                if let fileName = player.currentFileName {
-                    Text(fileName)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-
-                // Stop button
-                Button {
-                    player.stop()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.caption)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(Color.systemGray4, in: Capsule())
-            .onAppear {
-                if !reduceMotion {
-                    withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
-                        animationPhase = 1.0
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// A compact audio control view for embedding in navigation bars or status areas
-struct AudioStatusBarView: View {
-    @ObservedObject var player = AudioNotificationPlayer.shared
-
-    var body: some View {
-        if player.playbackState != .idle {
-            HStack(spacing: 8) {
-                // Play/Pause toggle
-                Button {
-                    player.togglePlayPause()
-                } label: {
-                    Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-
-                // Replay button
-                Button {
-                    try? player.replay()
-                } label: {
-                    Image(systemName: "arrow.counterclockwise")
-                        .foregroundStyle(.blue)
-                }
-                .buttonStyle(.plain)
-
-                // Stop button
-                Button {
-                    player.stop()
-                } label: {
-                    Image(systemName: "stop.fill")
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-}
-
-#Preview("Audio Playing Indicator") {
-    VStack {
-        AudioPlayingIndicator()
-        AudioStatusBarView()
-    }
-    .padding()
 }

@@ -38,7 +38,8 @@ final class TenexEventHandler: EventCallback {
                         await coreManager.triggerAudioNotification(
                             agentPubkey: item.authorPubkey,
                             conversationTitle: item.title,
-                            messageText: item.content
+                            messageText: item.content,
+                            conversationId: item.conversationId
                         )
                     }
                 }

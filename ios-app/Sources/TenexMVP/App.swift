@@ -422,7 +422,8 @@ class TenexCoreManager: ObservableObject {
     func triggerAudioNotification(
         agentPubkey: String,
         conversationTitle: String,
-        messageText: String
+        messageText: String,
+        conversationId: String? = nil
     ) async {
         // Load API keys from iOS Keychain
         let elevenlabsResult = await KeychainService.shared.loadElevenLabsApiKeyAsync()
@@ -445,7 +446,7 @@ class TenexCoreManager: ObservableObject {
 
             await MainActor.run {
                 do {
-                    try AudioNotificationPlayer.shared.play(path: notification.audioFilePath)
+                    try AudioNotificationPlayer.shared.play(notification: notification, conversationId: conversationId)
                 } catch {
                     print("[TenexCoreManager] Failed to play audio notification: \(error)")
                 }
@@ -916,10 +917,10 @@ struct MainTabView: View {
                 }
             }
         }
-        .overlay(alignment: .topTrailing) {
-            AudioPlayingIndicator()
-                .padding(.top, 50)
-                .padding(.trailing, 8)
+        .safeAreaInset(edge: .bottom) {
+            NowPlayingBar()
+                .environmentObject(coreManager)
+                .animation(.spring(duration: 0.3), value: AudioNotificationPlayer.shared.playbackState != .idle)
         }
     }
 }
