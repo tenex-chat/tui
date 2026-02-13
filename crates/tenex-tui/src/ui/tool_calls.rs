@@ -288,6 +288,32 @@ pub fn render_tool_line(
                 format!("🧠 → {}", variant)
             }
 
+            // Conversation get: show conversation ID and prompt if present
+            "conversation_get" | "mcp__tenex__conversation_get" => {
+                let conv_id = tool_call
+                    .parameters
+                    .get("conversationId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+
+                // Show prompt if present and non-empty, otherwise just show conversation ID
+                // Treat empty or whitespace-only prompts as absent
+                if let Some(prompt) = tool_call
+                    .parameters
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    format!(
+                        "📜 {} → \"{}\"",
+                        truncate_with_ellipsis(conv_id, 12),
+                        truncate_with_ellipsis(prompt, 50)
+                    )
+                } else {
+                    format!("📜 {}", truncate_with_ellipsis(conv_id, 12))
+                }
+            }
+
             // Default: use content fallback if available, otherwise verb + target
             _ => {
                 // If we have a meaningful content fallback, use it
@@ -365,5 +391,191 @@ mod tests {
         };
         let line = render_tool_line(&tool_call, Color::Gray, None);
         assert!(!line.spans.is_empty());
+    }
+
+    #[test]
+    fn test_render_conversation_get_with_prompt() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "mcp__tenex__conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": "aae52c600997",
+                "prompt": "Extract the final summary of all changes made"
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        // Check that the line contains the expected content
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("aae52c600997"), "Should contain conversation ID");
+        assert!(text.contains("Extract the final summary"), "Should contain the prompt");
+    }
+
+    #[test]
+    fn test_render_conversation_get_without_prompt() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": "abc123def456"
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        // Check that the line contains the expected content
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("abc123def456"), "Should contain conversation ID");
+        // Should NOT contain the arrow since there's no prompt
+        assert!(!text.contains("→"), "Should not contain arrow without prompt");
+    }
+
+    #[test]
+    fn test_render_conversation_get_long_prompt_truncated() {
+        let long_prompt = "This is a very long prompt that should be truncated because it exceeds the maximum length allowed for display in the tool line";
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "mcp__tenex__conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": "conv123",
+                "prompt": long_prompt
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+
+        // The prompt must be truncated and contain an ellipsis ("..." is used by truncate_with_ellipsis)
+        assert!(
+            text.contains("..."),
+            "Long prompt should contain ellipsis when truncated, got: '{}'",
+            text
+        );
+
+        // Extract the prompt portion (inside the quotes after the arrow)
+        // Format is: "│  📜 conv123 → \"truncated_prompt...\""
+        // The format method produces: 📜 {} → \"{}\" so we look for content between quotes
+        assert!(
+            text.contains("→"),
+            "Output should contain arrow (→) for prompt display, got: '{}'",
+            text
+        );
+        assert!(
+            text.contains('"'),
+            "Output should contain quotes (\") around prompt, got: '{}'",
+            text
+        );
+
+        let arrow_pos = text
+            .find("→ \"")
+            .expect("Arrow and opening quote should be present in output");
+        let after_arrow = &text[arrow_pos + "→ \"".len()..];
+        let closing_quote = after_arrow
+            .rfind('"')
+            .expect("Closing quote should be present in output");
+        let displayed_prompt = &after_arrow[..closing_quote];
+        // The truncated prompt should be at most 50 characters (including "...")
+        assert!(
+            displayed_prompt.chars().count() <= 50,
+            "Truncated prompt should be at most 50 characters, got {} chars: '{}'",
+            displayed_prompt.chars().count(),
+            displayed_prompt
+        );
+    }
+
+    #[test]
+    fn test_render_conversation_get_long_id_truncated() {
+        let long_id = "abcdef123456789ghijklmnop"; // 25 characters, longer than 12
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": long_id
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+
+        // The ID should be truncated and contain ellipsis ("..." is used by truncate_with_ellipsis)
+        assert!(
+            text.contains("..."),
+            "Long conversation ID should contain ellipsis when truncated, got: '{}'",
+            text
+        );
+
+        // The full long ID should NOT appear in the output
+        assert!(
+            !text.contains(long_id),
+            "Full long ID should not appear in output, got: '{}'",
+            text
+        );
+
+        // Extract the ID portion (between 📜 and end of string, since no prompt)
+        // Format is: "│  📜 truncated_id..."
+        assert!(
+            text.contains("📜"),
+            "Output should contain conversation icon (📜), got: '{}'",
+            text
+        );
+
+        let icon_pos = text
+            .find("📜 ")
+            .expect("Conversation icon (📜) should be present in output");
+        let after_icon = &text[icon_pos + "📜 ".len()..];
+        let displayed_id = after_icon.trim();
+        // The truncated ID should be at most 12 characters (including "...")
+        assert!(
+            displayed_id.chars().count() <= 12,
+            "Truncated ID should be at most 12 characters, got {} chars: '{}'",
+            displayed_id.chars().count(),
+            displayed_id
+        );
+    }
+
+    #[test]
+    fn test_render_conversation_get_empty_prompt() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "mcp__tenex__conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": "abc123def456",
+                "prompt": ""
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("abc123def456"), "Should contain conversation ID");
+        // Empty prompt should be treated as absent - no arrow or quotes
+        assert!(!text.contains("→"), "Should not contain arrow with empty prompt");
+        assert!(!text.contains("\"\""), "Should not contain empty quotes");
+    }
+
+    #[test]
+    fn test_render_conversation_get_whitespace_only_prompt() {
+        let tool_call = ToolCall {
+            id: "123".to_string(),
+            name: "conversation_get".to_string(),
+            parameters: serde_json::json!({
+                "conversationId": "conv987",
+                "prompt": "   \t\n   "
+            }),
+            result: None,
+        };
+        let line = render_tool_line(&tool_call, Color::Gray, None);
+
+        let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
+        assert!(text.contains("📜"), "Should contain conversation icon");
+        assert!(text.contains("conv987"), "Should contain conversation ID");
+        // Whitespace-only prompt should be treated as absent - no arrow or quotes
+        assert!(!text.contains("→"), "Should not contain arrow with whitespace-only prompt");
     }
 }
