@@ -124,82 +124,100 @@ struct InboxView: View {
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
 
-    /// Hard cap: 48 hours in seconds (48 * 60 * 60 = 172,800)
+    // MARK: - 48-Hour Cap Constants & Time Invalidation
+
+    /// Hard cap: 48 hours in seconds (48 * 60 * 60 = 172,800).
+    /// NOTE: This value is synchronized with Rust constant `tenex_core::constants::INBOX_48H_CAP_SECONDS`.
+    /// If changed, update both locations for cross-platform consistency.
     private static let inbox48HourCapSeconds: UInt64 = 48 * 60 * 60
 
-    /// Items within the 48-hour window from centralized store
-    private var itemsWithin48Hours: [InboxItem] {
-        let now = UInt64(Date().timeIntervalSince1970)
+    /// Refresh interval for time-based invalidation (1 minute).
+    /// Items crossing the 48h threshold will disappear on next tick.
+    private static let refreshIntervalSeconds: TimeInterval = 60
+
+    // MARK: - Computed Properties (Time-Aware)
+
+    /// Items within the 48-hour window from centralized store.
+    /// Takes `now` as parameter to ensure consistent filtering across all derived computations.
+    private func itemsWithin48Hours(now: UInt64) -> [InboxItem] {
         let cutoff = now > Self.inbox48HourCapSeconds ? now - Self.inbox48HourCapSeconds : 0
         return coreManager.inboxItems.filter { $0.createdAt >= cutoff }
     }
 
-    /// Items filtered by current tab selection (after 48h cap)
-    private var filteredItems: [InboxItem] {
-        itemsWithin48Hours.filter { $0.matches(filter: selectedFilter) }
+    /// Items filtered by current tab selection (after 48h cap).
+    private func filteredItems(now: UInt64) -> [InboxItem] {
+        itemsWithin48Hours(now: now).filter { $0.matches(filter: selectedFilter) }
     }
 
-    /// Count of unread items for badge display (within 48h cap)
-    private var unreadCount: Int {
-        itemsWithin48Hours.filter(\.isUnread).count
+    /// Count of unread items for badge display (within 48h cap).
+    private func unreadCount(now: UInt64) -> Int {
+        itemsWithin48Hours(now: now).filter(\.isUnread).count
     }
 
-    /// Unread count for a specific filter (within 48h cap)
-    private func unreadCount(for filter: InboxFilter) -> Int {
+    /// Unread count for a specific filter (within 48h cap).
+    private func unreadCount(for filter: InboxFilter, now: UInt64) -> Int {
         if filter == .all {
-            return unreadCount
+            return unreadCount(now: now)
         }
-        return itemsWithin48Hours.filter { $0.matches(filter: filter) && $0.isUnread }.count
+        return itemsWithin48Hours(now: now).filter { $0.matches(filter: filter) && $0.isUnread }.count
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Tab filter bar: All / Questions / Mentions
-                filterTabBar
+        // TimelineView triggers re-render periodically to invalidate stale items
+        // that have crossed the 48h threshold since last render.
+        TimelineView(.periodic(from: .now, by: Self.refreshIntervalSeconds)) { context in
+            // Compute `now` once per render cycle for consistent filtering
+            let now = UInt64(context.date.timeIntervalSince1970)
+            let items = filteredItems(now: now)
 
-                Divider()
+            NavigationStack {
+                VStack(spacing: 0) {
+                    // Tab filter bar: All / Questions / Mentions
+                    filterTabBar(now: now)
 
-                // Inbox list - uses centralized coreManager.inboxItems
-                if filteredItems.isEmpty {
-                    emptyStateView
-                } else {
-                    inboxList
+                    Divider()
+
+                    // Inbox list - uses centralized coreManager.inboxItems
+                    if items.isEmpty {
+                        emptyStateView
+                    } else {
+                        inboxList(items: items)
+                    }
                 }
-            }
-            .navigationTitle("Inbox")
-            .navigationBarTitleDisplayMode(.large)
-            .sheet(item: $selectedItem, onDismiss: {
-                // Handle navigation after sheet dismisses deterministically
-                if let pending = pendingNavigation {
-                    navigateToConversation = pending
-                    pendingNavigation = nil
+                .navigationTitle("Inbox")
+                .navigationBarTitleDisplayMode(.large)
+                .sheet(item: $selectedItem, onDismiss: {
+                    // Handle navigation after sheet dismisses deterministically
+                    if let pending = pendingNavigation {
+                        navigateToConversation = pending
+                        pendingNavigation = nil
+                    }
+                }) { item in
+                    InboxDetailView(item: item, onNavigateToConversation: { convId in
+                        // Store pending navigation, then dismiss sheet
+                        pendingNavigation = ConversationNavigationData(
+                            conversationId: convId
+                        )
+                        selectedItem = nil
+                    })
+                    .environmentObject(coreManager)
                 }
-            }) { item in
-                InboxDetailView(item: item, onNavigateToConversation: { convId in
-                    // Store pending navigation, then dismiss sheet
-                    pendingNavigation = ConversationNavigationData(
-                        conversationId: convId
+                .navigationDestination(item: $navigateToConversation) { navData in
+                    InboxConversationView(
+                        conversationId: navData.conversationId
                     )
-                    selectedItem = nil
-                })
-                .environmentObject(coreManager)
-            }
-            .navigationDestination(item: $navigateToConversation) { navData in
-                InboxConversationView(
-                    conversationId: navData.conversationId
-                )
-                .environmentObject(coreManager)
+                    .environmentObject(coreManager)
+                }
             }
         }
     }
 
     // MARK: - Filter Tab Bar
 
-    private var filterTabBar: some View {
+    private func filterTabBar(now: UInt64) -> some View {
         HStack(spacing: 0) {
             ForEach(InboxFilter.allCases, id: \.self) { filter in
-                filterTab(for: filter)
+                filterTab(for: filter, now: now)
             }
         }
         .padding(.horizontal)
@@ -207,8 +225,8 @@ struct InboxView: View {
         .background(Color.systemBackground)
     }
 
-    private func filterTab(for filter: InboxFilter) -> some View {
-        let count = unreadCount(for: filter)
+    private func filterTab(for filter: InboxFilter, now: UInt64) -> some View {
+        let count = unreadCount(for: filter, now: now)
 
         return Button(action: { selectedFilter = filter }) {
             HStack(spacing: 4) {
@@ -265,9 +283,9 @@ struct InboxView: View {
 
     // MARK: - Inbox List
 
-    private var inboxList: some View {
+    private func inboxList(items: [InboxItem]) -> some View {
         List {
-            ForEach(filteredItems, id: \.id) { item in
+            ForEach(items, id: \.id) { item in
                 Button(action: { selectedItem = item }) {
                     InboxItemRow(item: item)
                 }
