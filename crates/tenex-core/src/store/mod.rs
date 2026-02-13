@@ -1,5 +1,6 @@
 pub mod agent_tracking;
 pub mod app_data_store;
+pub mod content_store;
 pub mod db;
 pub mod events;
 pub mod runtime_hierarchy;
