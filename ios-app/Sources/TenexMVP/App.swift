@@ -305,9 +305,10 @@ class TenexCoreManager: ObservableObject {
                 self.setMessagesCache(messages, for: conversationId)
             }
             // Also refresh the conversation list
+            // Use showArchived: true to match fetchData() - client-side filtering is applied in views
             let filter = ConversationFilter(
                 projectIds: [],
-                showArchived: false,
+                showArchived: true,
                 hideScheduled: false,
                 timeFilter: .all
             )
@@ -595,10 +596,12 @@ class TenexCoreManager: ObservableObject {
         }
 
         do {
+            // Always fetch all conversations (including scheduled)
+            // Client-side filtering is applied in ConversationsTabView based on user preferences
             let filter = ConversationFilter(
                 projectIds: [],
                 showArchived: true,
-                hideScheduled: true,
+                hideScheduled: false,
                 timeFilter: .all
             )
 

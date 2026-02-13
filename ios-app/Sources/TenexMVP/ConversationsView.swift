@@ -6,6 +6,8 @@ struct ConversationsView: View {
     @State private var selectedConversation: ConversationFullInfo?
     @State private var showReports = false
     @State private var showNewConversation = false
+    /// Hide scheduled conversations (synced with ConversationsTabView preference)
+    @AppStorage("hideScheduled") private var hideScheduled = true
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -15,7 +17,10 @@ struct ConversationsView: View {
         coreManager.conversations.filter { conv in
             // projectATag is in a-tag format "kind:pubkey:d-tag", extract d-tag to match project.id
             let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
-            return projectId == project.id
+            guard projectId == project.id else { return false }
+            // Apply hideScheduled filter consistently with ConversationsTabView
+            if hideScheduled && conv.isScheduled { return false }
+            return true
         }
     }
 
