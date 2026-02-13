@@ -326,6 +326,8 @@ pub struct App {
     pub audio_player: AudioPlayer,
     /// Channel sender for voice/model browse results from background fetch tasks
     pub browse_tx: Option<tokio::sync::mpsc::Sender<crate::runtime::BrowseResult>>,
+    /// Last time the user sent a message per thread (unix timestamp seconds)
+    pub last_user_activity_by_thread: HashMap<String, u64>,
 }
 
 impl App {
@@ -408,6 +410,7 @@ impl App {
             stats_subtab: StatsSubtab::default(),
             audio_player: AudioPlayer::new(),
             browse_tx: None,
+            last_user_activity_by_thread: HashMap::new(),
         }
     }
 
@@ -2118,6 +2121,15 @@ impl App {
     /// Clear the waiting_for_user state for a thread
     pub fn clear_tab_waiting_for_user(&mut self, thread_id: &str) {
         self.tabs.clear_waiting_for_user(thread_id);
+    }
+
+    /// Record that the user was active in a thread (for TTS inactivity gating)
+    pub fn record_user_activity(&mut self, thread_id: &str) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.last_user_activity_by_thread.insert(thread_id.to_string(), now);
     }
 
     // ===== Home View Methods =====

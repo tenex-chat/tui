@@ -157,6 +157,15 @@ class TenexCoreManager: ObservableObject {
     /// Used to filter out stale inbox items that arrived before this session started.
     private(set) var sessionStartTimestamp: UInt64 = 0
 
+    /// Last time the user sent a message per conversation (Unix seconds).
+    /// Used to skip TTS when the user was recently active in a conversation.
+    private var lastUserActivityByConversation: [String: UInt64] = [:]
+
+    /// Record that the user was active in a conversation (for TTS inactivity gating).
+    func recordUserActivity(conversationId: String) {
+        lastUserActivityByConversation[conversationId] = UInt64(Date().timeIntervalSince1970)
+    }
+
     /// Register the event callback for push-based updates.
     /// Call this after successful login to enable real-time updates.
     func registerEventCallback() {
@@ -430,6 +439,17 @@ class TenexCoreManager: ObservableObject {
         messageText: String,
         conversationId: String? = nil
     ) async {
+        // Check inactivity threshold: skip TTS if user was recently active in this conversation
+        if let convId = conversationId,
+           let lastActivity = lastUserActivityByConversation[convId] {
+            let threshold: UInt64 = (try? core.getAiAudioSettings().ttsInactivityThresholdSecs) ?? 120
+            let now = UInt64(Date().timeIntervalSince1970)
+            if now - lastActivity < threshold {
+                print("[TenexCoreManager] Audio notification skipped: user active \(now - lastActivity)s ago (threshold: \(threshold)s)")
+                return
+            }
+        }
+
         // Load API keys from iOS Keychain
         let elevenlabsResult = await KeychainService.shared.loadElevenLabsApiKeyAsync()
         let openrouterResult = await KeychainService.shared.loadOpenRouterApiKeyAsync()
@@ -888,74 +908,64 @@ struct MainTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
 
     @State private var selectedTab = 0
-    @State private var previousTab = 0
     @State private var showProjectPickerForNewConv = false
     @State private var projectForNewConversation: ProjectInfo?
     @State private var showNewConversation = false
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            Tab(value: 0) {
+        ZStack {
+            tabPanel(tag: 0) {
                 NavigationStack {
                     ConversationsTabView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "bubble.left.and.bubble.right")
             }
-            Tab(value: 1) {
+            tabPanel(tag: 1) {
                 NavigationStack {
                     FeedView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "dot.radiowaves.left.and.right")
             }
-            Tab(value: 2) {
+            tabPanel(tag: 2) {
                 ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "folder")
             }
-            Tab(value: 3) {
+            tabPanel(tag: 3) {
                 InboxView()
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "tray")
             }
-            Tab(value: 4) {
-                ReportsTabView()
-                    .environmentObject(coreManager)
-                    .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "doc.richtext")
-            }
-            Tab(value: 10) {
+            tabPanel(tag: 10) {
                 NavigationStack {
                     SearchView()
                         .environmentObject(coreManager)
                 }
                 .nowPlayingInset(coreManager: coreManager)
-            } label: {
-                Image(systemName: "magnifyingglass")
-            }
-            Tab(value: 99) {
-                Color.clear
-            } label: {
-                Image(systemName: "plus")
             }
         }
-        .onChange(of: selectedTab) { _, newValue in
-            if newValue == 99 {
-                selectedTab = previousTab
-                showProjectPickerForNewConv = true
-            } else {
-                previousTab = newValue
+        .safeAreaInset(edge: .bottom) {
+            HStack {
+                GlassEffectContainer {
+                    HStack(spacing: 0) {
+                        tabButton(icon: "bubble.left.and.bubble.right", tag: 0)
+                        tabButton(icon: "dot.radiowaves.left.and.right", tag: 1)
+                        tabButton(icon: "folder", tag: 2)
+                        tabButton(icon: "tray", tag: 3)
+                        tabButton(icon: "magnifyingglass", tag: 10)
+                    }
+                }
+
+                Spacer()
+
+                Button { showProjectPickerForNewConv = true } label: {
+                    Image(systemName: "plus")
+                }
+                .buttonStyle(.glass)
             }
+            .padding(.horizontal)
         }
         .sheet(isPresented: $showProjectPickerForNewConv) {
             ProjectSelectorSheet(
@@ -976,5 +986,21 @@ struct MainTabView: View {
                     .environmentObject(coreManager)
             }
         }
+    }
+
+    // MARK: - Tab Panel
+
+    @ViewBuilder
+    private func tabPanel<Content: View>(tag: Int, @ViewBuilder content: () -> Content) -> some View {
+        content()
+            .opacity(selectedTab == tag ? 1 : 0)
+            .allowsHitTesting(selectedTab == tag)
+    }
+
+    private func tabButton(icon: String, tag: Int) -> some View {
+        Button { selectedTab = tag } label: {
+            Image(systemName: icon)
+        }
+        .buttonStyle(.glass)
     }
 }

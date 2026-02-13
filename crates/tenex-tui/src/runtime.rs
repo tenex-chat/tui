@@ -431,6 +431,7 @@ fn handle_core_events(
                             message_pubkey.clone(),
                             thread_title,
                             message_content,
+                            thread_id.clone(),
                         );
                     }
                 }
@@ -495,6 +496,7 @@ fn trigger_audio_notification(
     agent_pubkey: String,
     conversation_title: String,
     message_text: String,
+    thread_id: String,
 ) {
     // Check if audio notifications are enabled in preferences
     let prefs = app.preferences.borrow();
@@ -503,6 +505,22 @@ fn trigger_audio_notification(
     if !ai_settings.enabled {
         // Audio notifications disabled - skip silently (no log spam)
         return;
+    }
+
+    // Check inactivity threshold: skip TTS if user was recently active in this thread
+    let threshold = ai_settings.tts_inactivity_threshold_secs;
+    if let Some(&last_activity) = app.last_user_activity_by_thread.get(&thread_id) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        if now.saturating_sub(last_activity) < threshold {
+            log_diagnostic(&format!(
+                "AUDIO: Skipping TTS for thread {} - user active {}s ago (threshold: {}s)",
+                thread_id, now.saturating_sub(last_activity), threshold
+            ));
+            return;
+        }
     }
 
     // Check if API keys are configured

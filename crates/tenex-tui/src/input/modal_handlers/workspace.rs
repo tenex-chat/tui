@@ -237,6 +237,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         state.ai.voice_ids_input = ai.selected_voice_ids.join(", ");
                         state.ai.openrouter_model_input = ai.openrouter_model.clone().unwrap_or_default();
                         state.ai.audio_prompt_input = ai.audio_prompt.clone();
+                        state.ai.tts_inactivity_threshold_input = ai.tts_inactivity_threshold_secs.to_string();
                     }
                     ui::modal::SettingsTab::Appearance => {
                         // Appearance settings are toggles/selects, no editing to restore
@@ -371,6 +372,25 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                     }
                                 }
                             }
+                            Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                                match state.ai.tts_inactivity_threshold_input.trim().parse::<u64>() {
+                                    Ok(secs) => {
+                                        let result = app.preferences.borrow_mut().set_tts_inactivity_threshold(secs);
+                                        match result {
+                                            Ok(()) => {
+                                                app.set_warning_status(&format!("TTS inactivity threshold set to {}s", secs));
+                                                state.stop_editing();
+                                            }
+                                            Err(e) => {
+                                                app.set_warning_status(&format!("Failed to save: {}", e));
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        app.set_warning_status("Invalid value: enter a number of seconds");
+                                    }
+                                }
+                            }
                             Some(ui::modal::AiSetting::AudioEnabled) | None => {
                                 state.stop_editing();
                             }
@@ -491,6 +511,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         Some(ui::modal::AiSetting::AudioPrompt) => {
                             state.ai.audio_prompt_input.push(c);
                         }
+                        Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                            state.ai.tts_inactivity_threshold_input.push(c);
+                        }
                         _ => {}
                     }
                 }
@@ -526,6 +549,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         }
                         Some(ui::modal::AiSetting::AudioPrompt) => {
                             state.ai.audio_prompt_input.pop();
+                        }
+                        Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                            state.ai.tts_inactivity_threshold_input.pop();
                         }
                         _ => {}
                     }

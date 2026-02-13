@@ -1186,6 +1186,7 @@ pub struct AiAudioSettingsInfo {
     pub openrouter_model: Option<String>,
     pub audio_prompt: String,
     pub enabled: bool,
+    pub tts_inactivity_threshold_secs: u64,
 }
 
 /// Voice from ElevenLabs
@@ -1339,6 +1340,11 @@ impl FfiPreferencesStorage {
 
     fn set_audio_notifications_enabled(&mut self, enabled: bool) -> Result<(), String> {
         self.prefs.ai_audio_settings.enabled = enabled;
+        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn set_tts_inactivity_threshold(&mut self, secs: u64) -> Result<(), String> {
+        self.prefs.ai_audio_settings.tts_inactivity_threshold_secs = secs;
         self.save().map_err(|e| format!("Failed to save preferences: {}", e))
     }
 }
@@ -3587,6 +3593,7 @@ impl TenexCore {
             openrouter_model: settings.openrouter_model.clone(),
             audio_prompt: settings.audio_prompt.clone(),
             enabled: settings.enabled,
+            tts_inactivity_threshold_secs: settings.tts_inactivity_threshold_secs,
         })
     }
 
@@ -3665,6 +3672,18 @@ impl TenexCore {
 
         let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
         prefs_storage.set_audio_prompt(prompt)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    /// Set TTS inactivity threshold (seconds of inactivity before TTS fires)
+    pub fn set_tts_inactivity_threshold(&self, secs: u64) -> Result<(), TenexError> {
+        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+
+        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage.set_tts_inactivity_threshold(secs)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }

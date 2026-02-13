@@ -363,6 +363,11 @@ fn handle_send_message(app: &mut App) {
         app.add_to_message_history(content.clone());
         app.exit_history_mode();
 
+        // Record user activity before borrowing app fields (for TTS inactivity gating)
+        if let Some(thread) = app.selected_thread() {
+            app.record_user_activity(&thread.id.clone());
+        }
+
         if let (Some(ref core_handle), Some(ref project)) =
             (&app.core_handle, &app.selected_project)
         {
