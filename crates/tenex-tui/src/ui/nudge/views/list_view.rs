@@ -15,7 +15,7 @@ use tenex_core::models::Nudge;
 
 /// Render the nudge list view
 pub fn render_nudge_list(f: &mut Frame, app: &App, area: Rect, state: &NudgeListState) {
-    let nudge_count = app.data_store.borrow().nudges.len();
+    let nudge_count = app.data_store.borrow().content.nudges.len();
     let title = format!("Nudges ({})", nudge_count);
 
     let (popup_area, content_area) = Modal::new(&title)
@@ -28,7 +28,7 @@ pub fn render_nudge_list(f: &mut Frame, app: &App, area: Rect, state: &NudgeList
 
     // Get filtered nudges
     let data_store = app.data_store.borrow();
-    let filtered_nudges: Vec<&Nudge> = filter_nudges(&data_store.nudges, &state.filter);
+    let filtered_nudges: Vec<&Nudge> = filter_nudges(&data_store.content.nudges, &state.filter);
 
     // Render list or empty message
     let list_area = Rect::new(

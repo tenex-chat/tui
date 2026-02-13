@@ -15,7 +15,7 @@ use ratatui::{
 /// Render the nudge detail view
 pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDetailState) {
     let data_store = app.data_store.borrow();
-    let nudge = match data_store.nudges.get(&state.nudge_id) {
+    let nudge = match data_store.content.nudges.get(&state.nudge_id) {
         Some(n) => n,
         None => {
             // Nudge not found - render error
