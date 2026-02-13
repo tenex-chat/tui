@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export PATH="$HOME/.cargo/bin:$PATH"
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CORE_LIB_DEFAULT="$ROOT_DIR/target/aarch64-apple-ios-sim/release/libtenex_core.a"
 UDL_PATH="$ROOT_DIR/crates/tenex-core/src/tenex_core.udl"

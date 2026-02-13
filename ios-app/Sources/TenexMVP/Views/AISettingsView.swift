@@ -55,7 +55,7 @@ struct AISettingsView: View {
 
                     apiKeyRow(
                         title: "OpenRouter API Key",
-                        description: "For text massage LLM",
+                        description: "For text message LLM",
                         hasKey: hasOpenRouterKey,
                         isEditing: $isEditingOpenRouterKey,
                         keyInput: $openRouterKeyInput,
@@ -82,7 +82,7 @@ struct AISettingsView: View {
                     }
 
                     // Voice & Model selection rows that open sheets
-                    Section {
+                    Section("Voice Configuration") {
                         Button {
                             if availableVoices.isEmpty {
                                 fetchVoices()
@@ -113,7 +113,7 @@ struct AISettingsView: View {
                             showModelSelector = true
                         } label: {
                             HStack {
-                                Text("Text Massage Model")
+                                Text("Text Message Model")
                                     .foregroundStyle(.primary)
                                 Spacer()
                                 if let model = selectedModel,
@@ -139,21 +139,25 @@ struct AISettingsView: View {
                     // Audio Prompt Section
                     Section {
                         TextEditor(text: $audioPrompt)
-                            .frame(minHeight: 100)
+                            .frame(minHeight: 80)
+                            .font(.callout)
                         HStack {
                             Button("Save Prompt") {
                                 saveAudioPrompt()
                             }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
                             .disabled(audioPrompt.isEmpty)
                             Spacer()
-                            Button("Reset Prompt", role: .destructive) {
+                            Button("Reset to Default", role: .destructive) {
                                 resetAudioPrompt()
                             }
+                            .controlSize(.small)
                         }
                     } header: {
                         Text("Audio Prompt")
                     } footer: {
-                        Text("Instructions for how the LLM should massage text for speech synthesis.")
+                        Text("Instructions for how the LLM should process text for speech synthesis.")
                     }
 
                     // Debug Section
@@ -167,6 +171,7 @@ struct AISettingsView: View {
                     }
                 }
             }
+            .formStyle(.grouped)
             .navigationTitle("AI Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -196,6 +201,9 @@ struct AISettingsView: View {
                     onToggle: toggleVoice,
                     onFetch: fetchVoices
                 )
+                #if os(macOS)
+                .frame(minWidth: 400, idealWidth: 480, minHeight: 400, idealHeight: 500)
+                #endif
             }
             .sheet(isPresented: $showModelSelector) {
                 ModelSelectorSheet(
@@ -209,6 +217,9 @@ struct AISettingsView: View {
                     },
                     onFetch: fetchModels
                 )
+                #if os(macOS)
+                .frame(minWidth: 400, idealWidth: 480, minHeight: 400, idealHeight: 500)
+                #endif
             }
             .overlay {
                 if isLoadingSettings {
@@ -229,6 +240,9 @@ struct AISettingsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
+            #if os(macOS)
+            .frame(minWidth: 480, idealWidth: 520, minHeight: 500, idealHeight: 650)
+            #endif
         }
     }
 
@@ -676,7 +690,7 @@ private struct ModelSelectorSheet: View {
                     }
                 }
             }
-            .navigationTitle("Text Massage Model")
+            .navigationTitle("Text Message Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
