@@ -1,5 +1,19 @@
 import SwiftUI
 
+// MARK: - View Extension
+
+extension View {
+    /// Adds a NowPlayingBar as a bottom safe area inset inside tab content,
+    /// positioning it above the tab bar (not on top of it).
+    func nowPlayingInset(coreManager: TenexCoreManager) -> some View {
+        self.safeAreaInset(edge: .bottom) {
+            NowPlayingBar()
+                .environmentObject(coreManager)
+                .animation(.spring(duration: 0.3), value: AudioNotificationPlayer.shared.playbackState)
+        }
+    }
+}
+
 /// Apple Music-style Now Playing bar that sits above the tab bar.
 /// Shows conversation title, agent avatar + name, text snippet, progress bar, and controls.
 struct NowPlayingBar: View {
