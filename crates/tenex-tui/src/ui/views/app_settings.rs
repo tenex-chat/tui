@@ -1,7 +1,7 @@
 //! App Settings modal view - global application settings accessible via comma key
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::{AiSetting, AppSettingsState, GeneralSetting, SettingsTab};
+use crate::ui::modal::{AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, SettingsTab};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -43,6 +43,7 @@ pub fn render_app_settings(f: &mut Frame, app: &App, area: Rect, state: &AppSett
     match state.current_tab {
         SettingsTab::General => render_general_tab(f, app, content_area, state),
         SettingsTab::AI => render_ai_tab(f, content_area, state),
+        SettingsTab::Appearance => render_appearance_tab(f, app, content_area, state),
     };
 
     // Hints at bottom
@@ -244,6 +245,90 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
         is_prompt_selected,
         state.editing_audio_prompt(),
     );
+}
+
+/// Render Appearance tab content
+fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettingsState) {
+    let mut y_offset = area.y;
+
+    // Section header: Filters
+    render_section_header(f, area.x, y_offset, area.width, "Filters");
+    y_offset += 2;
+
+    // 1. Time Filter (select field cycling through options)
+    let is_time_filter_selected = state.selected_appearance_setting() == Some(AppearanceSetting::TimeFilter);
+    let time_filter_label = app.home.time_filter
+        .map(|tf| tf.label())
+        .unwrap_or("All");
+    render_select_field(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Time Filter:",
+        "Filter conversations by time (Enter to cycle)",
+        time_filter_label,
+        is_time_filter_selected,
+    );
+    y_offset += 3;
+
+    // 2. Hide Scheduled toggle
+    let is_hide_scheduled_selected = state.selected_appearance_setting() == Some(AppearanceSetting::HideScheduled);
+    render_toggle_row(
+        f,
+        area.x,
+        y_offset,
+        area.width,
+        "Hide Scheduled:",
+        "Hide scheduled/future events from lists (Enter to toggle)",
+        app.hide_scheduled,
+        is_hide_scheduled_selected,
+    );
+}
+
+/// Render a select field (read-only value with cycling)
+fn render_select_field(
+    f: &mut Frame,
+    x: u16,
+    y: u16,
+    width: u16,
+    label: &str,
+    description: &str,
+    value: &str,
+    is_selected: bool,
+) {
+    let row_area = Rect::new(x, y, width, 1);
+
+    let border_char = if is_selected { "▌" } else { "│" };
+    let border_color = if is_selected {
+        theme::ACCENT_PRIMARY
+    } else {
+        theme::TEXT_MUTED
+    };
+
+    let mut spans = vec![Span::styled(border_char, Style::default().fg(border_color))];
+
+    let label_style = if is_selected {
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        Style::default().fg(theme::TEXT_MUTED)
+    };
+    spans.push(Span::styled(format!(" {}", label), label_style));
+
+    // Display value with special styling
+    spans.push(Span::styled(
+        format!(" [{}]", value),
+        Style::default().fg(theme::ACCENT_SPECIAL),
+    ));
+
+    let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
+    f.render_widget(row, row_area);
+
+    let desc_area = Rect::new(x + 2, y + 1, width.saturating_sub(2), 1);
+    let desc = Paragraph::new(description).style(Style::default().fg(theme::TEXT_DIM));
+    f.render_widget(desc, desc_area);
 }
 
 /// Render a section header
@@ -458,7 +543,7 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
         ]
     } else {
-        // Show Delete hint only on AI tab for API key settings
+        // Build base hints with tab-specific Enter behavior
         let mut hints = vec![
             Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" switch tab", Style::default().fg(theme::TEXT_MUTED)),
@@ -467,8 +552,25 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)),
         ];
+
+        // Context-aware Enter behavior hint
+        if state.current_tab == SettingsTab::Appearance {
+            // Appearance tab uses toggle/cycle, not edit mode
+            match state.selected_appearance_setting() {
+                Some(AppearanceSetting::TimeFilter) => {
+                    hints.push(Span::styled(" cycle", Style::default().fg(theme::TEXT_MUTED)));
+                }
+                Some(AppearanceSetting::HideScheduled) => {
+                    hints.push(Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)));
+                }
+                None => {
+                    hints.push(Span::styled(" select", Style::default().fg(theme::TEXT_MUTED)));
+                }
+            }
+        } else {
+            hints.push(Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)));
+        }
 
         // Show Delete hint on AI tab for clearable settings
         if state.current_tab == SettingsTab::AI {
