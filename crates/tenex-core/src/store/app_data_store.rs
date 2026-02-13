@@ -4,16 +4,13 @@ use crate::store::content_store::ContentStore;
 use crate::store::inbox_store::InboxStore;
 use crate::store::operations_store::OperationsStore;
 use crate::store::reports_store::ReportsStore;
+use crate::store::statistics_store::StatisticsStore;
 use crate::store::trust_store::TrustStore;
 use crate::store::{RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::{trace, warn};
-
-/// Default batch size for pagination queries.
-/// Set high enough to minimize same-second overflow risk while keeping memory reasonable.
-const DEFAULT_PAGINATION_BATCH_SIZE: i32 = 10_000;
 
 /// Reactive data store - single source of truth for app-level concepts.
 /// Rebuilt from nostrdb on startup, updated incrementally on new events.
@@ -41,33 +38,16 @@ pub struct AppDataStore {
 
     // Operations status and agent tracking
     pub operations: OperationsStore,
+    pub statistics: StatisticsStore,
 
     // Pending subscriptions for new projects (drained by CoreRuntime)
     pending_project_subscriptions: Vec<String>,
 
     // Thread root index - maps project a_tag -> set of known thread root event IDs
-    // This avoids expensive full-table scans when loading threads
     thread_root_index: HashMap<String, HashSet<String>>,
 
     // Runtime hierarchy - tracks individual conversation runtimes and parent-child relationships
-    // for hierarchical runtime aggregation (parent runtime = own + all children recursively)
     pub runtime_hierarchy: RuntimeHierarchy,
-
-    // Pre-aggregated message counts by day for Stats view performance
-    // Maps day_start_timestamp -> (user_count, all_count) for O(1) lookup instead of O(total_messages) per frame
-    messages_by_day_counts: HashMap<u64, (u64, u64)>,
-
-    // Pre-aggregated hourly LLM activity data for Activity grid performance
-    // Maps (day_start, hour_of_day) -> (token_count, message_count)
-    // Uses calendar day boundaries (UTC) and hour-of-day (0-23)
-    // Stores only LLM messages (filtered by llm_metadata presence)
-    // Updated incrementally on new messages for O(1) lookups instead of O(total_messages) per render
-    llm_activity_by_hour: HashMap<(u64, u8), (u64, u64)>,
-
-    // Pre-aggregated runtime totals by day for Stats view performance
-    // Maps day_start_timestamp -> total runtime_ms (from llm-runtime tags)
-    runtime_by_day_counts: HashMap<u64, u64>,
-
 }
 
 impl AppDataStore {
@@ -86,12 +66,10 @@ impl AppDataStore {
             user_pubkey: None,
             agent_chatter: Vec::new(),
             operations: OperationsStore::new(),
+            statistics: StatisticsStore::new(),
             pending_project_subscriptions: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
-            messages_by_day_counts: HashMap::new(),
-            llm_activity_by_hour: HashMap::new(),
-            runtime_by_day_counts: HashMap::new(),
         };
         store.rebuild_from_ndb();
         store
@@ -104,12 +82,13 @@ impl AppDataStore {
         self.populate_inbox_from_existing(&pubkey);
         // Rebuild message counts if user changed (ensures historical counts are accurate)
         if pubkey_changed {
-            self.rebuild_messages_by_day_counts();
+            let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
+            self.statistics.rebuild_messages_by_day_counts(&self.ndb, &self.user_pubkey, &project_a_tags);
         }
         // Rebuild LLM activity hourly aggregates (always, not user-dependent)
-        self.rebuild_llm_activity_by_hour();
+        self.statistics.rebuild_llm_activity_by_hour(&self.messages_by_thread);
         // Rebuild runtime-by-day aggregates (always, not user-dependent)
-        self.rebuild_runtime_by_day_counts();
+        self.statistics.rebuild_runtime_by_day_counts(&self.messages_by_thread);
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -129,12 +108,10 @@ impl AppDataStore {
         self.user_pubkey = None;
         self.agent_chatter.clear();
         self.operations.clear();
+        self.statistics.clear();
         self.pending_project_subscriptions.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
-        self.messages_by_day_counts.clear();
-        self.llm_activity_by_hour.clear();
-        self.runtime_by_day_counts.clear();
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
@@ -290,14 +267,11 @@ impl AppDataStore {
             threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
         }
 
-        // Rebuild pre-aggregated message counts by day for Stats view
-        self.rebuild_messages_by_day_counts();
-
-        // Rebuild pre-aggregated LLM activity by hour for Activity grid
-        self.rebuild_llm_activity_by_hour();
-
-        // Rebuild pre-aggregated runtime by day for Stats view
-        self.rebuild_runtime_by_day_counts();
+        // Rebuild pre-aggregated statistics
+        let project_a_tags_for_stats: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
+        self.statistics.rebuild_messages_by_day_counts(&self.ndb, &self.user_pubkey, &project_a_tags_for_stats);
+        self.statistics.rebuild_llm_activity_by_hour(&self.messages_by_thread);
+        self.statistics.rebuild_runtime_by_day_counts(&self.messages_by_thread);
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -558,41 +532,12 @@ impl AppDataStore {
         }
     }
 
-    /// Get today's total LLM runtime (in milliseconds), based on message timestamps.
-    /// Used for the global status bar and Stats view.
-    pub fn get_today_unique_runtime(&mut self) -> u64 {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let seconds_per_day: u64 = 86400;
-        let today_start = (now / seconds_per_day) * seconds_per_day;
-        self.runtime_by_day_counts.get(&today_start).copied().unwrap_or(0)
+    pub fn get_today_unique_runtime(&self) -> u64 {
+        self.statistics.get_today_unique_runtime()
     }
 
-    /// Get runtime aggregated by day for the Stats tab bar chart.
-    /// Returns (day_start_timestamp, total_runtime_ms) tuples.
     pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
-        if num_days == 0 {
-            return Vec::new();
-        }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        let seconds_per_day: u64 = 86400;
-        let today_start = (now / seconds_per_day) * seconds_per_day;
-        let earliest_day = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
-
-        let mut result: Vec<(u64, u64)> = self
-            .runtime_by_day_counts
-            .iter()
-            .filter(|(day_start, runtime_ms)| **day_start >= earliest_day && **runtime_ms > 0)
-            .map(|(day_start, runtime_ms)| (*day_start, *runtime_ms))
-            .collect();
-        result.sort_by_key(|(day, _)| *day);
-        result
+        self.statistics.get_runtime_by_day(num_days)
     }
 
     /// Get top N conversations by total runtime (including descendants).
@@ -687,580 +632,34 @@ impl AppDataStore {
     /// Uses pre-aggregated counters for O(num_days) performance instead of O(total_messages).
     /// Data is queried directly from nostrdb using the `.authors()` filter for user messages
     /// and a-tag filters for project messages (no double-counting from agent_chatter).
+    // ===== Statistics Methods (delegated to StatisticsStore) =====
+
     pub fn get_messages_by_day(&self, num_days: usize) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
-        // Guard against zero days
-        if num_days == 0 {
-            return (Vec::new(), Vec::new());
-        }
-
-        let seconds_per_day: u64 = 86400;
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        // Calculate the start of today (UTC)
-        let today_start = (now / seconds_per_day) * seconds_per_day;
-
-        // Calculate the earliest day to include
-        let earliest_day = today_start - ((num_days - 1) as u64 * seconds_per_day);
-
-        // Extract counts for the requested window from pre-aggregated data (O(num_days))
-        let mut user_result: Vec<(u64, u64)> = Vec::new();
-        let mut all_result: Vec<(u64, u64)> = Vec::new();
-
-        for (&day_start, &(user_count, all_count)) in &self.messages_by_day_counts {
-            if day_start >= earliest_day {
-                if user_count > 0 {
-                    user_result.push((day_start, user_count));
-                }
-                if all_count > 0 {
-                    all_result.push((day_start, all_count));
-                }
-            }
-        }
-
-        // Sort by day_start ascending for chart display
-        user_result.sort_by_key(|(day, _)| *day);
-        all_result.sort_by_key(|(day, _)| *day);
-
-        (user_result, all_result)
+        self.statistics.get_messages_by_day(num_days)
     }
 
-    /// Get LLM token usage aggregated by calendar day and hour-of-day.
-    /// Returns a HashMap where key is hour_start_timestamp and value is total tokens.
-    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
-    /// Only includes LLM-generated messages (those with llm_metadata).
-    /// Covers the specified number of hours from now backwards.
     pub fn get_tokens_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let seconds_per_hour: u64 = 3600;
-        let current_hour_start = (now / seconds_per_hour) * seconds_per_hour;
-
-        self.get_tokens_by_hour_from(current_hour_start, num_hours)
+        self.statistics.get_tokens_by_hour(num_hours)
     }
 
-    /// Testable variant of get_tokens_by_hour that accepts a current_hour_start parameter.
-    /// This enables testing window slicing behavior without depending on SystemTime::now().
     pub fn get_tokens_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
-        let mut result: HashMap<u64, u64> = HashMap::new();
-
-        if num_hours == 0 {
-            return result;
-        }
-
-        let seconds_per_day: u64 = 86400;
-        let seconds_per_hour: u64 = 3600;
-
-        // Iterate backwards through num_hours and do direct HashMap lookups
-        // This guarantees O(num_hours) complexity instead of O(total_history_buckets)
-        for i in 0..num_hours {
-            let hour_offset = i as u64 * seconds_per_hour;
-            let hour_start = current_hour_start.saturating_sub(hour_offset);
-
-            // Convert hour_start to (day_start, hour_of_day) key
-            let day_start = (hour_start / seconds_per_day) * seconds_per_day;
-            let seconds_since_day_start = hour_start - day_start;
-            let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
-
-            // Direct HashMap lookup - O(1)
-            if let Some((tokens, _)) = self.llm_activity_by_hour.get(&(day_start, hour_of_day)) {
-                result.insert(hour_start, *tokens);
-            }
-        }
-
-        result
+        self.statistics.get_tokens_by_hour_from(current_hour_start, num_hours)
     }
 
-    /// Get LLM message count aggregated by calendar day and hour-of-day.
-    /// Returns a HashMap where key is hour_start_timestamp and value is message count.
-    /// Uses pre-aggregated data for O(num_hours) performance instead of O(total_messages).
-    /// Only includes LLM-generated messages (those with llm_metadata).
-    /// Covers the specified number of hours from now backwards.
     pub fn get_message_count_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        let seconds_per_hour: u64 = 3600;
-        let current_hour_start = (now / seconds_per_hour) * seconds_per_hour;
-
-        self.get_message_count_by_hour_from(current_hour_start, num_hours)
+        self.statistics.get_message_count_by_hour(num_hours)
     }
 
-    /// Testable variant of get_message_count_by_hour that accepts a current_hour_start parameter.
-    /// This enables testing window slicing behavior without depending on SystemTime::now().
     pub fn get_message_count_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
-        let mut result: HashMap<u64, u64> = HashMap::new();
-
-        if num_hours == 0 {
-            return result;
-        }
-
-        let seconds_per_day: u64 = 86400;
-        let seconds_per_hour: u64 = 3600;
-
-        // Iterate backwards through num_hours and do direct HashMap lookups
-        // This guarantees O(num_hours) complexity instead of O(total_history_buckets)
-        for i in 0..num_hours {
-            let hour_offset = i as u64 * seconds_per_hour;
-            let hour_start = current_hour_start.saturating_sub(hour_offset);
-
-            // Convert hour_start to (day_start, hour_of_day) key
-            let day_start = (hour_start / seconds_per_day) * seconds_per_day;
-            let seconds_since_day_start = hour_start - day_start;
-            let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
-
-            // Direct HashMap lookup - O(1)
-            if let Some((_, message_count)) = self.llm_activity_by_hour.get(&(day_start, hour_of_day)) {
-                result.insert(hour_start, *message_count);
-            }
-        }
-
-        result
+        self.statistics.get_message_count_by_hour_from(current_hour_start, num_hours)
     }
 
-    /// Rebuild message counts by day from nostrdb directly.
-    /// Called during startup after messages are loaded, and when user pubkey changes.
-    ///
-    /// This queries nostrdb directly to get accurate counts:
-    /// - User messages: ALL kind:1 events authored by the current user's pubkey (using .authors() filter)
-    /// - All messages: ALL kind:1 events that a-tag any of our projects
-    ///
-    /// Uses pagination to iterate through ALL results without arbitrary caps.
-    /// This approach is more accurate than using messages_by_thread because it captures
-    /// ALL user messages regardless of whether they're associated with a project thread.
-    ///
-    /// ## Pagination Safety
-    /// - Uses inclusive `until` with seen-event-id guards to handle same-second events safely
-    /// - Assumes nostrdb::query returns events ordered by created_at descending (newest first)
-    /// - Pagination cursor is always updated from ALL page results, not just non-duplicate events
-    ///
-    /// ## Known Limitation: Same-Second Overflow
-    /// If more than `batch_size` events share the exact same timestamp (same second), some events
-    /// MAY be missed because nostrdb doesn't provide deterministic secondary ordering (like note_key).
-    /// When this condition is detected, a warning is logged. For typical usage patterns, this is
-    /// extremely unlikely (10,000+ events in a single second would require an unusual workload).
-    /// If this limitation becomes problematic, consider increasing `batch_size`.
-    fn rebuild_messages_by_day_counts(&mut self) {
-        self.rebuild_messages_by_day_counts_with_batch_size(DEFAULT_PAGINATION_BATCH_SIZE);
-    }
-
-    /// Internal version with configurable batch_size for testing.
     #[cfg(test)]
     fn rebuild_messages_by_day_counts_with_batch_size(&mut self, batch_size: i32) {
-        self._rebuild_messages_by_day_counts_impl(batch_size);
-    }
-
-    /// Internal version with configurable batch_size for testing.
-    #[cfg(not(test))]
-    fn rebuild_messages_by_day_counts_with_batch_size(&mut self, batch_size: i32) {
-        self._rebuild_messages_by_day_counts_impl(batch_size);
-    }
-
-    /// Core implementation of rebuild_messages_by_day_counts with configurable batch_size.
-    fn _rebuild_messages_by_day_counts_impl(&mut self, batch_size: i32) {
-        self.messages_by_day_counts.clear();
-
-        let seconds_per_day: u64 = 86400;
-        let user_pubkey = self.user_pubkey.clone();
-
-        // Collect project a-tags for the "all" query
         let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-
-        // Query user messages directly from nostrdb using .authors() filter (efficient server-side filtering)
-        if let Some(ref user_pk) = user_pubkey {
-            // Convert hex pubkey to bytes for .authors() filter
-            if let Ok(pubkey_bytes) = hex::decode(user_pk) {
-                if pubkey_bytes.len() == 32 {
-                    let pubkey_array: [u8; 32] = pubkey_bytes.try_into().unwrap();
-
-                    match Transaction::new(&self.ndb) {
-                        Ok(txn) => {
-                            // Paginate through ALL user messages using until timestamp
-                            // Use seen-event-id guard to handle same-second pagination safely
-                            let mut until_timestamp: Option<u64> = None;
-                            let mut seen_event_ids: HashSet<[u8; 32]> = HashSet::new();
-                            let mut total_user_messages: u64 = 0;
-
-                            loop {
-                                let mut filter_builder = nostrdb::Filter::new()
-                                    .kinds([1])
-                                    .authors([&pubkey_array]);
-
-                                if let Some(until) = until_timestamp {
-                                    filter_builder = filter_builder.until(until);
-                                }
-
-                                let filter = filter_builder.build();
-
-                                match self.ndb.query(&txn, &[filter], batch_size) {
-                                    Ok(results) => {
-                                        if results.is_empty() {
-                                            break; // No more results
-                                        }
-
-                                        let page_size = results.len();
-                                        let mut page_oldest_timestamp: Option<u64> = None;
-                                        let mut page_newest_timestamp: Option<u64> = None;
-                                        let mut new_events_in_page = 0;
-
-                                        for result in results.iter() {
-                                            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                                                let event_id = *note.id();
-                                                let created_at = note.created_at();
-
-                                                // Track oldest and newest timestamps (from ALL results)
-                                                match page_oldest_timestamp {
-                                                    None => page_oldest_timestamp = Some(created_at),
-                                                    Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
-                                                    _ => {}
-                                                }
-                                                match page_newest_timestamp {
-                                                    None => page_newest_timestamp = Some(created_at),
-                                                    Some(t) if created_at > t => page_newest_timestamp = Some(created_at),
-                                                    _ => {}
-                                                }
-
-                                                // Skip if we've already processed this event (same-second boundary)
-                                                if seen_event_ids.contains(&event_id) {
-                                                    continue;
-                                                }
-                                                seen_event_ids.insert(event_id);
-
-                                                let day_start = (created_at / seconds_per_day) * seconds_per_day;
-                                                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
-                                                entry.0 += 1;
-                                                total_user_messages += 1;
-                                                new_events_in_page += 1;
-                                            }
-                                        }
-
-                                        // Detect potential same-second overflow: full page with all events at same timestamp
-                                        // This is the edge case where nostrdb's lack of secondary ordering may cause data loss
-                                        if page_size >= (batch_size as usize) {
-                                            if let (Some(oldest), Some(newest)) = (page_oldest_timestamp, page_newest_timestamp) {
-                                                if oldest == newest {
-                                                    warn!(
-                                                        "Potential same-second overflow detected in user messages query: \
-                                                        {} events at timestamp {}. If more than {} events share this timestamp, \
-                                                        some may be missed due to nostrdb pagination limitations.",
-                                                        page_size, oldest, batch_size
-                                                    );
-                                                }
-                                            }
-                                        }
-
-                                        // If we got fewer results than batch_size, we're done
-                                        if page_size < (batch_size as usize) {
-                                            break;
-                                        }
-
-                                        // If page had no new events, we've exhausted unique events at this timestamp boundary
-                                        if new_events_in_page == 0 {
-                                            // Still need to continue pagination with older timestamp
-                                            match page_oldest_timestamp {
-                                                Some(t) if t > 0 => until_timestamp = Some(t - 1),
-                                                _ => break,
-                                            }
-                                        } else {
-                                            // Use inclusive pagination (same timestamp) to catch more same-second events
-                                            // The seen_event_ids guard prevents double-counting
-                                            match page_oldest_timestamp {
-                                                Some(t) => until_timestamp = Some(t),
-                                                None => break,
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("Failed to query user messages from nostrdb: {:?}", e);
-                                        break;
-                                    }
-                                }
-                            }
-
-                            trace!("Counted {} total user messages", total_user_messages);
-                        }
-                        Err(e) => {
-                            warn!("Failed to create transaction for user messages query: {:?}", e);
-                        }
-                    }
-                } else {
-                    warn!("Invalid user pubkey length: {} (expected 32 bytes)", pubkey_bytes.len());
-                }
-            } else {
-                warn!("Failed to decode user pubkey from hex: {}", user_pk);
-            }
-        }
-
-        // Query all project messages directly from nostrdb (kind:1 with a-tag matching our projects)
-        if !project_a_tags.is_empty() {
-            match Transaction::new(&self.ndb) {
-                Ok(txn) => {
-                    // Track seen event IDs to avoid double-counting messages that a-tag multiple projects
-                    // This also handles same-second pagination safety
-                    let mut seen_event_ids: HashSet<[u8; 32]> = HashSet::new();
-                    let mut total_project_messages: u64 = 0;
-
-                    for a_tag in &project_a_tags {
-                        // Paginate through ALL messages for this project
-                        let mut until_timestamp: Option<u64> = None;
-
-                        loop {
-                            let mut filter_builder = nostrdb::Filter::new()
-                                .kinds([1])
-                                .tags([a_tag.as_str()], 'a');
-
-                            if let Some(until) = until_timestamp {
-                                filter_builder = filter_builder.until(until);
-                            }
-
-                            let filter = filter_builder.build();
-
-                            match self.ndb.query(&txn, &[filter], batch_size) {
-                                Ok(results) => {
-                                    if results.is_empty() {
-                                        break; // No more results for this project
-                                    }
-
-                                    // Track page-level oldest/newest timestamp separately from deduplication
-                                    // BUG FIX: Always update pagination cursor from ALL page results,
-                                    // even if events are duplicates (seen from another project)
-                                    let page_size = results.len();
-                                    let mut page_oldest_timestamp: Option<u64> = None;
-                                    let mut page_newest_timestamp: Option<u64> = None;
-                                    let mut new_events_in_page = 0;
-
-                                    for result in results.iter() {
-                                        if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                                            let event_id = *note.id();
-                                            let created_at = note.created_at();
-
-                                            // Track oldest and newest timestamps (from ALL results)
-                                            match page_oldest_timestamp {
-                                                None => page_oldest_timestamp = Some(created_at),
-                                                Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
-                                                _ => {}
-                                            }
-                                            match page_newest_timestamp {
-                                                None => page_newest_timestamp = Some(created_at),
-                                                Some(t) if created_at > t => page_newest_timestamp = Some(created_at),
-                                                _ => {}
-                                            }
-
-                                            // Skip if we've already counted this event (multi-project a-tags or same-second boundary)
-                                            if seen_event_ids.contains(&event_id) {
-                                                continue;
-                                            }
-                                            seen_event_ids.insert(event_id);
-
-                                            let day_start = (created_at / seconds_per_day) * seconds_per_day;
-                                            let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
-                                            entry.1 += 1;
-                                            total_project_messages += 1;
-                                            new_events_in_page += 1;
-                                        }
-                                    }
-
-                                    // Detect potential same-second overflow: full page with all events at same timestamp
-                                    if page_size >= (batch_size as usize) {
-                                        if let (Some(oldest), Some(newest)) = (page_oldest_timestamp, page_newest_timestamp) {
-                                            if oldest == newest {
-                                                warn!(
-                                                    "Potential same-second overflow detected in project '{}' messages query: \
-                                                    {} events at timestamp {}. If more than {} events share this timestamp, \
-                                                    some may be missed due to nostrdb pagination limitations.",
-                                                    a_tag, page_size, oldest, batch_size
-                                                );
-                                            }
-                                        }
-                                    }
-
-                                    // If we got fewer results than batch_size, we're done with this project
-                                    if page_size < (batch_size as usize) {
-                                        break;
-                                    }
-
-                                    // If page had no new events, we've exhausted unique events at this timestamp boundary
-                                    // Must still advance pagination to find older unique events
-                                    if new_events_in_page == 0 {
-                                        match page_oldest_timestamp {
-                                            Some(t) if t > 0 => until_timestamp = Some(t - 1),
-                                            _ => break,
-                                        }
-                                    } else {
-                                        // Use inclusive pagination (same timestamp) to catch more same-second events
-                                        // The seen_event_ids guard prevents double-counting
-                                        match page_oldest_timestamp {
-                                            Some(t) => until_timestamp = Some(t),
-                                            None => break,
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to query project messages for a-tag '{}': {:?}", a_tag, e);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    trace!("Counted {} total project messages (deduplicated)", total_project_messages);
-                }
-                Err(e) => {
-                    warn!("Failed to create transaction for project messages query: {:?}", e);
-                }
-            }
-        }
-    }
-
-    /// Increment message counts for a single message (called from handle_message_event).
-    /// This maintains the pre-aggregated counters incrementally for O(1) updates.
-    fn increment_message_day_count(&mut self, created_at: u64, pubkey: &str) {
-        let seconds_per_day: u64 = 86400;
-        let day_start = (created_at / seconds_per_day) * seconds_per_day;
-
-        let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
-
-        // Increment all count
-        entry.1 += 1;
-
-        // Increment user count if matches current user
-        if self.user_pubkey.as_deref() == Some(pubkey) {
-            entry.0 += 1;
-        }
-    }
-
-    /// Increment LLM activity hourly aggregates (O(1) per message).
-    /// Only increments if the message has llm_metadata (i.e., is an LLM-generated message).
-    /// Uses calendar day boundaries (UTC) and hour-of-day (0-23) for stable bucketing.
-    fn increment_llm_activity_hour(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
-        // Only count messages with LLM metadata (actual LLM responses)
-        if llm_metadata.is_empty() {
-            return;
-        }
-
-        let seconds_per_day: u64 = 86400;
-        let seconds_per_hour: u64 = 3600;
-
-        // Calculate calendar day start (UTC)
-        let day_start = (created_at / seconds_per_day) * seconds_per_day;
-
-        // Calculate hour-of-day (0-23) by finding seconds since day start
-        let seconds_since_day_start = created_at - day_start;
-        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
-
-        // Extract token count from llm_metadata (default to 0 if not present)
-        let tokens = llm_metadata
-            .iter()
-            .find(|(key, _)| key == "total-tokens")
-            .and_then(|(_, value)| value.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
-        let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
-        entry.0 += tokens;
-        entry.1 += 1;
-    }
-
-    /// Increment runtime-by-day aggregates (O(1) per message).
-    /// Only increments if the message has llm-runtime metadata.
-    fn increment_runtime_day_count(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
-        if created_at < RUNTIME_CUTOFF_TIMESTAMP {
-            return;
-        }
-
-        let runtime_ms: u64 = llm_metadata
-            .iter()
-            .filter(|(key, _)| key == "runtime")
-            .filter_map(|(_, value)| value.parse::<u64>().ok())
-            .sum();
-
-        if runtime_ms == 0 {
-            return;
-        }
-
-        let seconds_per_day: u64 = 86400;
-        let day_start = (created_at / seconds_per_day) * seconds_per_day;
-        let entry = self.runtime_by_day_counts.entry(day_start).or_insert(0);
-        *entry = entry.saturating_add(runtime_ms);
-    }
-
-    /// Rebuild LLM activity hourly aggregates from messages_by_thread.
-    /// Called during startup after messages are loaded.
-    /// Only counts messages with llm_metadata (LLM-generated messages).
-    fn rebuild_llm_activity_by_hour(&mut self) {
-        // Clear existing aggregates
-        self.llm_activity_by_hour.clear();
-
-        let seconds_per_day: u64 = 86400;
-        let seconds_per_hour: u64 = 3600;
-
-        // Iterate through all messages and aggregate by hour
-        for messages in self.messages_by_thread.values() {
-            for message in messages {
-                // Only count LLM messages (those with llm_metadata)
-                if !message.llm_metadata.is_empty() {
-                    let created_at = message.created_at;
-
-                    // Calculate calendar day start (UTC)
-                    let day_start = (created_at / seconds_per_day) * seconds_per_day;
-
-                    // Calculate hour-of-day (0-23) by finding seconds since day start
-                    let seconds_since_day_start = created_at - day_start;
-                    let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
-
-                    // Extract token count from llm_metadata (default to 0 if not present)
-                    let tokens = message.llm_metadata
-                        .iter()
-                        .find(|(key, _)| key == "total-tokens")
-                        .and_then(|(_, value)| value.parse::<u64>().ok())
-                        .unwrap_or(0);
-
-                    // Update aggregates: (day_start, hour_of_day) -> (token_count, message_count)
-                    let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
-                    entry.0 += tokens;
-                    entry.1 += 1;
-                }
-            }
-        }
-    }
-
-    /// Rebuild runtime-by-day aggregates from messages_by_thread.
-    /// Called during startup after messages are loaded.
-    fn rebuild_runtime_by_day_counts(&mut self) {
-        let mut counts: HashMap<u64, u64> = HashMap::new();
-
-        for messages in self.messages_by_thread.values() {
-            for message in messages {
-                let created_at = message.created_at;
-                if created_at < RUNTIME_CUTOFF_TIMESTAMP {
-                    continue;
-                }
-
-                let runtime_ms: u64 = message.llm_metadata
-                    .iter()
-                    .filter(|(key, _)| key == "runtime")
-                    .filter_map(|(_, value)| value.parse::<u64>().ok())
-                    .sum();
-
-                if runtime_ms == 0 {
-                    continue;
-                }
-
-                let seconds_per_day: u64 = 86400;
-                let day_start = (created_at / seconds_per_day) * seconds_per_day;
-                let entry = counts.entry(day_start).or_insert(0);
-                *entry = entry.saturating_add(runtime_ms);
-            }
-        }
-
-        self.runtime_by_day_counts = counts;
+        self.statistics.rebuild_messages_by_day_counts_with_batch_size(
+            &self.ndb, &self.user_pubkey, &project_a_tags, batch_size,
+        );
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -1665,14 +1064,10 @@ impl AppDataStore {
                         .reset_unconfirmed_timer(&thread_id, &message_pubkey, message_created_at);
                 }
 
-                // Update pre-aggregated message counts for Stats view (O(1) per message)
-                self.increment_message_day_count(message_created_at, &message_pubkey);
-
-                // Update pre-aggregated LLM activity for Activity grid (O(1) per message)
-                self.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
-
-                // Update pre-aggregated runtime by day for Stats view (O(1) per message)
-                self.increment_runtime_day_count(message_created_at, &message_llm_metadata);
+                // Update pre-aggregated statistics (O(1) per message)
+                self.statistics.increment_message_day_count(message_created_at, &message_pubkey, self.user_pubkey.as_deref());
+                self.statistics.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
+                self.statistics.increment_runtime_day_count(message_created_at, &message_llm_metadata);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
@@ -3409,7 +2804,7 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(5); // Force 5+ pagination pages
 
             // Verify EXACT count - must count all 25 messages
-            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
             assert_eq!(
                 total_user, 25,
                 "Pagination must count EXACTLY 25 user messages, got {}. Pagination data loss detected!",
@@ -3458,7 +2853,7 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(20);
 
             // Verify ALL same-second events are counted
-            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
             assert_eq!(
                 total_user, 15,
                 "Should count all 15 same-second events, got {}. Same-second event loss bug!",
@@ -3516,7 +2911,7 @@ mod tests {
 
             // KNOWN LIMITATION: We can only guarantee at least batch_size events are captured
             // The warning "Potential same-second overflow detected" should be logged
-            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
             assert!(
                 total_user >= 5,
                 "Must capture at least batch_size (5) same-second events, got {}. \
@@ -3589,7 +2984,7 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(3); // Force multi-page pagination
 
             // Verify EXACT deduplication: 3 + 3 + 2 = 8 unique messages
-            let total_all: u64 = store.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            let total_all: u64 = store.statistics.messages_by_day_counts.values().map(|(_, a)| *a).sum();
             assert_eq!(
                 total_all, 8,
                 "Must count EXACTLY 8 unique project messages (not 10 with double-counting), got {}. \
@@ -3664,7 +3059,7 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(2);
 
             // Verify EXACT count: 5 dual-tagged + 5 proj2-only = 10 unique messages
-            let total_all: u64 = store.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            let total_all: u64 = store.statistics.messages_by_day_counts.values().map(|(_, a)| *a).sum();
             assert_eq!(
                 total_all, 10,
                 "Must count EXACTLY 10 messages including older proj2-only ones, got {}. \
@@ -3719,7 +3114,7 @@ mod tests {
             // Due to nostrdb's lack of deterministic secondary ordering, we cannot guarantee
             // all 10 events are counted when >batch_size events share a timestamp.
             // This test verifies the warning is triggered (checked via logs) and we get at least 5.
-            let total_user: u64 = store.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
             assert!(
                 total_user >= 5,
                 "Should count at least batch_size (5) same-second events, got {}. \
@@ -3969,7 +3364,7 @@ mod tests {
         ];
 
         store.messages_by_thread.insert("thread1".to_string(), messages);
-        store.rebuild_runtime_by_day_counts();
+        store.statistics.rebuild_runtime_by_day_counts(&store.messages_by_thread);
 
         assert_eq!(store.get_today_unique_runtime(), 2000);
 
@@ -4105,18 +3500,18 @@ mod tests {
         msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
 
         store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2]);
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Verify both buckets exist with correct values
-        assert_eq!(store.llm_activity_by_hour.len(), 2, "Should have 2 separate hour buckets");
+        assert_eq!(store.statistics.llm_activity_by_hour.len(), 2, "Should have 2 separate hour buckets");
 
         // Day 1: hour 23
         let key1 = (day1_start, 23_u8);
-        assert_eq!(store.llm_activity_by_hour.get(&key1), Some(&(100, 1)), "Day 1 hour 23 should have 100 tokens, 1 message");
+        assert_eq!(store.statistics.llm_activity_by_hour.get(&key1), Some(&(100, 1)), "Day 1 hour 23 should have 100 tokens, 1 message");
 
         // Day 2: hour 1
         let key2 = (day2_start, 1_u8);
-        assert_eq!(store.llm_activity_by_hour.get(&key2), Some(&(200, 1)), "Day 2 hour 1 should have 200 tokens, 1 message");
+        assert_eq!(store.statistics.llm_activity_by_hour.get(&key2), Some(&(200, 1)), "Day 2 hour 1 should have 200 tokens, 1 message");
     }
 
     /// Test that only LLM messages (those with llm_metadata) are counted in activity tracking.
@@ -4141,10 +3536,10 @@ mod tests {
         empty_metadata_msg.llm_metadata = vec![];
 
         store.messages_by_thread.insert("thread1".to_string(), vec![user_msg, llm_msg, empty_metadata_msg]);
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Should only have 1 bucket for the LLM message
-        assert_eq!(store.llm_activity_by_hour.len(), 1, "Should only count LLM messages");
+        assert_eq!(store.statistics.llm_activity_by_hour.len(), 1, "Should only count LLM messages");
 
         // Verify the bucket contains only the LLM message data
         let seconds_per_day: u64 = 86400;
@@ -4154,7 +3549,7 @@ mod tests {
         let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
         let key = (day_start, hour_of_day);
 
-        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(150, 1)), "Should only have 1 LLM message with 150 tokens");
+        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(150, 1)), "Should only have 1 LLM message with 150 tokens");
     }
 
     /// Test that token counts are correctly parsed and aggregated from llm_metadata.
@@ -4180,7 +3575,7 @@ mod tests {
         msg3.llm_metadata = vec![("total-tokens".to_string(), "invalid".to_string())];
 
         store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         let seconds_per_day: u64 = 86400;
         let seconds_per_hour: u64 = 3600;
@@ -4190,7 +3585,7 @@ mod tests {
         let key = (day_start, hour_of_day);
 
         // All 3 messages counted, but only msg1 has valid tokens (500 + 0 + 0 = 500)
-        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(500, 3)), "Should have 500 total tokens and 3 messages");
+        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(500, 3)), "Should have 500 total tokens and 3 messages");
     }
 
     /// Test window slicing logic in get_tokens_by_hour and get_message_count_by_hour.
@@ -4227,10 +3622,10 @@ mod tests {
                 .push(msg);
         }
 
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Verify all 5 buckets were created
-        assert_eq!(store.llm_activity_by_hour.len(), 5, "Should have 5 hour buckets");
+        assert_eq!(store.statistics.llm_activity_by_hour.len(), 5, "Should have 5 hour buckets");
 
         // NOW TEST ACTUAL WINDOW SLICING using the testable _from variant
         // Set "now" to be at 14:00:00 (the last hour with data)
@@ -4316,7 +3711,7 @@ mod tests {
             .or_insert_with(Vec::new)
             .push(msg_02);
 
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Window from 02:00 current day looking back 4 hours should cross midnight
         // Should see: 02:00, 01:00, 00:00, 23:00 (prior day)
@@ -4421,7 +3816,7 @@ mod tests {
                 .push(msg);
         }
 
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Test using the _from variant with a fixed "now" at hour 2 (12:00)
         let current_hour_start = base_timestamp + 2 * seconds_per_hour;
@@ -4473,10 +3868,10 @@ mod tests {
         msg3.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
 
         store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
-        store.rebuild_llm_activity_by_hour();
+        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Should only have 1 bucket since all messages are in the same hour
-        assert_eq!(store.llm_activity_by_hour.len(), 1, "All messages should be in same hour bucket");
+        assert_eq!(store.statistics.llm_activity_by_hour.len(), 1, "All messages should be in same hour bucket");
 
         let seconds_per_day: u64 = 86400;
         let seconds_per_hour: u64 = 3600;
@@ -4486,7 +3881,7 @@ mod tests {
         let key = (day_start, hour_of_day);
 
         // Total tokens: 100 + 200 + 300 = 600, Total messages: 3
-        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(600, 3)), "Should aggregate all tokens and count all messages");
+        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(600, 3)), "Should aggregate all tokens and count all messages");
     }
 
     // ===== get_total_cost_since Tests =====
@@ -5434,10 +4829,10 @@ mod tests {
         let today_start = (now / 86400) * 86400;
 
         // Insert data for today and yesterday
-        store.messages_by_day_counts.insert(today_start, (5, 10));
-        store.messages_by_day_counts.insert(today_start - 86400, (3, 7));
+        store.statistics.messages_by_day_counts.insert(today_start, (5, 10));
+        store.statistics.messages_by_day_counts.insert(today_start - 86400, (3, 7));
         // Insert data for 10 days ago (should not appear in 3-day window)
-        store.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
+        store.statistics.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
 
         let (user, all) = store.get_messages_by_day(3);
         assert_eq!(user.len(), 2); // today + yesterday
@@ -5455,7 +4850,7 @@ mod tests {
         let day_start = (reference_hour_start / 86400) * 86400;
 
         // Insert tokens for hour 0 of day 100
-        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+        store.statistics.llm_activity_by_hour.insert((day_start, 0), (500, 10));
 
         let tokens = store.get_tokens_by_hour_from(reference_hour_start, 24);
         assert_eq!(tokens.get(&reference_hour_start), Some(&500));
@@ -5470,7 +4865,7 @@ mod tests {
         let reference_hour_start: u64 = 86400 * 100;
         let day_start = (reference_hour_start / 86400) * 86400;
 
-        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+        store.statistics.llm_activity_by_hour.insert((day_start, 0), (500, 10));
 
         let counts = store.get_message_count_by_hour_from(reference_hour_start, 24);
         assert_eq!(counts.get(&reference_hour_start), Some(&10));
