@@ -13,3 +13,4 @@ addresses.txt
 *~
 ios-app/build/
 __.SYMDEF
+.xcodebuildmcp/
