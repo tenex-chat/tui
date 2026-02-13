@@ -365,6 +365,9 @@ struct ConversationsTabView: View {
             }
             .sheet(isPresented: $showAISettings) {
                 AISettingsView()
+                    #if os(macOS)
+                    .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
+                    #endif
             }
             .sheet(isPresented: $showStats) {
                 NavigationStack {

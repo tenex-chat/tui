@@ -95,11 +95,13 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
 
     /// Play an audio notification with full metadata
     func play(notification: AudioNotificationInfo, conversationId: String?) throws {
+        let fileURL = URL(fileURLWithPath: notification.audioFilePath)
+        try play(url: fileURL)
+        // Set metadata AFTER play(url:) succeeds — play(url:) calls stop() which clears metadata
         currentAgentPubkey = notification.agentPubkey
         currentConversationTitle = notification.conversationTitle
         currentTextSnippet = notification.massagedText
         currentConversationId = conversationId
-        try play(path: notification.audioFilePath)
     }
 
     /// Play an audio file from the given path
