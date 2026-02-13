@@ -124,22 +124,32 @@ struct InboxView: View {
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
 
-    /// Items filtered by current tab selection from centralized store
+    /// Hard cap: 48 hours in seconds (48 * 60 * 60 = 172,800)
+    private static let inbox48HourCapSeconds: UInt64 = 48 * 60 * 60
+
+    /// Items within the 48-hour window from centralized store
+    private var itemsWithin48Hours: [InboxItem] {
+        let now = UInt64(Date().timeIntervalSince1970)
+        let cutoff = now > Self.inbox48HourCapSeconds ? now - Self.inbox48HourCapSeconds : 0
+        return coreManager.inboxItems.filter { $0.createdAt >= cutoff }
+    }
+
+    /// Items filtered by current tab selection (after 48h cap)
     private var filteredItems: [InboxItem] {
-        coreManager.inboxItems.filter { $0.matches(filter: selectedFilter) }
+        itemsWithin48Hours.filter { $0.matches(filter: selectedFilter) }
     }
 
-    /// Count of unread items for badge display
+    /// Count of unread items for badge display (within 48h cap)
     private var unreadCount: Int {
-        coreManager.inboxItems.filter(\.isUnread).count
+        itemsWithin48Hours.filter(\.isUnread).count
     }
 
-    /// Unread count for a specific filter
+    /// Unread count for a specific filter (within 48h cap)
     private func unreadCount(for filter: InboxFilter) -> Int {
         if filter == .all {
             return unreadCount
         }
-        return coreManager.inboxItems.filter { $0.matches(filter: filter) && $0.isUnread }.count
+        return itemsWithin48Hours.filter { $0.matches(filter: filter) && $0.isUnread }.count
     }
 
     var body: some View {
