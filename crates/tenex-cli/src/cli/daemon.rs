@@ -119,7 +119,7 @@ pub async fn run_daemon(
     {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
-        shared_data_store.lock().unwrap().set_trusted_backends(approved, blocked);
+        shared_data_store.lock().unwrap().trust.set_trusted_backends(approved, blocked);
     }
 
     // Try to auto-login: config credentials take priority over stored credentials
@@ -856,7 +856,7 @@ fn handle_request(
         "list_agent_definitions" => {
             let store = data_store.lock().unwrap();
             let agent_defs: Vec<_> = store
-                .get_agent_definitions()
+                .content.get_agent_definitions()
                 .iter()
                 .map(|ad| {
                     serde_json::json!({
@@ -883,7 +883,7 @@ fn handle_request(
         "list_mcp_tools" => {
             let store = data_store.lock().unwrap();
             let mcp_tools: Vec<_> = store
-                .get_mcp_tools()
+                .content.get_mcp_tools()
                 .iter()
                 .map(|tool| {
                     serde_json::json!({
