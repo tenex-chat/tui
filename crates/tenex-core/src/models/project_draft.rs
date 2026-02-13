@@ -140,7 +140,7 @@ pub struct AiAudioSettings {
 }
 
 fn default_audio_prompt() -> String {
-    "You are helping convert text messages into audio-friendly format. Remove code blocks, long IDs, pubkeys, and technical elements that don't work well in audio. Keep the core message clear and concise. Include a reference to the conversation title if provided. Make it natural for text-to-speech.".to_string()
+    "Rephrase the message for an audio listener. Output ONLY the rephrased text — no preamble, no commentary, no meta-text. Capture the meaning and context concisely as natural speech. Reference the conversation title naturally if provided. Use ALL CAPS for words the original emphasized with bold or italic. Omit code blocks, URLs, pubkeys, and other visual-only content — summarize their intent instead.".to_string()
 }
 
 impl Default for AiAudioSettings {
