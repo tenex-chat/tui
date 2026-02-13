@@ -543,7 +543,7 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             Span::styled(" cancel", Style::default().fg(theme::TEXT_MUTED)),
         ]
     } else {
-        // Show Delete hint only on AI tab for API key settings
+        // Build base hints with tab-specific Enter behavior
         let mut hints = vec![
             Span::styled("Tab", Style::default().fg(theme::ACCENT_WARNING)),
             Span::styled(" switch tab", Style::default().fg(theme::TEXT_MUTED)),
@@ -552,8 +552,25 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             Span::styled(" navigate", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
             Span::styled("Enter", Style::default().fg(theme::ACCENT_WARNING)),
-            Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)),
         ];
+
+        // Context-aware Enter behavior hint
+        if state.current_tab == SettingsTab::Appearance {
+            // Appearance tab uses toggle/cycle, not edit mode
+            match state.selected_appearance_setting() {
+                Some(AppearanceSetting::TimeFilter) => {
+                    hints.push(Span::styled(" cycle", Style::default().fg(theme::TEXT_MUTED)));
+                }
+                Some(AppearanceSetting::HideScheduled) => {
+                    hints.push(Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)));
+                }
+                None => {
+                    hints.push(Span::styled(" select", Style::default().fg(theme::TEXT_MUTED)));
+                }
+            }
+        } else {
+            hints.push(Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)));
+        }
 
         // Show Delete hint on AI tab for clearable settings
         if state.current_tab == SettingsTab::AI {

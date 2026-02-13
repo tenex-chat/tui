@@ -392,9 +392,8 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             app.set_warning_status(&format!("Time filter: {}", label));
                         }
                         Some(AppearanceSetting::HideScheduled) => {
+                            // toggle_hide_scheduled() sends its own notification
                             app.toggle_hide_scheduled();
-                            let label = if app.hide_scheduled { "hidden" } else { "visible" };
-                            app.set_warning_status(&format!("Scheduled events: {}", label));
                         }
                         None => {}
                     }
