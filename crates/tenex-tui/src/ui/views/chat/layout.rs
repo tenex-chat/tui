@@ -70,7 +70,7 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
             // Get working agent names from 24133 events
             let working_agents = {
                 let store = app.data_store.borrow();
-                let agent_pubkeys = store.get_working_agents(&thread.id);
+                let agent_pubkeys = store.operations.get_working_agents(&thread.id);
 
                 // Get project a_tag for potential fallback to project status
                 let project_a_tag = store.find_project_for_thread(&thread.id);

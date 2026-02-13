@@ -410,7 +410,7 @@ pub fn search_reports(
     let filter = query.to_lowercase();
     let mut results = Vec::new();
 
-    for report in store.get_reports() {
+    for report in store.reports.get_reports() {
         // Skip reports not in visible_projects
         if !visible_projects.contains(&report.project_a_tag) {
             continue;

@@ -18,7 +18,7 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
     if app.home.in_agent_detail() {
         if let Some(ref id) = app.home.viewing_agent_id {
             let agent = app.data_store.borrow()
-                .get_agent_definition(id)
+                .content.get_agent_definition(id)
                 .cloned();
             if let Some(agent) = agent {
                 render_agent_detail(f, app, area, &agent);

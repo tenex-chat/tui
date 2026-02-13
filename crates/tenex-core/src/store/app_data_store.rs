@@ -1570,15 +1570,7 @@ impl AppDataStore {
         None
     }
 
-    // ===== Inbox Methods (delegated to InboxStore) =====
-
-    pub fn get_inbox_items(&self) -> &[InboxItem] {
-        self.inbox.get_items()
-    }
-
-    pub fn add_inbox_item(&mut self, item: InboxItem) {
-        self.inbox.add_item(item);
-    }
+    // ===== Inbox Methods =====
 
     /// Check if a note should be added to inbox and add it if so.
     /// Handles both Ask and Mention event types for any kind:1 that p-tags the user.
@@ -1620,11 +1612,7 @@ impl AppDataStore {
             thread_id: Some(thread_id.to_string()),
             ask_event: message.ask_event.clone(),
         };
-        self.add_inbox_item(inbox_item);
-    }
-
-    pub fn mark_inbox_read(&mut self, id: &str) {
-        self.inbox.mark_read(id);
+        self.inbox.add_item(inbox_item);
     }
 
     // ===== Agent Chatter Methods =====
@@ -1663,131 +1651,15 @@ impl AppDataStore {
         }
     }
 
-    // ===== Content Delegation Methods =====
-
-    pub fn get_lesson(&self, lesson_id: &str) -> Option<&Lesson> {
-        self.content.get_lesson(lesson_id)
-    }
-
-    pub fn get_agent_definitions(&self) -> Vec<&AgentDefinition> {
-        self.content.get_agent_definitions()
-    }
-
-    pub fn get_agent_definition(&self, id: &str) -> Option<&AgentDefinition> {
-        self.content.get_agent_definition(id)
-    }
-
-    pub fn get_nudges(&self) -> Vec<&Nudge> {
-        self.content.get_nudges()
-    }
-
-    pub fn get_nudge(&self, id: &str) -> Option<&Nudge> {
-        self.content.get_nudge(id)
-    }
-
-    pub fn insert_mcp_tool(&mut self, note: &Note) {
-        self.content.insert_mcp_tool(note);
-    }
-
-    pub fn get_mcp_tools(&self) -> Vec<&MCPTool> {
-        self.content.get_mcp_tools()
-    }
-
-    pub fn get_mcp_tool(&self, id: &str) -> Option<&MCPTool> {
-        self.content.get_mcp_tool(id)
-    }
-
-    // ===== Report Methods (delegated to ReportsStore) =====
-
-    pub fn get_reports(&self) -> Vec<&Report> {
-        self.reports.get_reports()
-    }
-
-    pub fn get_reports_by_project(&self, project_a_tag: &str) -> Vec<&Report> {
-        self.reports.get_reports_by_project(project_a_tag)
-    }
-
-    pub fn get_report(&self, slug: &str) -> Option<&Report> {
-        self.reports.get_report(slug)
-    }
-
-    pub fn get_report_versions(&self, slug: &str) -> Vec<&Report> {
-        self.reports.get_report_versions(slug)
-    }
-
-    pub fn get_previous_report_version(&self, slug: &str, current_id: &str) -> Option<&Report> {
-        self.reports.get_previous_report_version(slug, current_id)
-    }
-
-    pub fn get_document_threads(&self, document_a_tag: &str) -> &[Thread] {
-        self.reports.get_document_threads(document_a_tag)
-    }
-
     // ===== Operations Status Methods (kind:24133) =====
 
-    // ===== Operations Methods (delegated to OperationsStore) =====
-
-    pub fn get_working_agents(&self, event_id: &str) -> Vec<String> {
-        self.operations.get_working_agents(event_id)
-    }
-
-    pub fn is_event_busy(&self, event_id: &str) -> bool {
-        self.operations.is_event_busy(event_id)
-    }
-
-    pub fn get_active_operations_count(&self, project_a_tag: &str) -> usize {
-        self.operations.get_active_operations_count(project_a_tag)
-    }
-
-    pub fn get_active_event_ids(&self, project_a_tag: &str) -> Vec<String> {
-        self.operations.get_active_event_ids(project_a_tag)
-    }
-
-    pub fn get_project_working_agents(&self, project_a_tag: &str) -> Vec<String> {
-        self.operations.get_project_working_agents(project_a_tag)
-    }
-
-    pub fn is_project_busy(&self, project_a_tag: &str) -> bool {
-        self.operations.is_project_busy(project_a_tag)
-    }
-
-    pub fn get_all_active_operations(&self) -> Vec<&OperationsStatus> {
-        self.operations.get_all_active_operations()
-    }
-
-    pub fn active_operations_count(&self) -> usize {
-        self.operations.active_operations_count()
-    }
-
-    pub fn has_active_agents(&self) -> bool {
-        self.operations.has_active_agents()
-    }
-
-    pub fn active_agent_count(&self) -> usize {
-        self.operations.active_agent_count()
-    }
-
-    #[cfg(test)]
-    pub fn confirmed_runtime_secs(&self) -> u64 {
-        self.operations.confirmed_runtime_secs()
-    }
-
-    pub fn unconfirmed_runtime_secs(&self) -> u64 {
-        self.operations.unconfirmed_runtime_secs()
-    }
-
     pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool, usize) {
-        let today_runtime_ms = self.get_today_unique_runtime();
+        let today_runtime_ms = self.statistics.get_today_unique_runtime();
         let unconfirmed_runtime_ms = self.operations.unconfirmed_runtime_secs() * 1000;
         let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
         let has_active_agents = self.operations.has_active_agents();
         let active_agent_count = self.operations.active_agent_count();
         (cumulative_runtime_ms, has_active_agents, active_agent_count)
-    }
-
-    #[cfg(test)]
-    pub fn get_active_agents_for_conversation(&self, conversation_id: &str) -> Vec<String> {
-        self.operations.get_active_agents_for_conversation(conversation_id)
     }
 
     /// Get thread info for an event ID (could be thread root or message within thread).
@@ -2150,11 +2022,7 @@ impl AppDataStore {
 
     // ===== Backend Trust Methods =====
 
-    // ===== Trust Delegation Methods =====
-
-    pub fn set_trusted_backends(&mut self, approved: HashSet<String>, blocked: HashSet<String>) {
-        self.trust.set_trusted_backends(approved, blocked);
-    }
+    // ===== Trust Methods =====
 
     pub fn add_approved_backend(&mut self, pubkey: &str) {
         let pending_statuses = self.trust.add_approved(pubkey);
@@ -2177,10 +2045,6 @@ impl AppDataStore {
         self.trust.drain_pending()
     }
 
-    pub fn has_pending_backend_approval(&self, backend_pubkey: &str, project_a_tag: &str) -> bool {
-        self.trust.has_pending_approval(backend_pubkey, project_a_tag)
-    }
-
     pub fn approve_pending_backends(&mut self, pending: Vec<PendingBackendApproval>) -> u32 {
         let mut approved_pubkeys: HashSet<String> = HashSet::new();
 
@@ -2200,10 +2064,6 @@ impl AppDataStore {
         }
 
         approved_pubkeys.len() as u32
-    }
-
-    pub fn has_pending_backend_approvals(&self) -> bool {
-        self.trust.has_pending_approvals()
     }
 }
 
@@ -2423,8 +2283,8 @@ mod tests {
         store.handle_status_event_json(json);
 
         // Verify agent tracking state was updated
-        assert!(store.has_active_agents());
-        assert_eq!(store.active_agent_count(), 2);
+        assert!(store.operations.has_active_agents());
+        assert_eq!(store.operations.active_agent_count(), 2);
     }
 
     /// Test handle_status_event_json ignores malformed JSON
@@ -2440,7 +2300,7 @@ mod tests {
         store.handle_status_event_json("null");
 
         // State should remain empty
-        assert!(!store.has_active_agents());
+        assert!(!store.operations.has_active_agents());
     }
 
     /// Test handle_status_event_json ignores unknown kinds
@@ -2461,7 +2321,7 @@ mod tests {
         store.handle_status_event_json(json);
 
         // Should not affect any state
-        assert!(!store.has_active_agents());
+        assert!(!store.operations.has_active_agents());
     }
 
     /// Test upsert_operations_status updates agent tracking with deduplication
@@ -2486,11 +2346,11 @@ mod tests {
 
         store.handle_status_event_json(json1);
         // Use confirmed_runtime_secs to isolate from unconfirmed runtime
-        assert_eq!(store.confirmed_runtime_secs(), 100);
+        assert_eq!(store.operations.confirmed_runtime_secs(), 100);
 
         // Same event again (simulating replay) - should NOT double-count
         store.handle_status_event_json(json1);
-        assert_eq!(store.confirmed_runtime_secs(), 100); // Still 100, not 200
+        assert_eq!(store.operations.confirmed_runtime_secs(), 100); // Still 100, not 200
 
         // Different event with runtime - should add
         let json2 = r#"{
@@ -2505,7 +2365,7 @@ mod tests {
         }"#;
 
         store.handle_status_event_json(json2);
-        assert_eq!(store.confirmed_runtime_secs(), 150); // 100 + 50
+        assert_eq!(store.operations.confirmed_runtime_secs(), 150); // 100 + 50
     }
 
     /// Test upsert_operations_status handles same-second events with different event IDs
@@ -2528,7 +2388,7 @@ mod tests {
         }"#;
 
         store.handle_status_event_json(json1);
-        assert_eq!(store.active_agent_count(), 1);
+        assert_eq!(store.operations.active_agent_count(), 1);
 
         // Second event at same timestamp with different (larger) event_id
         let json2 = r#"{
@@ -2544,7 +2404,7 @@ mod tests {
 
         store.handle_status_event_json(json2);
         // Should accept the second event (bbb > aaa lexicographically)
-        assert_eq!(store.active_agent_count(), 1);
+        assert_eq!(store.operations.active_agent_count(), 1);
     }
 
     /// Test upsert_operations_status uses thread_id for conversation tracking
@@ -2585,7 +2445,7 @@ mod tests {
         store.handle_status_event_json(json2);
 
         // Should replace agent1 with agent2 (same conversation via thread_id)
-        assert_eq!(store.active_agent_count(), 1);
+        assert_eq!(store.operations.active_agent_count(), 1);
     }
 
     /// Test empty p-tags removes agents from conversation
@@ -2608,7 +2468,7 @@ mod tests {
         }"#;
 
         store.handle_status_event_json(json1);
-        assert!(store.has_active_agents());
+        assert!(store.operations.has_active_agents());
 
         // Remove all agents with empty p-tags
         let json2 = r#"{
@@ -2622,7 +2482,7 @@ mod tests {
         }"#;
 
         store.handle_status_event_json(json2);
-        assert!(!store.has_active_agents());
+        assert!(!store.operations.has_active_agents());
     }
 
     /// Integration test for authoritative replacement semantics.
@@ -2656,8 +2516,8 @@ mod tests {
         store.handle_status_event_json(json1);
 
         // Verify initial state: 3 agents
-        assert_eq!(store.active_agent_count(), 3);
-        let agents1 = store.get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(store.operations.active_agent_count(), 3);
+        let agents1 = store.operations.get_active_agents_for_conversation("conversation_xyz");
         assert_eq!(agents1.len(), 3);
         assert!(agents1.contains(&"agent_alpha".to_string()));
         assert!(agents1.contains(&"agent_beta".to_string()));
@@ -2680,8 +2540,8 @@ mod tests {
         store.handle_status_event_json(json2);
 
         // Verify replacement: now only 2 agents (delta, epsilon)
-        assert_eq!(store.active_agent_count(), 2);
-        let agents2 = store.get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(store.operations.active_agent_count(), 2);
+        let agents2 = store.operations.get_active_agents_for_conversation("conversation_xyz");
         assert_eq!(agents2.len(), 2, "Expected 2 agents after replacement, got {}", agents2.len());
 
         // CRITICAL: Original agents should be GONE
@@ -2709,18 +2569,18 @@ mod tests {
         store.handle_status_event_json(json3);
 
         // conversation_xyz should still have delta, epsilon
-        let agents_xyz = store.get_active_agents_for_conversation("conversation_xyz");
+        let agents_xyz = store.operations.get_active_agents_for_conversation("conversation_xyz");
         assert_eq!(agents_xyz.len(), 2);
         assert!(agents_xyz.contains(&"agent_delta".to_string()));
         assert!(agents_xyz.contains(&"agent_epsilon".to_string()));
 
         // conversation_other should have omega
-        let agents_other = store.get_active_agents_for_conversation("conversation_other");
+        let agents_other = store.operations.get_active_agents_for_conversation("conversation_other");
         assert_eq!(agents_other.len(), 1);
         assert!(agents_other.contains(&"agent_omega".to_string()));
 
         // Total count should be 3 (2 from xyz + 1 from other)
-        assert_eq!(store.active_agent_count(), 3);
+        assert_eq!(store.operations.active_agent_count(), 3);
     }
 
     // ========================================================================================
@@ -4161,10 +4021,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let store = AppDataStore::new(db.ndb.clone());
 
-        assert!(store.get_agent_definitions().is_empty());
-        assert!(store.get_mcp_tools().is_empty());
-        assert!(store.get_nudges().is_empty());
-        assert!(store.get_lesson("nonexistent").is_none());
+        assert!(store.content.get_agent_definitions().is_empty());
+        assert!(store.content.get_mcp_tools().is_empty());
+        assert!(store.content.get_nudges().is_empty());
+        assert!(store.content.get_lesson("nonexistent").is_none());
     }
 
     #[test]
@@ -4177,7 +4037,7 @@ mod tests {
         store.content.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
         store.content.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
 
-        let defs = store.get_agent_definitions();
+        let defs = store.content.get_agent_definitions();
         assert_eq!(defs.len(), 3);
         assert_eq!(defs[0].name, "Newer Agent");
         assert_eq!(defs[1].name, "Middle Agent");
@@ -4192,9 +4052,9 @@ mod tests {
 
         store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
 
-        assert!(store.get_agent_definition("a1").is_some());
-        assert_eq!(store.get_agent_definition("a1").unwrap().name, "Agent One");
-        assert!(store.get_agent_definition("nonexistent").is_none());
+        assert!(store.content.get_agent_definition("a1").is_some());
+        assert_eq!(store.content.get_agent_definition("a1").unwrap().name, "Agent One");
+        assert!(store.content.get_agent_definition("nonexistent").is_none());
     }
 
     #[test]
@@ -4206,7 +4066,7 @@ mod tests {
         store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
         store.content.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
 
-        let tools = store.get_mcp_tools();
+        let tools = store.content.get_mcp_tools();
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0].name, "New Tool");
         assert_eq!(tools[1].name, "Old Tool");
@@ -4220,8 +4080,8 @@ mod tests {
 
         store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
 
-        assert!(store.get_mcp_tool("t1").is_some());
-        assert!(store.get_mcp_tool("missing").is_none());
+        assert!(store.content.get_mcp_tool("t1").is_some());
+        assert!(store.content.get_mcp_tool("missing").is_none());
     }
 
     #[test]
@@ -4233,7 +4093,7 @@ mod tests {
         store.content.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
         store.content.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
 
-        let nudges = store.get_nudges();
+        let nudges = store.content.get_nudges();
         assert_eq!(nudges.len(), 2);
         assert_eq!(nudges[0].title, "New Nudge");
         assert_eq!(nudges[1].title, "Old Nudge");
@@ -4247,9 +4107,9 @@ mod tests {
 
         store.content.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
 
-        assert!(store.get_lesson("l1").is_some());
-        assert_eq!(store.get_lesson("l1").unwrap().title, "Lesson One");
-        assert!(store.get_lesson("missing").is_none());
+        assert!(store.content.get_lesson("l1").is_some());
+        assert_eq!(store.content.get_lesson("l1").unwrap().title, "Lesson One");
+        assert!(store.content.get_lesson("missing").is_none());
     }
 
     #[test]
@@ -4265,10 +4125,10 @@ mod tests {
 
         store.clear();
 
-        assert!(store.get_agent_definitions().is_empty());
-        assert!(store.get_mcp_tools().is_empty());
-        assert!(store.get_nudges().is_empty());
-        assert!(store.get_lesson("l1").is_none());
+        assert!(store.content.get_agent_definitions().is_empty());
+        assert!(store.content.get_mcp_tools().is_empty());
+        assert!(store.content.get_nudges().is_empty());
+        assert!(store.content.get_lesson("l1").is_none());
     }
 
     // ===== B. Trust Tests =====
@@ -4282,7 +4142,7 @@ mod tests {
         let approved: HashSet<String> = ["pk1".to_string(), "pk2".to_string()].into();
         let blocked: HashSet<String> = ["pk3".to_string()].into();
 
-        store.set_trusted_backends(approved, blocked);
+        store.trust.set_trusted_backends(approved, blocked);
 
         assert!(store.trust.approved_backends.contains("pk1"));
         assert!(store.trust.approved_backends.contains("pk2"));
@@ -4339,14 +4199,14 @@ mod tests {
 
         store.trust.pending_backend_approvals.push(approval);
 
-        assert!(store.has_pending_backend_approvals());
-        assert!(store.has_pending_backend_approval("pk1", "31933:pk:proj1"));
-        assert!(!store.has_pending_backend_approval("pk1", "other_project"));
-        assert!(!store.has_pending_backend_approval("pk2", "31933:pk:proj1"));
+        assert!(store.trust.has_pending_approvals());
+        assert!(store.trust.has_pending_approval("pk1", "31933:pk:proj1"));
+        assert!(!store.trust.has_pending_approval("pk1", "other_project"));
+        assert!(!store.trust.has_pending_approval("pk2", "31933:pk:proj1"));
 
         let drained = store.drain_pending_backend_approvals();
         assert_eq!(drained.len(), 1);
-        assert!(!store.has_pending_backend_approvals());
+        assert!(!store.trust.has_pending_approvals());
     }
 
     #[test]
@@ -4445,10 +4305,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let store = AppDataStore::new(db.ndb.clone());
 
-        assert!(store.get_reports().is_empty());
-        assert!(store.get_report("slug").is_none());
-        assert!(store.get_reports_by_project("proj").is_empty());
-        assert!(store.get_document_threads("doc").is_empty());
+        assert!(store.reports.get_reports().is_empty());
+        assert!(store.reports.get_report("slug").is_none());
+        assert!(store.reports.get_reports_by_project("proj").is_empty());
+        assert!(store.reports.get_document_threads("doc").is_empty());
     }
 
     #[test]
@@ -4461,7 +4321,7 @@ mod tests {
         store.reports.add_report(make_test_report("slug-b", "proj1", 300));
         store.reports.add_report(make_test_report("slug-c", "proj1", 200));
 
-        let reports = store.get_reports();
+        let reports = store.reports.get_reports();
         assert_eq!(reports.len(), 3);
         assert_eq!(reports[0].slug, "slug-b");
         assert_eq!(reports[1].slug, "slug-c");
@@ -4478,12 +4338,12 @@ mod tests {
         store.reports.add_report(make_test_report("slug-b", "proj2", 200));
         store.reports.add_report(make_test_report("slug-c", "proj1", 300));
 
-        let proj1_reports = store.get_reports_by_project("proj1");
+        let proj1_reports = store.reports.get_reports_by_project("proj1");
         assert_eq!(proj1_reports.len(), 2);
         assert_eq!(proj1_reports[0].slug, "slug-c");
         assert_eq!(proj1_reports[1].slug, "slug-a");
 
-        let proj2_reports = store.get_reports_by_project("proj2");
+        let proj2_reports = store.reports.get_reports_by_project("proj2");
         assert_eq!(proj2_reports.len(), 1);
     }
 
@@ -4523,22 +4383,22 @@ mod tests {
         store.reports.add_report(v2);
 
         // Latest version should be v2
-        let latest = store.get_report("my-report").unwrap();
+        let latest = store.reports.get_report("my-report").unwrap();
         assert_eq!(latest.title, "Version 2");
 
         // All versions
-        let versions = store.get_report_versions("my-report");
+        let versions = store.reports.get_report_versions("my-report");
         assert_eq!(versions.len(), 2);
         assert_eq!(versions[0].id, "v2-id"); // newest first
         assert_eq!(versions[1].id, "v1-id");
 
         // Previous version
-        let prev = store.get_previous_report_version("my-report", "v2-id");
+        let prev = store.reports.get_previous_report_version("my-report", "v2-id");
         assert!(prev.is_some());
         assert_eq!(prev.unwrap().id, "v1-id");
 
         // No previous for oldest
-        assert!(store.get_previous_report_version("my-report", "v1-id").is_none());
+        assert!(store.reports.get_previous_report_version("my-report", "v1-id").is_none());
     }
 
     #[test]
@@ -4550,11 +4410,11 @@ mod tests {
         let thread = make_test_thread("t1", "pk1", 100);
         store.reports.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
 
-        let threads = store.get_document_threads("doc-atag");
+        let threads = store.reports.get_document_threads("doc-atag");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].id, "t1");
 
-        assert!(store.get_document_threads("missing").is_empty());
+        assert!(store.reports.get_document_threads("missing").is_empty());
     }
 
     #[test]
@@ -4568,8 +4428,8 @@ mod tests {
 
         store.clear();
 
-        assert!(store.get_reports().is_empty());
-        assert!(store.get_document_threads("doc").is_empty());
+        assert!(store.reports.get_reports().is_empty());
+        assert!(store.reports.get_document_threads("doc").is_empty());
     }
 
     // ===== D. Inbox Tests =====
@@ -4580,11 +4440,11 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.add_inbox_item(make_test_inbox_item("i3", InboxEventType::Mention, 300));
-        store.add_inbox_item(make_test_inbox_item("i2", InboxEventType::Ask, 200));
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.inbox.add_item(make_test_inbox_item("i3", InboxEventType::Mention, 300));
+        store.inbox.add_item(make_test_inbox_item("i2", InboxEventType::Ask, 200));
 
-        let items = store.get_inbox_items();
+        let items = store.inbox.get_items();
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].id, "i3"); // most recent first
         assert_eq!(items[1].id, "i2");
@@ -4597,10 +4457,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 200)); // same id
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 200)); // same id
 
-        assert_eq!(store.get_inbox_items().len(), 1);
+        assert_eq!(store.inbox.get_items().len(), 1);
     }
 
     #[test]
@@ -4609,11 +4469,11 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        assert!(!store.get_inbox_items()[0].is_read);
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        assert!(!store.inbox.get_items()[0].is_read);
 
-        store.mark_inbox_read("i1");
-        assert!(store.get_inbox_items()[0].is_read);
+        store.inbox.mark_read("i1");
+        assert!(store.inbox.get_items()[0].is_read);
     }
 
     #[test]
@@ -4623,11 +4483,11 @@ mod tests {
         let mut store = AppDataStore::new(db.ndb.clone());
 
         // Mark as read before adding
-        store.mark_inbox_read("i1");
+        store.inbox.mark_read("i1");
 
         // Adding item with same id should be marked as read
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        assert!(store.get_inbox_items()[0].is_read);
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        assert!(store.inbox.get_items()[0].is_read);
     }
 
     #[test]
@@ -4636,10 +4496,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         store.clear();
 
-        assert!(store.get_inbox_items().is_empty());
+        assert!(store.inbox.get_items().is_empty());
     }
 
     // ===== E. Operations Tests =====
@@ -4650,13 +4510,13 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let store = AppDataStore::new(db.ndb.clone());
 
-        assert!(store.get_working_agents("ev1").is_empty());
-        assert!(!store.is_event_busy("ev1"));
-        assert_eq!(store.get_active_operations_count("proj1"), 0);
-        assert!(store.get_active_event_ids("proj1").is_empty());
-        assert!(!store.is_project_busy("proj1"));
-        assert!(store.get_all_active_operations().is_empty());
-        assert_eq!(store.active_operations_count(), 0);
+        assert!(store.operations.get_working_agents("ev1").is_empty());
+        assert!(!store.operations.is_event_busy("ev1"));
+        assert_eq!(store.operations.get_active_operations_count("proj1"), 0);
+        assert!(store.operations.get_active_event_ids("proj1").is_empty());
+        assert!(!store.operations.is_project_busy("proj1"));
+        assert!(store.operations.get_all_active_operations().is_empty());
+        assert_eq!(store.operations.active_operations_count(), 0);
     }
 
     #[test]
@@ -4670,10 +4530,10 @@ mod tests {
             make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
         );
 
-        let agents = store.get_working_agents("ev1");
+        let agents = store.operations.get_working_agents("ev1");
         assert_eq!(agents.len(), 2);
-        assert!(store.is_event_busy("ev1"));
-        assert!(!store.is_event_busy("ev2"));
+        assert!(store.operations.is_event_busy("ev1"));
+        assert!(!store.operations.is_event_busy("ev2"));
     }
 
     #[test]
@@ -4695,13 +4555,13 @@ mod tests {
             make_test_operations_status("ev3", "proj2", vec!["a3"], 300),
         );
 
-        assert_eq!(store.get_active_operations_count("proj1"), 2);
-        assert_eq!(store.get_active_operations_count("proj2"), 1);
-        assert!(store.is_project_busy("proj1"));
-        assert!(store.is_project_busy("proj2"));
-        assert!(!store.is_project_busy("proj3"));
+        assert_eq!(store.operations.get_active_operations_count("proj1"), 2);
+        assert_eq!(store.operations.get_active_operations_count("proj2"), 1);
+        assert!(store.operations.is_project_busy("proj1"));
+        assert!(store.operations.is_project_busy("proj2"));
+        assert!(!store.operations.is_project_busy("proj3"));
 
-        let proj1_events = store.get_active_event_ids("proj1");
+        let proj1_events = store.operations.get_active_event_ids("proj1");
         assert_eq!(proj1_events.len(), 2);
     }
 
@@ -4720,10 +4580,10 @@ mod tests {
             make_test_operations_status("ev2", "proj1", vec!["a1"], 200),
         );
 
-        assert_eq!(store.get_active_operations_count("proj1"), 1);
-        assert!(!store.is_event_busy("ev1"));
-        assert!(store.is_event_busy("ev2"));
-        assert_eq!(store.active_operations_count(), 1);
+        assert_eq!(store.operations.get_active_operations_count("proj1"), 1);
+        assert!(!store.operations.is_event_busy("ev1"));
+        assert!(store.operations.is_event_busy("ev2"));
+        assert_eq!(store.operations.active_operations_count(), 1);
     }
 
     #[test]
@@ -4745,7 +4605,7 @@ mod tests {
             make_test_operations_status("ev3", "proj1", vec!["a3"], 200),
         );
 
-        let all = store.get_all_active_operations();
+        let all = store.operations.get_all_active_operations();
         assert_eq!(all.len(), 3);
         assert_eq!(all[0].event_id, "ev2"); // oldest first
         assert_eq!(all[1].event_id, "ev3");
@@ -4768,7 +4628,7 @@ mod tests {
             make_test_operations_status("ev2", "proj1", vec!["agent1"], 200),
         );
 
-        let agents = store.get_project_working_agents("proj1");
+        let agents = store.operations.get_project_working_agents("proj1");
         // agent1 appears in both events, but should be deduped
         assert_eq!(agents.len(), 2); // agent1, agent2
     }
@@ -4786,8 +4646,8 @@ mod tests {
 
         store.clear();
 
-        assert!(store.get_all_active_operations().is_empty());
-        assert_eq!(store.active_operations_count(), 0);
+        assert!(store.operations.get_all_active_operations().is_empty());
+        assert_eq!(store.operations.active_operations_count(), 0);
     }
 
     // ===== F. Statistics Tests =====
@@ -4954,7 +4814,7 @@ mod tests {
         store.messages_by_thread.entry("t1".to_string()).or_default()
             .push(make_test_message("m1", "pk1", "t1", "hello", 100));
         store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
-        store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         store.operations.operations_by_event.insert("ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
         store.reports.add_report(make_test_report("slug", "proj1", 100));
@@ -4966,10 +4826,10 @@ mod tests {
         assert!(store.get_projects().is_empty());
         assert!(store.get_threads("proj1").is_empty());
         assert!(store.get_messages("t1").is_empty());
-        assert!(store.get_agent_definitions().is_empty());
-        assert!(store.get_inbox_items().is_empty());
-        assert!(store.get_all_active_operations().is_empty());
-        assert!(store.get_reports().is_empty());
+        assert!(store.content.get_agent_definitions().is_empty());
+        assert!(store.inbox.get_items().is_empty());
+        assert!(store.operations.get_all_active_operations().is_empty());
+        assert!(store.reports.get_reports().is_empty());
         assert!(store.trust.approved_backends.is_empty());
         assert!(store.user_pubkey.is_none());
     }

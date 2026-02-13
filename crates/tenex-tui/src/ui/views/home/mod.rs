@@ -215,7 +215,7 @@ fn build_tab_badge(count: usize, color: ratatui::style::Color) -> (Option<Span<'
 
 fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
     let inbox_count = app.inbox_items().iter().filter(|i| !i.is_read).count();
-    let active_count = app.data_store.borrow().active_operations_count();
+    let active_count = app.data_store.borrow().operations.active_operations_count();
 
     let (inbox_badge, inbox_badge_width) = build_tab_badge(inbox_count, theme::ACCENT_ERROR);
     let (active_badge, active_badge_width) = build_tab_badge(active_count, theme::ACCENT_SUCCESS);

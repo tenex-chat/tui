@@ -256,7 +256,7 @@ fn thread_to_full_info(
     let message_count = store.get_messages(&thread.id).len() as u32;
     let author_name = store.get_profile_name(&thread.pubkey);
     let has_children = store.runtime_hierarchy.has_children(&thread.id);
-    let is_active = store.is_event_busy(&thread.id);
+    let is_active = store.operations.is_event_busy(&thread.id);
     let is_archived = archived_ids.contains(&thread.id);
     let project_a_tag = store.get_project_a_tag_for_thread(&thread.id).unwrap_or_default();
 
@@ -403,7 +403,7 @@ fn process_note_keys_with_deltas(
                         }
 
                         // Inbox additions (ask events)
-                        if store.get_inbox_items().iter().any(|i| i.id == message.id) {
+                        if store.inbox.get_items().iter().any(|i| i.id == message.id) {
                             inbox_items_to_upsert.insert(message.id.clone());
                         }
 
@@ -411,7 +411,7 @@ fn process_note_keys_with_deltas(
                         if let Some(ref user_pk) = store.user_pubkey.clone() {
                             if &message.pubkey == user_pk {
                                 for reply_id in extract_e_tag_ids(&note) {
-                                    if store.get_inbox_items().iter().any(|i| i.id == reply_id) {
+                                    if store.inbox.get_items().iter().any(|i| i.id == reply_id) {
                                         inbox_items_to_upsert.insert(reply_id);
                                     }
                                 }
@@ -435,7 +435,7 @@ fn process_note_keys_with_deltas(
                             });
 
                             // Inbox additions for thread roots (ask events / mentions)
-                            if store.get_inbox_items().iter().any(|i| i.id == root_message.id) {
+                            if store.inbox.get_items().iter().any(|i| i.id == root_message.id) {
                                 inbox_items_to_upsert.insert(root_message.id.clone());
                             }
                         }
@@ -463,7 +463,7 @@ fn process_note_keys_with_deltas(
     }
 
     for inbox_id in inbox_items_to_upsert {
-        if let Some(item) = store.get_inbox_items().iter().find(|i| i.id == inbox_id) {
+        if let Some(item) = store.inbox.get_items().iter().find(|i| i.id == inbox_id) {
             deltas.push(DataChangeType::InboxUpsert {
                 item: inbox_item_to_info(store, item),
             });
@@ -493,7 +493,7 @@ fn process_data_changes_with_deltas(
 
                     // Capture pending state before update to detect new pending approvals
                     let pending_before = if let Some(status) = ProjectStatus::from_value(&event) {
-                        store.has_pending_backend_approval(&status.backend_pubkey, &status.project_coordinate)
+                        store.trust.has_pending_approval(&status.backend_pubkey, &status.project_coordinate)
                     } else {
                         false
                     };
@@ -530,7 +530,7 @@ fn process_data_changes_with_deltas(
                             if let Some(status) = OperationsStatus::from_value(&event) {
                                 let project_a_tag = status.project_coordinate.clone();
                                 let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
-                                let active_conversation_ids = store.get_active_event_ids(&project_a_tag);
+                                let active_conversation_ids = store.operations.get_active_event_ids(&project_a_tag);
 
                                 deltas.push(DataChangeType::ActiveConversationsChanged {
                                     project_id,
@@ -2065,7 +2065,7 @@ impl TenexCore {
         };
 
         // Get reports for this project
-        let reports = store.get_reports_by_project(&project_a_tag);
+        let reports = store.reports.get_reports_by_project(&project_a_tag);
 
         reports
             .iter()
@@ -2116,7 +2116,7 @@ impl TenexCore {
         };
 
         // Get inbox items from the store
-        store.get_inbox_items()
+        store.inbox.get_items()
             .iter()
             .map(|item| inbox_item_to_info(store, item))
             .collect()
@@ -2308,7 +2308,7 @@ impl TenexCore {
                 let has_children = store.runtime_hierarchy.has_children(&thread.id);
 
                 // Check if thread has active agents
-                let is_active = store.is_event_busy(&thread.id);
+                let is_active = store.operations.is_event_busy(&thread.id);
 
                 conversations.push(ConversationFullInfo {
                     id: thread.id.clone(),
@@ -2369,7 +2369,7 @@ impl TenexCore {
 
             // Count active conversations
             let active_count = threads.iter()
-                .filter(|t| store.is_event_busy(&t.id))
+                .filter(|t| store.operations.is_event_busy(&t.id))
                 .count() as u32;
 
             // Check visibility (empty means all visible)
@@ -2566,7 +2566,7 @@ impl TenexCore {
         };
 
         // Get agent definitions for these IDs
-        Ok(store.get_agent_definitions()
+        Ok(store.content.get_agent_definitions()
             .into_iter()
             .filter(|agent| agent_ids.contains(&agent.id))
             .map(agent_to_info)
@@ -2586,7 +2586,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.get_agent_definitions()
+        Ok(store.content.get_agent_definitions()
             .into_iter()
             .map(agent_to_info)
             .collect())
@@ -2605,7 +2605,7 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.get_nudges()
+        Ok(store.content.get_nudges()
             .into_iter()
             .map(|n| NudgeInfo {
                 id: n.id.clone(),
@@ -2842,7 +2842,7 @@ impl TenexCore {
 
         let approved_set: std::collections::HashSet<String> = approved.into_iter().collect();
         let blocked_set: std::collections::HashSet<String> = blocked.into_iter().collect();
-        store.set_trusted_backends(approved_set, blocked_set);
+        store.trust.set_trusted_backends(approved_set, blocked_set);
 
         Ok(())
     }
@@ -2926,7 +2926,7 @@ impl TenexCore {
         })?;
 
         let diagnostic = serde_json::json!({
-            "has_pending_backend_approvals": store.has_pending_backend_approvals(),
+            "has_pending_backend_approvals": store.trust.has_pending_approvals(),
             "project_statuses_count": store.project_statuses.len(),
             "project_statuses_keys": store.project_statuses.keys().collect::<Vec<_>>(),
             "projects_count": store.get_projects().len(),
@@ -3115,7 +3115,7 @@ impl TenexCore {
                 .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
             let store = store_guard.as_mut()
                 .ok_or(TenexError::CoreNotInitialized)?;
-            store.get_today_unique_runtime()
+            store.statistics.get_today_unique_runtime()
         };
 
         // Re-acquire read lock for remaining data
@@ -3127,7 +3127,7 @@ impl TenexCore {
         // ===== 2. Runtime Chart Data (CHART_WINDOW_DAYS) =====
         // Use shared constant for chart window (same as TUI stats view)
         use crate::constants::CHART_WINDOW_DAYS;
-        let runtime_by_day_raw = store.get_runtime_by_day(CHART_WINDOW_DAYS);
+        let runtime_by_day_raw = store.statistics.get_runtime_by_day(CHART_WINDOW_DAYS);
         let runtime_by_day: Vec<DayRuntime> = runtime_by_day_raw
             .into_iter()
             .map(|(day_start, runtime_ms)| DayRuntime {
@@ -3203,8 +3203,8 @@ impl TenexCore {
 
         // ===== 5. Activity Grid Data (30 days × 24 hours = 720 hours) =====
         const ACTIVITY_HOURS: usize = 30 * 24;
-        let tokens_by_hour_raw = store.get_tokens_by_hour(ACTIVITY_HOURS);
-        let messages_by_hour_raw = store.get_message_count_by_hour(ACTIVITY_HOURS);
+        let tokens_by_hour_raw = store.statistics.get_tokens_by_hour(ACTIVITY_HOURS);
+        let messages_by_hour_raw = store.statistics.get_message_count_by_hour(ACTIVITY_HOURS);
 
         // Find max values for normalization (both tokens and messages)
         let max_tokens = tokens_by_hour_raw.values().max().copied().unwrap_or(1).max(1);

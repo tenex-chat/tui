@@ -649,7 +649,7 @@ pub(crate) fn render_messages_panel(
                         let (title, from_agent_name, to_agent_name, status, activity, is_busy, thread_branch) = {
                             let store = app.data_store.borrow();
                             // Check if any agents are working on this delegation
-                            let is_busy = store.is_event_busy(thread_id);
+                            let is_busy = store.operations.is_event_busy(thread_id);
                             // Get the "from" agent name (who made the delegation call)
                             let from_name = store.get_profile_name(parent_pubkey);
                             if let Some(t) = store.get_thread_by_id(thread_id) {

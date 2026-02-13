@@ -207,21 +207,21 @@ fn render_agents_list(
                 let agent_name = app
                     .data_store
                     .borrow()
-                    .get_agent_definition(agent_id)
+                    .content.get_agent_definition(agent_id)
                     .map(|a| a.name.clone())
                     .unwrap_or_else(|| format!("{}...", &agent_id[..16.min(agent_id.len())]));
 
                 let agent_role = app
                     .data_store
                     .borrow()
-                    .get_agent_definition(agent_id)
+                    .content.get_agent_definition(agent_id)
                     .map(|a| a.role.clone())
                     .unwrap_or_else(|| "unknown".to_string());
 
                 let author_pubkey = app
                     .data_store
                     .borrow()
-                    .get_agent_definition(agent_id)
+                    .content.get_agent_definition(agent_id)
                     .map(|a| a.pubkey.clone());
 
                 let mut spans = vec![];
@@ -302,7 +302,7 @@ fn render_tools_list(
                 let tool_name = app
                     .data_store
                     .borrow()
-                    .get_mcp_tool(tool_id)
+                    .content.get_mcp_tool(tool_id)
                     .map(|t| t.name.clone())
                     .unwrap_or_else(|| format!("{}...", &tool_id[..16.min(tool_id.len())]));
 
@@ -417,7 +417,7 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     let available_agents: Vec<_> = app
         .data_store
         .borrow()
-        .get_agent_definitions()
+        .content.get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -548,7 +548,7 @@ pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .get_agent_definitions()
+        .content.get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -564,7 +564,7 @@ pub fn get_agent_id_at_index(app: &App, state: &ProjectSettingsState, index: usi
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .get_agent_definitions()
+        .content.get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -598,7 +598,7 @@ fn render_add_mcp_tool_mode(f: &mut Frame, app: &App, area: Rect, state: &Projec
     let available_tools: Vec<_> = app
         .data_store
         .borrow()
-        .get_mcp_tools()
+        .content.get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
         .filter(|t| {
@@ -720,7 +720,7 @@ pub fn available_mcp_tool_count(app: &App, state: &ProjectSettingsState) -> usiz
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .get_mcp_tools()
+        .content.get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
         .filter(|t| fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter))
@@ -732,7 +732,7 @@ pub fn get_mcp_tool_id_at_index(app: &App, state: &ProjectSettingsState, index: 
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .get_mcp_tools()
+        .content.get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
         .filter(|t| fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter))

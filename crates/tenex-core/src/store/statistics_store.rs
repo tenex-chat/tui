@@ -554,3 +554,354 @@ impl StatisticsStore {
         self.runtime_by_day_counts = counts;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_message(id: &str, pubkey: &str, thread_id: &str, content: &str, created_at: u64) -> Message {
+        Message {
+            id: id.to_string(),
+            content: content.to_string(),
+            pubkey: pubkey.to_string(),
+            thread_id: thread_id.to_string(),
+            created_at,
+            reply_to: None,
+            is_reasoning: false,
+            ask_event: None,
+            q_tags: vec![],
+            a_tags: vec![],
+            p_tags: vec![],
+            tool_name: None,
+            tool_args: None,
+            llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
+        }
+    }
+
+    // ===== Basic Getter Tests =====
+
+    #[test]
+    fn test_messages_by_day_empty() {
+        let store = StatisticsStore::new();
+        let (user, all) = store.get_messages_by_day(7);
+        assert!(user.is_empty());
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn test_messages_by_day_zero_days() {
+        let store = StatisticsStore::new();
+        let (user, all) = store.get_messages_by_day(0);
+        assert!(user.is_empty());
+        assert!(all.is_empty());
+    }
+
+    #[test]
+    fn test_messages_by_day_window() {
+        let mut store = StatisticsStore::new();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let today_start = (now / 86400) * 86400;
+
+        store.messages_by_day_counts.insert(today_start, (5, 10));
+        store.messages_by_day_counts.insert(today_start - 86400, (3, 7));
+        store.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
+
+        let (user, all) = store.get_messages_by_day(3);
+        assert_eq!(user.len(), 2);
+        assert_eq!(all.len(), 2);
+    }
+
+    #[test]
+    fn test_tokens_by_hour_window() {
+        let mut store = StatisticsStore::new();
+
+        let reference_hour_start: u64 = 86400 * 100;
+        let day_start = (reference_hour_start / 86400) * 86400;
+
+        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+
+        let tokens = store.get_tokens_by_hour_from(reference_hour_start, 24);
+        assert_eq!(tokens.get(&reference_hour_start), Some(&500));
+    }
+
+    #[test]
+    fn test_message_count_by_hour() {
+        let mut store = StatisticsStore::new();
+
+        let reference_hour_start: u64 = 86400 * 100;
+        let day_start = (reference_hour_start / 86400) * 86400;
+
+        store.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+
+        let counts = store.get_message_count_by_hour_from(reference_hour_start, 24);
+        assert_eq!(counts.get(&reference_hour_start), Some(&10));
+    }
+
+    #[test]
+    fn test_zero_hours_returns_empty() {
+        let store = StatisticsStore::new();
+
+        let tokens = store.get_tokens_by_hour_from(86400, 0);
+        assert!(tokens.is_empty());
+
+        let counts = store.get_message_count_by_hour_from(86400, 0);
+        assert!(counts.is_empty());
+    }
+
+    // ===== LLM Activity Tests =====
+
+    #[test]
+    fn test_llm_activity_utc_day_hour_bucketing() {
+        let mut store = StatisticsStore::new();
+
+        let day1_timestamp = 1705361400_u64;
+        let day2_timestamp = 1705368600_u64;
+
+        let seconds_per_day: u64 = 86400;
+        let day1_start = (day1_timestamp / seconds_per_day) * seconds_per_day;
+        let day2_start = (day2_timestamp / seconds_per_day) * seconds_per_day;
+
+        assert_ne!(day1_start, day2_start);
+
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", day1_timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", day2_timestamp);
+        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+
+        let mut messages_by_thread = HashMap::new();
+        messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2]);
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        assert_eq!(store.llm_activity_by_hour.len(), 2);
+
+        let key1 = (day1_start, 23_u8);
+        assert_eq!(store.llm_activity_by_hour.get(&key1), Some(&(100, 1)));
+
+        let key2 = (day2_start, 1_u8);
+        assert_eq!(store.llm_activity_by_hour.get(&key2), Some(&(200, 1)));
+    }
+
+    #[test]
+    fn test_llm_activity_only_counts_llm_messages() {
+        let mut store = StatisticsStore::new();
+
+        let timestamp = 1705363800_u64;
+
+        let user_msg = make_test_message("msg1", "pubkey1", "thread1", "user message", timestamp);
+
+        let mut llm_msg = make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
+        llm_msg.llm_metadata = vec![("total-tokens".to_string(), "150".to_string())];
+
+        let mut empty_metadata_msg = make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
+        empty_metadata_msg.llm_metadata = vec![];
+
+        let mut messages_by_thread = HashMap::new();
+        messages_by_thread.insert("thread1".to_string(), vec![user_msg, llm_msg, empty_metadata_msg]);
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        assert_eq!(store.llm_activity_by_hour.len(), 1);
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(150, 1)));
+    }
+
+    #[test]
+    fn test_llm_activity_token_parsing() {
+        let mut store = StatisticsStore::new();
+
+        let timestamp = 1705363800_u64;
+
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", timestamp);
+        msg2.llm_metadata = vec![("other-key".to_string(), "value".to_string())];
+
+        let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test", timestamp);
+        msg3.llm_metadata = vec![("total-tokens".to_string(), "invalid".to_string())];
+
+        let mut messages_by_thread = HashMap::new();
+        messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(500, 3)));
+    }
+
+    #[test]
+    fn test_llm_activity_window_slicing() {
+        let mut store = StatisticsStore::new();
+
+        let seconds_per_hour: u64 = 3600;
+        let base_timestamp = 1705316400_u64;
+
+        let mut messages_by_thread: HashMap<String, Vec<Message>> = HashMap::new();
+        for i in 0..5u64 {
+            let timestamp = base_timestamp + (i * seconds_per_hour);
+            let mut msg = make_test_message(&format!("msg{}", i), "pubkey1", "thread1", "test", timestamp);
+            msg.llm_metadata = vec![("total-tokens".to_string(), format!("{}", (i + 1) * 100))];
+            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+        }
+
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        assert_eq!(store.llm_activity_by_hour.len(), 5);
+
+        let current_hour_start = base_timestamp + (4 * seconds_per_hour);
+
+        let result = store.get_tokens_by_hour_from(current_hour_start, 3);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64));
+        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64));
+        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64));
+
+        let result = store.get_tokens_by_hour_from(current_hour_start, 5);
+        assert_eq!(result.len(), 5);
+
+        let result = store.get_tokens_by_hour_from(current_hour_start, 10);
+        assert_eq!(result.len(), 5);
+    }
+
+    #[test]
+    fn test_llm_activity_same_hour_aggregation() {
+        let mut store = StatisticsStore::new();
+
+        let timestamp = 1705363800_u64;
+
+        let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test1", timestamp);
+        msg1.llm_metadata = vec![("total-tokens".to_string(), "100".to_string())];
+
+        let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test2", timestamp + 60);
+        msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
+
+        let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test3", timestamp + 120);
+        msg3.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
+
+        let mut messages_by_thread = HashMap::new();
+        messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        assert_eq!(store.llm_activity_by_hour.len(), 1);
+
+        let seconds_per_day: u64 = 86400;
+        let seconds_per_hour: u64 = 3600;
+        let day_start = (timestamp / seconds_per_day) * seconds_per_day;
+        let seconds_since_day_start = timestamp - day_start;
+        let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
+        let key = (day_start, hour_of_day);
+
+        assert_eq!(store.llm_activity_by_hour.get(&key), Some(&(600, 3)));
+    }
+
+    #[test]
+    fn test_llm_activity_message_count_window() {
+        let mut store = StatisticsStore::new();
+
+        let seconds_per_hour: u64 = 3600;
+        let base_timestamp = 1705316400_u64;
+
+        let mut messages_by_thread: HashMap<String, Vec<Message>> = HashMap::new();
+
+        // Hour 0: 1 message with 1000 tokens
+        let mut msg = make_test_message("msg0", "pubkey1", "thread1", "test", base_timestamp);
+        msg.llm_metadata = vec![("total-tokens".to_string(), "1000".to_string())];
+        messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+
+        // Hour 1: 2 messages with 500 tokens each
+        for i in 0..2 {
+            let mut msg = make_test_message(&format!("msg1_{}", i), "pubkey1", "thread1", "test", base_timestamp + seconds_per_hour);
+            msg.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
+            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+        }
+
+        // Hour 2: 3 messages with 333 tokens each
+        for i in 0..3 {
+            let mut msg = make_test_message(&format!("msg2_{}", i), "pubkey1", "thread1", "test", base_timestamp + 2 * seconds_per_hour);
+            msg.llm_metadata = vec![("total-tokens".to_string(), "333".to_string())];
+            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+        }
+
+        store.rebuild_llm_activity_by_hour(&messages_by_thread);
+
+        let current_hour_start = base_timestamp + 2 * seconds_per_hour;
+
+        let message_result = store.get_message_count_by_hour_from(current_hour_start, 3);
+        assert_eq!(message_result.len(), 3);
+        assert_eq!(message_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&3_u64));
+        assert_eq!(message_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&2_u64));
+        assert_eq!(message_result.get(&base_timestamp), Some(&1_u64));
+
+        let token_result = store.get_tokens_by_hour_from(current_hour_start, 3);
+        assert_eq!(token_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&999_u64));
+        assert_eq!(token_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&1000_u64));
+        assert_eq!(token_result.get(&base_timestamp), Some(&1000_u64));
+    }
+
+    #[test]
+    fn test_runtime_by_day_counts_use_message_timestamps() {
+        let mut store = StatisticsStore::new();
+
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let seconds_per_day: u64 = 86400;
+        let today_start = (now / seconds_per_day) * seconds_per_day;
+        let yesterday_start = today_start.saturating_sub(seconds_per_day);
+
+        fn make_message_with_runtime(id: &str, pubkey: &str, thread_id: &str, created_at: u64, runtime_ms: u64) -> Message {
+            Message {
+                id: id.to_string(),
+                content: "test".to_string(),
+                pubkey: pubkey.to_string(),
+                thread_id: thread_id.to_string(),
+                created_at,
+                reply_to: None,
+                is_reasoning: false,
+                ask_event: None,
+                q_tags: vec![],
+                a_tags: vec![],
+                p_tags: vec![],
+                tool_name: None,
+                tool_args: None,
+                llm_metadata: vec![("runtime".to_string(), runtime_ms.to_string())],
+                delegation_tag: None,
+                branch: None,
+            }
+        }
+
+        let messages = vec![
+            make_message_with_runtime("msg1", "pubkey1", "thread1", yesterday_start + 60, 1000),
+            make_message_with_runtime("msg2", "pubkey1", "thread1", today_start + 120, 2000),
+        ];
+
+        let mut messages_by_thread = HashMap::new();
+        messages_by_thread.insert("thread1".to_string(), messages);
+        store.rebuild_runtime_by_day_counts(&messages_by_thread);
+
+        assert_eq!(store.get_today_unique_runtime(), 2000);
+
+        let by_day = store.get_runtime_by_day(2);
+        assert!(by_day.contains(&(yesterday_start, 1000)));
+        assert!(by_day.contains(&(today_start, 2000)));
+    }
+}

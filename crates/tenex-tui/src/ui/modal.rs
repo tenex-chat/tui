@@ -733,7 +733,7 @@ impl CreateProjectState {
 
         // Add tools from selected agents
         for agent_id in &self.agent_ids {
-            if let Some(agent) = app.get_agent_definition(agent_id) {
+            if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
                 for mcp_id in &agent.mcp_servers {
                     tool_ids.insert(mcp_id.clone());
                 }

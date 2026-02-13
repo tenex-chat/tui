@@ -319,7 +319,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let nudge_titles: Vec<String> = selected_nudge_ids
             .iter()
-            .filter_map(|id| app.data_store.borrow().get_nudge(id).map(|n| format!("/{}", n.title)))
+            .filter_map(|id| app.data_store.borrow().content.get_nudge(id).map(|n| format!("/{}", n.title)))
             .collect();
         format!("[{}]", nudge_titles.join(", "))
     };

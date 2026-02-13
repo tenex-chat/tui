@@ -113,7 +113,7 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                 let versions = app
                     .data_store
                     .borrow()
-                    .get_report_versions(&slug)
+                    .reports.get_report_versions(&slug)
                     .into_iter()
                     .cloned()
                     .collect::<Vec<_>>();
@@ -132,7 +132,7 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                     let versions = app
                         .data_store
                         .borrow()
-                        .get_report_versions(&slug)
+                        .reports.get_report_versions(&slug)
                         .into_iter()
                         .cloned()
                         .collect::<Vec<_>>();
@@ -193,7 +193,7 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                     let threads = app
                         .data_store
                         .borrow()
-                        .get_document_threads(&a_tag)
+                        .reports.get_document_threads(&a_tag)
                         .to_vec();
                     if let Some(thread) = threads.get(state.selected_thread_index) {
                         app.open_thread_from_home(thread, &project_a_tag);

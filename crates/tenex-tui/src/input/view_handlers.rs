@@ -24,7 +24,7 @@ struct ActiveWorkCache {
 impl ActiveWorkCache {
     fn new(app: &App) -> Self {
         let operations = app.data_store.borrow()
-            .get_all_active_operations()
+            .operations.get_all_active_operations()
             .into_iter()
             .cloned()
             .collect();
@@ -77,7 +77,7 @@ fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&Ac
             } else {
                 // Fallback: fetch fresh (should not happen if caller provides cache)
                 let data_store = app.data_store.borrow();
-                let operations = data_store.get_all_active_operations();
+                let operations = data_store.operations.get_all_active_operations();
                 if let Some(op) = operations.get(index) {
                     if let Some(ref thread_id) = op.thread_id {
                         return Some(thread_id.clone());
@@ -352,9 +352,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let (is_busy, event_ids, agent_pubkeys) = {
                     let store = app.data_store.borrow();
                     (
-                        store.is_project_busy(&a_tag),
-                        store.get_active_event_ids(&a_tag),
-                        store.get_project_working_agents(&a_tag),
+                        store.operations.is_project_busy(&a_tag),
+                        store.operations.get_active_event_ids(&a_tag),
+                        store.operations.get_project_working_agents(&a_tag),
                     )
                 };
                 if is_busy {
@@ -421,7 +421,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         let items = app.inbox_items();
                         if let Some(item) = items.get(idx) {
                             let item_id = item.id.clone();
-                            app.data_store.borrow_mut().mark_inbox_read(&item_id);
+                            app.data_store.borrow_mut().inbox.mark_read(&item_id);
 
                             if let Some(ref thread_id) = item.thread_id {
                                 let project_a_tag = item.project_a_tag.clone();
@@ -515,7 +515,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             let items = app.inbox_items();
             if let Some(item) = items.get(app.current_selection()) {
                 let item_id = item.id.clone();
-                app.data_store.borrow_mut().mark_inbox_read(&item_id);
+                app.data_store.borrow_mut().inbox.mark_read(&item_id);
             }
         }
         KeyCode::Char(' ') if app.home_panel_focus == HomeTab::Conversations => {
@@ -1045,7 +1045,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                         SidebarSelection::Report(a_tag) => {
                             use crate::ui::components::ReportCoordinate;
                             if let Some(coord) = ReportCoordinate::parse(&a_tag) {
-                                let report = app.data_store.borrow().get_report(&coord.slug).cloned();
+                                let report = app.data_store.borrow().reports.get_report(&coord.slug).cloned();
                                 if let Some(report) = report {
                                     use crate::ui::modal::{ModalState, ReportViewerState};
                                     app.modal_state = ModalState::ReportViewer(ReportViewerState::new(report));
@@ -1309,13 +1309,13 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
         if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
             let (is_busy, project_a_tag) = {
                 let store = app.data_store.borrow();
-                let is_busy = store.is_event_busy(&stop_thread_id);
+                let is_busy = store.operations.is_event_busy(&stop_thread_id);
                 let project_a_tag = store.find_project_for_thread(&stop_thread_id);
                 (is_busy, project_a_tag)
             };
             if is_busy {
                 if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                    let working_agents = app.data_store.borrow().get_working_agents(&stop_thread_id);
+                    let working_agents = app.data_store.borrow().operations.get_working_agents(&stop_thread_id);
                     if let Err(e) = core_handle.send(NostrCommand::StopOperations {
                         project_a_tag: a_tag,
                         event_ids: vec![stop_thread_id.clone()],
@@ -1375,7 +1375,7 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
     } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
         let section_index = (c as usize) - ('1' as usize);
         if let Some(ref lesson_id) = app.viewing_lesson_id {
-            if let Some(lesson) = app.data_store.borrow().get_lesson(lesson_id) {
+            if let Some(lesson) = app.data_store.borrow().content.get_lesson(lesson_id) {
                 if section_index < lesson.sections().len() {
                     app.lesson_viewer_section = section_index;
                     app.scroll_offset = 0;
