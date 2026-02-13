@@ -1,6 +1,7 @@
 use crate::events::PendingBackendApproval;
 use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
 use crate::store::content_store::ContentStore;
+use crate::store::reports_store::ReportsStore;
 use crate::store::trust_store::TrustStore;
 use crate::store::{AgentTrackingState, RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
@@ -19,6 +20,7 @@ pub struct AppDataStore {
 
     // Sub-stores
     pub content: ContentStore,
+    pub reports: ReportsStore,
     pub trust: TrustStore,
 
     // Core app data
@@ -35,14 +37,6 @@ pub struct AppDataStore {
 
     // Agent chatter feed - kind:1 events a-tagging our projects
     pub agent_chatter: Vec<AgentChatter>,
-
-    // Reports - kind:30023 events (articles/documents)
-    // Key: report slug (d-tag) -> latest version
-    pub reports: HashMap<String, Report>,
-    // All versions by slug (for version history)
-    pub reports_all_versions: HashMap<String, Vec<Report>>,
-    // Threads by document a-tag (kind:1 events that a-tag a document)
-    pub document_threads: HashMap<String, Vec<Thread>>,
 
     // Operations status - kind:24133 events
     // Maps event_id -> OperationsStatus (which agents are working on which events)
@@ -84,6 +78,7 @@ impl AppDataStore {
         let mut store = Self {
             ndb,
             content: ContentStore::new(),
+            reports: ReportsStore::new(),
             trust: TrustStore::new(),
             projects: Vec::new(),
             project_statuses: HashMap::new(),
@@ -94,9 +89,6 @@ impl AppDataStore {
             inbox_read_ids: HashSet::new(),
             user_pubkey: None,
             agent_chatter: Vec::new(),
-            reports: HashMap::new(),
-            reports_all_versions: HashMap::new(),
-            document_threads: HashMap::new(),
             operations_by_event: HashMap::new(),
             pending_project_subscriptions: Vec::new(),
             thread_root_index: HashMap::new(),
@@ -131,6 +123,7 @@ impl AppDataStore {
     /// will repopulate with the new user's filtered view.
     pub fn clear(&mut self) {
         self.content.clear();
+        self.reports.clear();
         self.trust.clear();
         self.projects.clear();
         self.project_statuses.clear();
@@ -141,9 +134,6 @@ impl AppDataStore {
         self.inbox_read_ids.clear();
         self.user_pubkey = None;
         self.agent_chatter.clear();
-        self.reports.clear();
-        self.reports_all_versions.clear();
-        self.document_threads.clear();
         self.operations_by_event.clear();
         self.pending_project_subscriptions.clear();
         self.thread_root_index.clear();
@@ -338,65 +328,8 @@ impl AppDataStore {
         // Operations status (kind:24133) will be populated when events arrive.
 
         // Load reports (kind:30023)
-        self.load_reports();
-    }
-
-    /// Load reports from nostrdb (kind:30023) that belong to known projects
-    fn load_reports(&mut self) {
-        use nostrdb::{Filter, Transaction};
-
-        // Collect project a-tags to filter reports
         let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-
-        if project_a_tags.is_empty() {
-            // No projects loaded, skipping report loading
-            return;
-        }
-
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
-
-        // Query reports that specifically a-tag our projects (instead of fetching all and filtering)
-        let a_tag_refs: Vec<&str> = project_a_tags.iter().map(|s| s.as_str()).collect();
-        let filter = Filter::new()
-            .kinds([30023])
-            .tags(a_tag_refs, 'a')
-            .build();
-        let Ok(results) = self.ndb.query(&txn, &[filter], 1000) else {
-            return;
-        };
-
-        for result in results {
-            if let Ok(note) = self.ndb.get_note_by_key(&txn, result.note_key) {
-                if let Some(report) = Report::from_note(&note) {
-                    self.add_report(report);
-                }
-            }
-        }
-    }
-
-    /// Add a report, maintaining version history and latest-by-slug
-    fn add_report(&mut self, report: Report) {
-        let slug = report.slug.clone();
-
-        // Add to all versions
-        let versions = self.reports_all_versions.entry(slug.clone()).or_default();
-
-        // Check for duplicate (same id)
-        if versions.iter().any(|r| r.id == report.id) {
-            return;
-        }
-
-        versions.push(report.clone());
-
-        // Sort versions by created_at descending (newest first)
-        versions.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-        // Update latest version
-        if let Some(latest) = versions.first() {
-            self.reports.insert(slug, latest.clone());
-        }
+        self.reports.load_reports(&self.ndb, &project_a_tags);
     }
 
     // NOTE: load_operations_status() was removed because ephemeral events (kind:24133)
@@ -1408,7 +1341,11 @@ impl AppDataStore {
             4200 => { self.content.handle_mcp_tool_event(note); None }
             4201 => { self.content.handle_nudge_event(note); None }
             24133 => { self.handle_operations_status_event(note); None }
-            30023 => { self.handle_report_event(note); None }
+            30023 => {
+                let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
+                self.reports.handle_report_event(note, &known_a_tags);
+                None
+            }
             _ => None
         }
     }
@@ -1440,11 +1377,7 @@ impl AppDataStore {
                         // Check if it's a report a-tag (30023:pubkey:slug)
                         if a_val.starts_with("30023:") {
                             if let Some(thread) = Thread::from_note(note) {
-                                let threads = self.document_threads.entry(a_val.to_string()).or_default();
-                                if !threads.iter().any(|t| t.id == thread.id) {
-                                    threads.push(thread);
-                                    threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
-                                }
+                                self.reports.add_document_thread(a_val, thread);
                             }
                             break;
                         }
@@ -2392,50 +2325,30 @@ impl AppDataStore {
         self.content.get_mcp_tool(id)
     }
 
-    // ===== Report Methods (kind:30023) =====
+    // ===== Report Methods (delegated to ReportsStore) =====
 
-    /// Get all reports (latest version of each), sorted by created_at descending
     pub fn get_reports(&self) -> Vec<&Report> {
-        let mut reports: Vec<_> = self.reports.values().collect();
-        reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        reports
+        self.reports.get_reports()
     }
 
-    /// Get reports for a specific project
     pub fn get_reports_by_project(&self, project_a_tag: &str) -> Vec<&Report> {
-        let mut reports: Vec<_> = self.reports
-            .values()
-            .filter(|r| r.project_a_tag == project_a_tag)
-            .collect();
-        reports.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        reports
+        self.reports.get_reports_by_project(project_a_tag)
     }
 
-    /// Get a specific report by slug (latest version)
     pub fn get_report(&self, slug: &str) -> Option<&Report> {
-        self.reports.get(slug)
+        self.reports.get_report(slug)
     }
 
-    /// Get all versions of a report by slug
     pub fn get_report_versions(&self, slug: &str) -> Vec<&Report> {
-        self.reports_all_versions
-            .get(slug)
-            .map(|v| v.iter().collect())
-            .unwrap_or_default()
+        self.reports.get_report_versions(slug)
     }
 
-    /// Get the previous version of a report (for diff)
     pub fn get_previous_report_version(&self, slug: &str, current_id: &str) -> Option<&Report> {
-        let versions = self.reports_all_versions.get(slug)?;
-        let current_idx = versions.iter().position(|r| r.id == current_id)?;
-        versions.get(current_idx + 1)
+        self.reports.get_previous_report_version(slug, current_id)
     }
 
-    /// Get threads for a specific document (by document a-tag)
     pub fn get_document_threads(&self, document_a_tag: &str) -> &[Thread] {
-        self.document_threads.get(document_a_tag)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+        self.reports.get_document_threads(document_a_tag)
     }
 
     // ===== Operations Status Methods (kind:24133) =====
@@ -2497,16 +2410,6 @@ impl AppDataStore {
                 }
             }
             self.operations_by_event.insert(event_id, status);
-        }
-    }
-
-    fn handle_report_event(&mut self, note: &Note) {
-        if let Some(report) = Report::from_note(note) {
-            // Only add reports that belong to known projects
-            let is_known_project = self.projects.iter().any(|p| p.a_tag() == report.project_a_tag);
-            if is_known_project {
-                self.add_report(report);
-            }
         }
     }
 
@@ -5305,9 +5208,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_report(make_test_report("slug-a", "proj1", 100));
-        store.add_report(make_test_report("slug-b", "proj1", 300));
-        store.add_report(make_test_report("slug-c", "proj1", 200));
+        store.reports.add_report(make_test_report("slug-a", "proj1", 100));
+        store.reports.add_report(make_test_report("slug-b", "proj1", 300));
+        store.reports.add_report(make_test_report("slug-c", "proj1", 200));
 
         let reports = store.get_reports();
         assert_eq!(reports.len(), 3);
@@ -5322,9 +5225,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_report(make_test_report("slug-a", "proj1", 100));
-        store.add_report(make_test_report("slug-b", "proj2", 200));
-        store.add_report(make_test_report("slug-c", "proj1", 300));
+        store.reports.add_report(make_test_report("slug-a", "proj1", 100));
+        store.reports.add_report(make_test_report("slug-b", "proj2", 200));
+        store.reports.add_report(make_test_report("slug-c", "proj1", 300));
 
         let proj1_reports = store.get_reports_by_project("proj1");
         assert_eq!(proj1_reports.len(), 2);
@@ -5367,8 +5270,8 @@ mod tests {
             reading_time_mins: 1,
         };
 
-        store.add_report(v1);
-        store.add_report(v2);
+        store.reports.add_report(v1);
+        store.reports.add_report(v2);
 
         // Latest version should be v2
         let latest = store.get_report("my-report").unwrap();
@@ -5396,7 +5299,7 @@ mod tests {
         let mut store = AppDataStore::new(db.ndb.clone());
 
         let thread = make_test_thread("t1", "pk1", 100);
-        store.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
+        store.reports.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
 
         let threads = store.get_document_threads("doc-atag");
         assert_eq!(threads.len(), 1);
@@ -5411,8 +5314,8 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.add_report(make_test_report("slug", "proj1", 100));
-        store.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
+        store.reports.add_report(make_test_report("slug", "proj1", 100));
+        store.reports.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
 
         store.clear();
 
@@ -5805,7 +5708,7 @@ mod tests {
         store.add_inbox_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         store.operations_by_event.insert("ev1".to_string(),
             make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
-        store.add_report(make_test_report("slug", "proj1", 100));
+        store.reports.add_report(make_test_report("slug", "proj1", 100));
         store.trust.approved_backends.insert("pk1".to_string());
         store.user_pubkey = Some("user1".to_string());
 
