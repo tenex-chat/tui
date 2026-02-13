@@ -29,7 +29,7 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
     // Layout: Header tabs | Main area | Bottom padding | Optional tab bar | Statusbar
     let chunks = if has_tabs {
         Layout::vertical([
-            Constraint::Length(2), // Tab header
+            Constraint::Length(3), // Tab header (1 padding + 1 text + 1 underline)
             Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Bottom padding
             Constraint::Length(layout::TAB_BAR_HEIGHT), // Open tabs bar
@@ -38,7 +38,7 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         .split(area)
     } else {
         Layout::vertical([
-            Constraint::Length(2), // Tab header
+            Constraint::Length(3), // Tab header (1 padding + 1 text + 1 underline)
             Constraint::Min(0),    // Main area (sidebar + content)
             Constraint::Length(1), // Bottom padding
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
@@ -258,8 +258,15 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
+    // Render tab text on row 1 (row 0 is top padding)
+    let text_rect = Rect {
+        x: area.x,
+        y: area.y + 1,
+        width: area.width,
+        height: 1,
+    };
     let tab_bar = Paragraph::new(Line::from(spans)).style(Style::default().bg(theme::BG_APP));
-    f.render_widget(tab_bar, area);
+    f.render_widget(tab_bar, text_rect);
 
     let mut offset = 0usize;
     for (tab, label) in tabs {
@@ -280,11 +287,15 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
         if app.home_panel_focus == tab {
             let highlight_rect = Rect {
                 x: area.x + offset as u16,
-                y: area.y + 1,
+                y: area.y + 2,
                 width: width as u16,
                 height: 1,
             };
-            let highlight = Block::default().style(Style::default().bg(theme::ACCENT_PRIMARY));
+            let underline: String = "▔".repeat(width);
+            let highlight = Paragraph::new(Line::from(Span::styled(
+                underline,
+                Style::default().fg(theme::ACCENT_PRIMARY).bg(theme::BG_APP),
+            )));
             f.render_widget(highlight, highlight_rect);
         }
 
