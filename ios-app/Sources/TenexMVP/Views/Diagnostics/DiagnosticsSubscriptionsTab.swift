@@ -69,7 +69,7 @@ struct DiagnosticsSubscriptionsTab: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "antenna.radiowaves.left.and.right.slash")
-                .font(.system(size: 48))
+                .font(.system(.largeTitle))
                 .foregroundColor(.secondary)
 
             Text("No Active Subscriptions")

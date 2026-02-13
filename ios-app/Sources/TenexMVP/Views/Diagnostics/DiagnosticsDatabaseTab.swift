@@ -70,7 +70,7 @@ struct DiagnosticsDatabaseTab: View {
     private var emptyState: some View {
         VStack(spacing: 16) {
             Image(systemName: "tray")
-                .font(.system(size: 48))
+                .font(.system(.largeTitle))
                 .foregroundColor(.secondary)
 
             Text("No Events in Database")

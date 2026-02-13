@@ -323,10 +323,10 @@ struct RuntimeDisplayView: View {
     private func runtimeContent(currentTime: Date) -> some View {
         VStack(spacing: 8) {
             Text("⏱️")
-                .font(.system(size: 32))
+                .font(.system(.title))
 
             Text(computeRuntime(currentTime))
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .font(.system(.title, design: .rounded)).bold()
                 .monospacedDigit()
 
             Text("Total active time")

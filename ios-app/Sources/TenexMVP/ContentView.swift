@@ -171,7 +171,7 @@ struct EmptyStateView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "folder.badge.questionmark")
-                .font(.system(size: 60))
+                .font(.system(.largeTitle))
                 .foregroundStyle(.secondary)
 
             Text("No Projects Found")
@@ -372,7 +372,7 @@ struct ProjectDetailSheet: View {
                             .overlay {
                                 Image(systemName: "folder.fill")
                                     .foregroundStyle(.white)
-                                    .font(.system(size: 36))
+                                    .font(.system(.title))
                             }
 
                         Text(project.title)

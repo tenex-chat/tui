@@ -240,7 +240,7 @@ struct MatchingMessageRow: View {
                 .frame(width: 22, height: 22)
                 .overlay {
                     Image(systemName: isUser ? "person.fill" : "sparkle")
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.white)
                 }
 
@@ -340,7 +340,7 @@ struct SearchConversationView: View {
             if messages.isEmpty {
                 VStack(spacing: 16) {
                     Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 60))
+                        .font(.system(.largeTitle))
                         .foregroundStyle(.secondary)
                     Text("No Messages")
                         .font(.title2)

@@ -171,7 +171,7 @@ struct DiagnosticsSectionUnavailableView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: icon)
-                .font(.system(size: 48))
+                .font(.system(.largeTitle))
                 .foregroundColor(.orange)
 
             Text(title)
@@ -247,7 +247,7 @@ struct DiagnosticsErrorView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 60))
+                .font(.system(.largeTitle))
                 .foregroundColor(.orange)
 
             Text("Failed to Load Diagnostics")
@@ -278,7 +278,7 @@ struct DiagnosticsEmptyView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "gauge.with.needle")
-                .font(.system(size: 60))
+                .font(.system(.largeTitle))
                 .foregroundColor(.secondary)
 
             Text("No Diagnostics Available")

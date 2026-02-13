@@ -137,7 +137,7 @@ struct AgentSelectorSheet: View {
     private var emptyStateView: some View {
         VStack(spacing: 16) {
             Image(systemName: searchText.isEmpty ? "person.2.slash" : "magnifyingglass")
-                .font(.system(size: 40))
+                .font(.system(.largeTitle))
                 .foregroundStyle(.secondary)
 
             if searchText.isEmpty {

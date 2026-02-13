@@ -142,7 +142,7 @@ struct ErrorView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 60))
+                .font(.system(.largeTitle))
                 .foregroundColor(.orange)
 
             Text("Failed to Load Stats")
@@ -173,7 +173,7 @@ struct EmptyStatsView: View {
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 60))
+                .font(.system(.largeTitle))
                 .foregroundColor(.secondary)
 
             Text("No Stats Available")
