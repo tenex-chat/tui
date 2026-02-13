@@ -78,6 +78,15 @@ pub fn fuzzy_score(target: &str, pattern: &str) -> Option<usize> {
     }
 }
 
+/// Check if an inbox item's timestamp is within the 48-hour cap.
+///
+/// This is extracted as a standalone function for testability.
+/// The `now` parameter should be the current Unix timestamp in seconds.
+pub fn is_within_48h_cap(created_at: u64, now: u64) -> bool {
+    let cutoff = now.saturating_sub(tenex_core::constants::INBOX_48H_CAP_SECONDS);
+    created_at >= cutoff
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -2198,6 +2207,7 @@ impl App {
     /// Get inbox items for Home view (filtered by time_filter, archived)
     /// NOTE: Inbox items are NOT filtered by visible_projects - if someone asks you a question,
     /// you should see it regardless of project filtering.
+    /// NOTE: A hard cap of 48 hours is always applied to keep the inbox focused on recent items.
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
         let items = self.data_store.borrow().get_inbox_items().to_vec();
         let now = std::time::SystemTime::now()
@@ -2208,6 +2218,8 @@ impl App {
 
         items.into_iter()
             // NOTE: NO project filter for inbox - you should see all asks/mentions regardless of project selection
+            // Hard 48-hour cap - always applied (uses shared constant via helper function)
+            .filter(|item| is_within_48h_cap(item.created_at, now))
             // Archive filter - hide items from archived threads unless show_archived is true
             .filter(|item| {
                 if let Some(ref thread_id) = item.thread_id {
@@ -2216,7 +2228,7 @@ impl App {
                     true  // Keep items without thread_id
                 }
             })
-            // Time filter
+            // User-selectable time filter (can further restrict, but not beyond 48h cap)
             .filter(|item| {
                 if let Some(ref tf) = self.home.time_filter {
                     let cutoff = now.saturating_sub(tf.seconds());
@@ -4054,4 +4066,105 @@ pub enum SearchMatchType {
     Thread,
     ConversationId,
     Message { message_id: String },
+}
+
+// =============================================================================
+// TESTS
+// =============================================================================
+
+#[cfg(test)]
+mod inbox_48h_cap_tests {
+    use super::*;
+    use tenex_core::constants::INBOX_48H_CAP_SECONDS;
+
+    /// Verify the constant value is 48 hours in seconds
+    #[test]
+    fn test_48h_constant_value() {
+        // 48 hours * 60 minutes * 60 seconds = 172,800 seconds
+        assert_eq!(INBOX_48H_CAP_SECONDS, 172_800);
+        assert_eq!(INBOX_48H_CAP_SECONDS, 48 * 60 * 60);
+    }
+
+    /// Items exactly at the cutoff boundary should be included
+    #[test]
+    fn test_boundary_at_exactly_48h() {
+        let now: u64 = 200_000; // arbitrary "current" time
+        let cutoff = now - INBOX_48H_CAP_SECONDS;
+
+        // Item created exactly at cutoff should be included
+        assert!(is_within_48h_cap(cutoff, now));
+    }
+
+    /// Items 1 second before the cutoff should be excluded
+    #[test]
+    fn test_boundary_just_before_48h() {
+        let now: u64 = 200_000;
+        let cutoff = now - INBOX_48H_CAP_SECONDS;
+
+        // Item created 1 second before cutoff should be excluded
+        assert!(!is_within_48h_cap(cutoff - 1, now));
+    }
+
+    /// Items 1 second after the cutoff should be included
+    #[test]
+    fn test_boundary_just_after_48h() {
+        let now: u64 = 200_000;
+        let cutoff = now - INBOX_48H_CAP_SECONDS;
+
+        // Item created 1 second after cutoff should be included
+        assert!(is_within_48h_cap(cutoff + 1, now));
+    }
+
+    /// Very recent items (within last hour) should be included
+    #[test]
+    fn test_recent_item_included() {
+        let now: u64 = 200_000;
+        let one_hour_ago = now - 3600;
+
+        assert!(is_within_48h_cap(one_hour_ago, now));
+    }
+
+    /// Items from exactly now should be included
+    #[test]
+    fn test_current_time_included() {
+        let now: u64 = 200_000;
+
+        assert!(is_within_48h_cap(now, now));
+    }
+
+    /// Items from the future (edge case) should be included
+    #[test]
+    fn test_future_item_included() {
+        let now: u64 = 200_000;
+        let future = now + 1000;
+
+        assert!(is_within_48h_cap(future, now));
+    }
+
+    /// Items from 72 hours ago should be excluded
+    #[test]
+    fn test_old_item_excluded() {
+        let now: u64 = 300_000;
+        let seventy_two_hours_ago = now - (72 * 60 * 60);
+
+        assert!(!is_within_48h_cap(seventy_two_hours_ago, now));
+    }
+
+    /// Edge case: now is very small (near Unix epoch), no underflow
+    #[test]
+    fn test_no_underflow_near_epoch() {
+        let now: u64 = 1000; // Very early time
+        // saturating_sub should handle this gracefully
+        assert!(is_within_48h_cap(500, now)); // Item from 500 seconds ago
+        assert!(is_within_48h_cap(0, now));   // Item from epoch should be included since now < 48h
+    }
+
+    /// Edge case: now is exactly 48 hours
+    #[test]
+    fn test_now_equals_48h() {
+        let now = INBOX_48H_CAP_SECONDS;
+
+        // Item at epoch (0) should be exactly at the boundary
+        assert!(is_within_48h_cap(0, now));
+    }
 }

@@ -22,6 +22,12 @@ pub const DEFAULT_NUDGE_TITLE: &str = "Untitled";
 /// Staleness threshold in seconds - status older than this is considered offline
 pub const STALENESS_THRESHOLD_SECS: u64 = 5 * 60; // 5 minutes
 
+// Inbox filtering constants
+/// Hard cap for inbox items: 48 hours in seconds (48 * 60 * 60 = 172,800).
+/// Keeps the inbox focused on recent items requiring attention.
+/// Note: Used by both TUI (Rust) and iOS (Swift) for consistent filtering.
+pub const INBOX_48H_CAP_SECONDS: u64 = 48 * 60 * 60;
+
 // Stats window constants
 /// Number of days for the cost display window (used in Stats tab and FFI).
 /// This is separate from the chart window to allow independent tuning.
