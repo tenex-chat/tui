@@ -906,6 +906,10 @@ struct MainTabView: View {
                 InboxView()
                     .environmentObject(coreManager)
             }
+            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+                ReportsTabView()
+                    .environmentObject(coreManager)
+            }
             Tab("Search", systemImage: "magnifyingglass", value: 10) {
                 NavigationStack {
                     SearchView()
