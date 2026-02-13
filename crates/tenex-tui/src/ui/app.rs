@@ -2198,6 +2198,7 @@ impl App {
     /// Get inbox items for Home view (filtered by time_filter, archived)
     /// NOTE: Inbox items are NOT filtered by visible_projects - if someone asks you a question,
     /// you should see it regardless of project filtering.
+    /// NOTE: A hard cap of 48 hours is always applied to keep the inbox focused on recent items.
     pub fn inbox_items(&self) -> Vec<crate::models::InboxItem> {
         let items = self.data_store.borrow().get_inbox_items().to_vec();
         let now = std::time::SystemTime::now()
@@ -2206,8 +2207,14 @@ impl App {
             .unwrap_or(0);
         let prefs = self.preferences.borrow();
 
+        // Hard cap: 48 hours in seconds (48 * 60 * 60 = 172,800)
+        const INBOX_48H_CAP_SECONDS: u64 = 48 * 60 * 60;
+        let hard_cutoff = now.saturating_sub(INBOX_48H_CAP_SECONDS);
+
         items.into_iter()
             // NOTE: NO project filter for inbox - you should see all asks/mentions regardless of project selection
+            // Hard 48-hour cap - always applied
+            .filter(|item| item.created_at >= hard_cutoff)
             // Archive filter - hide items from archived threads unless show_archived is true
             .filter(|item| {
                 if let Some(ref thread_id) = item.thread_id {
@@ -2216,7 +2223,7 @@ impl App {
                     true  // Keep items without thread_id
                 }
             })
-            // Time filter
+            // User-selectable time filter (can further restrict, but not beyond 48h cap)
             .filter(|item| {
                 if let Some(ref tf) = self.home.time_filter {
                     let cutoff = now.saturating_sub(tf.seconds());
