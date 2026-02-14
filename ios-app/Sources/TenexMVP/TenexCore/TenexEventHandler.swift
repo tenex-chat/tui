@@ -19,8 +19,8 @@ final class TenexEventHandler: EventCallback {
             guard let coreManager = self?.coreManager else { return }
 
             switch changeType {
-            case .messageAppended(let conversationId, _):
-                coreManager.signalConversationUpdate(conversationId: conversationId)
+            case .messageAppended(let conversationId, let message):
+                coreManager.applyMessageAppended(conversationId: conversationId, message: message)
 
             case .conversationUpsert(let conversation):
                 coreManager.signalConversationUpdate(conversationId: conversation.id)
