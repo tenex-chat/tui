@@ -1,7 +1,8 @@
 import SwiftUI
+import Combine
 
 /// ViewModel for managing reports data across all projects.
-/// Handles fetching, filtering, and caching reports with reactive updates.
+/// Observes reactive reports updates from TenexCoreManager for real-time updates.
 @MainActor
 final class ReportsViewModel: ObservableObject {
     // MARK: - Published Properties
@@ -21,9 +22,7 @@ final class ReportsViewModel: ObservableObject {
     // MARK: - Private Properties
 
     private weak var coreManager: TenexCoreManager?
-
-    /// Cache mapping report ID to project info for display
-    private var reportProjectMap: [String: ProjectInfo] = [:]
+    private var cancellables = Set<AnyCancellable>()
 
     // MARK: - Computed Properties
 
@@ -34,10 +33,7 @@ final class ReportsViewModel: ObservableObject {
         // Filter by selected projects
         if !selectedProjectIds.isEmpty {
             result = result.filter { report in
-                if let project = projectFor(report: report) {
-                    return selectedProjectIds.contains(project.id)
-                }
-                return false
+                selectedProjectIds.contains(report.projectId)
             }
         }
 
@@ -61,14 +57,22 @@ final class ReportsViewModel: ObservableObject {
         self.coreManager = coreManager
     }
 
-    /// Configure the ViewModel with a core manager reference
+    /// Configure the ViewModel with a core manager reference and set up reactive bindings
     func configure(with coreManager: TenexCoreManager) {
         self.coreManager = coreManager
+
+        // Observe reactive reports updates from coreManager
+        coreManager.$reports
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] newReports in
+                self?.reports = newReports
+            }
+            .store(in: &cancellables)
     }
 
     // MARK: - Public Methods
 
-    /// Load reports from all projects
+    /// Load reports from all projects (initial load)
     func loadReports() async {
         guard let coreManager = coreManager else { return }
 
@@ -76,23 +80,20 @@ final class ReportsViewModel: ObservableObject {
         defer { isLoading = false }
 
         var allReports: [ReportInfo] = []
-        var projectMap: [String: ProjectInfo] = [:]
 
-        // Fetch reports from each project
+        // Fetch reports from each project via FFI for initial load
         let projects = coreManager.projects
         for project in projects {
             let projectReports = await coreManager.safeCore.getReports(projectId: project.id)
-            for report in projectReports {
-                allReports.append(report)
-                projectMap[report.id] = project
-            }
+            allReports.append(contentsOf: projectReports)
         }
 
         // Sort by updated date (newest first)
         allReports.sort { $0.updatedAt > $1.updatedAt }
 
+        // Update both local state and coreManager's reactive property
         self.reports = allReports
-        self.reportProjectMap = projectMap
+        coreManager.reports = allReports
     }
 
     /// Refresh reports (sync first, then reload)
@@ -104,6 +105,6 @@ final class ReportsViewModel: ObservableObject {
 
     /// Get the project associated with a report
     func projectFor(report: ReportInfo) -> ProjectInfo? {
-        reportProjectMap[report.id]
+        coreManager?.projects.first { $0.id == report.projectId }
     }
 }
