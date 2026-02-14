@@ -52,7 +52,7 @@ let project = Project(
                     // Library search path for libtenex_core.a
                     "LIBRARY_SEARCH_PATHS[sdk=iphonesimulator*]": [
                         "$(inherited)",
-                        "$(SRCROOT)/../target/aarch64-apple-ios-sim/release"
+                        "$(SRCROOT)/../target/universal-ios-sim/release"
                     ],
                     "LIBRARY_SEARCH_PATHS[sdk=iphoneos*]": [
                         "$(inherited)",
@@ -65,7 +65,7 @@ let project = Project(
                     // Link the Rust static library - use full path to force static linking
                     "OTHER_LDFLAGS[sdk=iphonesimulator*]": [
                         "$(inherited)",
-                        "$(SRCROOT)/../target/aarch64-apple-ios-sim/release/libtenex_core.a"
+                        "$(SRCROOT)/../target/universal-ios-sim/release/libtenex_core.a"
                     ],
                     "OTHER_LDFLAGS[sdk=iphoneos*]": [
                         "$(inherited)",

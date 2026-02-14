@@ -27,6 +27,11 @@ struct MessageComposerView: View {
     /// Reference conversation ID for context tagging (adds ["context", "<id>"] tag when sent)
     let referenceConversationId: String?
 
+    /// Reference report a-tag for context tagging (adds ["context", "<a-tag>"] tag when sent)
+    /// Format: "30023:<pubkey>:<slug>" - the standard Nostr a-tag for addressable events
+    /// Used by "Chat with Author" feature to reference the report being discussed
+    let referenceReportATag: String?
+
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
 
@@ -150,6 +155,7 @@ struct MessageComposerView: View {
         initialAgentPubkey: String? = nil,
         initialContent: String? = nil,
         referenceConversationId: String? = nil,
+        referenceReportATag: String? = nil,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
@@ -159,6 +165,7 @@ struct MessageComposerView: View {
         self.initialAgentPubkey = initialAgentPubkey
         self.initialContent = initialContent
         self.referenceConversationId = referenceConversationId
+        self.referenceReportATag = referenceReportATag
         self.onSend = onSend
         self.onDismiss = onDismiss
 
@@ -167,12 +174,12 @@ struct MessageComposerView: View {
 
         // Initialize draft (will be updated in onAppear)
         if let conversationId = conversationId, let projectId = project?.id {
-            _draft = State(initialValue: Draft(conversationId: conversationId, projectId: projectId, referenceConversationId: referenceConversationId))
+            _draft = State(initialValue: Draft(conversationId: conversationId, projectId: projectId, referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
         } else if let projectId = project?.id {
-            _draft = State(initialValue: Draft(projectId: projectId, content: initialContent ?? "", referenceConversationId: referenceConversationId))
+            _draft = State(initialValue: Draft(projectId: projectId, content: initialContent ?? "", referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
         } else {
             // No project yet - will be set when project is selected
-            _draft = State(initialValue: Draft(projectId: "", content: initialContent ?? "", referenceConversationId: referenceConversationId))
+            _draft = State(initialValue: Draft(projectId: "", content: initialContent ?? "", referenceConversationId: referenceConversationId, referenceReportATag: referenceReportATag))
         }
 
         // Initialize localText with initial content if provided
@@ -812,12 +819,13 @@ struct MessageComposerView: View {
             // CRITICAL DATA SAFETY: Only apply loaded draft if user hasn't made edits yet
             // This prevents async load from overwriting live user typing
             if !isDirty {
-                // CONVERSATION REFERENCE: If we have initial content (e.g., from "Reference this conversation"),
-                // use it instead of the loaded draft content. This ensures the context message is shown.
+                // CONVERSATION/REPORT REFERENCE: If we have initial content (e.g., from "Reference this conversation"
+                // or "Chat with Author"), use it instead of the loaded draft content. This ensures the context message is shown.
                 if let initialContent = initialContent, !initialContent.isEmpty {
                     var modifiedDraft = loadedDraft
                     modifiedDraft.updateContent(initialContent)
                     modifiedDraft.setReferenceConversation(referenceConversationId)
+                    modifiedDraft.setReferenceReportATag(referenceReportATag)
                     draft = modifiedDraft
 
                     // Sync localText with initial content
@@ -826,11 +834,12 @@ struct MessageComposerView: View {
                         localText = initialContent
                     }
 
-                    // Persist the initial content and reference conversation ID to draft storage
+                    // Persist the initial content and reference IDs to draft storage
                     await draftManager.updateContent(initialContent, conversationId: conversationId, projectId: projectId)
                     await draftManager.updateReferenceConversation(referenceConversationId, conversationId: conversationId, projectId: projectId)
+                    await draftManager.updateReferenceReportATag(referenceReportATag, conversationId: conversationId, projectId: projectId)
 
-                    print("[MessageComposerView] Applied initial content from conversation reference")
+                    print("[MessageComposerView] Applied initial content from reference (conversation or report)")
                 } else {
                     draft = loadedDraft
                     // PERFORMANCE FIX: Sync localText with loaded draft content
@@ -845,12 +854,16 @@ struct MessageComposerView: View {
             } else {
                 print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
 
-                // RACE CONDITION FIX: Persist referenceConversationId even if user typed before load completed.
-                // The reference ID must always be saved regardless of dirty state, otherwise it can be lost
+                // RACE CONDITION FIX: Persist reference IDs even if user typed before load completed.
+                // The reference IDs must always be saved regardless of dirty state, otherwise they can be lost
                 // when scheduleContentSync flips isDirty before this async block runs.
                 if let refId = referenceConversationId {
                     await draftManager.updateReferenceConversation(refId, conversationId: conversationId, projectId: projectId)
                     print("[MessageComposerView] Persisted referenceConversationId despite isDirty=true")
+                }
+                if let refATag = referenceReportATag {
+                    await draftManager.updateReferenceReportATag(refATag, conversationId: conversationId, projectId: projectId)
+                    print("[MessageComposerView] Persisted referenceReportATag despite isDirty=true")
                 }
             }
 
@@ -871,8 +884,9 @@ struct MessageComposerView: View {
             print("[MessageComposerView] Set availableAgents to \(availableAgents.count) agents")
             agentsLoadError = nil
 
-            // For replies: always use initialAgentPubkey - we know who we're replying to
-            if !isNewConversation, let initialPubkey = initialAgentPubkey {
+            // If initialAgentPubkey is provided, use it (works for both new conversations and replies)
+            // This supports features like "Chat with Author" where we want to direct the conversation to a specific agent
+            if let initialPubkey = initialAgentPubkey {
                 draft.setAgent(initialPubkey)
                 await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
 
@@ -880,7 +894,7 @@ struct MessageComposerView: View {
                 let name = coreManager.safeCore.getProfileName(pubkey: initialPubkey)
                 replyTargetAgentName = name.isEmpty ? "Agent" : name
             } else if draft.agentPubkey == nil {
-                // New conversation: auto-select PM agent if available
+                // No initial agent specified: auto-select PM agent if available (for new conversations)
                 if let pmAgent = agents.first(where: { $0.isPm }) {
                     draft.setAgent(pmAgent.pubkey)
                     await draftManager.updateAgent(pmAgent.pubkey, conversationId: conversationId, projectId: projectId)
@@ -981,20 +995,28 @@ struct MessageComposerView: View {
         // Validate agent pubkey against current project's agents before sending
         // CRITICAL: Only validate if we have a successful agent list (no load error)
         // Don't clear agent selection on transient errors - preserve user's choice
+        // EXCEPTION: Skip validation for direct chats initiated via initialAgentPubkey (e.g., "Chat with Author")
+        // These should address the target even if they're offline - standard messaging behavior
         var validatedAgentPubkey: String? = draft.agentPubkey
         if let agentPubkey = draft.agentPubkey, agentsLoadError == nil {
-            // Only validate if we successfully loaded agents
-            let agentExists = availableAgents.contains { $0.pubkey == agentPubkey }
-            if !agentExists && !availableAgents.isEmpty {
-                // Only clear if we have agents but this one isn't in the list
-                // If availableAgents is empty, the project might have no agents (valid state)
-                print("[MessageComposerView] Warning: Agent pubkey '\(agentPubkey)' not found in current project's agents. Clearing agent selection.")
-                // Clear invalid agent from draft
-                draft.clearAgent()
-                Task {
-                    await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+            // Skip online-agent validation if this agent was explicitly set via initialAgentPubkey
+            // This supports "Chat with Author" and similar features where the recipient may be offline
+            let isDirectChat = initialAgentPubkey != nil && agentPubkey == initialAgentPubkey
+
+            if !isDirectChat {
+                // Only validate agents selected from the online list
+                let agentExists = availableAgents.contains { $0.pubkey == agentPubkey }
+                if !agentExists && !availableAgents.isEmpty {
+                    // Only clear if we have agents but this one isn't in the list
+                    // If availableAgents is empty, the project might have no agents (valid state)
+                    print("[MessageComposerView] Warning: Agent pubkey '\(agentPubkey)' not found in current project's agents. Clearing agent selection.")
+                    // Clear invalid agent from draft
+                    draft.clearAgent()
+                    Task {
+                        await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
+                    }
+                    validatedAgentPubkey = nil
                 }
-                validatedAgentPubkey = nil
             }
         }
 

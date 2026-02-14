@@ -319,12 +319,36 @@ struct ReportsTabDetailView: View {
     let report: ReportInfo
     let project: ProjectInfo?
 
+    @EnvironmentObject private var coreManager: TenexCoreManager
+    @State private var showChatWithAuthor = false
+
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .long
         formatter.timeStyle = .short
         return formatter
     }()
+
+    /// Convert the report author's npub to hex pubkey for MessageComposerView
+    private var authorHexPubkey: String? {
+        Bech32.npubToHex(report.authorNpub)
+    }
+
+    /// Generate the report's a-tag for reference (format: 30023:pubkey:slug)
+    /// Returns nil if the author's npub cannot be converted to hex (invalid npub)
+    private var reportATag: String? {
+        guard let authorHex = authorHexPubkey else {
+            // Invalid npub - cannot generate valid a-tag
+            return nil
+        }
+        return "30023:\(authorHex):\(report.id)"
+    }
+
+    /// Whether the "Chat with Author" button should be enabled
+    /// Requires both a valid project and a valid author hex pubkey
+    private var canChatWithAuthor: Bool {
+        project != nil && authorHexPubkey != nil
+    }
 
     var body: some View {
         ScrollView {
@@ -341,6 +365,27 @@ struct ReportsTabDetailView: View {
         }
         .navigationTitle(report.title)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showChatWithAuthor = true
+                } label: {
+                    Label("Chat with Author", systemImage: "bubble.left.fill")
+                }
+                .disabled(!canChatWithAuthor)
+            }
+        }
+        .sheet(isPresented: $showChatWithAuthor) {
+            if let project = project, let authorPubkey = authorHexPubkey {
+                MessageComposerView(
+                    project: project,
+                    initialAgentPubkey: authorPubkey,
+                    initialContent: ConversationFormatters.generateReportContextMessage(report: report),
+                    referenceReportATag: reportATag
+                )
+                .environmentObject(coreManager)
+            }
+        }
     }
 
     private var headerSection: some View {
