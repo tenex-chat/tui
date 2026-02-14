@@ -55,7 +55,7 @@ struct AudioNotificationsLogView: View {
     private func loadNotifications() {
         Task {
             do {
-                let result = try await TenexDirect.listAudioNotifications()
+                let result = try await coreManager.safeCore.listAudioNotifications()
                 notifications = result.sorted { $0.createdAt > $1.createdAt }
                 isLoading = false
             } catch {
@@ -73,7 +73,7 @@ struct AudioNotificationsLogView: View {
         Task {
             for notification in toDelete {
                 do {
-                    try await TenexDirect.deleteAudioNotification(id: notification.id)
+                    try await coreManager.safeCore.deleteAudioNotification(id: notification.id)
                 } catch {
                     errorMessage = "Failed to delete notification: \(error.localizedDescription)"
                     showError = true

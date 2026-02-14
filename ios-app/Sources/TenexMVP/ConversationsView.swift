@@ -353,7 +353,7 @@ struct MessagesView: View {
         LastAgentFinder.findLastAgentPubkey(
             messages: messages,
             availableAgents: availableAgents,
-            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+            npubToHex: { Bech32.npubToHex($0) }
         )
     }
 

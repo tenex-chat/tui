@@ -227,8 +227,7 @@ struct SlackMessageRow: View {
     /// Convert npub (bech32) to hex pubkey format for use with AgentAvatarView and other components
     private func npubToHex(_ npub: String) -> String? {
         guard !npub.isEmpty else { return nil }
-        // Use the FFI function to convert npub (bech32) to hex pubkey
-        return coreManager.safeCore.npubToHex(npub: npub)
+        return Bech32.npubToHex(npub)
     }
 }
 
