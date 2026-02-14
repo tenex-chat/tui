@@ -56,6 +56,14 @@ struct MessageComposerView: View {
     @State private var dictationManager = DictationManager()
     @State private var showDictationOverlay = false
 
+    // PERFORMANCE FIX: Local text state for instant typing response
+    // This decouples TextEditor binding from draft persistence to eliminate per-keystroke lag
+    @State private var localText: String = ""
+    @State private var contentSyncTask: Task<Void, Never>?
+
+    // Flag to suppress onChange sync during programmatic localText updates (load/switch/dictation)
+    @State private var isProgrammaticUpdate: Bool = false
+
     // MARK: - Computed
 
     private var draftManager: DraftManager {
@@ -87,8 +95,10 @@ struct MessageComposerView: View {
             return false
         }
 
-        // Draft must be valid (has required content) and not currently sending
-        return draft.isValid && !isSending
+        // PERFORMANCE FIX: Use localText for instant send button feedback
+        // Draft sync may be pending, but localText always has current content
+        let hasContent = !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return hasContent && !isSending
     }
 
     private var selectedAgent: OnlineAgentInfo? {
@@ -225,10 +235,15 @@ struct MessageComposerView: View {
                     DictationOverlayView(
                         manager: dictationManager,
                         onComplete: { text in
-                            draft.updateContent(draft.content + (draft.content.isEmpty ? "" : " ") + text)
+                            // Append dictated text to localText (instant update)
+                            let appendedText = localText + (localText.isEmpty ? "" : " ") + text
+                            localText = appendedText
+                            // Dictation is user-initiated content, so mark dirty and sync
+                            isDirty = true
+                            // Sync to draft directly (bypass onChange which is suppressed during programmatic updates)
                             if let projectId = selectedProject?.id {
                                 Task {
-                                    await draftManager.updateContent(draft.content, conversationId: conversationId, projectId: projectId)
+                                    await draftManager.updateContent(appendedText, conversationId: conversationId, projectId: projectId)
                                 }
                             }
                             showDictationOverlay = false
@@ -261,6 +276,9 @@ struct MessageComposerView: View {
 
                         Task {
                             do {
+                                // HIGH FIX: Flush localText to DraftManager before saving
+                                // This prevents losing the last ~300ms of typing
+                                await flushLocalTextToDraftManager()
                                 try await draftManager.saveNow()
 
                                 if backgroundTaskID != .invalid {
@@ -283,6 +301,8 @@ struct MessageComposerView: View {
                         #else
                         Task {
                             do {
+                                // HIGH FIX: Flush localText to DraftManager before saving
+                                await flushLocalTextToDraftManager()
                                 try await draftManager.saveNow()
                                 onDismiss?()
                                 dismiss()
@@ -390,6 +410,8 @@ struct MessageComposerView: View {
 
                     Task {
                         do {
+                            // HIGH FIX: Flush localText to DraftManager before saving
+                            await flushLocalTextToDraftManager()
                             try await draftManager.saveNow()
                             print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
                         } catch {
@@ -404,6 +426,8 @@ struct MessageComposerView: View {
                     #else
                     Task {
                         do {
+                            // HIGH FIX: Flush localText to DraftManager before saving
+                            await flushLocalTextToDraftManager()
                             try await draftManager.saveNow()
                             print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
                         } catch {
@@ -603,26 +627,21 @@ struct MessageComposerView: View {
 
     private var contentEditorView: some View {
         ZStack(alignment: .topLeading) {
-            TextEditor(text: Binding(
-                get: { draft.content },
-                set: { newValue in
-                    isDirty = true // Mark as dirty when user edits
-                    draft.updateContent(newValue)
-                    if let projectId = selectedProject?.id {
-                        Task {
-                            await draftManager.updateContent(newValue, conversationId: conversationId, projectId: projectId)
-                        }
-                    }
-                }
-            ))
+            // PERFORMANCE FIX: Bind directly to localText for instant response
+            // Draft sync is debounced to prevent per-keystroke lag
+            TextEditor(text: $localText)
             .font(.body)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .scrollContentBackground(.hidden)
             .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject)
             .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject ? 0.5 : 1.0)
+            .onChange(of: localText) { oldValue, newValue in
+                // PERFORMANCE FIX: Debounce draft sync to avoid per-keystroke mutations
+                scheduleContentSync(newValue)
+            }
 
-            if draft.content.isEmpty {
+            if localText.isEmpty {
                 Text(isNewConversation && selectedProject == nil
                      ? "Select a project to start composing"
                      : (isLoadingDraft ? "Loading draft..." : (isSwitchingProject ? "Switching project..." : (isNewConversation ? "What would you like to discuss?" : "Type your reply..."))))
@@ -633,6 +652,83 @@ struct MessageComposerView: View {
             }
         }
         .frame(minHeight: 200)
+    }
+
+    // MARK: - Content Sync (Debounced)
+
+    /// Immediately flush localText to DraftManager, canceling any pending debounced sync.
+    /// Call this before saveNow() to prevent data loss from the last ~300ms of typing.
+    ///
+    /// MEDIUM FIX: Uses draft.projectId instead of selectedProject?.id to prevent data leakage.
+    /// draft.projectId represents where the content CAME FROM, not where it SHOULD GO based on
+    /// current selection. This is critical for scene-phase flushes: if user taps a different project
+    /// in the project sheet and app backgrounds BEFORE projectChanged() runs, we must flush
+    /// old localText to the OLD project, not the newly selected one.
+    ///
+    /// For explicit project switches, use `flushLocalTextToDraftManager(projectId:)` with the
+    /// captured previous project ID.
+    private func flushLocalTextToDraftManager() async {
+        // Use draft.projectId (where content came from) NOT selectedProject?.id (current binding)
+        let projectId = draft.projectId
+        guard !projectId.isEmpty else { return }
+        await flushLocalTextToDraftManager(projectId: projectId)
+    }
+
+    /// Immediately flush localText to DraftManager, canceling any pending debounced sync.
+    /// Call this before saveNow() to prevent data loss from the last ~300ms of typing.
+    ///
+    /// - Parameter projectId: Explicit project ID to flush to. Required to avoid flushing to wrong project
+    ///   during project switches (when selectedProject has already changed to the new project).
+    private func flushLocalTextToDraftManager(projectId: String) async {
+        // Cancel any pending debounced sync
+        contentSyncTask?.cancel()
+        contentSyncTask = nil
+
+        // Immediately sync current localText to DraftManager using explicit projectId
+        await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+    }
+
+    /// Debounce content sync to DraftManager to avoid per-keystroke lag
+    /// Uses 300ms debounce - typing feels instant, persistence catches up
+    ///
+    /// NOTE: We intentionally don't update draft.content during typing.
+    /// - localText is the source of truth for the UI and for sending
+    /// - DraftManager handles persistence
+    /// - draft.content is only used for initial loading
+    private func scheduleContentSync(_ content: String) {
+        // Skip sync during programmatic updates (load/switch/dictation)
+        // LOW PRIORITY FIX: Consume the flag here instead of at call sites
+        // SwiftUI's onChange runs AFTER the transaction completes, so resetting
+        // the flag immediately after setting localText doesn't work - the flag
+        // must be consumed inside the handler that runs asynchronously
+        if isProgrammaticUpdate {
+            isProgrammaticUpdate = false
+            return
+        }
+
+        // Mark dirty immediately (cheap operation)
+        isDirty = true
+
+        // Cancel any pending sync
+        contentSyncTask?.cancel()
+
+        // MEDIUM FIX: Capture projectId at schedule time to prevent cross-project content leakage
+        // If project changes during the debounce window, this captured ID ensures we don't
+        // write old content to the new project's draft
+        guard let capturedProjectId = selectedProject?.id else { return }
+        let capturedConversationId = conversationId
+
+        // Schedule debounced sync
+        contentSyncTask = Task {
+            // Wait for 300ms of inactivity before syncing
+            try? await Task.sleep(for: .milliseconds(300))
+
+            // Check if cancelled (user typed more, or project changed)
+            guard !Task.isCancelled else { return }
+
+            // Sync to DraftManager using captured IDs (safe from project changes)
+            await draftManager.updateContent(content, conversationId: capturedConversationId, projectId: capturedProjectId)
+        }
     }
 
     private var toolbarView: some View {
@@ -661,15 +757,15 @@ struct MessageComposerView: View {
 
             Spacer()
 
-            // Character count
-            if draft.content.count > 0 {
-                Text("\(draft.content.count)")
+            // Character count (use localText for instant feedback)
+            if localText.count > 0 {
+                Text("\(localText.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            // Clear button (if has content)
-            if draft.hasContent {
+            // Clear button (if has content) - use localText for instant feedback
+            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button(action: clearDraft) {
                     Image(systemName: "trash")
                         .foregroundStyle(.red)
@@ -702,6 +798,14 @@ struct MessageComposerView: View {
             // This prevents async load from overwriting live user typing
             if !isDirty {
                 draft = loadedDraft
+                // PERFORMANCE FIX: Sync localText with loaded draft content
+                // Flag is consumed by scheduleContentSync to suppress isDirty marking
+                // LOW FIX: Only set flag when value will actually change, otherwise onChange
+                // won't fire and the flag remains true, causing first user keystroke to be ignored
+                if loadedDraft.content != localText {
+                    isProgrammaticUpdate = true
+                    localText = loadedDraft.content
+                }
             } else {
                 print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
             }
@@ -762,14 +866,20 @@ struct MessageComposerView: View {
         Task {
             // HIGH #1 FIX: Store previous project to revert on save failure
             let previousProject = coreManager.projects.first { $0.id == draft.projectId }
+            // HIGH PRIORITY FIX: Capture previous project ID BEFORE any changes
+            // This ensures flushLocalTextToDraftManager writes to the OLD project, not the NEW one
+            let previousProjectId = draft.projectId
 
             // BLOCKER #2 FIX: Disable editing during project switch
             isSwitchingProject = true
 
             // Save any pending changes to the current draft before switching
-            if !draft.projectId.isEmpty {
+            if !previousProjectId.isEmpty {
                 // MEDIUM #3 FIX: Catch save errors during project switch
                 do {
+                    // HIGH FIX: Flush localText to DraftManager before saving
+                    // Uses explicit previousProjectId to avoid writing old content to new project's draft
+                    await flushLocalTextToDraftManager(projectId: previousProjectId)
                     try await draftManager.saveNow()
                 } catch {
                     print("[MessageComposerView] ERROR: Failed to save before project switch: \(error)")
@@ -796,6 +906,16 @@ struct MessageComposerView: View {
             // Always replace draft with project-specific draft
             // This ensures content from Project A never persists under Project B
             draft = projectDraft
+            // PERFORMANCE FIX: Sync localText with loaded draft content
+            // Flag is consumed by scheduleContentSync to suppress isDirty marking
+            // LOW FIX: Only set flag when value will actually change, otherwise onChange
+            // won't fire and the flag remains true, causing first user keystroke to be ignored
+            if projectDraft.content != localText {
+                isProgrammaticUpdate = true
+                localText = projectDraft.content
+            }
+            // Cancel any pending sync from previous project
+            contentSyncTask?.cancel()
             print("[MessageComposerView] Loaded draft for project '\(project.id)' (absolute data safety: no cross-project content leakage)")
 
             // Validate and clear agent if it doesn't belong to this project
@@ -837,6 +957,11 @@ struct MessageComposerView: View {
         isSending = true
         sendError = nil
 
+        // PERFORMANCE FIX: Cancel any pending sync and use localText directly
+        // This ensures we send what the user typed, even if sync hasn't caught up
+        contentSyncTask?.cancel()
+        let contentToSend = localText
+
         Task {
             do {
                 let result: SendMessageResult
@@ -845,7 +970,7 @@ struct MessageComposerView: View {
                     result = try await coreManager.safeCore.sendThread(
                         projectId: project.id,
                         title: "",
-                        content: draft.content,
+                        content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
                         nudgeIds: Array(draft.selectedNudgeIds)
                     )
@@ -853,7 +978,7 @@ struct MessageComposerView: View {
                     result = try await coreManager.safeCore.sendMessage(
                         conversationId: conversationId!,
                         projectId: project.id,
-                        content: draft.content,
+                        content: contentToSend,
                         agentPubkey: validatedAgentPubkey
                     )
                 }
@@ -882,6 +1007,18 @@ struct MessageComposerView: View {
         // CRITICAL DATA SAFETY: Do NOT reset isDirty on clear
         // This prevents async load from overwriting the user's intentional clear (delete)
         // isDirty = false // REMOVED - keep isDirty=true to protect against async load
+
+        // PERFORMANCE FIX: Clear localText immediately for instant feedback
+        // Flag is consumed by scheduleContentSync to suppress isDirty marking
+        // LOW FIX: Only set flag when value will actually change, otherwise onChange
+        // won't fire and the flag remains true, causing first user keystroke to be ignored
+        if !localText.isEmpty {
+            isProgrammaticUpdate = true
+            localText = ""
+        }
+        // Cancel any pending sync since we're clearing
+        contentSyncTask?.cancel()
+
         draft.clear()
         if let projectId = selectedProject?.id {
             Task {
