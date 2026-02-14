@@ -33,13 +33,27 @@ struct AgentSelectorSheet: View {
     // MARK: - Computed
 
     private var filteredAgents: [OnlineAgentInfo] {
+        let filtered: [OnlineAgentInfo]
         if searchText.isEmpty {
-            return agents
+            filtered = agents
+        } else {
+            // Use locale-aware filtering for correct international matching
+            filtered = agents.filter { agent in
+                agent.name.localizedCaseInsensitiveContains(searchText)
+            }
         }
 
-        let lowercasedSearch = searchText.lowercased()
-        return agents.filter { agent in
-            agent.name.lowercased().contains(lowercasedSearch)
+        // Sort: PM agents first, then alphabetically by name, with pubkey tie-breaker for stability
+        return filtered.sorted { a, b in
+            if a.isPm != b.isPm {
+                return a.isPm  // PM agents come first
+            }
+            let nameComparison = a.name.localizedCaseInsensitiveCompare(b.name)
+            if nameComparison != .orderedSame {
+                return nameComparison == .orderedAscending
+            }
+            // Tie-breaker: use pubkey for stable sorting when names are equal
+            return a.pubkey < b.pubkey
         }
     }
 
@@ -188,25 +202,26 @@ struct OnlineAgentRowView: View {
     var onConfig: (() -> Void)?
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             // Tappable main content for selection
             Button(action: onTap) {
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     // Agent avatar - uses actual agent pubkey for profile lookup
                     AgentAvatarView(
                         agentName: agent.name,
                         pubkey: agent.pubkey,
-                        size: 48,
+                        size: 36,
                         showBorder: false,
                         isSelected: isSelected
                     )
                     .environmentObject(coreManager)
 
                     // Agent info
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 6) {
                             Text(agent.name)
-                                .font(.headline)
+                                .font(.subheadline)
+                                .fontWeight(.medium)
                                 .foregroundStyle(.primary)
 
                             if agent.isPm {
@@ -214,41 +229,31 @@ struct OnlineAgentRowView: View {
                                     .font(.caption2)
                                     .fontWeight(.semibold)
                                     .foregroundStyle(.white)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
                                     .background(
                                         Capsule()
                                             .fill(Color.blue)
                                     )
                             }
+
+                            if let model = agent.model, !model.isEmpty {
+                                Text(model)
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
 
                         Text("@\(agent.name)")
-                            .font(.subheadline)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-
-                        if let model = agent.model, !model.isEmpty {
-                            HStack(spacing: 4) {
-                                Image(systemName: "cpu")
-                                    .font(.caption2)
-                                Text(model)
-                                    .font(.caption2)
-                            }
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(Color.systemGray5)
-                            )
-                        }
                     }
 
                     Spacer()
 
                     // Selection indicator
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.title2)
+                        .font(.body)
                         .foregroundStyle(isSelected ? .blue : .secondary)
                 }
             }
@@ -258,15 +263,15 @@ struct OnlineAgentRowView: View {
             if let onConfig = onConfig {
                 Button(action: onConfig) {
                     Image(systemName: "gearshape")
-                        .font(.title3)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .padding(8)
+                        .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 }
 
