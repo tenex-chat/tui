@@ -888,6 +888,14 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func logout() throws 
     
     /**
+     * Convert an npub (bech32) string to a hex pubkey string.
+     * Returns None if the input is not a valid npub.
+     * This is useful for converting authorNpub (which is bech32 format) to hex
+     * format needed by functions like get_profile_name.
+     */
+    func npubToHex(npub: String)  -> String?
+    
+    /**
      * Refresh data from relays.
      * Call this to fetch the latest data from relays.
      *
@@ -1637,6 +1645,20 @@ open func logout()throws   {try rustCallWithError(FfiConverterTypeTenexError_lif
     uniffi_tenex_core_fn_method_tenexcore_logout(self.uniffiClonePointer(),$0
     )
 }
+}
+    
+    /**
+     * Convert an npub (bech32) string to a hex pubkey string.
+     * Returns None if the input is not a valid npub.
+     * This is useful for converting authorNpub (which is bech32 format) to hex
+     * format needed by functions like get_profile_name.
+     */
+open func npubToHex(npub: String) -> String?  {
+    return try!  FfiConverterOptionString.lift(try! rustCall() {
+    uniffi_tenex_core_fn_method_tenexcore_npub_to_hex(self.uniffiClonePointer(),
+        FfiConverterString.lower(npub),$0
+    )
+})
 }
     
     /**
@@ -8389,6 +8411,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_logout() != 20996) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_npub_to_hex() != 23677) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_refresh() != 48105) {
