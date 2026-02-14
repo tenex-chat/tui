@@ -173,13 +173,15 @@ struct ConversationDetailView: View {
         coreManager.safeCore.getProjects().first { $0.id == conversation.extractedProjectId }
     }
 
-    /// Find the last agent that spoke in the conversation
+    /// Find the last agent that spoke in the conversation (hex pubkey format)
+    /// Filters by role to exclude user messages and only selects from available agents
     private var lastAgentPubkey: String? {
-        // Get the latest reply author's pubkey
-        if let reply = viewModel.latestReply {
-            return reply.authorNpub.isEmpty ? nil : reply.authorNpub
-        }
-        return nil
+        let availableAgents = project.flatMap { coreManager.onlineAgents[$0.id] } ?? []
+        return LastAgentFinder.findLastAgentPubkey(
+            messages: viewModel.messages,
+            availableAgents: availableAgents,
+            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+        )
     }
 
     private func latestReplySection(_ reply: MessageInfo) -> some View {
@@ -190,7 +192,7 @@ struct ConversationDetailView: View {
                 HStack(spacing: 6) {
                     AgentAvatarView(
                         agentName: reply.author,
-                        pubkey: reply.authorNpub.isEmpty ? nil : reply.authorNpub,
+                        pubkey: reply.authorNpub.isEmpty ? nil : coreManager.safeCore.npubToHex(npub: reply.authorNpub),
                         size: 20,
                         fontSize: 8,
                         showBorder: false
@@ -705,29 +707,13 @@ struct FullConversationSheet: View {
     }
 
     /// Find the last agent that spoke in the conversation (like TUI's get_most_recent_agent_from_conversation)
+    /// Returns hex pubkey format for use with MessageComposerView
     private var lastAgentPubkey: String? {
-        // Get set of agent pubkeys for quick lookup
-        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
-
-        // Find the most recent message from an agent (not the user)
-        // Messages are sorted by createdAt, iterate to find the latest agent message
-        var latestAgentPubkey: String?
-        var latestTimestamp: UInt64 = 0
-
-        for msg in messages {
-            // Skip user messages
-            if msg.role == "user" {
-                continue
-            }
-
-            // Check if this message is from a known agent (authorNpub is actually hex pubkey)
-            if agentPubkeys.contains(msg.authorNpub) && msg.createdAt >= latestTimestamp {
-                latestTimestamp = msg.createdAt
-                latestAgentPubkey = msg.authorNpub
-            }
-        }
-
-        return latestAgentPubkey
+        LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            availableAgents: availableAgents,
+            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+        )
     }
 
     var body: some View {

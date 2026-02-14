@@ -348,20 +348,13 @@ struct MessagesView: View {
     @State private var availableAgents: [OnlineAgentInfo] = []
     @Environment(\.dismiss) private var dismiss
 
-    /// Find the last agent that spoke in the conversation
+    /// Find the last agent that spoke in the conversation (hex pubkey format)
     private var lastAgentPubkey: String? {
-        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
-        var latestAgentPubkey: String?
-        var latestTimestamp: UInt64 = 0
-
-        for msg in messages {
-            if msg.role == "user" { continue }
-            if agentPubkeys.contains(msg.authorNpub) && msg.createdAt >= latestTimestamp {
-                latestTimestamp = msg.createdAt
-                latestAgentPubkey = msg.authorNpub
-            }
-        }
-        return latestAgentPubkey
+        LastAgentFinder.findLastAgentPubkey(
+            messages: messages,
+            availableAgents: availableAgents,
+            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+        )
     }
 
     var body: some View {

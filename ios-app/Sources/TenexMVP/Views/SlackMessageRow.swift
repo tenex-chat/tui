@@ -69,7 +69,7 @@ struct SlackMessageRow: View {
                 HStack(spacing: 6) {
                     AgentAvatarView(
                         agentName: message.author,
-                        pubkey: message.authorNpub.isEmpty ? nil : npubToPubkey(message.authorNpub),
+                        pubkey: message.authorNpub.isEmpty ? nil : npubToHex(message.authorNpub),
                         size: avatarSize,
                         fontSize: avatarFontSize,
                         showBorder: false
@@ -196,11 +196,12 @@ struct SlackMessageRow: View {
     @ViewBuilder
     private var qTagContent: some View {
         // Inline ask event (if present)
-        if let askEvent = message.askEvent {
+        // Only render if we can convert npub to hex - required for answerAsk FFI call
+        if let askEvent = message.askEvent, let hexPubkey = npubToHex(message.authorNpub) {
             InlineAskView(
                 askEvent: askEvent,
                 askEventId: message.id,
-                askAuthorPubkey: npubToPubkey(message.authorNpub) ?? message.authorNpub,
+                askAuthorPubkey: hexPubkey,
                 conversationId: conversationId,
                 projectId: projectId
             )
@@ -223,11 +224,11 @@ struct SlackMessageRow: View {
 
     // MARK: - Helpers
 
-    /// Convert npub to hex pubkey if possible
-    private func npubToPubkey(_ npub: String) -> String? {
-        // npub is already a hex pubkey in this context (authorNpub contains hex pubkey)
-        // The naming is misleading in the model
-        return npub.isEmpty ? nil : npub
+    /// Convert npub (bech32) to hex pubkey format for use with AgentAvatarView and other components
+    private func npubToHex(_ npub: String) -> String? {
+        guard !npub.isEmpty else { return nil }
+        // Use the FFI function to convert npub (bech32) to hex pubkey
+        return coreManager.safeCore.npubToHex(npub: npub)
     }
 }
 
