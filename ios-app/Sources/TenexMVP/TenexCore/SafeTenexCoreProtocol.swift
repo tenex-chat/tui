@@ -69,6 +69,11 @@ protocol SafeTenexCoreProtocol: Actor {
     func getProfileName(pubkey: String) -> String
     func getProfilePicture(pubkey: String) throws -> String?
 
+    // MARK: - Pubkey Conversion
+    /// Convert an npub (bech32) string to a hex pubkey string.
+    /// Returns nil if the input is not a valid npub.
+    func npubToHex(npub: String) -> String?
+
     // MARK: - Thread Collapse State
     func getCollapsedThreadIds() throws -> [String]
     func isThreadCollapsed(threadId: String) -> Bool

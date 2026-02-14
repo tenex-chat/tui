@@ -564,3 +564,50 @@ enum TextUtilities {
         return String(text.prefix(maxLength)) + "..."
     }
 }
+
+// MARK: - Last Agent Finder
+
+/// Utility for finding the last agent that spoke in a conversation.
+/// Used by reply buttons to pre-select the agent to reply to.
+enum LastAgentFinder {
+    /// Finds the last agent (non-user) that spoke in the conversation.
+    /// Only considers agents that are currently available (online).
+    ///
+    /// - Parameters:
+    ///   - messages: The messages in the conversation
+    ///   - availableAgents: The currently available/online agents for the project
+    ///   - npubToHex: A function to convert npub (bech32) to hex pubkey
+    /// - Returns: The hex pubkey of the last agent that spoke, or nil if none found
+    static func findLastAgentPubkey(
+        messages: [MessageInfo],
+        availableAgents: [OnlineAgentInfo],
+        npubToHex: (String) -> String?
+    ) -> String? {
+        // Get set of agent pubkeys (hex format) for quick lookup
+        let agentPubkeys = Set(availableAgents.map { $0.pubkey })
+
+        // Find the most recent message from an agent (not the user)
+        var latestAgentHexPubkey: String?
+        var latestTimestamp: UInt64 = 0
+
+        for msg in messages {
+            // Skip user messages
+            if msg.role == "user" {
+                continue
+            }
+
+            // Convert authorNpub (bech32 format) to hex for comparison with agent pubkeys
+            guard let hexPubkey = npubToHex(msg.authorNpub) else {
+                continue
+            }
+
+            // Check if this message is from a known agent
+            if agentPubkeys.contains(hexPubkey) && msg.createdAt >= latestTimestamp {
+                latestTimestamp = msg.createdAt
+                latestAgentHexPubkey = hexPubkey
+            }
+        }
+
+        return latestAgentHexPubkey
+    }
+}
