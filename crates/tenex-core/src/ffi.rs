@@ -1739,6 +1739,18 @@ impl TenexCore {
         Ok(store.get_profile_picture(&pubkey))
     }
 
+    /// Convert an npub (bech32) string to a hex pubkey string.
+    /// Returns None if the input is not a valid npub.
+    /// This is useful for converting authorNpub (which is bech32 format) to hex
+    /// format needed by functions like get_profile_name.
+    pub fn npub_to_hex(&self, npub: String) -> Option<String> {
+        // Use nostr_sdk's PublicKey to parse the bech32 npub
+        match PublicKey::from_bech32(&npub) {
+            Ok(pk) => Some(pk.to_hex()),
+            Err(_) => None,
+        }
+    }
+
     /// Get the display name for a pubkey.
     /// Returns the profile name if available, otherwise formats the pubkey as npub.
     pub fn get_profile_name(&self, pubkey: String) -> String {

@@ -450,6 +450,16 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    // MARK: - Pubkey Conversion
+
+    /// Convert an npub (bech32) string to a hex pubkey string.
+    /// Returns nil if the input is not a valid npub.
+    func npubToHex(npub: String) -> String? {
+        profiler.measureFFI("npubToHex") {
+            core.npubToHex(npub: npub)
+        }
+    }
+
     // MARK: - Thread Collapse State
 
     /// Get collapsed thread IDs.
