@@ -919,6 +919,12 @@ struct MainTabView: View {
                 .nowPlayingInset(coreManager: coreManager)
             }
 
+            Tab("Reports", systemImage: "doc.richtext", value: 4) {
+                ReportsTabView()
+                    .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
+            }
+
             Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
                 NavigationStack {
                     FeedView()
