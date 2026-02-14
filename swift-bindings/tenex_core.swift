@@ -5287,6 +5287,10 @@ public struct ReportInfo {
      */
     public var id: String
     /**
+     * Project ID this report belongs to
+     */
+    public var projectId: String
+    /**
      * Title of the report
      */
     public var title: String
@@ -5326,6 +5330,9 @@ public struct ReportInfo {
          * Unique identifier (d-tag/slug)
          */id: String, 
         /**
+         * Project ID this report belongs to
+         */projectId: String, 
+        /**
          * Title of the report
          */title: String, 
         /**
@@ -5350,6 +5357,7 @@ public struct ReportInfo {
          * Tags/hashtags
          */tags: [String]) {
         self.id = id
+        self.projectId = projectId
         self.title = title
         self.summary = summary
         self.content = content
@@ -5369,6 +5377,9 @@ extension ReportInfo: Sendable {}
 extension ReportInfo: Equatable, Hashable {
     public static func ==(lhs: ReportInfo, rhs: ReportInfo) -> Bool {
         if lhs.id != rhs.id {
+            return false
+        }
+        if lhs.projectId != rhs.projectId {
             return false
         }
         if lhs.title != rhs.title {
@@ -5400,6 +5411,7 @@ extension ReportInfo: Equatable, Hashable {
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(id)
+        hasher.combine(projectId)
         hasher.combine(title)
         hasher.combine(summary)
         hasher.combine(content)
@@ -5421,6 +5433,7 @@ public struct FfiConverterTypeReportInfo: FfiConverterRustBuffer {
         return
             try ReportInfo(
                 id: FfiConverterString.read(from: &buf), 
+                projectId: FfiConverterString.read(from: &buf), 
                 title: FfiConverterString.read(from: &buf), 
                 summary: FfiConverterOptionString.read(from: &buf), 
                 content: FfiConverterString.read(from: &buf), 
@@ -5434,6 +5447,7 @@ public struct FfiConverterTypeReportInfo: FfiConverterRustBuffer {
 
     public static func write(_ value: ReportInfo, into buf: inout [UInt8]) {
         FfiConverterString.write(value.id, into: &buf)
+        FfiConverterString.write(value.projectId, into: &buf)
         FfiConverterString.write(value.title, into: &buf)
         FfiConverterOptionString.write(value.summary, into: &buf)
         FfiConverterString.write(value.content, into: &buf)
@@ -6829,6 +6843,11 @@ public enum DataChangeType {
     case inboxUpsert(item: InboxItem
     )
     /**
+     * A report was created or updated (kind:30023)
+     */
+    case reportUpsert(report: ReportInfo
+    )
+    /**
      * Project online status updated (kind:24010)
      */
     case projectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]
@@ -6893,25 +6912,28 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
         case 4: return .inboxUpsert(item: try FfiConverterTypeInboxItem.read(from: &buf)
         )
         
-        case 5: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeOnlineAgentInfo.read(from: &buf)
+        case 5: return .reportUpsert(report: try FfiConverterTypeReportInfo.read(from: &buf)
         )
         
-        case 6: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
+        case 6: return .projectStatusChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), isOnline: try FfiConverterBool.read(from: &buf), onlineAgents: try FfiConverterSequenceTypeOnlineAgentInfo.read(from: &buf)
         )
         
-        case 7: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
+        case 7: return .pendingBackendApproval(backendPubkey: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf)
         )
         
-        case 8: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        case 8: return .activeConversationsChanged(projectId: try FfiConverterString.read(from: &buf), projectATag: try FfiConverterString.read(from: &buf), activeConversationIds: try FfiConverterSequenceString.read(from: &buf)
         )
         
-        case 9: return .mcpToolsChanged
+        case 9: return .streamChunk(agentPubkey: try FfiConverterString.read(from: &buf), conversationId: try FfiConverterString.read(from: &buf), textDelta: try FfiConverterOptionString.read(from: &buf)
+        )
         
-        case 10: return .statsUpdated
+        case 10: return .mcpToolsChanged
         
-        case 11: return .diagnosticsUpdated
+        case 11: return .statsUpdated
         
-        case 12: return .general
+        case 12: return .diagnosticsUpdated
+        
+        case 13: return .general
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -6942,8 +6964,13 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             FfiConverterTypeInboxItem.write(item, into: &buf)
             
         
-        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+        case let .reportUpsert(report):
             writeInt(&buf, Int32(5))
+            FfiConverterTypeReportInfo.write(report, into: &buf)
+            
+        
+        case let .projectStatusChanged(projectId,projectATag,isOnline,onlineAgents):
+            writeInt(&buf, Int32(6))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterBool.write(isOnline, into: &buf)
@@ -6951,39 +6978,39 @@ public struct FfiConverterTypeDataChangeType: FfiConverterRustBuffer {
             
         
         case let .pendingBackendApproval(backendPubkey,projectATag):
-            writeInt(&buf, Int32(6))
+            writeInt(&buf, Int32(7))
             FfiConverterString.write(backendPubkey, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             
         
         case let .activeConversationsChanged(projectId,projectATag,activeConversationIds):
-            writeInt(&buf, Int32(7))
+            writeInt(&buf, Int32(8))
             FfiConverterString.write(projectId, into: &buf)
             FfiConverterString.write(projectATag, into: &buf)
             FfiConverterSequenceString.write(activeConversationIds, into: &buf)
             
         
         case let .streamChunk(agentPubkey,conversationId,textDelta):
-            writeInt(&buf, Int32(8))
+            writeInt(&buf, Int32(9))
             FfiConverterString.write(agentPubkey, into: &buf)
             FfiConverterString.write(conversationId, into: &buf)
             FfiConverterOptionString.write(textDelta, into: &buf)
             
         
         case .mcpToolsChanged:
-            writeInt(&buf, Int32(9))
-        
-        
-        case .statsUpdated:
             writeInt(&buf, Int32(10))
         
         
-        case .diagnosticsUpdated:
+        case .statsUpdated:
             writeInt(&buf, Int32(11))
         
         
-        case .general:
+        case .diagnosticsUpdated:
             writeInt(&buf, Int32(12))
+        
+        
+        case .general:
+            writeInt(&buf, Int32(13))
         
         }
     }
