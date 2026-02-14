@@ -99,7 +99,6 @@ impl ProjectStatus {
         let mut branches: Vec<String> = Vec::new();
         let mut all_models: Vec<String> = Vec::new();
         let mut all_tools: Vec<String> = Vec::new();
-        let mut is_first_agent = true;
 
         // First pass: collect project coordinate, agents, branches, all models, and all tools
         for tag in &tags {
@@ -115,15 +114,16 @@ impl ProjectStatus {
                 }
                 "agent" => {
                     if tag.len() >= 3 {
+                        // PM detection: check for "pm" marker in tag[3] (if present)
+                        let is_pm = tag.len() >= 4 && tag[3] == "pm";
                         let agent = ProjectAgent {
                             pubkey: tag[1].clone(),
                             name: tag[2].clone(),
-                            is_pm: is_first_agent,
+                            is_pm,
                             model: None,
                             tools: Vec::new(),
                         };
                         agent_map.insert(tag[2].clone(), agent);
-                        is_first_agent = false;
                     }
                 }
                 "branch" => {
@@ -611,4 +611,105 @@ mod tests {
     // - Import an event into it
     // - Query it to get a Note reference
     // This is better suited for integration tests rather than unit tests.
+
+    /// Test PM detection based on ["pm"] marker in agent tag (4th element)
+    #[test]
+    fn test_pm_tag_detection() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "agent1_pubkey", "architect", "pm"],
+                ["agent", "agent2_pubkey", "claude-code"],
+                ["agent", "agent3_pubkey", "researcher"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // Find each agent and verify PM status
+        let architect = status.agents.iter().find(|a| a.name == "architect").unwrap();
+        let claude_code = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
+        let researcher = status.agents.iter().find(|a| a.name == "researcher").unwrap();
+
+        assert!(architect.is_pm, "architect should be PM (has 'pm' marker in tag)");
+        assert!(!claude_code.is_pm, "claude-code should NOT be PM");
+        assert!(!researcher.is_pm, "researcher should NOT be PM");
+
+        // Verify pm_agent() returns the correct agent
+        let pm = status.pm_agent().expect("Should have a PM agent");
+        assert_eq!(pm.name, "architect");
+    }
+
+    /// Test PM detection when PM marker is on a non-first agent
+    #[test]
+    fn test_pm_tag_on_non_first_agent() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "agent1_pubkey", "researcher"],
+                ["agent", "agent2_pubkey", "execution-coordinator", "pm"],
+                ["agent", "agent3_pubkey", "claude-code"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // The PM is NOT the first agent - it's the one with the "pm" marker
+        let researcher = status.agents.iter().find(|a| a.name == "researcher").unwrap();
+        let exec_coord = status.agents.iter().find(|a| a.name == "execution-coordinator").unwrap();
+        let claude_code = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
+
+        assert!(!researcher.is_pm, "researcher should NOT be PM (no 'pm' marker)");
+        assert!(exec_coord.is_pm, "execution-coordinator should be PM (has 'pm' marker)");
+        assert!(!claude_code.is_pm, "claude-code should NOT be PM");
+
+        // Verify pm_agent() returns the correct agent
+        let pm = status.pm_agent().expect("Should have a PM agent");
+        assert_eq!(pm.name, "execution-coordinator");
+    }
+
+    /// Test handling of agents without any PM marker
+    #[test]
+    fn test_no_pm_marker() {
+        let json = r#"{
+            "kind": 24010,
+            "pubkey": "backend_pubkey",
+            "created_at": 1706400000,
+            "tags": [
+                ["a", "31933:user_pubkey:project_id"],
+                ["agent", "agent1_pubkey", "agent1"],
+                ["agent", "agent2_pubkey", "agent2"]
+            ]
+        }"#;
+
+        let status = ProjectStatus::from_json(json).unwrap();
+
+        // No agent should be marked as PM
+        assert!(!status.agents.iter().any(|a| a.is_pm), "No agent should be PM when no 'pm' marker exists");
+        assert!(status.pm_agent().is_none(), "pm_agent() should return None");
+    }
+
+    /// Test PM detection with real fixture data containing the pm marker
+    #[test]
+    fn test_pm_tag_in_real_fixture() {
+        // The real fixture has: ["agent","bd2b5117...","architect-orchestrator","pm"]
+        let json = include_str!("../../tests/fixtures/real_status_event_128_tools.json");
+
+        let status = ProjectStatus::from_json(json).expect("Failed to parse real event");
+
+        // Find the architect-orchestrator agent (should be PM based on the fixture)
+        let architect = status.agents.iter().find(|a| a.name == "architect-orchestrator");
+        assert!(architect.is_some(), "Should have architect-orchestrator agent");
+        assert!(architect.unwrap().is_pm, "architect-orchestrator should be PM (has 'pm' marker in fixture)");
+
+        // Verify pm_agent() returns the correct agent
+        let pm = status.pm_agent().expect("Should have a PM agent");
+        assert_eq!(pm.name, "architect-orchestrator");
+    }
 }

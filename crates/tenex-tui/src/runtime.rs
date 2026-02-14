@@ -484,6 +484,9 @@ fn handle_core_events(
                     app.show_backend_approval_modal(pending.backend_pubkey, pending.project_a_tag);
                 }
             }
+            CoreEvent::ReportUpsert(_report) => {
+                // Reports are already stored by the core; no TUI-specific handling needed
+            }
         }
     }
 }
