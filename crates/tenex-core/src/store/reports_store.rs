@@ -95,12 +95,14 @@ impl ReportsStore {
         }
     }
 
-    pub fn handle_report_event(&mut self, note: &Note, known_project_a_tags: &[String]) {
+    pub fn handle_report_event(&mut self, note: &Note, known_project_a_tags: &[String]) -> Option<Report> {
         if let Some(report) = Report::from_note(note) {
             if known_project_a_tags.iter().any(|tag| *tag == report.project_a_tag) {
-                self.add_report(report);
+                self.add_report(report.clone());
+                return Some(report);
             }
         }
+        None
     }
 
     // ===== Loader =====

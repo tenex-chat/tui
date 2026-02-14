@@ -45,6 +45,9 @@ final class TenexEventHandler: EventCallback {
                     }
                 }
 
+            case .reportUpsert(let report):
+                coreManager.applyReportUpsert(report)
+
             case .projectStatusChanged(let projectId, let projectATag, let isOnline, let onlineAgents):
                 coreManager.applyProjectStatusChanged(
                     projectId: projectId,

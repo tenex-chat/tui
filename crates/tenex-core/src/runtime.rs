@@ -87,6 +87,12 @@ pub fn process_note_keys(
                     // Operations status - already handled by data_store.handle_event
                     // No CoreEvent needed as UI will query data_store directly
                 }
+                30023 => {
+                    // Report upsert - use the event returned by handle_event
+                    if let Some(event) = status_event {
+                        events.push(event);
+                    }
+                }
                 _ => {}
             }
         }
@@ -133,8 +139,9 @@ impl CoreRuntime {
 
         // NOTE: Ephemeral kinds (24010, 24133) are intentionally excluded
         // They are processed directly via DataChange channel, not through nostrdb
+        // Kind 30023 = NIP-23 long-form content (reports/articles)
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
+            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023])
             .build();
         let ndb_subscription = ndb.subscribe(&[ndb_filter])?;
         let ndb_stream = SubscriptionStream::new((*ndb).clone(), ndb_subscription);

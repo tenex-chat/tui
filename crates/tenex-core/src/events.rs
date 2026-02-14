@@ -1,4 +1,4 @@
-use crate::models::{Message, ProjectStatus};
+use crate::models::{Message, ProjectStatus, Report};
 
 /// A pending backend approval request - triggered when we receive a status event
 /// from an unknown backend that isn't in approved or blocked lists.
@@ -18,4 +18,6 @@ pub enum CoreEvent {
     ProjectStatus(ProjectStatus),
     /// Backend approval request - UI should show modal to approve/block
     PendingBackendApproval(PendingBackendApproval),
+    /// Report created or updated (kind:30023)
+    ReportUpsert(Report),
 }

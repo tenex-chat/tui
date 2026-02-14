@@ -49,7 +49,7 @@ use nostr_sdk::prelude::*;
 use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction};
 
 use crate::models::agent_definition::AgentDefinition;
-use crate::models::{ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Thread};
+use crate::models::{ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, Thread};
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
 use crate::stats::{query_ndb_stats, SharedEventFeed, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
@@ -449,6 +449,44 @@ fn process_note_keys_with_deltas(
                         }
                     }
                 }
+                30023 => {
+                    // Report/article event
+                    if let Some(report) = Report::from_note(&note) {
+                        // Find the project ID for this report
+                        if let Some(project) = store.get_projects().iter().find(|p| p.a_tag() == report.project_a_tag) {
+                            let project_id = project.id.clone();
+                            let author_name = store.get_profile_name(&report.author);
+                            let author_npub = hex::decode(&report.author)
+                                .ok()
+                                .and_then(|bytes| {
+                                    if bytes.len() == 32 {
+                                        let mut arr = [0u8; 32];
+                                        arr.copy_from_slice(&bytes);
+                                        nostr_sdk::PublicKey::from_slice(&arr).ok()
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .and_then(|pk| pk.to_bech32().ok())
+                                .unwrap_or_else(|| format!("{}...", &report.author[..16.min(report.author.len())]));
+
+                            deltas.push(DataChangeType::ReportUpsert {
+                                report: ReportInfo {
+                                    id: report.slug.clone(),
+                                    project_id,
+                                    title: report.title.clone(),
+                                    summary: Some(report.summary.clone()),
+                                    content: report.content.clone(),
+                                    author: author_name,
+                                    author_npub,
+                                    created_at: report.created_at,
+                                    updated_at: report.created_at,
+                                    tags: report.hashtags.clone(),
+                                },
+                            });
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -578,7 +616,8 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             DataChangeType::MessageAppended { .. }
             | DataChangeType::ConversationUpsert { .. }
             | DataChangeType::ProjectUpsert { .. }
-            | DataChangeType::InboxUpsert { .. } => {
+            | DataChangeType::InboxUpsert { .. }
+            | DataChangeType::ReportUpsert { .. } => {
                 stats_changed = true;
                 diagnostics_changed = true;
             }
@@ -805,6 +844,8 @@ pub struct MessageInfo {
 pub struct ReportInfo {
     /// Unique identifier (d-tag/slug)
     pub id: String,
+    /// Project ID this report belongs to
+    pub project_id: String,
     /// Title of the report
     pub title: String,
     /// Summary/excerpt
@@ -1369,6 +1410,8 @@ pub enum DataChangeType {
     ProjectUpsert { project: ProjectInfo },
     /// An inbox item was created or updated
     InboxUpsert { item: InboxItem },
+    /// A report was created or updated (kind:30023)
+    ReportUpsert { report: ReportInfo },
     /// Project online status updated (kind:24010)
     ProjectStatusChanged { project_id: String, project_a_tag: String, is_online: bool, online_agents: Vec<OnlineAgentInfo> },
     /// Backend approval required for a project status event
@@ -1532,7 +1575,7 @@ impl TenexCore {
 
         // Subscribe to relevant kinds in nostrdb (mirrors CoreRuntime)
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 513, 4129, 4201])
+            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023])
             .build();
         let ndb_subscription = match ndb.subscribe(&[ndb_filter]) {
             Ok(sub) => sub,
@@ -2102,6 +2145,7 @@ impl TenexCore {
 
                 ReportInfo {
                     id: r.slug.clone(),
+                    project_id: project_id.clone(),
                     title: r.title.clone(),
                     summary: Some(r.summary.clone()), // Report has String, not Option<String>
                     content: r.content.clone(),
