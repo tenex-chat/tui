@@ -735,8 +735,8 @@ impl AppDataStore {
             24133 => { self.operations.handle_operations_status_event(note); None }
             30023 => {
                 let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-                self.reports.handle_report_event(note, &known_a_tags);
-                None
+                self.reports.handle_report_event(note, &known_a_tags)
+                    .map(crate::events::CoreEvent::ReportUpsert)
             }
             _ => None
         }

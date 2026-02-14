@@ -85,6 +85,7 @@ class TenexCoreManager: ObservableObject {
     @Published var projects: [ProjectInfo] = []
     @Published var conversations: [ConversationFullInfo] = []
     @Published var inboxItems: [InboxItem] = []
+    @Published var reports: [ReportInfo] = []
     @Published var messagesByConversation: [String: [MessageInfo]] = [:]
     @Published private(set) var statsVersion: UInt64 = 0
     @Published private(set) var diagnosticsVersion: UInt64 = 0
@@ -236,6 +237,19 @@ class TenexCoreManager: ObservableObject {
         }
         updated.sort { $0.createdAt > $1.createdAt }
         inboxItems = updated
+    }
+
+    @MainActor
+    func applyReportUpsert(_ report: ReportInfo) {
+        var updated = reports
+        if let index = updated.firstIndex(where: { $0.id == report.id && $0.projectId == report.projectId }) {
+            updated[index] = report
+        } else {
+            updated.append(report)
+        }
+        // Sort by updated date (newest first)
+        updated.sort { $0.updatedAt > $1.updatedAt }
+        reports = updated
     }
 
     @MainActor

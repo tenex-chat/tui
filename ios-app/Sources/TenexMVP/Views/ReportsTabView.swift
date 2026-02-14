@@ -36,11 +36,8 @@ struct ReportsTabView: View {
             viewModel.configure(with: coreManager)
             await viewModel.loadReports()
         }
-        .onChange(of: coreManager.projects) { _, _ in
-            Task {
-                await viewModel.loadReports()
-            }
-        }
+        // Reports now update reactively via TenexEventHandler -> coreManager.reports -> viewModel
+        // No need to observe coreManager.projects for report updates
     }
 
     // MARK: - Split View Layout (iPad/Mac)
@@ -81,7 +78,7 @@ struct ReportsTabView: View {
             if viewModel.filteredReports.isEmpty {
                 emptyStateView
             } else {
-                List(viewModel.filteredReports, id: \.id, selection: useSplitView ? $selectedReport : nil) { report in
+                List(viewModel.filteredReports, id: \.self, selection: useSplitView ? $selectedReport : nil) { report in
                     if useSplitView {
                         ReportsTabRowView(
                             report: report,
@@ -112,12 +109,6 @@ struct ReportsTabView: View {
                 if viewModel.isLoading {
                     ProgressView()
                         .scaleEffect(0.8)
-                } else {
-                    Button {
-                        Task { await viewModel.refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
                 }
             }
         }
