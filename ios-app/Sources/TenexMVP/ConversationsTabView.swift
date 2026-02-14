@@ -178,6 +178,8 @@ struct ConversationsTabView: View {
     @State private var projectForNewConversation: ProjectInfo?
     @State private var showNewConversation = false
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
+    // Conversation reference feature state - uses .sheet(item:) pattern for safe state management
+    @State private var conversationToReference: ConversationFullInfo?
     #if os(macOS)
     @Environment(\.openWindow) private var openWindow
     #endif
@@ -278,6 +280,14 @@ struct ConversationsTabView: View {
                                 } label: {
                                     Label("Archive", systemImage: "archivebox")
                                 }
+                            }
+                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                                Button {
+                                    conversationToReference = conversation
+                                } label: {
+                                    Label("Reference", systemImage: "link")
+                                }
+                                .tint(.blue)
                             }
                         }
                     }
@@ -420,6 +430,18 @@ struct ConversationsTabView: View {
                 if let project = projectForNewConversation {
                     MessageComposerView(project: project)
                         .environmentObject(coreManager)
+                }
+            }
+            .sheet(item: $conversationToReference) { conversation in
+                // Extract project from conversation's projectATag
+                let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+                if let project = coreManager.projects.first(where: { $0.id == projectId }) {
+                    MessageComposerView(
+                        project: project,
+                        initialContent: ConversationFormatters.generateContextMessage(conversation: conversation),
+                        referenceConversationId: conversation.id
+                    )
+                    .environmentObject(coreManager)
                 }
             }
             .task {

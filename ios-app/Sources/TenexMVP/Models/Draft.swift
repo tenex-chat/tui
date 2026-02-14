@@ -15,6 +15,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case selectedNudgeIds
         case isNewConversation
         case lastEdited
+        case referenceConversationId
     }
     /// Unique identifier for the draft
     var id: String
@@ -43,10 +44,14 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Timestamp of last edit
     var lastEdited: Date
 
+    /// Reference conversation ID for context tagging (used by "Reference this conversation" feature)
+    /// When set, adds a ["context", "<conversation-id>"] tag to the sent event
+    var referenceConversationId: String?
+
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
-    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = []) {
+    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = nil
         self.projectId = projectId
@@ -56,10 +61,11 @@ struct Draft: Codable, Identifiable, Equatable {
         self.selectedNudgeIds = selectedNudgeIds
         self.isNewConversation = true
         self.lastEdited = Date()
+        self.referenceConversationId = referenceConversationId
     }
 
     /// Create a new draft for an existing conversation
-    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = []) {
+    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = conversationId
         self.projectId = projectId
@@ -69,12 +75,13 @@ struct Draft: Codable, Identifiable, Equatable {
         self.selectedNudgeIds = selectedNudgeIds
         self.isNewConversation = false
         self.lastEdited = Date()
+        self.referenceConversationId = referenceConversationId
     }
 
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId and selectedNudgeIds were added
+    /// Handles drafts from before projectId, selectedNudgeIds, and referenceConversationId were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -92,6 +99,8 @@ struct Draft: Codable, Identifiable, Equatable {
         self.selectedNudgeIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedNudgeIds) ?? []
         self.isNewConversation = try container.decode(Bool.self, forKey: .isNewConversation)
         self.lastEdited = try container.decode(Date.self, forKey: .lastEdited)
+        // Migration: referenceConversationId is new, default to nil
+        self.referenceConversationId = try container.decodeIfPresent(String.self, forKey: .referenceConversationId)
     }
 
     // MARK: - Computed Properties
@@ -147,6 +156,7 @@ struct Draft: Codable, Identifiable, Equatable {
         content = ""
         agentPubkey = nil
         selectedNudgeIds = []
+        referenceConversationId = nil
         lastEdited = Date()
     }
 
@@ -165,6 +175,18 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Clear all selected nudges
     mutating func clearNudges() {
         selectedNudgeIds = []
+        lastEdited = Date()
+    }
+
+    /// Set the reference conversation ID for context tagging
+    mutating func setReferenceConversation(_ conversationId: String?) {
+        referenceConversationId = conversationId
+        lastEdited = Date()
+    }
+
+    /// Clear the reference conversation
+    mutating func clearReferenceConversation() {
+        referenceConversationId = nil
         lastEdited = Date()
     }
 }

@@ -573,6 +573,50 @@ enum ConversationFormatters {
             return "<1m"
         }
     }
+
+    // MARK: - Conversation Reference
+
+    /// Get the short ID (first 12 hex characters) of a conversation ID
+    static func shortId(_ conversationId: String) -> String {
+        String(conversationId.prefix(12))
+    }
+
+    /// Generate a context message for referencing a conversation.
+    /// This message instructs the agent to inspect the referenced conversation for context.
+    ///
+    /// - Parameters:
+    ///   - conversationId: The full conversation ID to reference
+    ///   - messages: The messages in the conversation (for token count estimation)
+    /// - Returns: A formatted context message string
+    static func generateContextMessage(conversationId: String, messages: [MessageInfo]) -> String {
+        let shortConversationId = shortId(conversationId)
+
+        // Calculate approximate token count: total characters / 4
+        let totalChars = messages.reduce(0) { $0 + $1.content.count }
+        let tokenCount = totalChars / 4
+
+        return """
+        This message is in the context of conversation id \(shortConversationId) (full: \(conversationId)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
+        """
+    }
+
+    /// Generate a context message for referencing a conversation using ConversationFullInfo.
+    /// Uses message count as a proxy for token estimation when messages aren't loaded.
+    ///
+    /// - Parameters:
+    ///   - conversation: The conversation to reference
+    ///   - estimatedTokensPerMessage: Average tokens per message (default: 200)
+    /// - Returns: A formatted context message string
+    static func generateContextMessage(conversation: ConversationFullInfo, estimatedTokensPerMessage: Int = 200) -> String {
+        let shortConversationId = shortId(conversation.id)
+
+        // Estimate tokens based on message count when actual content isn't available
+        let tokenCount = Int(conversation.messageCount) * estimatedTokensPerMessage
+
+        return """
+        This message is in the context of conversation id \(shortConversationId) (full: \(conversation.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
+        """
+    }
 }
 
 // MARK: - Status Color Helper
