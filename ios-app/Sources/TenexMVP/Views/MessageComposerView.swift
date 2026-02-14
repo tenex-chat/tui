@@ -21,6 +21,12 @@ struct MessageComposerView: View {
     /// Initial agent pubkey to pre-select (e.g., last agent that spoke in conversation)
     let initialAgentPubkey: String?
 
+    /// Initial content to pre-populate the composer with (e.g., context message for conversation reference)
+    let initialContent: String?
+
+    /// Reference conversation ID for context tagging (adds ["context", "<id>"] tag when sent)
+    let referenceConversationId: String?
+
     /// Callback when message is sent successfully
     var onSend: ((SendMessageResult) -> Void)?
 
@@ -142,6 +148,8 @@ struct MessageComposerView: View {
         conversationId: String? = nil,
         conversationTitle: String? = nil,
         initialAgentPubkey: String? = nil,
+        initialContent: String? = nil,
+        referenceConversationId: String? = nil,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
@@ -149,6 +157,8 @@ struct MessageComposerView: View {
         self.conversationId = conversationId
         self.conversationTitle = conversationTitle
         self.initialAgentPubkey = initialAgentPubkey
+        self.initialContent = initialContent
+        self.referenceConversationId = referenceConversationId
         self.onSend = onSend
         self.onDismiss = onDismiss
 
@@ -157,12 +167,17 @@ struct MessageComposerView: View {
 
         // Initialize draft (will be updated in onAppear)
         if let conversationId = conversationId, let projectId = project?.id {
-            _draft = State(initialValue: Draft(conversationId: conversationId, projectId: projectId))
+            _draft = State(initialValue: Draft(conversationId: conversationId, projectId: projectId, referenceConversationId: referenceConversationId))
         } else if let projectId = project?.id {
-            _draft = State(initialValue: Draft(projectId: projectId))
+            _draft = State(initialValue: Draft(projectId: projectId, content: initialContent ?? "", referenceConversationId: referenceConversationId))
         } else {
             // No project yet - will be set when project is selected
-            _draft = State(initialValue: Draft(projectId: ""))
+            _draft = State(initialValue: Draft(projectId: "", content: initialContent ?? "", referenceConversationId: referenceConversationId))
+        }
+
+        // Initialize localText with initial content if provided
+        if let content = initialContent {
+            _localText = State(initialValue: content)
         }
     }
 
@@ -797,17 +812,46 @@ struct MessageComposerView: View {
             // CRITICAL DATA SAFETY: Only apply loaded draft if user hasn't made edits yet
             // This prevents async load from overwriting live user typing
             if !isDirty {
-                draft = loadedDraft
-                // PERFORMANCE FIX: Sync localText with loaded draft content
-                // Flag is consumed by scheduleContentSync to suppress isDirty marking
-                // LOW FIX: Only set flag when value will actually change, otherwise onChange
-                // won't fire and the flag remains true, causing first user keystroke to be ignored
-                if loadedDraft.content != localText {
-                    isProgrammaticUpdate = true
-                    localText = loadedDraft.content
+                // CONVERSATION REFERENCE: If we have initial content (e.g., from "Reference this conversation"),
+                // use it instead of the loaded draft content. This ensures the context message is shown.
+                if let initialContent = initialContent, !initialContent.isEmpty {
+                    var modifiedDraft = loadedDraft
+                    modifiedDraft.updateContent(initialContent)
+                    modifiedDraft.setReferenceConversation(referenceConversationId)
+                    draft = modifiedDraft
+
+                    // Sync localText with initial content
+                    if initialContent != localText {
+                        isProgrammaticUpdate = true
+                        localText = initialContent
+                    }
+
+                    // Persist the initial content and reference conversation ID to draft storage
+                    await draftManager.updateContent(initialContent, conversationId: conversationId, projectId: projectId)
+                    await draftManager.updateReferenceConversation(referenceConversationId, conversationId: conversationId, projectId: projectId)
+
+                    print("[MessageComposerView] Applied initial content from conversation reference")
+                } else {
+                    draft = loadedDraft
+                    // PERFORMANCE FIX: Sync localText with loaded draft content
+                    // Flag is consumed by scheduleContentSync to suppress isDirty marking
+                    // LOW FIX: Only set flag when value will actually change, otherwise onChange
+                    // won't fire and the flag remains true, causing first user keystroke to be ignored
+                    if loadedDraft.content != localText {
+                        isProgrammaticUpdate = true
+                        localText = loadedDraft.content
+                    }
                 }
             } else {
                 print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
+
+                // RACE CONDITION FIX: Persist referenceConversationId even if user typed before load completed.
+                // The reference ID must always be saved regardless of dirty state, otherwise it can be lost
+                // when scheduleContentSync flips isDirty before this async block runs.
+                if let refId = referenceConversationId {
+                    await draftManager.updateReferenceConversation(refId, conversationId: conversationId, projectId: projectId)
+                    print("[MessageComposerView] Persisted referenceConversationId despite isDirty=true")
+                }
             }
 
             // BLOCKER #1 FIX: Mark loading as complete to enable editing

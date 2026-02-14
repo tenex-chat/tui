@@ -284,6 +284,33 @@ final class DraftManager {
         scheduleSave()
     }
 
+    /// Update a draft's reference conversation ID with debounced auto-save
+    /// - Parameters:
+    ///   - referenceConversationId: The conversation ID to reference (nil to clear)
+    ///   - conversationId: The conversation ID (nil for new thread)
+    ///   - projectId: The project ID
+    func updateReferenceConversation(_ referenceConversationId: String?, conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
+        let key = Draft.storageKey(for: conversationId, projectId: projectId)
+
+        if var draft = drafts[key] {
+            draft.setReferenceConversation(referenceConversationId)
+            drafts[key] = draft
+        } else {
+            var newDraft: Draft
+            if let conversationId = conversationId {
+                newDraft = Draft(conversationId: conversationId, projectId: projectId, referenceConversationId: referenceConversationId)
+            } else {
+                newDraft = Draft(projectId: projectId, referenceConversationId: referenceConversationId)
+            }
+            drafts[key] = newDraft
+        }
+
+        scheduleSave()
+    }
+
     /// Force save immediately, cancelling any pending debounced save
     /// - Note: This is truly synchronous - blocks until save completes
     /// - Throws: Error if save fails (including if load failed and saves are blocked)
