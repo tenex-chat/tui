@@ -450,16 +450,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    // MARK: - Pubkey Conversion
-
-    /// Convert an npub (bech32) string to a hex pubkey string.
-    /// Returns nil if the input is not a valid npub.
-    func npubToHex(npub: String) -> String? {
-        profiler.measureFFI("npubToHex") {
-            core.npubToHex(npub: npub)
-        }
-    }
-
     // MARK: - Thread Collapse State
 
     /// Get collapsed thread IDs.
@@ -530,8 +520,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     selectedVoiceIds: settings.selectedVoiceIds,
                     openrouterModel: settings.openrouterModel,
                     audioPrompt: settings.audioPrompt,
-                    enabled: settings.enabled,
-                    ttsInactivityThresholdSecs: settings.ttsInactivityThresholdSecs
+                    enabled: settings.enabled
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
@@ -548,22 +537,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                 throw CoreError.tenex(error)
             }
         }
-    }
-
-    /// Set TTS inactivity threshold (seconds of inactivity before TTS fires)
-    func setTtsInactivityThreshold(secs: UInt64) throws {
-        try profiler.measureFFI("setTtsInactivityThreshold") {
-            do {
-                try core.setTtsInactivityThreshold(secs: secs)
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
-
-    /// Get the default audio prompt
-    func getDefaultAudioPrompt() -> String {
-        core.getDefaultAudioPrompt()
     }
 
     /// Set audio prompt template
@@ -623,6 +596,49 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// List all audio notifications
+    func listAudioNotifications() throws -> [AudioNotificationInfo] {
+        try profiler.measureFFI("listAudioNotifications") {
+            do {
+                return try core.listAudioNotifications()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Delete an audio notification by ID
+    func deleteAudioNotification(id: String) throws {
+        try profiler.measureFFI("deleteAudioNotification") {
+            do {
+                try core.deleteAudioNotification(id: id)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch ElevenLabs voices
+    func fetchElevenlabsVoices(apiKey: String) throws -> [VoiceInfo] {
+        try profiler.measureFFI("fetchElevenlabsVoices") {
+            do {
+                return try core.fetchElevenlabsVoices(apiKey: apiKey)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Fetch OpenRouter models
+    func fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
+        try profiler.measureFFI("fetchOpenrouterModels") {
+            do {
+                return try core.fetchOpenrouterModels(apiKey: apiKey)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
 
     // MARK: - Misc
 

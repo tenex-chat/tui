@@ -19,7 +19,6 @@ struct AISettingsView: View {
     @State private var audioPrompt = ""
     @State private var selectedModel: String?
     @State private var selectedVoiceIds: Set<String> = []
-    @State private var ttsInactivityThreshold: Double = 120
 
     // Available options
     @State private var availableVoices: [VoiceInfo] = []
@@ -76,20 +75,8 @@ struct AISettingsView: View {
                             .onChange(of: audioEnabled) { _, newValue in
                                 saveAudioEnabled(newValue)
                             }
-
-                        Stepper(
-                            "Inactivity Threshold: \(Int(ttsInactivityThreshold))s",
-                            value: $ttsInactivityThreshold,
-                            in: 0...600,
-                            step: 30
-                        )
-                        .onChange(of: ttsInactivityThreshold) { _, newValue in
-                            saveTtsInactivityThreshold(UInt64(newValue))
-                        }
                     } header: {
                         Text("Audio Notifications")
-                    } footer: {
-                        Text("TTS only fires after you've been inactive in a conversation for the threshold duration. Set to 0 to always fire.")
                     }
 
                     // Voice & Model selection rows that open sheets
@@ -357,7 +344,6 @@ struct AISettingsView: View {
                     audioPrompt = settings.audioPrompt
                     selectedModel = settings.openrouterModel
                     selectedVoiceIds = Set(settings.selectedVoiceIds)
-                    ttsInactivityThreshold = Double(settings.ttsInactivityThresholdSecs)
                 }
                 isLoadingSettings = false
             }
@@ -453,19 +439,6 @@ struct AISettingsView: View {
         }
     }
 
-    private func saveTtsInactivityThreshold(_ secs: UInt64) {
-        Task {
-            do {
-                try await coreManager.safeCore.setTtsInactivityThreshold(secs: secs)
-            } catch {
-                await MainActor.run {
-                    errorMessage = "Failed to save threshold: \(error.localizedDescription)"
-                    showError = true
-                }
-            }
-        }
-    }
-
     private func saveAudioPrompt() {
         Task {
             do {
@@ -479,9 +452,16 @@ struct AISettingsView: View {
         }
     }
 
+    /// Default audio prompt used for text-to-speech massage
+    private static let defaultAudioPrompt = """
+        You are a text preprocessor for a text-to-speech system. Your task is to convert technical \
+        conversation text into natural, speakable prose. Remove code blocks, simplify technical jargon, \
+        and focus on the key message being communicated.
+        """
+
     private func resetAudioPrompt() {
+        let defaultPrompt = Self.defaultAudioPrompt
         Task {
-            let defaultPrompt = await coreManager.safeCore.getDefaultAudioPrompt()
             do {
                 try await coreManager.safeCore.setAudioPrompt(prompt: defaultPrompt)
                 await MainActor.run {
@@ -553,7 +533,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let voices = try await TenexDirect.fetchElevenLabsVoices(apiKey: apiKey)
+                let voices = try await coreManager.safeCore.fetchElevenlabsVoices(apiKey: apiKey)
                 await MainActor.run {
                     availableVoices = voices
                     isLoadingVoices = false
@@ -583,7 +563,7 @@ struct AISettingsView: View {
             }
 
             do {
-                let models = try await TenexDirect.fetchOpenRouterModels(apiKey: apiKey)
+                let models = try await coreManager.safeCore.fetchOpenrouterModels(apiKey: apiKey)
                 await MainActor.run {
                     availableModels = models
                     isLoadingModels = false

@@ -454,9 +454,10 @@ class TenexCoreManager: ObservableObject {
         conversationId: String? = nil
     ) async {
         // Check inactivity threshold: skip TTS if user was recently active in this conversation
+        // Using fixed 120 second threshold
         if let convId = conversationId,
            let lastActivity = lastUserActivityByConversation[convId] {
-            let threshold: UInt64 = (try? core.getAiAudioSettings().ttsInactivityThresholdSecs) ?? 120
+            let threshold: UInt64 = 120
             let now = UInt64(Date().timeIntervalSince1970)
             if now - lastActivity < threshold {
                 print("[TenexCoreManager] Audio notification skipped: user active \(now - lastActivity)s ago (threshold: \(threshold)s)")

@@ -180,7 +180,7 @@ struct ConversationDetailView: View {
         return LastAgentFinder.findLastAgentPubkey(
             messages: viewModel.messages,
             availableAgents: availableAgents,
-            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+            npubToHex: { Bech32.npubToHex($0) }
         )
     }
 
@@ -192,7 +192,7 @@ struct ConversationDetailView: View {
                 HStack(spacing: 6) {
                     AgentAvatarView(
                         agentName: reply.author,
-                        pubkey: reply.authorNpub.isEmpty ? nil : coreManager.safeCore.npubToHex(npub: reply.authorNpub),
+                        pubkey: reply.authorNpub.isEmpty ? nil : Bech32.npubToHex(reply.authorNpub),
                         size: 20,
                         fontSize: 8,
                         showBorder: false
@@ -712,7 +712,7 @@ struct FullConversationSheet: View {
         LastAgentFinder.findLastAgentPubkey(
             messages: messages,
             availableAgents: availableAgents,
-            npubToHex: { coreManager.safeCore.npubToHex(npub: $0) }
+            npubToHex: { Bech32.npubToHex($0) }
         )
     }
 

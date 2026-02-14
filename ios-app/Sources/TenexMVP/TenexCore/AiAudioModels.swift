@@ -9,7 +9,6 @@ public struct AiAudioSettings {
     public let openrouterModel: String?
     public let audioPrompt: String
     public let enabled: Bool
-    public let ttsInactivityThresholdSecs: UInt64
 
     public init(
         elevenlabsApiKeyConfigured: Bool,
@@ -17,8 +16,7 @@ public struct AiAudioSettings {
         selectedVoiceIds: [String],
         openrouterModel: String?,
         audioPrompt: String,
-        enabled: Bool,
-        ttsInactivityThresholdSecs: UInt64 = 120
+        enabled: Bool
     ) {
         self.elevenlabsApiKeyConfigured = elevenlabsApiKeyConfigured
         self.openrouterApiKeyConfigured = openrouterApiKeyConfigured
@@ -26,7 +24,6 @@ public struct AiAudioSettings {
         self.openrouterModel = openrouterModel
         self.audioPrompt = audioPrompt
         self.enabled = enabled
-        self.ttsInactivityThresholdSecs = ttsInactivityThresholdSecs
     }
 }
 
