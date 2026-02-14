@@ -1,5 +1,25 @@
 import Foundation
 
+// MARK: - FFI Top-Level Function Wrappers
+// These private wrappers provide access to UniFFI top-level functions from within SafeTenexCore.
+// They're needed because the actor's methods with the same names would otherwise shadow them.
+
+private func _listAudioNotifications() throws -> [AudioNotificationInfo] {
+    try listAudioNotifications()
+}
+
+private func _deleteAudioNotification(id: String) throws {
+    try deleteAudioNotification(id: id)
+}
+
+private func _fetchElevenlabsVoices(apiKey: String) throws -> [VoiceInfo] {
+    try fetchElevenlabsVoices(apiKey: apiKey)
+}
+
+private func _fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
+    try fetchOpenrouterModels(apiKey: apiKey)
+}
+
 /// Thread-safe actor wrapper around TenexCore that provides:
 /// - Serialized FFI access (thread safety via actor isolation)
 /// - Proper error handling (no force unwraps exposed to callers)
@@ -597,10 +617,11 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// List all audio notifications
+    /// Note: This calls a top-level UniFFI function, not a TenexCore method
     func listAudioNotifications() throws -> [AudioNotificationInfo] {
         try profiler.measureFFI("listAudioNotifications") {
             do {
-                return try core.listAudioNotifications()
+                return try _listAudioNotifications()
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -608,10 +629,11 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Delete an audio notification by ID
+    /// Note: This calls a top-level UniFFI function, not a TenexCore method
     func deleteAudioNotification(id: String) throws {
         try profiler.measureFFI("deleteAudioNotification") {
             do {
-                try core.deleteAudioNotification(id: id)
+                try _deleteAudioNotification(id: id)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -619,10 +641,11 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Fetch ElevenLabs voices
+    /// Note: This calls a top-level UniFFI function, not a TenexCore method
     func fetchElevenlabsVoices(apiKey: String) throws -> [VoiceInfo] {
         try profiler.measureFFI("fetchElevenlabsVoices") {
             do {
-                return try core.fetchElevenlabsVoices(apiKey: apiKey)
+                return try _fetchElevenlabsVoices(apiKey: apiKey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -630,10 +653,11 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Fetch OpenRouter models
+    /// Note: This calls a top-level UniFFI function, not a TenexCore method
     func fetchOpenrouterModels(apiKey: String) throws -> [ModelInfo] {
         try profiler.measureFFI("fetchOpenrouterModels") {
             do {
-                return try core.fetchOpenrouterModels(apiKey: apiKey)
+                return try _fetchOpenrouterModels(apiKey: apiKey)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
