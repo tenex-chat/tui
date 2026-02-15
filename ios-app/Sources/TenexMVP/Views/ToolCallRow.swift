@@ -63,6 +63,12 @@ struct ToolCallRow: View {
             return ToolDisplayInfo(icon: "doc.text", text: filePath)
         }
 
+        // IMPORTANT: Check todo_write BEFORE generic write/edit check.
+        // mcp__tenex__todo_write contains "write" so would match the generic pattern otherwise.
+        if name.contains("todo_write") || name.contains("todowrite") {
+            return ToolDisplayInfo(icon: "checklist", text: "Updated todos")
+        }
+
         if name.contains("write") || name.contains("edit") {
             let filePath = extractString(from: args, keys: ["file_path", "path", "file"])
             return ToolDisplayInfo(icon: "square.and.pencil", text: filePath)
@@ -78,17 +84,15 @@ struct ToolCallRow: View {
             return ToolDisplayInfo(icon: "play.fill", text: description)
         }
 
-        if name.contains("todo_write") || name.contains("todowrite") {
-            return ToolDisplayInfo(icon: "checklist", text: "Updated todos")
-        }
-
         if name.contains("web") || name.contains("fetch") {
             let url = extractString(from: args, keys: ["url", "uri"])
             return ToolDisplayInfo(icon: "globe", text: url)
         }
 
         if name.contains("mcp") {
-            // Generic MCP tool - show the tool name
+            // Generic MCP tool fallback - show the extracted tool name
+            // NOTE: MCP tools with specific patterns (todo_write, write, task, etc.)
+            // are handled by earlier checks. This only catches truly unknown MCP tools.
             let shortName = extractMcpToolName(from: toolName ?? "")
             return ToolDisplayInfo(icon: "puzzlepiece", text: shortName)
         }
@@ -129,6 +133,7 @@ struct ToolCallRow: View {
         ToolCallRow(toolName: "glob", toolArgs: "{\"pattern\": \"**/*.swift\"}")
         ToolCallRow(toolName: "mcp__tenex__task", toolArgs: "{\"description\": \"Analyze codebase structure\"}")
         ToolCallRow(toolName: "todo_write", toolArgs: "{}")
+        ToolCallRow(toolName: "mcp__tenex__todo_write", toolArgs: "{}")
         ToolCallRow(toolName: "web_fetch", toolArgs: "{\"url\": \"https://example.com\"}")
     }
     .padding()
