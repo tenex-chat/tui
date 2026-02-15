@@ -8,6 +8,11 @@ import SwiftUI
 /// - Uses Equatable conformance to prevent unnecessary re-renders
 /// - Caches parsed elements to avoid re-parsing on every body evaluation
 /// - Uses identifiable wrapper for stable ForEach identity
+///
+/// ## Features
+/// - Clickable links (URLs are tappable and open in browser)
+/// - Inline images (image URLs are rendered as embedded images)
+/// - Markdown formatting (headers, code blocks, tables, lists, bold, inline code)
 struct MarkdownView: View, Equatable {
     let content: String
 
@@ -16,6 +21,15 @@ struct MarkdownView: View, Equatable {
     private static var parseCache: [Int: [MarkdownElement]] = [:]
     private static let cacheLock = NSLock()
     private static let maxCacheSize = 100
+
+    /// Image file extensions that should be rendered inline
+    private static let imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "heic", "heif", "avif"]
+
+    /// URL regex pattern - matches http/https URLs
+    private static let urlPattern = try! NSRegularExpression(
+        pattern: #"https?://[^\s\)\]\>\"\']+[^\s\.\,\;\:\!\?\)\]\>\"\'…]"#,
+        options: [.caseInsensitive]
+    )
 
     static func == (lhs: MarkdownView, rhs: MarkdownView) -> Bool {
         lhs.content == rhs.content
@@ -54,6 +68,15 @@ struct MarkdownView: View, Equatable {
 
         Self.parseCache[contentHash] = parsed
         return parsed
+    }
+
+    /// Check if a URL points to an image based on file extension
+    private static func isImageURL(_ urlString: String) -> Bool {
+        // Remove query parameters and fragments for extension check
+        let cleanURL = urlString.components(separatedBy: "?").first ?? urlString
+        let cleanURLWithoutFragment = cleanURL.components(separatedBy: "#").first ?? cleanURL
+        let lowercased = cleanURLWithoutFragment.lowercased()
+        return imageExtensions.contains { lowercased.hasSuffix(".\($0)") }
     }
 
     private func parseMarkdown() -> [MarkdownElement] {
@@ -180,7 +203,14 @@ struct MarkdownView: View, Equatable {
         return elements
     }
 
-    private func parseInlineMarkdown(_ text: String) -> Text {
+    /// Parse inline markdown and return a view that can contain text, links, and images
+    @ViewBuilder
+    private func parseInlineMarkdown(_ text: String) -> some View {
+        InlineMarkdownView(text: text)
+    }
+
+    /// Parse inline markdown and return a Text view (for use in headers and simple contexts)
+    private func parseInlineMarkdownText(_ text: String) -> Text {
         var result = AttributedString()
 
         // Simple parsing for bold and inline code
@@ -277,5 +307,251 @@ struct TableView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.systemGray4, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Inline Markdown View (with Links and Images)
+
+/// A view that renders inline markdown content with support for:
+/// - Clickable links (URLs open in browser)
+/// - Inline images (image URLs rendered as embedded images)
+/// - Bold text (**text**)
+/// - Inline code (`code`)
+struct InlineMarkdownView: View {
+    let text: String
+
+    /// Image file extensions that should be rendered inline
+    private static let imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "heic", "heif", "avif"]
+
+    /// URL regex pattern - matches http/https URLs
+    private static let urlPattern = try! NSRegularExpression(
+        pattern: #"https?://[^\s\)\]\>\"\']+[^\s\.\,\;\:\!\?\)\]\>\"\'…]"#,
+        options: [.caseInsensitive]
+    )
+
+    var body: some View {
+        let segments = parseTextWithURLs(text)
+
+        // Use FlowLayout for wrapping content
+        FlowLayout(spacing: 0) {
+            ForEach(segments) { segment in
+                segment.view
+            }
+        }
+    }
+
+    /// Check if a URL points to an image based on file extension
+    private static func isImageURL(_ urlString: String) -> Bool {
+        // Remove query parameters and fragments for extension check
+        let cleanURL = urlString.components(separatedBy: "?").first ?? urlString
+        let cleanURLWithoutFragment = cleanURL.components(separatedBy: "#").first ?? cleanURL
+        let lowercased = cleanURLWithoutFragment.lowercased()
+        return imageExtensions.contains { lowercased.hasSuffix(".\($0)") }
+    }
+
+    /// Parse text into segments, separating URLs from regular text
+    private func parseTextWithURLs(_ text: String) -> [InlineSegment] {
+        var segments: [InlineSegment] = []
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+
+        var lastEnd = 0
+        let matches = Self.urlPattern.matches(in: text, options: [], range: range)
+
+        for match in matches {
+            // Add text before the URL
+            if match.range.location > lastEnd {
+                let beforeRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let beforeText = nsText.substring(with: beforeRange)
+                if !beforeText.isEmpty {
+                    segments.append(InlineSegment(view: AnyView(parseFormattedText(beforeText))))
+                }
+            }
+
+            // Add the URL (as image or link)
+            let urlString = nsText.substring(with: match.range)
+            if Self.isImageURL(urlString), let url = URL(string: urlString) {
+                segments.append(InlineSegment(view: AnyView(InlineImageView(url: url, urlString: urlString))))
+            } else if let url = URL(string: urlString) {
+                segments.append(InlineSegment(view: AnyView(InlineLinkView(url: url, displayText: urlString))))
+            } else {
+                // Fallback: render as plain text if URL parsing fails
+                segments.append(InlineSegment(view: AnyView(Text(urlString))))
+            }
+
+            lastEnd = match.range.location + match.range.length
+        }
+
+        // Add remaining text after the last URL
+        if lastEnd < nsText.length {
+            let remainingRange = NSRange(location: lastEnd, length: nsText.length - lastEnd)
+            let remainingText = nsText.substring(with: remainingRange)
+            if !remainingText.isEmpty {
+                segments.append(InlineSegment(view: AnyView(parseFormattedText(remainingText))))
+            }
+        }
+
+        // If no URLs found, just parse the whole text for formatting
+        if segments.isEmpty {
+            segments.append(InlineSegment(view: AnyView(parseFormattedText(text))))
+        }
+
+        return segments
+    }
+
+    /// Parse text for bold and inline code formatting
+    private func parseFormattedText(_ text: String) -> Text {
+        var result = AttributedString()
+        var current = text
+
+        while !current.isEmpty {
+            if let boldRange = current.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
+                let before = String(current[..<boldRange.lowerBound])
+                let match = String(current[boldRange])
+                let inner = String(match.dropFirst(2).dropLast(2))
+
+                result.append(AttributedString(before))
+                var boldPart = AttributedString(inner)
+                boldPart.font = .body.bold()
+                result.append(boldPart)
+                current = String(current[boldRange.upperBound...])
+            } else if let codeRange = current.range(of: "`(.+?)`", options: .regularExpression) {
+                let before = String(current[..<codeRange.lowerBound])
+                let match = String(current[codeRange])
+                let inner = String(match.dropFirst(1).dropLast(1))
+
+                result.append(AttributedString(before))
+                var codePart = AttributedString(inner)
+                codePart.font = .system(.body, design: .monospaced)
+                codePart.foregroundColor = .orange
+                result.append(codePart)
+                current = String(current[codeRange.upperBound...])
+            } else {
+                result.append(AttributedString(current))
+                break
+            }
+        }
+
+        return Text(result)
+    }
+}
+
+// MARK: - Inline Segment (Identifiable wrapper)
+
+/// Wrapper for inline content segments
+private struct InlineSegment: Identifiable {
+    let id = UUID()
+    let view: AnyView
+}
+
+// MARK: - Inline Link View
+
+/// A clickable link that opens in the browser
+struct InlineLinkView: View {
+    let url: URL
+    let displayText: String
+
+    var body: some View {
+        Link(destination: url) {
+            Text(displayText)
+                .foregroundStyle(Color.accentColor)
+                .underline()
+        }
+    }
+}
+
+// MARK: - Inline Image View
+
+/// An embedded image loaded from a URL
+struct InlineImageView: View {
+    let url: URL
+    let urlString: String
+
+    /// Maximum width for inline images
+    private let maxImageWidth: CGFloat = 300
+
+    /// Maximum height for inline images
+    private let maxImageHeight: CGFloat = 200
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(width: 100, height: 60)
+                case .success(let image):
+                    Link(destination: url) {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: maxImageWidth, maxHeight: maxImageHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                case .failure:
+                    // On failure, show the URL as a clickable link instead
+                    InlineLinkView(url: url, displayText: urlString)
+                @unknown default:
+                    InlineLinkView(url: url, displayText: urlString)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Flow Layout
+
+/// A layout that wraps content horizontally like text
+struct FlowLayout: Layout {
+    let spacing: CGFloat
+
+    init(spacing: CGFloat = 4) {
+        self.spacing = spacing
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let result = FlowResult(in: proposal.width ?? .infinity, subviews: subviews, spacing: spacing)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = FlowResult(in: bounds.width, subviews: subviews, spacing: spacing)
+
+        for (index, subview) in subviews.enumerated() {
+            let point = result.positions[index]
+            subview.place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y), proposal: .unspecified)
+        }
+    }
+
+    private struct FlowResult {
+        var size: CGSize = .zero
+        var positions: [CGPoint] = []
+
+        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
+            var currentX: CGFloat = 0
+            var currentY: CGFloat = 0
+            var lineHeight: CGFloat = 0
+
+            for subview in subviews {
+                let viewSize = subview.sizeThatFits(.unspecified)
+
+                // If this view doesn't fit on current line, move to next line
+                if currentX + viewSize.width > maxWidth && currentX > 0 {
+                    currentX = 0
+                    currentY += lineHeight + spacing
+                    lineHeight = 0
+                }
+
+                positions.append(CGPoint(x: currentX, y: currentY))
+
+                currentX += viewSize.width + spacing
+                lineHeight = max(lineHeight, viewSize.height)
+
+                size.width = max(size.width, currentX)
+            }
+
+            size.height = currentY + lineHeight
+        }
     }
 }
