@@ -91,4 +91,7 @@ protocol SafeTenexCoreProtocol: Actor {
 
     // MARK: - Misc
     func version() -> String
+
+    // MARK: - Image Upload
+    func uploadImage(data: Data, mimeType: String) throws -> String
 }

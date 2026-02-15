@@ -993,6 +993,9 @@ impl App {
                         .iter()
                         .map(|a| ImageAttachment { id: a.id, url: a.url.clone() })
                         .collect();
+
+                    // Sync ID counters to prevent collisions with restored attachments
+                    editor.sync_attachment_id_counters();
                 }
 
                 tlog!("AGENT", "restore_chat_draft: loaded draft, agent_pubkey={:?}",

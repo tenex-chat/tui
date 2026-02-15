@@ -237,6 +237,34 @@ final class DraftManager {
         scheduleSave()
     }
 
+    /// Update a draft's image attachments with debounced auto-save
+    /// - Parameters:
+    ///   - imageAttachments: The image attachments
+    ///   - conversationId: The conversation ID (nil for new thread)
+    ///   - projectId: The project ID
+    func updateImageAttachments(_ imageAttachments: [ImageAttachment], conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
+        let key = Draft.storageKey(for: conversationId, projectId: projectId)
+
+        if var draft = drafts[key] {
+            draft.imageAttachments = imageAttachments
+            drafts[key] = draft
+        } else {
+            var newDraft: Draft
+            if let conversationId = conversationId {
+                newDraft = Draft(conversationId: conversationId, projectId: projectId)
+            } else {
+                newDraft = Draft(projectId: projectId)
+            }
+            newDraft.imageAttachments = imageAttachments
+            drafts[key] = newDraft
+        }
+
+        scheduleSave()
+    }
+
     /// Delete a draft
     /// - Parameters:
     ///   - conversationId: The conversation ID (nil for new thread)

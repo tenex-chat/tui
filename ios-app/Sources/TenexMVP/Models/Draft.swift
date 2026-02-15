@@ -1,5 +1,13 @@
 import Foundation
 
+/// An uploaded image attachment with its Blossom URL
+struct ImageAttachment: Codable, Identifiable, Equatable {
+    /// Unique identifier for the attachment
+    let id: Int
+    /// Blossom URL where the image is stored
+    let url: String
+}
+
 /// A draft message for composition.
 /// Can be for a new conversation (thread) or an existing conversation.
 struct Draft: Codable, Identifiable, Equatable {
@@ -17,6 +25,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case lastEdited
         case referenceConversationId
         case referenceReportATag
+        case imageAttachments
     }
     /// Unique identifier for the draft
     var id: String
@@ -54,6 +63,12 @@ struct Draft: Codable, Identifiable, Equatable {
     /// When set, adds a ["context", "<a-tag>"] tag to the sent event
     var referenceReportATag: String?
 
+    /// Uploaded image attachments with their Blossom URLs
+    var imageAttachments: [ImageAttachment]
+
+    /// Next image attachment ID (for generating unique IDs)
+    private var nextImageId: Int = 1
+
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
@@ -69,6 +84,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
+        self.imageAttachments = []
     }
 
     /// Create a new draft for an existing conversation
@@ -84,12 +100,13 @@ struct Draft: Codable, Identifiable, Equatable {
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
+        self.imageAttachments = []
     }
 
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId, and referenceReportATag were added
+    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId, referenceReportATag, and imageAttachments were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -111,21 +128,32 @@ struct Draft: Codable, Identifiable, Equatable {
         self.referenceConversationId = try container.decodeIfPresent(String.self, forKey: .referenceConversationId)
         // Migration: referenceReportATag is new, default to nil
         self.referenceReportATag = try container.decodeIfPresent(String.self, forKey: .referenceReportATag)
+        // Migration: imageAttachments is new, default to empty array
+        self.imageAttachments = try container.decodeIfPresent([ImageAttachment].self, forKey: .imageAttachments) ?? []
+
+        // Restore nextImageId from existing attachments
+        if let maxId = self.imageAttachments.map(\.id).max() {
+            self.nextImageId = maxId + 1
+        }
     }
 
     // MARK: - Computed Properties
 
     /// Whether the draft has meaningful content
     var hasContent: Bool {
-        // Only check content - titles are auto-generated from 513 events
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // Check content OR images - either is valid
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageAttachments.isEmpty
     }
 
     /// Whether the draft is valid for sending
     var isValid: Bool {
-        // Both new conversations and replies just need content
-        // Titles are auto-generated from 513 events
-        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // Both new conversations and replies need content OR images
+        !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !imageAttachments.isEmpty
+    }
+
+    /// Whether the draft has any image attachments
+    var hasImages: Bool {
+        !imageAttachments.isEmpty
     }
 
     // MARK: - Mutation
@@ -168,6 +196,8 @@ struct Draft: Codable, Identifiable, Equatable {
         selectedNudgeIds = []
         referenceConversationId = nil
         referenceReportATag = nil
+        imageAttachments = []
+        nextImageId = 1
         lastEdited = Date()
     }
 
@@ -211,6 +241,44 @@ struct Draft: Codable, Identifiable, Equatable {
     mutating func clearReferenceReportATag() {
         referenceReportATag = nil
         lastEdited = Date()
+    }
+
+    // MARK: - Image Attachments
+
+    /// Add an image attachment and return its ID
+    mutating func addImageAttachment(url: String) -> Int {
+        let id = nextImageId
+        nextImageId += 1
+        imageAttachments.append(ImageAttachment(id: id, url: url))
+        lastEdited = Date()
+        return id
+    }
+
+    /// Remove an image attachment by ID
+    mutating func removeImageAttachment(id: Int) {
+        imageAttachments.removeAll { $0.id == id }
+        lastEdited = Date()
+    }
+
+    /// Clear all image attachments
+    mutating func clearImageAttachments() {
+        imageAttachments = []
+        nextImageId = 1
+        lastEdited = Date()
+    }
+
+    /// Build the full message content including image URLs
+    /// Replaces [Image #N] markers with actual URLs (matching TUI behavior)
+    func buildFullContent() -> String {
+        var fullContent = content
+
+        // Replace [Image #N] markers with actual URLs
+        for attachment in imageAttachments {
+            let marker = "[Image #\(attachment.id)]"
+            fullContent = fullContent.replacingOccurrences(of: marker, with: attachment.url)
+        }
+
+        return fullContent
     }
 }
 
