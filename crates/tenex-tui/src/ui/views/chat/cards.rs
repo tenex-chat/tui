@@ -1,4 +1,4 @@
-use crate::ui::theme;
+use crate::ui::{format::format_message_time, theme};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -410,9 +410,10 @@ pub(crate) fn author_line_with_recipient(
     Line::from(spans)
 }
 
-/// Render LLM metadata line (id and token info) for a selected message
+/// Render LLM metadata line (id, time, and token info) for a selected message
 pub(crate) fn llm_metadata_line(
     message_id: &str,
+    created_at: u64,
     llm_metadata: &[(String, String)],
     indicator_color: Color,
     bg: Color,
@@ -424,13 +425,23 @@ pub(crate) fn llm_metadata_line(
     ];
     let mut current_len = 3; // "│  "
 
-    // Add message ID (first 8 chars)
-    let id_short = &message_id[..8.min(message_id.len())];
+    // Add message ID (first 12 chars)
+    let id_short = &message_id[..12.min(message_id.len())];
     spans.push(Span::styled(
         format!("id:{}", id_short),
         Style::default().fg(theme::TEXT_MUTED).bg(bg),
     ));
     current_len += 3 + id_short.len(); // "id:" + id
+
+    // Add message time
+    let time_str = format_message_time(created_at);
+    spans.push(Span::styled("  ", Style::default().bg(bg)));
+    current_len += 2;
+    spans.push(Span::styled(
+        format!("@{}", time_str),
+        Style::default().fg(theme::TEXT_MUTED).bg(bg),
+    ));
+    current_len += 1 + time_str.len(); // "@" + time
 
     // Add LLM metadata chips
     for (key, value) in llm_metadata {
