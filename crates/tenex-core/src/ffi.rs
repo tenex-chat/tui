@@ -3815,6 +3815,36 @@ impl TenexCore {
         })
     }
 
+    /// Upload an image to Blossom and return the URL.
+    ///
+    /// This uploads the image data to the Blossom server using the user's Nostr keys
+    /// for authentication. The returned URL can be embedded in message content.
+    ///
+    /// # Arguments
+    /// * `data` - Raw image data (PNG, JPEG, etc.)
+    /// * `mime_type` - MIME type of the image (e.g., "image/png", "image/jpeg")
+    ///
+    /// # Returns
+    /// The Blossom URL where the image is stored.
+    pub fn upload_image(&self, data: Vec<u8>, mime_type: String) -> Result<String, TenexError> {
+        // Get the user's keys for authentication
+        let keys_guard = self.keys.read().map_err(|_| TenexError::LockError {
+            resource: "keys".to_string(),
+        })?;
+        let keys = keys_guard.as_ref().ok_or_else(|| TenexError::NotLoggedIn)?;
+
+        // Use shared Tokio runtime for async upload
+        let runtime = get_tokio_runtime();
+
+        let url = runtime
+            .block_on(crate::nostr::upload_image(&data, keys, &mime_type))
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to upload image: {}", e),
+            })?;
+
+        Ok(url)
+    }
+
 }
 
 // Standalone FFI functions — no TenexCore instance needed, bypasses actor serialization.
