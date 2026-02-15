@@ -24,7 +24,6 @@ struct ProjectsSheet: View {
                                 isFiltered: selectedProjectIds.contains(project.id),
                                 onToggleFilter: { toggleProject(project.id) }
                             )
-                            .environmentObject(coreManager)
                         }
                     } header: {
                         Text("Projects")
@@ -178,6 +177,9 @@ private struct ProjectsSheetRow: View {
         }
         .buttonStyle(.plain)
         .frame(width: 70)
+        .accessibilityLabel("Filter by \(project.title)")
+        .accessibilityValue(isFiltered ? "On" : "Off")
+        .accessibilityHint("Double tap to \(isFiltered ? "remove from" : "add to") conversation filter")
     }
 
     // MARK: - Center/Right Zone: Main Action
