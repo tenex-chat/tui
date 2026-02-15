@@ -492,6 +492,11 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_login(void*_Nonnull ptr, RustBu
 void uniffi_tenex_core_fn_method_tenexcore_logout(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_NPUB_TO_HEX
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_NPUB_TO_HEX
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_npub_to_hex(void*_Nonnull ptr, RustBuffer npub, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_REFRESH
 int8_t uniffi_tenex_core_fn_method_tenexcore_refresh(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -555,6 +560,11 @@ void uniffi_tenex_core_fn_method_tenexcore_set_selected_voice_ids(void*_Nonnull 
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 void uniffi_tenex_core_fn_method_tenexcore_set_trusted_backends(void*_Nonnull ptr, RustBuffer approved, RustBuffer blocked, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TTS_INACTIVITY_THRESHOLD
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_TTS_INACTIVITY_THRESHOLD
+void uniffi_tenex_core_fn_method_tenexcore_set_tts_inactivity_threshold(void*_Nonnull ptr, uint64_t secs, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_VISIBLE_PROJECTS
@@ -1169,6 +1179,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_logout(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_NPUB_TO_HEX
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_NPUB_TO_HEX
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_npub_to_hex(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_REFRESH
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_refresh(void
@@ -1244,6 +1260,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_selected_voice_ids(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TRUSTED_BACKENDS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_trusted_backends(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TTS_INACTIVITY_THRESHOLD
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_SET_TTS_INACTIVITY_THRESHOLD
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_set_tts_inactivity_threshold(void
     
 );
 #endif
