@@ -373,6 +373,23 @@ impl TextEditor {
         self.cursor += c.len_utf8();
     }
 
+    /// Insert a string at cursor atomically (single undo operation)
+    /// Use this for inserting markers or multi-character sequences to avoid undo bloat.
+    pub fn insert_str(&mut self, s: &str) {
+        self.push_undo_state();
+        // Delete selection first if any
+        if let Some((start, end)) = self.selection_range() {
+            if start < end {
+                self.text.drain(start..end);
+                self.cursor = start;
+            }
+        }
+        self.selection_anchor = None;
+
+        self.text.insert_str(self.cursor, s);
+        self.cursor += s.len();
+    }
+
     /// Insert a newline at cursor
     pub fn insert_newline(&mut self) {
         self.insert_char('\n');
@@ -660,6 +677,19 @@ impl TextEditor {
         self.next_image_id += 1;
         self.image_attachments.push(ImageAttachment { id, url });
         id
+    }
+
+    /// Sync ID counters after restoring attachments from draft.
+    /// Must be called after directly setting `attachments` and `image_attachments`
+    /// to prevent ID collisions with new attachments.
+    pub fn sync_attachment_id_counters(&mut self) {
+        // Find max ID in paste attachments and set next_attachment_id to max+1
+        let max_attachment_id = self.attachments.iter().map(|a| a.id).max().unwrap_or(0);
+        self.next_attachment_id = max_attachment_id + 1;
+
+        // Find max ID in image attachments and set next_image_id to max+1
+        let max_image_id = self.image_attachments.iter().map(|a| a.id).max().unwrap_or(0);
+        self.next_image_id = max_image_id + 1;
     }
 
     /// Get the number of lines in the input
@@ -1011,17 +1041,40 @@ impl TextEditor {
     }
 
     /// Delete focused attachment (image or paste)
+    /// Also removes the corresponding marker from the editor text to prevent orphaned markers
     pub fn delete_focused_attachment(&mut self) {
         if let Some(idx) = self.focused_attachment {
             let img_count = self.image_attachments.len();
             if idx < img_count {
-                // Delete image attachment
+                // Delete image attachment - get ID before removing
+                let attachment_id = self.image_attachments[idx].id;
                 self.image_attachments.remove(idx);
+                // Remove the marker from text (try both with and without trailing space)
+                let marker_with_space = format!("[Image #{}] ", attachment_id);
+                let marker_without_space = format!("[Image #{}]", attachment_id);
+                if self.text.contains(&marker_with_space) {
+                    self.push_undo_state();
+                    self.text = self.text.replace(&marker_with_space, "");
+                    // Adjust cursor if it was past the removed marker
+                    self.cursor = self.cursor.min(self.text.len());
+                } else if self.text.contains(&marker_without_space) {
+                    self.push_undo_state();
+                    self.text = self.text.replace(&marker_without_space, "");
+                    self.cursor = self.cursor.min(self.text.len());
+                }
             } else {
-                // Delete paste attachment
+                // Delete paste attachment - get ID before removing
                 let paste_idx = idx - img_count;
                 if paste_idx < self.attachments.len() {
+                    let attachment_id = self.attachments[paste_idx].id;
                     self.attachments.remove(paste_idx);
+                    // Remove the marker from text
+                    let marker = format!("[Text Attachment {}]", attachment_id);
+                    if self.text.contains(&marker) {
+                        self.push_undo_state();
+                        self.text = self.text.replace(&marker, "");
+                        self.cursor = self.cursor.min(self.text.len());
+                    }
                 }
             }
             // Adjust focus

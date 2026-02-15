@@ -243,9 +243,8 @@ pub(crate) async fn run_app(
                     UploadResult::Success(url) => {
                         let id = app.chat_editor_mut().add_image_attachment(url);
                         let marker = format!("[Image #{}] ", id);
-                        for c in marker.chars() {
-                            app.chat_editor_mut().insert_char(c);
-                        }
+                        // Use insert_str for atomic insertion (single undo operation)
+                        app.chat_editor_mut().insert_str(&marker);
                         app.save_chat_draft();
                         app.dismiss_notification();
                     }
