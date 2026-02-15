@@ -1020,12 +1020,6 @@ struct MainTabView: View {
                 .nowPlayingInset(coreManager: coreManager)
             }
 
-            Tab("Projects", systemImage: "folder", value: 2) {
-                ContentView(userNpub: $userNpub, isLoggedIn: $isLoggedIn)
-                    .environmentObject(coreManager)
-                    .nowPlayingInset(coreManager: coreManager)
-            }
-
             Tab("Inbox", systemImage: "tray", value: 3) {
                 InboxView()
                     .environmentObject(coreManager)

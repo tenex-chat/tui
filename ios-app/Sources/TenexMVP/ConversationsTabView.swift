@@ -239,17 +239,6 @@ struct ConversationsTabView: View {
         return conversations
     }
 
-    /// Text for the filter button
-    private var filterButtonLabel: String {
-        if selectedProjectIds.isEmpty {
-            return "All Projects"
-        } else if selectedProjectIds.count == 1 {
-            return coreManager.projects.first { $0.id == selectedProjectIds.first }?.title ?? "1 Project"
-        } else {
-            return "\(selectedProjectIds.count) Projects"
-        }
-    }
-
     var body: some View {
         NavigationStack {
             Group {
@@ -354,17 +343,23 @@ struct ConversationsTabView: View {
                             Image(systemName: "plus")
                         }
                         Button(action: { showFilterSheet = true }) {
-                            Label(filterButtonLabel, systemImage: selectedProjectIds.isEmpty ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "folder")
+                                // Show badge when filtering is active
+                                if !selectedProjectIds.isEmpty {
+                                    Circle()
+                                        .fill(.blue)
+                                        .frame(width: 8, height: 8)
+                                        .offset(x: 2, y: -2)
+                                }
+                            }
                         }
                     }
                 }
             }
             .sheet(isPresented: $showFilterSheet) {
-                ProjectFilterSheet(
-                    projects: coreManager.projects,
-                    projectOnlineStatus: coreManager.projectOnlineStatus,
-                    selectedProjectIds: $selectedProjectIds
-                )
+                ProjectsSheet(selectedProjectIds: $selectedProjectIds)
+                    .environmentObject(coreManager)
             }
             #if os(iOS)
             .sheet(item: $selectedConversation) { conversation in
@@ -679,104 +674,6 @@ private struct ConversationRowFull: View {
     }
 }
 
-// MARK: - Project Filter Sheet
-
-private struct ProjectFilterSheet: View {
-    let projects: [ProjectInfo]
-    let projectOnlineStatus: [String: Bool]
-    @Binding var selectedProjectIds: Set<String>
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                // "All Projects" option
-                Button(action: {
-                    selectedProjectIds.removeAll()
-                }) {
-                    HStack {
-                        Image(systemName: "square.grid.2x2")
-                            .foregroundStyle(.blue)
-                            .frame(width: 24)
-                        Text("All Projects")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if selectedProjectIds.isEmpty {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                }
-
-                Divider()
-
-                // Individual projects
-                ForEach(projects, id: \.id) { project in
-                    Button(action: {
-                        toggleProject(project.id)
-                    }) {
-                        HStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(projectColor(for: project).gradient)
-                                .frame(width: 24, height: 24)
-                                .overlay {
-                                    Image(systemName: "folder.fill")
-                                        .foregroundStyle(.white)
-                                        .font(.caption)
-                                }
-
-                            Text(project.title)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            if projectOnlineStatus[project.id] == true {
-                                Circle()
-                                    .fill(.green)
-                                    .frame(width: 8, height: 8)
-                            }
-
-                            Spacer()
-
-                            if selectedProjectIds.contains(project.id) {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
-                            }
-                        }
-                    }
-                }
-            }
-            #if os(iOS)
-                .listStyle(.insetGrouped)
-                #else
-                .listStyle(.inset)
-                #endif
-            .navigationTitle("Filter Projects")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func toggleProject(_ id: String) {
-        if selectedProjectIds.contains(id) {
-            selectedProjectIds.remove(id)
-        } else {
-            selectedProjectIds.insert(id)
-        }
-    }
-
-    /// Deterministic color using shared utility (stable across app launches)
-    private func projectColor(for project: ProjectInfo) -> Color {
-        deterministicColor(for: project.id)
-    }
-}
 
 // MARK: - Empty State
 
