@@ -81,9 +81,9 @@ enum TodoParser {
         var idCounter = 0
 
         for message in messages {
-            // Check if this is a todo_write tool call
+            // Check if this is a todo_write tool call (including MCP-wrapped version)
             guard let toolName = message.toolName?.lowercased(),
-                  toolName == "todo_write" || toolName == "todowrite",
+                  toolName == "todo_write" || toolName == "todowrite" || toolName == "mcp__tenex__todo_write",
                   let toolArgs = message.toolArgs else {
                 continue
             }
