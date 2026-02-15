@@ -1,5 +1,35 @@
 import SwiftUI
 
+// MARK: - URL Detection Utilities (Shared)
+
+/// Shared utilities for URL detection in markdown content
+enum MarkdownURLUtilities {
+    /// Image file extensions that should be rendered inline
+    static let imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico", "tiff", "tif", "heic", "heif", "avif"]
+
+    /// URL regex pattern - matches http/https URLs
+    static let urlPattern = try! NSRegularExpression(
+        pattern: #"https?://[^\s\)\]\>\"\']+[^\s\.\,\;\:\!\?\)\]\>\"\'…]"#,
+        options: [.caseInsensitive]
+    )
+
+    /// Check if a URL points to an image based on file extension
+    static func isImageURL(_ urlString: String) -> Bool {
+        // Remove query parameters and fragments for extension check
+        let cleanURL = urlString.components(separatedBy: "?").first ?? urlString
+        let cleanURLWithoutFragment = cleanURL.components(separatedBy: "#").first ?? cleanURL
+        let lowercased = cleanURLWithoutFragment.lowercased()
+        return imageExtensions.contains { lowercased.hasSuffix(".\($0)") }
+    }
+
+    /// Check if text contains any URLs
+    static func containsURL(_ text: String) -> Bool {
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+        return urlPattern.firstMatch(in: text, options: [], range: range) != nil
+    }
+}
+
 // MARK: - Markdown View
 
 /// A reusable view that renders markdown content with support for headers, lists, code blocks, tables, etc.
@@ -8,6 +38,11 @@ import SwiftUI
 /// - Uses Equatable conformance to prevent unnecessary re-renders
 /// - Caches parsed elements to avoid re-parsing on every body evaluation
 /// - Uses identifiable wrapper for stable ForEach identity
+///
+/// ## Features
+/// - Clickable links (URLs are tappable and open in browser)
+/// - Inline images (image URLs are rendered as embedded images)
+/// - Markdown formatting (headers, code blocks, tables, lists, bold, inline code)
 struct MarkdownView: View, Equatable {
     let content: String
 
@@ -180,40 +215,10 @@ struct MarkdownView: View, Equatable {
         return elements
     }
 
-    private func parseInlineMarkdown(_ text: String) -> Text {
-        var result = AttributedString()
-
-        // Simple parsing for bold and inline code
-        var current = text
-        while !current.isEmpty {
-            if let boldRange = current.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
-                let before = String(current[..<boldRange.lowerBound])
-                let match = String(current[boldRange])
-                let inner = String(match.dropFirst(2).dropLast(2))
-
-                result.append(AttributedString(before))
-                var boldPart = AttributedString(inner)
-                boldPart.font = .body.bold()
-                result.append(boldPart)
-                current = String(current[boldRange.upperBound...])
-            } else if let codeRange = current.range(of: "`(.+?)`", options: .regularExpression) {
-                let before = String(current[..<codeRange.lowerBound])
-                let match = String(current[codeRange])
-                let inner = String(match.dropFirst(1).dropLast(1))
-
-                result.append(AttributedString(before))
-                var codePart = AttributedString(inner)
-                codePart.font = .system(.body, design: .monospaced)
-                codePart.foregroundColor = .orange
-                result.append(codePart)
-                current = String(current[codeRange.upperBound...])
-            } else {
-                result.append(AttributedString(current))
-                break
-            }
-        }
-
-        return Text(result)
+    /// Parse inline markdown and return a view that can contain text, links, and images
+    @ViewBuilder
+    private func parseInlineMarkdown(_ text: String) -> some View {
+        InlineMarkdownView(text: text)
     }
 
     /// Clears the parse cache (call on memory warning)
@@ -277,5 +282,364 @@ struct TableView: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color.systemGray4, lineWidth: 1)
         )
+    }
+}
+
+// MARK: - Inline Markdown View (with Links and Images)
+
+/// A view that renders inline markdown content with support for:
+/// - Clickable links (URLs open in browser)
+/// - Inline images (image URLs rendered as embedded images)
+/// - Bold text (**text**)
+/// - Inline code (`code`)
+///
+/// ## Performance Optimizations
+/// - Segments are parsed once in init and stored with stable IDs
+/// - Plain text without URLs bypasses FlowLayout for proper wrapping
+/// - Segments have stable identity based on content hash + position
+struct InlineMarkdownView: View {
+    let text: String
+
+    /// Parsed segments, computed once at init for stable identity
+    private let segments: [InlineSegment]
+
+    /// Whether this content contains any URLs (determines layout strategy)
+    private let containsURLs: Bool
+
+    init(text: String) {
+        self.text = text
+        self.containsURLs = MarkdownURLUtilities.containsURL(text)
+        self.segments = Self.parseTextWithURLs(text)
+    }
+
+    var body: some View {
+        if containsURLs {
+            // Use FlowLayout only when we have mixed content (text + links/images)
+            FlowLayout(spacing: 0) {
+                ForEach(segments) { segment in
+                    segmentView(for: segment)
+                }
+            }
+        } else {
+            // For plain text without URLs, use regular Text for proper wrapping
+            if let firstSegment = segments.first, case .text(let attributed) = firstSegment.content {
+                Text(attributed)
+            } else {
+                Text(text)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func segmentView(for segment: InlineSegment) -> some View {
+        switch segment.content {
+        case .text(let attributed):
+            Text(attributed)
+                .fixedSize(horizontal: false, vertical: true)
+        case .link(let url, let displayText):
+            InlineLinkView(url: url, displayText: displayText)
+        case .image(let url, let urlString):
+            InlineImageView(url: url, urlString: urlString)
+        }
+    }
+
+    /// Parse text into segments, separating URLs from regular text
+    /// This is a static function to enable calling from init
+    private static func parseTextWithURLs(_ text: String) -> [InlineSegment] {
+        var segments: [InlineSegment] = []
+        let nsText = text as NSString
+        let range = NSRange(location: 0, length: nsText.length)
+
+        var lastEnd = 0
+        let matches = MarkdownURLUtilities.urlPattern.matches(in: text, options: [], range: range)
+
+        for match in matches {
+            // Add text before the URL
+            if match.range.location > lastEnd {
+                let beforeRange = NSRange(location: lastEnd, length: match.range.location - lastEnd)
+                let beforeText = nsText.substring(with: beforeRange)
+                if !beforeText.isEmpty {
+                    let attributed = parseFormattedText(beforeText)
+                    segments.append(InlineSegment(
+                        content: .text(attributed),
+                        rangeStart: lastEnd
+                    ))
+                }
+            }
+
+            // Add the URL (as image or link)
+            let urlString = nsText.substring(with: match.range)
+            if MarkdownURLUtilities.isImageURL(urlString), let url = URL(string: urlString) {
+                segments.append(InlineSegment(
+                    content: .image(url: url, urlString: urlString),
+                    rangeStart: match.range.location
+                ))
+            } else if let url = URL(string: urlString) {
+                segments.append(InlineSegment(
+                    content: .link(url: url, displayText: urlString),
+                    rangeStart: match.range.location
+                ))
+            } else {
+                // Fallback: render as plain text if URL parsing fails
+                segments.append(InlineSegment(
+                    content: .text(AttributedString(urlString)),
+                    rangeStart: match.range.location
+                ))
+            }
+
+            lastEnd = match.range.location + match.range.length
+        }
+
+        // Add remaining text after the last URL
+        if lastEnd < nsText.length {
+            let remainingRange = NSRange(location: lastEnd, length: nsText.length - lastEnd)
+            let remainingText = nsText.substring(with: remainingRange)
+            if !remainingText.isEmpty {
+                let attributed = parseFormattedText(remainingText)
+                segments.append(InlineSegment(
+                    content: .text(attributed),
+                    rangeStart: lastEnd
+                ))
+            }
+        }
+
+        // If no URLs found, just parse the whole text for formatting
+        if segments.isEmpty {
+            let attributed = parseFormattedText(text)
+            segments.append(InlineSegment(
+                content: .text(attributed),
+                rangeStart: 0
+            ))
+        }
+
+        return segments
+    }
+
+    /// Parse text for bold and inline code formatting
+    private static func parseFormattedText(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        var current = text
+
+        while !current.isEmpty {
+            if let boldRange = current.range(of: "\\*\\*(.+?)\\*\\*", options: .regularExpression) {
+                let before = String(current[..<boldRange.lowerBound])
+                let match = String(current[boldRange])
+                let inner = String(match.dropFirst(2).dropLast(2))
+
+                result.append(AttributedString(before))
+                var boldPart = AttributedString(inner)
+                boldPart.font = .body.bold()
+                result.append(boldPart)
+                current = String(current[boldRange.upperBound...])
+            } else if let codeRange = current.range(of: "`(.+?)`", options: .regularExpression) {
+                let before = String(current[..<codeRange.lowerBound])
+                let match = String(current[codeRange])
+                let inner = String(match.dropFirst(1).dropLast(1))
+
+                result.append(AttributedString(before))
+                var codePart = AttributedString(inner)
+                codePart.font = .system(.body, design: .monospaced)
+                codePart.foregroundColor = .orange
+                result.append(codePart)
+                current = String(current[codeRange.upperBound...])
+            } else {
+                result.append(AttributedString(current))
+                break
+            }
+        }
+
+        return result
+    }
+}
+
+// MARK: - Inline Segment (with Stable Identity)
+
+/// Content types for inline segments
+private enum InlineSegmentContent: Hashable {
+    case text(AttributedString)
+    case link(url: URL, displayText: String)
+    case image(url: URL, urlString: String)
+}
+
+/// Wrapper for inline content segments with stable identity
+/// Identity is derived from content type + position, not random UUID
+private struct InlineSegment: Identifiable {
+    let content: InlineSegmentContent
+    let rangeStart: Int
+
+    /// Stable ID derived from content hash and position
+    var id: Int {
+        var hasher = Hasher()
+        hasher.combine(rangeStart)
+        hasher.combine(content)
+        return hasher.finalize()
+    }
+}
+
+// MARK: - Inline Link View
+
+/// A clickable link that opens in the browser
+struct InlineLinkView: View {
+    let url: URL
+    let displayText: String
+
+    var body: some View {
+        Link(destination: url) {
+            Text(displayText)
+                .foregroundStyle(Color.accentColor)
+                .underline()
+        }
+    }
+}
+
+// MARK: - Inline Image View
+
+/// An embedded image loaded from a URL
+struct InlineImageView: View {
+    let url: URL
+    let urlString: String
+
+    /// Maximum width for inline images
+    private let maxImageWidth: CGFloat = 300
+
+    /// Maximum height for inline images
+    private let maxImageHeight: CGFloat = 200
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(width: 100, height: 60)
+                case .success(let image):
+                    Link(destination: url) {
+                        image
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: maxImageWidth, maxHeight: maxImageHeight)
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                case .failure:
+                    // On failure, show the URL as a clickable link instead
+                    InlineLinkView(url: url, displayText: urlString)
+                @unknown default:
+                    InlineLinkView(url: url, displayText: urlString)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Flow Layout
+
+/// A layout that wraps content horizontally like text
+///
+/// ## Width Handling
+/// - Uses a reasonable default width (UIScreen width - padding) when parent doesn't specify
+/// - Passes width constraints to text subviews so they can wrap properly
+/// - Only wraps to next line when a subview cannot fit
+struct FlowLayout: Layout {
+    let spacing: CGFloat
+
+    /// Default width to use when parent doesn't specify one
+    /// This prevents infinite width scenarios
+    private static let defaultMaxWidth: CGFloat = {
+        #if os(iOS)
+        return UIScreen.main.bounds.width - 32 // Account for typical padding
+        #else
+        return 600 // Reasonable default for macOS
+        #endif
+    }()
+
+    init(spacing: CGFloat = 4) {
+        self.spacing = spacing
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = resolveWidth(proposal.width)
+        let result = FlowResult(in: maxWidth, subviews: subviews, spacing: spacing)
+        return result.size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let maxWidth = bounds.width > 0 ? bounds.width : resolveWidth(proposal.width)
+        let result = FlowResult(in: maxWidth, subviews: subviews, spacing: spacing)
+
+        for (index, subview) in subviews.enumerated() {
+            let point = result.positions[index]
+            let size = result.sizes[index]
+            // Pass width constraint to subview so Text can wrap properly
+            subview.place(
+                at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                proposal: ProposedViewSize(width: size.width, height: size.height)
+            )
+        }
+    }
+
+    /// Resolve width, using a reasonable default when not specified
+    private func resolveWidth(_ proposedWidth: CGFloat?) -> CGFloat {
+        guard let width = proposedWidth, width.isFinite, width > 0 else {
+            return Self.defaultMaxWidth
+        }
+        return width
+    }
+
+    private struct FlowResult {
+        var size: CGSize = .zero
+        var positions: [CGPoint] = []
+        var sizes: [CGSize] = []
+
+        init(in maxWidth: CGFloat, subviews: Subviews, spacing: CGFloat) {
+            var currentX: CGFloat = 0
+            var currentY: CGFloat = 0
+            var lineHeight: CGFloat = 0
+
+            for subview in subviews {
+                // Calculate remaining width on current line
+                let remainingWidth = max(0, maxWidth - currentX)
+
+                // First, try to fit with remaining width constraint
+                let constrainedSize = subview.sizeThatFits(ProposedViewSize(width: remainingWidth, height: nil))
+
+                // If the constrained size doesn't fit and we're not at line start, try full width on new line
+                if constrainedSize.width > remainingWidth && currentX > 0 {
+                    // Move to next line
+                    currentX = 0
+                    currentY += lineHeight + spacing
+                    lineHeight = 0
+
+                    // Re-measure with full width available
+                    let fullWidthSize = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+                    let viewSize = CGSize(
+                        width: min(fullWidthSize.width, maxWidth),
+                        height: fullWidthSize.height
+                    )
+
+                    positions.append(CGPoint(x: currentX, y: currentY))
+                    sizes.append(viewSize)
+
+                    currentX += viewSize.width + spacing
+                    lineHeight = max(lineHeight, viewSize.height)
+                } else {
+                    // Fits on current line (or we're at line start, so must place here)
+                    let viewSize = CGSize(
+                        width: min(constrainedSize.width, remainingWidth),
+                        height: constrainedSize.height
+                    )
+
+                    positions.append(CGPoint(x: currentX, y: currentY))
+                    sizes.append(viewSize)
+
+                    currentX += viewSize.width + spacing
+                    lineHeight = max(lineHeight, viewSize.height)
+                }
+
+                size.width = max(size.width, currentX - spacing)
+            }
+
+            size.height = currentY + lineHeight
+        }
     }
 }

@@ -788,6 +788,22 @@ class TenexCoreManager: ObservableObject {
     }
 }
 
+// MARK: - Debug Auto-Login Support
+//
+// For automated testing (e.g., ios-tester agent), you can bypass the login screen by:
+//
+// 1. Launch arguments (recommended for xcrun simctl):
+//    xcrun simctl launch <UDID> com.tenex.mvp --debug-nsec "nsec1..."
+//
+// 2. Environment variables:
+//    TENEX_DEBUG_NSEC=nsec1...
+//
+// Example with simctl:
+//    xcrun simctl launch 91722A96-628B-49D9-9A07-3E5A2BDEB65D com.tenex.mvp --debug-nsec "nsec1abc..."
+//
+// The app will auto-login with the provided nsec and skip the login screen.
+// This is only intended for DEBUG builds and automated testing.
+
 @main
 struct TenexMVPApp: App {
     @StateObject private var coreManager = TenexCoreManager()
@@ -796,6 +812,31 @@ struct TenexMVPApp: App {
     @State private var isAttemptingAutoLogin = false
     @State private var autoLoginError: String?
     @Environment(\.scenePhase) private var scenePhase
+
+    /// Check for debug nsec from launch arguments or environment variables.
+    /// Returns the nsec if found, nil otherwise.
+    private func getDebugNsec() -> String? {
+        #if DEBUG
+        // Check launch arguments first: --debug-nsec "nsec1..."
+        let args = ProcessInfo.processInfo.arguments
+        if let index = args.firstIndex(of: "--debug-nsec"), index + 1 < args.count {
+            let nsec = args[index + 1]
+            if nsec.hasPrefix("nsec1") {
+                print("[DEBUG] Found debug nsec from launch arguments")
+                return nsec
+            }
+        }
+
+        // Check environment variable: TENEX_DEBUG_NSEC=nsec1...
+        if let nsec = ProcessInfo.processInfo.environment["TENEX_DEBUG_NSEC"],
+           nsec.hasPrefix("nsec1") {
+            print("[DEBUG] Found debug nsec from environment variable")
+            return nsec
+        }
+        #endif
+
+        return nil
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -881,7 +922,38 @@ struct TenexMVPApp: App {
         isAttemptingAutoLogin = true
         autoLoginError = nil
 
+        // Check for debug nsec first (only in DEBUG builds)
+        let debugNsec = getDebugNsec()
+
         DispatchQueue.global(qos: .userInitiated).async {
+            // If debug nsec provided, attempt login with it directly
+            if let nsec = debugNsec {
+                print("[DEBUG] Attempting login with debug nsec...")
+                do {
+                    let loginResult = try coreManager.core.login(nsec: nsec)
+                    DispatchQueue.main.async {
+                        isAttemptingAutoLogin = false
+                        if loginResult.success {
+                            print("[DEBUG] Debug login successful, npub: \(loginResult.npub)")
+                            userNpub = loginResult.npub
+                            isLoggedIn = true
+                        } else {
+                            print("[DEBUG] Debug login failed - showing login screen")
+                            autoLoginError = "Debug nsec login failed"
+                        }
+                    }
+                    return
+                } catch {
+                    print("[DEBUG] Debug login error: \(error)")
+                    DispatchQueue.main.async {
+                        isAttemptingAutoLogin = false
+                        autoLoginError = "Debug nsec invalid: \(error.localizedDescription)"
+                    }
+                    return
+                }
+            }
+
+            // Normal auto-login flow using stored credentials
             let result = coreManager.attemptAutoLogin()
 
             DispatchQueue.main.async {
