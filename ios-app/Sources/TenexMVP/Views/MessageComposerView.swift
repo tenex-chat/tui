@@ -67,6 +67,14 @@ struct MessageComposerView: View {
     @State private var dictationManager = DictationManager()
     @State private var showDictationOverlay = false
 
+    // Image attachment state
+    @State private var showImagePicker = false
+    @State private var isUploadingImage = false
+    @State private var imageUploadError: String?
+    @State private var showImageUploadError = false
+    /// Local image attachments synced with draft for UI display
+    @State private var localImageAttachments: [ImageAttachment] = []
+
     // PERFORMANCE FIX: Local text state for instant typing response
     // This decouples TextEditor binding from draft persistence to eliminate per-keystroke lag
     @State private var localText: String = ""
@@ -108,8 +116,10 @@ struct MessageComposerView: View {
 
         // PERFORMANCE FIX: Use localText for instant send button feedback
         // Draft sync may be pending, but localText always has current content
-        let hasContent = !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        return hasContent && !isSending
+        let hasTextContent = !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasImageContent = !localImageAttachments.isEmpty
+        // Either text or images is sufficient to send
+        return (hasTextContent || hasImageContent) && !isSending && !isUploadingImage
     }
 
     private var selectedAgent: OnlineAgentInfo? {
@@ -239,6 +249,11 @@ struct MessageComposerView: View {
                 // Nudge chips (for new conversations)
                 if isNewConversation && selectedProject != nil {
                     nudgeChipsView
+                }
+
+                // Image attachment chips (for all conversations)
+                if !localImageAttachments.isEmpty && selectedProject != nil {
+                    imageAttachmentChipsView
                 }
 
                 Divider()
@@ -396,6 +411,18 @@ struct MessageComposerView: View {
                         isDirty = true // Mark as dirty when user selects nudges
                     }
                 )
+            }
+            #if os(iOS)
+            .sheet(isPresented: $showImagePicker) {
+                ImagePicker { imageData, mimeType in
+                    handleImageSelected(data: imageData, mimeType: mimeType)
+                }
+            }
+            #endif
+            .alert("Image Upload Failed", isPresented: $showImageUploadError) {
+                Button("OK") { }
+            } message: {
+                Text(imageUploadError ?? "Unknown error")
             }
             .alert("Send Failed", isPresented: $showSendError) {
                 Button("OK") { }
@@ -647,6 +674,21 @@ struct MessageComposerView: View {
         .background(Color.systemGray6)
     }
 
+    private var imageAttachmentChipsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(localImageAttachments) { attachment in
+                    ImageAttachmentChipView(attachment: attachment) {
+                        removeImageAttachment(id: attachment.id)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 12)
+        .background(Color.systemGray6)
+    }
+
     private var contentEditorView: some View {
         ZStack(alignment: .topLeading) {
             // PERFORMANCE FIX: Bind directly to localText for instant response
@@ -763,6 +805,21 @@ struct MessageComposerView: View {
             }
 
             #if os(iOS)
+            // Image attachment button
+            Button {
+                showImagePicker = true
+            } label: {
+                if isUploadingImage {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                } else {
+                    Image(systemName: "photo")
+                        .foregroundStyle(.blue)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(selectedProject == nil || isUploadingImage)
+
             // Voice dictation button
             Button {
                 Task {
@@ -779,6 +836,17 @@ struct MessageComposerView: View {
 
             Spacer()
 
+            // Image attachment count
+            if !localImageAttachments.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "photo.fill")
+                        .font(.caption2)
+                    Text("\(localImageAttachments.count)")
+                        .font(.caption)
+                }
+                .foregroundStyle(.blue)
+            }
+
             // Character count (use localText for instant feedback)
             if localText.count > 0 {
                 Text("\(localText.count)")
@@ -786,8 +854,8 @@ struct MessageComposerView: View {
                     .foregroundStyle(.secondary)
             }
 
-            // Clear button (if has content) - use localText for instant feedback
-            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Clear button (if has content or images) - use localText for instant feedback
+            if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty {
                 Button(action: clearDraft) {
                     Image(systemName: "trash")
                         .foregroundStyle(.red)
@@ -850,6 +918,8 @@ struct MessageComposerView: View {
                         isProgrammaticUpdate = true
                         localText = loadedDraft.content
                     }
+                    // Sync image attachments
+                    localImageAttachments = loadedDraft.imageAttachments
                 }
             } else {
                 print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
@@ -1026,7 +1096,13 @@ struct MessageComposerView: View {
         // PERFORMANCE FIX: Cancel any pending sync and use localText directly
         // This ensures we send what the user typed, even if sync hasn't caught up
         contentSyncTask?.cancel()
-        let contentToSend = localText
+
+        // Build full content including image URLs (replaces [Image #N] markers with actual URLs)
+        var contentToSend = localText
+        for attachment in localImageAttachments {
+            let marker = "[Image #\(attachment.id)]"
+            contentToSend = contentToSend.replacingOccurrences(of: marker, with: attachment.url)
+        }
 
         Task {
             do {
@@ -1085,10 +1161,72 @@ struct MessageComposerView: View {
         // Cancel any pending sync since we're clearing
         contentSyncTask?.cancel()
 
+        // Clear image attachments
+        localImageAttachments = []
+
         draft.clear()
         if let projectId = selectedProject?.id {
             Task {
                 await draftManager.clearDraft(conversationId: conversationId, projectId: projectId)
+            }
+        }
+    }
+
+    // MARK: - Image Attachment Handling
+
+    /// Handle image selected from picker - upload to Blossom
+    private func handleImageSelected(data: Data, mimeType: String) {
+        isUploadingImage = true
+        imageUploadError = nil
+
+        Task {
+            do {
+                let url = try await coreManager.safeCore.uploadImage(data: data, mimeType: mimeType)
+
+                // Add to draft and local state
+                let imageId = draft.addImageAttachment(url: url)
+                let attachment = ImageAttachment(id: imageId, url: url)
+                localImageAttachments.append(attachment)
+
+                // Insert marker at cursor position (matching TUI behavior)
+                let marker = "[Image #\(imageId)] "
+                localText.append(marker)
+
+                // Mark dirty and save
+                isDirty = true
+                if let projectId = selectedProject?.id {
+                    await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+                    await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
+                }
+
+                isUploadingImage = false
+            } catch {
+                isUploadingImage = false
+                imageUploadError = error.localizedDescription
+                showImageUploadError = true
+            }
+        }
+    }
+
+    /// Remove an image attachment
+    private func removeImageAttachment(id: Int) {
+        // Remove from local state
+        localImageAttachments.removeAll { $0.id == id }
+
+        // Remove marker from text
+        let marker = "[Image #\(id)]"
+        localText = localText.replacingOccurrences(of: marker + " ", with: "")
+        localText = localText.replacingOccurrences(of: marker, with: "")
+
+        // Update draft
+        draft.removeImageAttachment(id: id)
+
+        // Mark dirty and save
+        isDirty = true
+        if let projectId = selectedProject?.id {
+            Task {
+                await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+                await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
             }
         }
     }
@@ -1174,6 +1312,110 @@ struct OnlineAgentChipView: View {
         .contentShape(Capsule())
     }
 }
+
+// MARK: - Image Attachment Chip View
+
+struct ImageAttachmentChipView: View {
+    let attachment: ImageAttachment
+    let onRemove: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            // Image icon
+            Image(systemName: "photo.fill")
+                .font(.caption)
+                .foregroundStyle(.blue)
+
+            // Image label
+            Text("Image #\(attachment.id)")
+                .font(.caption)
+                .foregroundStyle(.primary)
+
+            // Remove button
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(Color.blue.opacity(0.1))
+        )
+    }
+}
+
+// MARK: - Image Picker
+
+#if os(iOS)
+import PhotosUI
+
+struct ImagePicker: UIViewControllerRepresentable {
+    let onImageSelected: (Data, String) -> Void
+
+    func makeUIViewController(context: Context) -> PHPickerViewController {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: PHPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, PHPickerViewControllerDelegate {
+        let parent: ImagePicker
+
+        init(_ parent: ImagePicker) {
+            self.parent = parent
+        }
+
+        func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+            picker.dismiss(animated: true)
+
+            guard let result = results.first else { return }
+
+            // Load the image data
+            if result.itemProvider.canLoadObject(ofClass: UIImage.self) {
+                result.itemProvider.loadObject(ofClass: UIImage.self) { [weak self] object, error in
+                    guard let image = object as? UIImage else { return }
+
+                    // Convert to PNG or JPEG data
+                    let imageData: Data?
+                    let mimeType: String
+
+                    // Prefer PNG for transparency, fallback to JPEG for smaller size
+                    if let pngData = image.pngData() {
+                        imageData = pngData
+                        mimeType = "image/png"
+                    } else if let jpegData = image.jpegData(compressionQuality: 0.9) {
+                        imageData = jpegData
+                        mimeType = "image/jpeg"
+                    } else {
+                        return
+                    }
+
+                    guard let data = imageData else { return }
+
+                    // Call on main thread
+                    DispatchQueue.main.async {
+                        self?.parent.onImageSelected(data, mimeType)
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Preview
 

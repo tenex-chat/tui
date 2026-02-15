@@ -673,4 +673,23 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
             core.version()
         }
     }
+
+    // MARK: - Image Upload
+
+    /// Upload an image to Blossom and return the URL.
+    /// Uses the user's Nostr keys for authentication.
+    ///
+    /// - Parameters:
+    ///   - data: Raw image data (PNG, JPEG, etc.)
+    ///   - mimeType: MIME type of the image (e.g., "image/png", "image/jpeg")
+    /// - Returns: The Blossom URL where the image is stored
+    func uploadImage(data: Data, mimeType: String) throws -> String {
+        try profiler.measureFFI("uploadImage") {
+            do {
+                return try core.uploadImage(data: data, mimeType: mimeType)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
 }

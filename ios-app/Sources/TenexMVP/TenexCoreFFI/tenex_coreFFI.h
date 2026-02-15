@@ -592,6 +592,11 @@ void uniffi_tenex_core_fn_method_tenexcore_unarchive_conversation(void*_Nonnull 
 void uniffi_tenex_core_fn_method_tenexcore_update_agent_config(void*_Nonnull ptr, RustBuffer project_id, RustBuffer agent_pubkey, RustBuffer model, RustBuffer tools, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UPLOAD_IMAGE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_UPLOAD_IMAGE
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_upload_image(void*_Nonnull ptr, RustBuffer data, RustBuffer mime_type, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_VERSION
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_version(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -1296,6 +1301,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_unarchive_conversation(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPDATE_AGENT_CONFIG
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_update_agent_config(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPLOAD_IMAGE
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_UPLOAD_IMAGE
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_upload_image(void
     
 );
 #endif
