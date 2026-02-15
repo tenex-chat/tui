@@ -354,6 +354,8 @@ struct ConversationsTabView: View {
                                 }
                             }
                         }
+                        .accessibilityLabel(selectedProjectIds.isEmpty ? "Filter by project" : "Filtering \(selectedProjectIds.count) project\(selectedProjectIds.count == 1 ? "" : "s")")
+                        .accessibilityHint("Opens project filter sheet")
                     }
                 }
             }
