@@ -16,6 +16,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case isNewConversation
         case lastEdited
         case referenceConversationId
+        case referenceReportATag
     }
     /// Unique identifier for the draft
     var id: String
@@ -48,10 +49,15 @@ struct Draft: Codable, Identifiable, Equatable {
     /// When set, adds a ["context", "<conversation-id>"] tag to the sent event
     var referenceConversationId: String?
 
+    /// Reference report a-tag for context tagging (used by "Chat with Author" feature)
+    /// Format: "30023:<pubkey>:<slug>" - the standard Nostr a-tag for addressable events
+    /// When set, adds a ["context", "<a-tag>"] tag to the sent event
+    var referenceReportATag: String?
+
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
-    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil) {
+    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = nil
         self.projectId = projectId
@@ -62,10 +68,11 @@ struct Draft: Codable, Identifiable, Equatable {
         self.isNewConversation = true
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
+        self.referenceReportATag = referenceReportATag
     }
 
     /// Create a new draft for an existing conversation
-    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil) {
+    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = conversationId
         self.projectId = projectId
@@ -76,12 +83,13 @@ struct Draft: Codable, Identifiable, Equatable {
         self.isNewConversation = false
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
+        self.referenceReportATag = referenceReportATag
     }
 
     // MARK: - Migration Support
 
     /// Custom decoder for backward compatibility
-    /// Handles drafts from before projectId, selectedNudgeIds, and referenceConversationId were added
+    /// Handles drafts from before projectId, selectedNudgeIds, referenceConversationId, and referenceReportATag were added
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -101,6 +109,8 @@ struct Draft: Codable, Identifiable, Equatable {
         self.lastEdited = try container.decode(Date.self, forKey: .lastEdited)
         // Migration: referenceConversationId is new, default to nil
         self.referenceConversationId = try container.decodeIfPresent(String.self, forKey: .referenceConversationId)
+        // Migration: referenceReportATag is new, default to nil
+        self.referenceReportATag = try container.decodeIfPresent(String.self, forKey: .referenceReportATag)
     }
 
     // MARK: - Computed Properties
@@ -157,6 +167,7 @@ struct Draft: Codable, Identifiable, Equatable {
         agentPubkey = nil
         selectedNudgeIds = []
         referenceConversationId = nil
+        referenceReportATag = nil
         lastEdited = Date()
     }
 
@@ -187,6 +198,18 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Clear the reference conversation
     mutating func clearReferenceConversation() {
         referenceConversationId = nil
+        lastEdited = Date()
+    }
+
+    /// Set the reference report a-tag for context tagging (used by "Chat with Author" feature)
+    mutating func setReferenceReportATag(_ aTag: String?) {
+        referenceReportATag = aTag
+        lastEdited = Date()
+    }
+
+    /// Clear the reference report a-tag
+    mutating func clearReferenceReportATag() {
+        referenceReportATag = nil
         lastEdited = Date()
     }
 }

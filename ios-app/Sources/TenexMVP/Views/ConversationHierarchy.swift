@@ -617,6 +617,23 @@ enum ConversationFormatters {
         This message is in the context of conversation id \(shortConversationId) (full: \(conversation.id)). Your first task is to inspect that conversation with conversation_get to understand the context we're working from. The conversation is approximately \(tokenCount) tokens.
         """
     }
+
+    // MARK: - Report Reference
+
+    /// Generate a context message for referencing a report when chatting with its author.
+    /// This message instructs the agent to use the report as context.
+    ///
+    /// - Parameters:
+    ///   - report: The report being referenced
+    /// - Returns: A formatted context message string
+    static func generateReportContextMessage(report: ReportInfo) -> String {
+        // Estimate tokens based on content length (approx 4 chars per token)
+        let tokenCount = report.content.count / 4
+
+        return """
+        I'd like to discuss the report "\(report.title)" (slug: \(report.id)). The report is approximately \(tokenCount) tokens and is already in your context via the report_read tool or your memorized knowledge. Let me know if you need me to share any specific parts.
+        """
+    }
 }
 
 // MARK: - Status Color Helper
