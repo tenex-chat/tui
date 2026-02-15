@@ -83,6 +83,34 @@ pub fn format_duration_since(started_at: u64) -> String {
     }
 }
 
+/// Format a timestamp as compact relative time or absolute date.
+/// - For messages < 7 days old: "5m", "2h", "3d"
+/// - For messages >= 7 days old: "2025-12-20"
+pub fn format_message_time(timestamp: u64) -> String {
+    let diff = now_seconds().saturating_sub(timestamp);
+    const SEVEN_DAYS: u64 = 7 * 24 * 60 * 60;
+
+    if diff < SEVEN_DAYS {
+        // Relative time (compact format)
+        if diff < 60 {
+            "now".to_string()
+        } else if diff < 3600 {
+            format!("{}m", diff / 60)
+        } else if diff < 86400 {
+            format!("{}h", diff / 3600)
+        } else {
+            format!("{}d", diff / 86400)
+        }
+    } else {
+        // Absolute date for older messages
+        use chrono::{TimeZone, Utc};
+        Utc.timestamp_opt(timestamp as i64, 0)
+            .single()
+            .map(|dt| dt.format("%Y-%m-%d").to_string())
+            .unwrap_or_else(|| "unknown".to_string())
+    }
+}
+
 /// Map status label to a Unicode symbol.
 pub fn status_label_to_symbol(label: &str) -> &'static str {
     match label.to_lowercase().as_str() {

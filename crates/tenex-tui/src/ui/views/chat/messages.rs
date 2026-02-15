@@ -404,9 +404,10 @@ pub(crate) fn render_messages_panel(
                     let show_debug_for_llm = (is_selected || app.show_llm_metadata()) && !msg.llm_metadata.is_empty();
 
                     if show_debug_for_llm {
-                        // LLM metadata line (id + token info)
+                        // LLM metadata line (id + time + token info)
                         messages_text.push(llm_metadata_line(
                             &msg.id,
+                            msg.created_at,
                             &msg.llm_metadata,
                             indicator_color,
                             bg,
