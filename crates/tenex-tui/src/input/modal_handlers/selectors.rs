@@ -170,3 +170,54 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
         }
     }
 }
+
+pub(super) fn handle_skill_selector_key(app: &mut App, key: KeyEvent) {
+    let skills = app.filtered_skills();
+    let item_count = skills.len();
+
+    if let ModalState::SkillSelector(ref mut state) = app.modal_state {
+        match key.code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Enter => {
+                // Apply to current tab (per-tab isolated)
+                let selected_ids = state.selected_skill_ids.clone();
+                if let Some(tab) = app.tabs.active_tab_mut() {
+                    tab.selected_skill_ids = selected_ids;
+                }
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Up => {
+                if state.selector.index > 0 {
+                    state.selector.index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if item_count > 0 && state.selector.index < item_count - 1 {
+                    state.selector.index += 1;
+                }
+            }
+            KeyCode::Char(' ') => {
+                if let Some(skill) = skills.get(state.selector.index) {
+                    let skill_id = skill.id.clone();
+                    if let Some(pos) = state.selected_skill_ids.iter().position(|id| id == &skill_id)
+                    {
+                        state.selected_skill_ids.remove(pos);
+                    } else {
+                        state.selected_skill_ids.push(skill_id);
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                state.selector.filter.push(c);
+                state.selector.index = 0;
+            }
+            KeyCode::Backspace => {
+                state.selector.filter.pop();
+                state.selector.index = 0;
+            }
+            _ => {}
+        }
+    }
+}
