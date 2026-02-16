@@ -155,8 +155,18 @@ impl Message {
                     };
 
                     if let Some(eid) = event_id {
-                        // Check marker (4th element in NIP-10: ["e", id, relay, marker])
-                        let marker = tag.get(3).and_then(|t| t.variant().str());
+                        // Check marker for NIP-10 format: ["e", id, relay, marker]
+                        // Some clients omit relay: ["e", id, "skill"] - marker at index 2
+                        let marker_at_3 = tag.get(3).and_then(|t| t.variant().str());
+                        let marker_at_2 = tag.get(2).and_then(|t| t.variant().str());
+
+                        // Determine effective marker, checking both positions for "skill"
+                        let marker = if marker_at_3 == Some("skill") || marker_at_2 == Some("skill") {
+                            Some("skill")
+                        } else {
+                            // For other markers, use standard NIP-10 position (index 3)
+                            marker_at_3
+                        };
 
                         match marker {
                             Some("root") => {
@@ -164,6 +174,9 @@ impl Message {
                             }
                             Some("reply") => {
                                 reply_to = Some(eid);
+                            }
+                            Some("skill") => {
+                                // Skill marker e-tags are skill references, not thread/reply markers - skip
                             }
                             None => {
                                 // No marker: backwards compat - if we don't have root yet, use as root

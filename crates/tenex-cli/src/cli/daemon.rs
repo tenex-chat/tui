@@ -614,6 +614,7 @@ fn handle_request(
                         agent_pubkey: Some(result.agent_pubkey),
                         reply_to: Some(thread_id.to_string()),
                         nudge_ids: vec![],
+                        skill_ids: vec![],
                         ask_author_pubkey: None,
                         response_tx: Some(response_tx),
                     }) {
@@ -728,6 +729,7 @@ fn handle_request(
                         content: content.to_string(),
                         agent_pubkey: Some(result.agent_pubkey),
                         nudge_ids: vec![],
+                        skill_ids: vec![],
                         reference_conversation_id: None,
                         fork_message_id: None,
                         response_tx: Some(response_tx),
