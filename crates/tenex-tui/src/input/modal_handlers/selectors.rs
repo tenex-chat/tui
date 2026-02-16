@@ -120,6 +120,85 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
     Ok(())
 }
 
+/// Handle key events for the composer project selector (for changing project in new conversations)
+pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
+    let (online_projects, offline_projects) = app.filtered_projects();
+    let all_projects: Vec<_> = online_projects
+        .into_iter()
+        .chain(offline_projects)
+        .collect();
+    let item_count = all_projects.len();
+
+    if let ModalState::ComposerProjectSelector { ref mut selector } = app.modal_state {
+        match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
+            SelectorAction::Selected(project) => {
+                let a_tag = project.a_tag();
+                let project_name = project.name.clone();
+
+                // Check if a draft tab already exists for the target project
+                // If so, switch to it instead of creating a duplicate
+                if let Some((existing_idx, _)) = app.find_draft_tab(&a_tag) {
+                    // Get the current tab's draft_id before switching (to close it)
+                    let current_draft_id = app.tabs.active_tab().and_then(|t| t.draft_id.clone());
+
+                    // Switch to the existing draft tab for the target project
+                    app.switch_to_tab(existing_idx);
+
+                    // Close the old draft tab if it was different
+                    if let Some(old_draft_id) = current_draft_id {
+                        if old_draft_id != format!("{}:new", a_tag) {
+                            // Find and close the old draft tab
+                            if let Some(old_idx) = app.tabs.tabs().iter().position(|t| {
+                                t.draft_id.as_deref() == Some(&old_draft_id)
+                            }) {
+                                app.close_tab_at(old_idx);
+                            }
+                        }
+                    }
+                } else {
+                    // No existing draft for target project - update the current draft tab
+                    if let Some(tab) = app.tabs.active_tab_mut() {
+                        if tab.is_draft() {
+                            // Update draft tab to new project
+                            tab.project_a_tag = a_tag.clone();
+                            tab.draft_id = Some(format!("{}:new", a_tag));
+                            tab.thread_title = format!("New: {}", project_name);
+                        }
+                    }
+                }
+
+                // Update the selected project (for display and agent lookup)
+                app.selected_project = Some(project);
+
+                // Auto-select PM agent from the new project's status
+                // If no PM agent is found, clear the selected agent to prevent stale selection
+                let pm_agent = {
+                    let store = app.data_store.borrow();
+                    store.get_project_status(&a_tag)
+                        .and_then(|status| status.pm_agent().cloned())
+                };
+                if let Some(pm) = pm_agent {
+                    app.set_selected_agent(Some(pm));
+                } else {
+                    // Clear stale agent selection when no PM is found for the new project
+                    app.set_selected_agent(None);
+                    app.user_explicitly_selected_agent = false;
+                }
+
+                // Save the draft content under the new project key
+                app.save_chat_draft();
+
+                app.modal_state = ModalState::None;
+            }
+            SelectorAction::Cancelled => {
+                app.modal_state = ModalState::None;
+            }
+            SelectorAction::Continue => {}
+        }
+    }
+    Ok(())
+}
+
 pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
     let nudges = app.filtered_nudges();
     let item_count = nudges.len();

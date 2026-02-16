@@ -30,7 +30,7 @@ pub use create_project::render_create_project;
 pub use debug_stats::render_debug_stats;
 pub use draft_navigator::render_draft_navigator;
 pub use history_search::render_history_search;
-pub use home::{render_home, render_projects_modal};
+pub use home::{render_composer_project_selector, render_home, render_projects_modal};
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
 pub use nudge_crud::{

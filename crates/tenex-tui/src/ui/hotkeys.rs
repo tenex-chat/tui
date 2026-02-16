@@ -185,6 +185,7 @@ impl HotkeyContext {
             ModalState::CommandPalette(_) => return HotkeyContext::CommandPaletteModal,
             ModalState::AgentSelector { .. } => return HotkeyContext::AgentSelectorModal,
             ModalState::ProjectsModal { .. } => return HotkeyContext::ProjectSelectorModal,
+            ModalState::ComposerProjectSelector { .. } => return HotkeyContext::ProjectSelectorModal,
             ModalState::AskModal(_) => return HotkeyContext::AskModal,
             ModalState::AttachmentEditor { .. } => return HotkeyContext::AttachmentModal,
             ModalState::ConversationActions(_) => return HotkeyContext::ConversationActionsModal,

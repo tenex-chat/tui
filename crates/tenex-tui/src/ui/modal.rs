@@ -2155,6 +2155,11 @@ pub enum ModalState {
     WorkspaceManager(WorkspaceManagerState),
     /// Global app settings modal (accessible via comma key from anywhere)
     AppSettings(AppSettingsState),
+    /// Project selector for the composer context line (only for new conversations)
+    /// This allows changing the a-tag when starting a new conversation
+    ComposerProjectSelector {
+        selector: SelectorState,
+    },
 }
 
 impl Default for ModalState {

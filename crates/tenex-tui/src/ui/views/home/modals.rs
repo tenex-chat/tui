@@ -12,10 +12,18 @@ use ratatui::{
     Frame,
 };
 
-pub fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
-    let filter = app.projects_modal_filter();
-
-    let (popup_area, remaining) = Modal::new("Switch Project")
+/// Shared helper for rendering project selector modals
+/// Used by both `render_projects_modal` and `render_composer_project_selector`
+fn render_project_selector_modal_inner(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    title: &str,
+    filter: &str,
+    selected_index: usize,
+    hints_text: &str,
+) {
+    let (popup_area, remaining) = Modal::new(title)
         .size(ModalSize {
             max_width: 65,
             height_percent: 0.7,
@@ -26,7 +34,6 @@ pub fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
     // Build sections
     let data_store = app.data_store.borrow();
     let (online_projects, offline_projects) = app.filtered_projects();
-    let selected_index = app.projects_modal_index();
 
     let mut sections = Vec::new();
 
@@ -88,9 +95,35 @@ pub fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("↑↓ navigate · enter select · esc close")
+    let hints = Paragraph::new(hints_text)
         .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
+}
+
+pub fn render_projects_modal(f: &mut Frame, app: &App, area: Rect) {
+    render_project_selector_modal_inner(
+        f,
+        app,
+        area,
+        "Switch Project",
+        app.projects_modal_filter(),
+        app.projects_modal_index(),
+        "↑↓ navigate · enter select · esc close",
+    );
+}
+
+/// Render the composer project selector modal (for changing project in new conversations)
+/// This is used when starting a new conversation and wanting to change the a-tag
+pub fn render_composer_project_selector(f: &mut Frame, app: &App, area: Rect) {
+    render_project_selector_modal_inner(
+        f,
+        app,
+        area,
+        "Select Project for New Conversation",
+        app.composer_project_selector_filter(),
+        app.composer_project_selector_index(),
+        "↑↓ navigate · enter select · esc cancel",
+    );
 }
 
 /// Render the tab modal (Alt+/) showing all open tabs

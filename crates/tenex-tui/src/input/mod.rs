@@ -62,6 +62,7 @@ pub(crate) fn handle_key(
                 | ModalState::AgentSettings(_)
                 | ModalState::ExpandedEditor { .. }
                 | ModalState::AskModal(_)
+                | ModalState::ComposerProjectSelector { .. }
         );
 
     // For text input contexts, only handle modified keys (Ctrl+, Alt+)
