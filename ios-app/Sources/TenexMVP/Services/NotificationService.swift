@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import os.log
 
 // MARK: - Notification Service
 
@@ -10,7 +11,10 @@ import UserNotifications
 final class NotificationService: NSObject, ObservableObject {
     static let shared = NotificationService()
 
-    /// Whether notification permission has been granted
+    /// Logger for notification service events (nonisolated to allow use in delegate callbacks)
+    private nonisolated static let logger = Logger(subsystem: "com.tenex.mvp", category: "NotificationService")
+
+    /// Whether notification permission has been granted (includes provisional/ephemeral)
     @Published private(set) var isAuthorized = false
 
     /// Current authorization status
@@ -25,19 +29,58 @@ final class NotificationService: NSObject, ObservableObject {
 
     // MARK: - Authorization
 
-    /// Request notification authorization from the user.
-    /// Call this early in the app lifecycle (e.g., after login).
-    func requestAuthorization() async {
-        do {
-            let granted = try await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
-            isAuthorized = granted
-            print("[NotificationService] Authorization \(granted ? "granted" : "denied")")
+    /// Result of attempting to request notification authorization.
+    enum AuthorizationResult {
+        /// Permission was granted (either just now or previously)
+        case granted
+        /// Permission was just denied by the user
+        case denied
+        /// Permission was previously denied - user must enable in Settings
+        case previouslyDenied
+        /// An error occurred during the request
+        case error(Error)
+    }
 
-            // Update authorization status
-            await checkAuthorizationStatus()
-        } catch {
-            print("[NotificationService] Authorization request failed: \(error)")
-            isAuthorized = false
+    /// Request notification authorization from the user.
+    /// This method checks the current status first and only shows the system dialog
+    /// if the status is `.notDetermined`. If permission was previously denied,
+    /// returns `.previouslyDenied` so the caller can prompt the user to go to Settings.
+    ///
+    /// - Returns: The result of the authorization attempt
+    @discardableResult
+    func requestAuthorization() async -> AuthorizationResult {
+        // First, check current status
+        await checkAuthorizationStatus()
+
+        Self.logger.info("Current authorization status: \(self.authorizationStatus.description)")
+
+        switch authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            Self.logger.debug("Already authorized")
+            return .granted
+
+        case .denied:
+            Self.logger.info("Previously denied - user must enable in Settings")
+            return .previouslyDenied
+
+        case .notDetermined:
+            // Only case where iOS will show the permission dialog
+            Self.logger.info("Status is notDetermined - requesting authorization...")
+            do {
+                let granted = try await notificationCenter.requestAuthorization(options: [.alert, .sound, .badge])
+                isAuthorized = granted
+                await checkAuthorizationStatus()
+                Self.logger.info("Authorization \(granted ? "granted" : "denied") by user")
+                return granted ? .granted : .denied
+            } catch {
+                Self.logger.error("Authorization request failed: \(error)")
+                isAuthorized = false
+                return .error(error)
+            }
+
+        @unknown default:
+            Self.logger.warning("Unknown authorization status: \(self.authorizationStatus.rawValue)")
+            return .denied
         }
     }
 
@@ -45,7 +88,16 @@ final class NotificationService: NSObject, ObservableObject {
     func checkAuthorizationStatus() async {
         let settings = await notificationCenter.notificationSettings()
         authorizationStatus = settings.authorizationStatus
-        isAuthorized = settings.authorizationStatus == .authorized
+        // Treat .authorized, .provisional, and .ephemeral as authorized
+        // since they all allow local notifications to be delivered
+        isAuthorized = settings.authorizationStatus.allowsLocalNotifications
+        Self.logger.debug("Checked status: \(self.authorizationStatus.description), isAuthorized: \(self.isAuthorized)")
+    }
+
+    /// Whether the user has previously denied notification permission.
+    /// Use this to determine if we should show an in-app prompt to go to Settings.
+    var isPreviouslyDenied: Bool {
+        authorizationStatus == .denied
     }
 
     // MARK: - Badge Management
@@ -55,9 +107,9 @@ final class NotificationService: NSObject, ObservableObject {
     func updateBadge(count: Int) async {
         do {
             try await notificationCenter.setBadgeCount(count)
-            print("[NotificationService] Badge updated to \(count)")
+            Self.logger.debug("Badge updated to \(count)")
         } catch {
-            print("[NotificationService] Failed to update badge: \(error)")
+            Self.logger.error("Failed to update badge: \(error)")
         }
     }
 
@@ -85,7 +137,7 @@ final class NotificationService: NSObject, ObservableObject {
         conversationId: String?
     ) async {
         guard isAuthorized else {
-            print("[NotificationService] Not authorized - skipping notification")
+            Self.logger.debug("Not authorized - skipping notification")
             return
         }
 
@@ -120,9 +172,9 @@ final class NotificationService: NSObject, ObservableObject {
 
         do {
             try await notificationCenter.add(request)
-            print("[NotificationService] Scheduled notification for ask event: \(askEventId.prefix(12))...")
+            Self.logger.info("Scheduled notification for ask event: \(askEventId.prefix(12))...")
         } catch {
-            print("[NotificationService] Failed to schedule notification: \(error)")
+            Self.logger.error("Failed to schedule notification: \(error)")
         }
     }
 
@@ -131,14 +183,14 @@ final class NotificationService: NSObject, ObservableObject {
     func removeNotification(askEventId: String) {
         notificationCenter.removePendingNotificationRequests(withIdentifiers: ["ask-\(askEventId)"])
         notificationCenter.removeDeliveredNotifications(withIdentifiers: ["ask-\(askEventId)"])
-        print("[NotificationService] Removed notification for ask event: \(askEventId.prefix(12))...")
+        Self.logger.debug("Removed notification for ask event: \(askEventId.prefix(12))...")
     }
 
     /// Remove all pending ask notifications.
     func removeAllNotifications() {
         notificationCenter.removeAllPendingNotificationRequests()
         notificationCenter.removeAllDeliveredNotifications()
-        print("[NotificationService] Removed all notifications")
+        Self.logger.debug("Removed all notifications")
     }
 }
 
@@ -165,7 +217,7 @@ extension NotificationService: UNUserNotificationCenterDelegate {
         // Extract navigation info for deep linking
         if let type = userInfo["type"] as? String, type == "ask" {
             if let conversationId = userInfo["conversationId"] as? String {
-                print("[NotificationService] User tapped notification for conversation: \(conversationId.prefix(12))...")
+                Self.logger.info("User tapped notification for conversation: \(conversationId.prefix(12))...")
                 // Deep linking can be handled via a shared navigation state manager
                 // For now, just log - UI layer will handle navigation
                 await MainActor.run {
@@ -187,3 +239,61 @@ extension Notification.Name {
     /// userInfo contains "conversationId" for navigation.
     static let askNotificationTapped = Notification.Name("askNotificationTapped")
 }
+
+// MARK: - UNAuthorizationStatus Extensions
+
+extension UNAuthorizationStatus {
+    /// Human-readable description for logging purposes.
+    var description: String {
+        switch self {
+        case .notDetermined: return "notDetermined"
+        case .denied: return "denied"
+        case .authorized: return "authorized"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        @unknown default: return "unknown(\(rawValue))"
+        }
+    }
+
+    /// Whether this authorization status allows local notifications to be delivered.
+    /// Returns true for `.authorized`, `.provisional`, and `.ephemeral`.
+    var allowsLocalNotifications: Bool {
+        switch self {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        case .notDetermined, .denied:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+}
+
+// MARK: - Settings URL Helper
+
+#if os(iOS)
+import UIKit
+
+extension NotificationService {
+    /// Opens the app's notification settings in the iOS Settings app.
+    /// On iOS 16+, opens directly to notification settings.
+    /// On earlier versions, opens the app's general settings page.
+    /// Use this when the user has previously denied notification permission.
+    func openNotificationSettings() {
+        let settingsURLString: String
+        if #available(iOS 16.0, *) {
+            settingsURLString = UIApplication.openNotificationSettingsURLString
+        } else {
+            settingsURLString = UIApplication.openSettingsURLString
+        }
+
+        guard let settingsURL = URL(string: settingsURLString) else {
+            Self.logger.error("Failed to create Settings URL")
+            return
+        }
+        UIApplication.shared.open(settingsURL) { success in
+            Self.logger.debug("Opened Settings: \(success)")
+        }
+    }
+}
+#endif
