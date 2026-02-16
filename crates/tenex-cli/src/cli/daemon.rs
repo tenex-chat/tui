@@ -584,6 +584,14 @@ fn handle_request(
                 }
             };
 
+            // Validate nudge_ids parameter with comprehensive checks
+            let nudge_ids = match validate_nudge_ids_param(&request.params["nudge_ids"]) {
+                Ok(ids) => ids,
+                Err(msg) => {
+                    return (Response::error(id, "INVALID_PARAMS", &msg), false);
+                }
+            };
+
             let (project_slug, thread_id, recipient_slug, content) =
                 match (project_slug, thread_id, recipient_slug, content) {
                     (Some(p), Some(t), Some(r), Some(c)) => (p, t, r, c),
@@ -621,7 +629,7 @@ fn handle_request(
                         content: content.to_string(),
                         agent_pubkey: Some(result.agent_pubkey),
                         reply_to: Some(thread_id.to_string()),
-                        nudge_ids: vec![],
+                        nudge_ids,
                         skill_ids,
                         ask_author_pubkey: None,
                         response_tx: Some(response_tx),
@@ -700,6 +708,14 @@ fn handle_request(
                 }
             };
 
+            // Validate nudge_ids parameter with comprehensive checks
+            let nudge_ids = match validate_nudge_ids_param(&request.params["nudge_ids"]) {
+                Ok(ids) => ids,
+                Err(msg) => {
+                    return (Response::error(id, "INVALID_PARAMS", &msg), false);
+                }
+            };
+
             let (project_slug, recipient_slug, content) =
                 match (project_slug, recipient_slug, content) {
                     (Some(p), Some(r), Some(c)) => (p, r, c),
@@ -744,7 +760,7 @@ fn handle_request(
                         title,
                         content: content.to_string(),
                         agent_pubkey: Some(result.agent_pubkey),
-                        nudge_ids: vec![],
+                        nudge_ids,
                         skill_ids,
                         reference_conversation_id: None,
                         fork_message_id: None,
@@ -941,6 +957,30 @@ fn handle_request(
                 })
                 .collect();
             (Response::success(id, serde_json::json!(skills)), false)
+        }
+
+        "list_nudges" => {
+            let store = data_store.lock().unwrap();
+            let nudges: Vec<_> = store
+                .content.get_nudges()
+                .iter()
+                .map(|nudge| {
+                    serde_json::json!({
+                        "id": nudge.id,
+                        "pubkey": nudge.pubkey,
+                        "title": nudge.title,
+                        "description": nudge.description,
+                        "content": nudge.content,
+                        "hashtags": nudge.hashtags,
+                        "allowed_tools": nudge.allowed_tools,
+                        "denied_tools": nudge.denied_tools,
+                        "only_tools": nudge.only_tools,
+                        "supersedes": nudge.supersedes,
+                        "created_at": nudge.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(nudges)), false)
         }
 
         "show_project" => {
@@ -1470,6 +1510,84 @@ fn validate_skill_ids_param(skill_ids_param: &serde_json::Value) -> Result<Vec<S
         if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
             return Err(format!(
                 "skill_ids must contain only hex characters: {}",
+                trimmed
+            ));
+        }
+
+        seen.insert(trimmed.to_string());
+        validated.push(trimmed.to_string());
+    }
+
+    Ok(validated)
+}
+
+/// Validates nudge IDs from JSON-RPC parameters.
+///
+/// Performs comprehensive validation:
+/// 1. Checks that `nudge_ids` is null (returns empty vec) or an array
+/// 2. Ensures all elements are strings (returns error if any non-string)
+/// 3. Trims whitespace, filters empty strings, and deduplicates
+/// 4. Validates 64-character hex format
+///
+/// Returns Ok(Vec<String>) with validated IDs, or Err(String) with error message.
+fn validate_nudge_ids_param(nudge_ids_param: &serde_json::Value) -> Result<Vec<String>, String> {
+    use std::collections::HashSet;
+
+    if nudge_ids_param.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let arr = nudge_ids_param
+        .as_array()
+        .ok_or("nudge_ids must be an array of strings")?;
+
+    // First pass: ensure all elements are strings
+    for (i, v) in arr.iter().enumerate() {
+        if !v.is_string() {
+            return Err(format!(
+                "nudge_ids[{}] must be a string, got {}",
+                i,
+                match v {
+                    serde_json::Value::Null => "null",
+                    serde_json::Value::Bool(_) => "boolean",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Object(_) => "object",
+                    serde_json::Value::String(_) => unreachable!(),
+                }
+            ));
+        }
+    }
+
+    // Second pass: validate and collect
+    let mut seen = HashSet::new();
+    let mut validated = Vec::new();
+
+    for v in arr {
+        let s = v.as_str().unwrap(); // Safe: verified above
+        let trimmed = s.trim();
+
+        // Skip empty/whitespace-only IDs
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip duplicates
+        if seen.contains(trimmed) {
+            continue;
+        }
+
+        // Validate 64-character hex format
+        if trimmed.len() != 64 {
+            return Err(format!(
+                "nudge_ids must be 64-character hex strings (got {} characters): {}",
+                trimmed.len(),
+                trimmed
+            ));
+        }
+        if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!(
+                "nudge_ids must contain only hex characters: {}",
                 trimmed
             ));
         }
