@@ -246,8 +246,8 @@ struct MessageComposerView: View {
                     }
                 }
 
-                // Nudge chips (for new conversations)
-                if isNewConversation && selectedProject != nil {
+                // Nudge chips (for all conversations)
+                if selectedProject != nil {
                     nudgeChipsView
                 }
 
@@ -1121,7 +1121,8 @@ struct MessageComposerView: View {
                         conversationId: conversationId!,
                         projectId: project.id,
                         content: contentToSend,
-                        agentPubkey: validatedAgentPubkey
+                        agentPubkey: validatedAgentPubkey,
+                        nudgeIds: Array(draft.selectedNudgeIds)
                     )
                 }
 
