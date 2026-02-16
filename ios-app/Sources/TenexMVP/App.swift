@@ -1,5 +1,6 @@
 import SwiftUI
 import CryptoKit
+import UserNotifications
 
 // MARK: - Auto-Login Result
 
@@ -109,6 +110,24 @@ class TenexCoreManager: ObservableObject {
     /// Whether any conversation currently has active agents (24133 events with agents)
     /// Used to highlight the runtime indicator when work is happening
     @Published var hasActiveAgents: Bool = false
+
+    // MARK: - Ask Badge Support
+
+    /// Hard cap for inbox items: 48 hours in seconds.
+    /// Synchronized with InboxView.inbox48HourCapSeconds and Rust constant.
+    private static let inbox48HourCapSeconds: UInt64 = 48 * 60 * 60
+
+    /// Count of unanswered ask events within the 48-hour window.
+    /// Computed property that filters inboxItems for badge display.
+    var unansweredAskCount: Int {
+        let now = UInt64(Date().timeIntervalSince1970)
+        let cutoff = now > Self.inbox48HourCapSeconds ? now - Self.inbox48HourCapSeconds : 0
+        return inboxItems.filter { item in
+            item.eventType == "ask" &&
+            item.status == "waiting" &&
+            item.createdAt >= cutoff
+        }.count
+    }
 
     // MARK: - Event Callback
     /// Event handler for push-based updates from Rust core
@@ -237,6 +256,18 @@ class TenexCoreManager: ObservableObject {
         }
         updated.sort { $0.createdAt > $1.createdAt }
         inboxItems = updated
+
+        // Update app badge with unanswered ask count
+        updateAppBadge()
+    }
+
+    /// Update the app icon badge with unanswered ask count.
+    @MainActor
+    func updateAppBadge() {
+        let count = unansweredAskCount
+        Task {
+            await NotificationService.shared.updateBadge(count: count)
+        }
     }
 
     @MainActor
@@ -885,13 +916,34 @@ struct TenexMVPApp: App {
                 if loggedIn {
                     coreManager.clearLiveFeed()
                     coreManager.registerEventCallback()
-                    // Initial data fetch on login
+                    // Initial data fetch on login with proper authorization sequencing
                     Task { @MainActor in
+                        // Request authorization FIRST so badge can be set after data load
+                        await NotificationService.shared.requestAuthorization()
                         await coreManager.fetchData()
+                        // Update badge after both authorization and data load complete
+                        coreManager.updateAppBadge()
                     }
                 } else {
                     coreManager.unregisterEventCallback()
                     coreManager.clearLiveFeed()
+                    // Clear badge on logout
+                    Task {
+                        await NotificationService.shared.clearBadge()
+                    }
+                }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                // Handle app becoming active
+                if newPhase == .active && isLoggedIn {
+                    Task {
+                        // Refresh authorization status (user may have changed permissions in Settings)
+                        await NotificationService.shared.checkAuthorizationStatus()
+                        // Recalculate badge (may be stale after 48-hour window changes)
+                        await MainActor.run {
+                            coreManager.updateAppBadge()
+                        }
+                    }
                 }
             }
         }
@@ -1031,6 +1083,7 @@ struct MainTabView: View {
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
+            .badge(coreManager.unansweredAskCount)
 
             Tab(value: 10, role: .search) {
                 NavigationStack {
