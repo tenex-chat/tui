@@ -69,6 +69,7 @@ pub enum CliCommand {
         content: String,
         wait_secs: Option<u64>,
         wait_for_project: bool,
+        skill_ids: Vec<String>,
     },
     /// Create a new thread in a project (with recipient targeting)
     CreateThread {
@@ -77,6 +78,7 @@ pub enum CliCommand {
         content: String,
         wait_secs: Option<u64>,
         wait_for_project: bool,
+        skill_ids: Vec<String>,
     },
     /// Boot/start a project
     BootProject { project_slug: String, wait: bool },
@@ -88,6 +90,8 @@ pub enum CliCommand {
     ListAgentDefinitions,
     /// List all MCP tools (kind:4200)
     ListMCPTools,
+    /// List all skills (kind:4202)
+    ListSkills,
     /// Show detailed project information (kind:24010)
     ShowProject { project_slug: String, wait_for_project: bool },
     /// Save a project - create new or update existing (kind:31933)
@@ -125,23 +129,25 @@ impl CliCommand {
                 ("list_messages", serde_json::json!({ "thread_id": thread_id }))
             }
             CliCommand::GetState => ("get_state", serde_json::json!({})),
-            CliCommand::SendMessage { project_slug, thread_id, recipient_slug, content, wait_for_project, .. } => (
+            CliCommand::SendMessage { project_slug, thread_id, recipient_slug, content, wait_for_project, skill_ids, .. } => (
                 "send_message",
                 serde_json::json!({
                     "project_slug": project_slug,
                     "thread_id": thread_id,
                     "recipient_slug": recipient_slug,
                     "content": content,
-                    "wait_for_project": wait_for_project
+                    "wait_for_project": wait_for_project,
+                    "skill_ids": skill_ids
                 }),
             ),
-            CliCommand::CreateThread { project_slug, recipient_slug, content, wait_for_project, .. } => (
+            CliCommand::CreateThread { project_slug, recipient_slug, content, wait_for_project, skill_ids, .. } => (
                 "create_thread",
                 serde_json::json!({
                     "project_slug": project_slug,
                     "recipient_slug": recipient_slug,
                     "content": content,
-                    "wait_for_project": wait_for_project
+                    "wait_for_project": wait_for_project,
+                    "skill_ids": skill_ids
                 }),
             ),
             CliCommand::BootProject { project_slug, .. } => {
@@ -151,6 +157,7 @@ impl CliCommand {
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
             CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
             CliCommand::ListMCPTools => ("list_mcp_tools", serde_json::json!({})),
+            CliCommand::ListSkills => ("list_skills", serde_json::json!({})),
             CliCommand::ShowProject { project_slug, wait_for_project } => {
                 ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
             }
