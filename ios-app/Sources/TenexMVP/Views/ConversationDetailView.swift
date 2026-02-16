@@ -122,10 +122,15 @@ struct ConversationDetailView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Status badge, avatars, and runtime row
+            // Status badge, project badge, avatars, and runtime row
             HStack(alignment: .center, spacing: 12) {
                 // Status badge
                 StatusBadge(status: viewModel.currentStatus, isActive: viewModel.currentIsActive)
+
+                // Project badge
+                if let project = project {
+                    ProjectBadge(projectTitle: project.title)
+                }
 
                 Spacer()
 
@@ -170,7 +175,7 @@ struct ConversationDetailView: View {
 
     /// Find the project for this conversation
     private var project: ProjectInfo? {
-        coreManager.safeCore.getProjects().first { $0.id == conversation.extractedProjectId }
+        coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
     /// Find the last agent that spoke in the conversation (hex pubkey format)
@@ -703,7 +708,7 @@ struct FullConversationSheet: View {
 
     /// Find the project for this conversation
     private var project: ProjectInfo? {
-        coreManager.safeCore.getProjects().first { $0.id == conversation.extractedProjectId }
+        coreManager.projects.first { $0.id == conversation.extractedProjectId }
     }
 
     /// Find the last agent that spoke in the conversation (like TUI's get_most_recent_agent_from_conversation)
