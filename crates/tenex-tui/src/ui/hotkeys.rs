@@ -90,6 +90,7 @@ pub enum HotkeyId {
     InsertNewline,
     CancelEdit,
     HistorySearch,
+    SkillSelector,
 
     // === Agent Browser ===
     ViewAgent,
@@ -792,6 +793,13 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         HotkeyId::HistorySearch,
         KeyCode::Char('r'),
         "Search History",
+        "Input",
+        &[HotkeyContext::ChatEditing],
+    ),
+    HotkeyBinding::alt(
+        HotkeyId::SkillSelector,
+        KeyCode::Char('k'),
+        "Select Skills",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
