@@ -230,16 +230,6 @@ struct ReportsTabRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            // Report icon
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.orange.gradient)
-                .frame(width: 44, height: 44)
-                .overlay {
-                    Image(systemName: "doc.richtext")
-                        .foregroundStyle(.white)
-                        .font(.title3)
-                }
-
             VStack(alignment: .leading, spacing: 4) {
                 // Title
                 Text(report.title)

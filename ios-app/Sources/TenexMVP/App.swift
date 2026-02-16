@@ -214,18 +214,8 @@ class TenexCoreManager: ObservableObject {
     /// 4. Triggers a new negentropy sync to fetch any missed events
     /// 5. Refreshes all data from the store
     func manualRefresh() async {
-        do {
-            // Force reconnect to relays and restart subscriptions
-            try await safeCore.forceReconnect()
-            // After reconnection, fetch fresh data from the store
-            await fetchData()
-        } catch {
-            // If force reconnect fails, fall back to regular refresh
-            print("[TenexCoreManager] Force reconnect failed: \(error), falling back to regular refresh")
-            _ = await safeCore.refresh()
-            // Also fetch fresh data after fallback refresh to ensure UI is updated
-            await fetchData()
-        }
+        _ = await safeCore.refresh()
+        await fetchData()
     }
 
     // MARK: - Push-Based Delta Application
@@ -1136,7 +1126,9 @@ struct MainTabView: View {
             }
         }
         .tabViewStyle(.sidebarAdaptable)
+        #if os(iOS)
         .tabBarMinimizeBehavior(.onScrollDown)
+        #endif
         .ignoresSafeArea(.keyboard)
     }
 }

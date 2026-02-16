@@ -317,11 +317,6 @@ void uniffi_tenex_core_fn_method_tenexcore_boot_project(void*_Nonnull ptr, RustB
 void uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_FORCE_RECONNECT
-#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_FORCE_RECONNECT
-void uniffi_tenex_core_fn_method_tenexcore_force_reconnect(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_generate_audio_notification(void*_Nonnull ptr, RustBuffer agent_pubkey, RustBuffer conversation_title, RustBuffer message_text, RustBuffer elevenlabs_api_key, RustBuffer openrouter_api_key, RustCallStatus *_Nonnull out_status
@@ -447,11 +442,6 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_projects(void*_Nonnull ptr,
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_reports(void*_Nonnull ptr, RustBuffer project_id, RustCallStatus *_Nonnull out_status
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_SKILLS
-#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_SKILLS
-RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_skills(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GET_STATS_SNAPSHOT
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_get_stats_snapshot(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
@@ -524,7 +514,7 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_message(void*_Nonnull ptr,
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD
-RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, RustBuffer project_id, RustBuffer title, RustBuffer content, RustBuffer agent_pubkey, RustBuffer nudge_ids, RustBuffer skill_ids, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_thread(void*_Nonnull ptr, RustBuffer project_id, RustBuffer title, RustBuffer content, RustBuffer agent_pubkey, RustBuffer nudge_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SET_AUDIO_NOTIFICATIONS_ENABLED
@@ -984,12 +974,6 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback(void
     
 );
 #endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_FORCE_RECONNECT
-#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_FORCE_RECONNECT
-uint16_t uniffi_tenex_core_checksum_method_tenexcore_force_reconnect(void
-    
-);
-#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_generate_audio_notification(void
@@ -1137,12 +1121,6 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_projects(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_REPORTS
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_REPORTS
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_reports(void
-    
-);
-#endif
-#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_SKILLS
-#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_GET_SKILLS
-uint16_t uniffi_tenex_core_checksum_method_tenexcore_get_skills(void
     
 );
 #endif
