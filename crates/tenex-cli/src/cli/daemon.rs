@@ -576,21 +576,12 @@ fn handle_request(
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
 
-            // Validate skill_ids parameter: if present, must be an array
-            let skill_ids_param = &request.params["skill_ids"];
-            let skill_ids: Vec<String> = if skill_ids_param.is_null() {
-                Vec::new()
-            } else if let Some(arr) = skill_ids_param.as_array() {
-                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-            } else {
-                return (
-                    Response::error(
-                        id,
-                        "INVALID_PARAMS",
-                        "skill_ids must be an array of strings",
-                    ),
-                    false,
-                );
+            // Validate skill_ids parameter with comprehensive checks
+            let skill_ids = match validate_skill_ids_param(&request.params["skill_ids"]) {
+                Ok(ids) => ids,
+                Err(msg) => {
+                    return (Response::error(id, "INVALID_PARAMS", &msg), false);
+                }
             };
 
             let (project_slug, thread_id, recipient_slug, content) =
@@ -701,21 +692,12 @@ fn handle_request(
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
 
-            // Validate skill_ids parameter: if present, must be an array
-            let skill_ids_param = &request.params["skill_ids"];
-            let skill_ids: Vec<String> = if skill_ids_param.is_null() {
-                Vec::new()
-            } else if let Some(arr) = skill_ids_param.as_array() {
-                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
-            } else {
-                return (
-                    Response::error(
-                        id,
-                        "INVALID_PARAMS",
-                        "skill_ids must be an array of strings",
-                    ),
-                    false,
-                );
+            // Validate skill_ids parameter with comprehensive checks
+            let skill_ids = match validate_skill_ids_param(&request.params["skill_ids"]) {
+                Ok(ids) => ids,
+                Err(msg) => {
+                    return (Response::error(id, "INVALID_PARAMS", &msg), false);
+                }
             };
 
             let (project_slug, recipient_slug, content) =
@@ -1419,4 +1401,82 @@ fn find_agent_in_project(
     }
 
     Err(AgentLookupError::AgentNotFound)
+}
+
+/// Validates skill IDs from JSON-RPC parameters.
+///
+/// Performs comprehensive validation:
+/// 1. Checks that `skill_ids` is null (returns empty vec) or an array
+/// 2. Ensures all elements are strings (returns error if any non-string)
+/// 3. Trims whitespace, filters empty strings, and deduplicates
+/// 4. Validates 64-character hex format
+///
+/// Returns Ok(Vec<String>) with validated IDs, or Err(String) with error message.
+fn validate_skill_ids_param(skill_ids_param: &serde_json::Value) -> Result<Vec<String>, String> {
+    use std::collections::HashSet;
+
+    if skill_ids_param.is_null() {
+        return Ok(Vec::new());
+    }
+
+    let arr = skill_ids_param
+        .as_array()
+        .ok_or("skill_ids must be an array of strings")?;
+
+    // First pass: ensure all elements are strings
+    for (i, v) in arr.iter().enumerate() {
+        if !v.is_string() {
+            return Err(format!(
+                "skill_ids[{}] must be a string, got {}",
+                i,
+                match v {
+                    serde_json::Value::Null => "null",
+                    serde_json::Value::Bool(_) => "boolean",
+                    serde_json::Value::Number(_) => "number",
+                    serde_json::Value::Array(_) => "array",
+                    serde_json::Value::Object(_) => "object",
+                    serde_json::Value::String(_) => unreachable!(),
+                }
+            ));
+        }
+    }
+
+    // Second pass: validate and collect
+    let mut seen = HashSet::new();
+    let mut validated = Vec::new();
+
+    for v in arr {
+        let s = v.as_str().unwrap(); // Safe: verified above
+        let trimmed = s.trim();
+
+        // Skip empty/whitespace-only IDs
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip duplicates
+        if seen.contains(trimmed) {
+            continue;
+        }
+
+        // Validate 64-character hex format
+        if trimmed.len() != 64 {
+            return Err(format!(
+                "skill_ids must be 64-character hex strings (got {} characters): {}",
+                trimmed.len(),
+                trimmed
+            ));
+        }
+        if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(format!(
+                "skill_ids must contain only hex characters: {}",
+                trimmed
+            ));
+        }
+
+        seen.insert(trimmed.to_string());
+        validated.push(trimmed.to_string());
+    }
+
+    Ok(validated)
 }
