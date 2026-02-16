@@ -1027,11 +1027,11 @@ impl NostrWorker {
             ));
         }
 
-        // Skill tags (e-tags with "skill" marker per NIP-10)
+        // Skill tags (custom "skill" tag, same format as nudge tags)
         for skill_id in skill_ids {
             event = event.tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                vec![skill_id, "".to_string(), "skill".to_string()],
+                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+                vec![skill_id],
             ));
         }
 
@@ -1144,11 +1144,11 @@ impl NostrWorker {
             ));
         }
 
-        // Skill tags (e-tags with "skill" marker per NIP-10)
+        // Skill tags (custom "skill" tag, same format as nudge tags)
         for skill_id in skill_ids {
             event = event.tag(Tag::custom(
-                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
-                vec![skill_id, "".to_string(), "skill".to_string()],
+                TagKind::Custom(std::borrow::Cow::Borrowed("skill")),
+                vec![skill_id],
             ));
         }
 
