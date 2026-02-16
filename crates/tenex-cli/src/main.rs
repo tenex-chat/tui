@@ -79,7 +79,8 @@ enum Commands {
         /// Wait for project status (24010 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
-        /// Skill event IDs to attach (can be specified multiple times)
+        /// Skill event IDs to attach (can be specified multiple times).
+        /// Must be 64-character hex strings (Nostr event IDs).
         #[arg(long, short = 'S')]
         skill: Vec<String>,
         /// Message content (all remaining arguments are joined)
@@ -99,7 +100,8 @@ enum Commands {
         /// Wait for project status (24010 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
-        /// Skill event IDs to attach (can be specified multiple times)
+        /// Skill event IDs to attach (can be specified multiple times).
+        /// Must be 64-character hex strings (Nostr event IDs).
         #[arg(long, short = 'S')]
         skill: Vec<String>,
         /// Message content (all remaining arguments are joined)
@@ -132,7 +134,8 @@ enum Commands {
     /// List all MCP tools (kind:4200 events)
     ListMCPTools,
 
-    /// List all skills (kind:4202 events)
+    /// List all skills (kind:4202 events).
+    /// Use `--skill <ID>` with send-message or create-thread to attach skills.
     ListSkills,
 
     /// Show detailed project information (from kind:24010)
@@ -231,7 +234,7 @@ fn main() {
                 content: message.join(" "),
                 wait_secs: wait,
                 wait_for_project,
-                skill_ids: skill,
+                skill_ids: validate_skill_ids(skill),
             }
         }
         Some(Commands::CreateThread { project_slug, recipient_slug, wait, wait_for_project, skill, message }) => {
@@ -241,7 +244,7 @@ fn main() {
                 content: message.join(" "),
                 wait_secs: wait,
                 wait_for_project,
-                skill_ids: skill,
+                skill_ids: validate_skill_ids(skill),
             }
         }
         Some(Commands::BootProject { project_slug, wait }) => CliCommand::BootProject { project_slug, wait },
@@ -383,4 +386,46 @@ fn load_config(data_dir: &std::path::Path) -> Option<CliConfig> {
         }
     }
     None
+}
+
+/// Validate and normalize skill IDs.
+/// - Trims whitespace from each ID
+/// - Filters out empty/whitespace-only IDs
+/// - Deduplicates IDs
+/// - Validates 64-character hex format
+/// Returns the validated IDs or exits with error if any ID is invalid.
+fn validate_skill_ids(skill_ids: Vec<String>) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut seen = HashSet::new();
+    let mut validated = Vec::new();
+
+    for id in skill_ids {
+        let trimmed = id.trim().to_string();
+
+        // Skip empty/whitespace-only IDs
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        // Skip duplicates
+        if seen.contains(&trimmed) {
+            continue;
+        }
+
+        // Validate 64-character hex format
+        if trimmed.len() != 64 {
+            eprintln!("Error: Skill event ID must be 64 hex characters (got {} characters): {}", trimmed.len(), trimmed);
+            std::process::exit(1);
+        }
+        if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+            eprintln!("Error: Skill event ID must contain only hex characters: {}", trimmed);
+            std::process::exit(1);
+        }
+
+        seen.insert(trimmed.clone());
+        validated.push(trimmed);
+    }
+
+    validated
 }
