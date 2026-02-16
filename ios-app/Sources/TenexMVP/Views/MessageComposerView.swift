@@ -715,6 +715,7 @@ struct MessageComposerView: View {
                     SkillChipView(skill: skill) {
                         isDirty = true
                         draft.removeSkill(skill.id)
+                        persistSelectedSkillIds()
                     }
                 }
 
@@ -934,6 +935,17 @@ struct MessageComposerView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.systemBackground)
+    }
+
+    // MARK: - Skill Sync
+
+    /// Persists selected skill IDs to DraftManager.
+    /// Call after modifying draft.selectedSkillIds to persist changes.
+    private func persistSelectedSkillIds() {
+        guard let projectId = selectedProject?.id else { return }
+        Task {
+            await draftManager.updateSkillIds(draft.selectedSkillIds, conversationId: conversationId, projectId: projectId)
+        }
     }
 
     // MARK: - Actions
