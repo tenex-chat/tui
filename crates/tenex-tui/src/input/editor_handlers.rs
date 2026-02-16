@@ -100,8 +100,8 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
-        // Ctrl+S = open skill selector
-        KeyCode::Char('s') if has_ctrl => {
+        // Alt+K = open skill selector (K for sKills; Alt+S conflicts with global audio stop)
+        KeyCode::Char('k') if has_alt => {
             app.open_skill_selector();
         }
         // Ctrl+R = open history search
@@ -293,20 +293,22 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (Nudge -> Model -> Agent)
+        // Left = move to previous item (Skill -> Nudge -> Model -> Agent)
         KeyCode::Left => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Agent, // Already at leftmost
                 InputContextFocus::Model => InputContextFocus::Agent,
                 InputContextFocus::Nudge => InputContextFocus::Model,
+                InputContextFocus::Skill => InputContextFocus::Nudge,
             });
         }
-        // Right = move to next item (Agent -> Model -> Nudge)
+        // Right = move to next item (Agent -> Model -> Nudge -> Skill)
         KeyCode::Right => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Model,
                 InputContextFocus::Model => InputContextFocus::Nudge,
-                InputContextFocus::Nudge => InputContextFocus::Nudge, // Already at rightmost
+                InputContextFocus::Nudge => InputContextFocus::Skill,
+                InputContextFocus::Skill => InputContextFocus::Skill, // Already at rightmost
             });
         }
         // Enter = open the appropriate selector modal
@@ -349,6 +351,10 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                 InputContextFocus::Nudge => {
                     app.input_context_focus = None;
                     app.open_nudge_selector();
+                }
+                InputContextFocus::Skill => {
+                    app.input_context_focus = None;
+                    app.open_skill_selector();
                 }
             }
         }

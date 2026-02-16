@@ -157,6 +157,8 @@ pub enum InputContextFocus {
     Model,
     /// Nudge selector is selected
     Nudge,
+    /// Skill selector is selected
+    Skill,
 }
 
 /// A feed item representing a kind:1 event (text note) from a project
@@ -3647,7 +3649,7 @@ impl App {
             .unwrap_or_default()
     }
 
-    // ===== Skill Selector Methods (Ctrl+S) =====
+    // ===== Skill Selector Methods (Alt+K) =====
 
     /// Open the skill selector modal
     pub fn open_skill_selector(&mut self) {

@@ -123,6 +123,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
             ("Ctrl+Shift+Z", "Redo"),
             ("Ctrl+C/X", "Copy/Cut selection"),
             ("Ctrl+N", "Open nudge selector"),
+            ("Alt+K", "Open skill selector"),
             ("Home/End", "Line start/end"),
             ("Alt+←/→", "Word left/right"),
             ("Alt+Backspace", "Delete word backward"),

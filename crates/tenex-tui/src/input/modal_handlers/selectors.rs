@@ -95,6 +95,11 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                             tab.draft_id = Some(format!("{}:new", a_tag));
                             tab.thread_title = format!("New: {}", project_name);
 
+                            // Clear project-scoped selections when switching projects
+                            // Skills and nudges may not exist in the new project
+                            tab.selected_skill_ids.clear();
+                            tab.selected_nudge_ids.clear();
+
                             // Save the draft content under the new project key
                             app.save_chat_draft();
                         }
@@ -125,6 +130,13 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
     let item_count = nudges.len();
 
     if let ModalState::NudgeSelector(ref mut state) = app.modal_state {
+        // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
+        if item_count > 0 {
+            state.selector.index = state.selector.index.min(item_count - 1);
+        } else {
+            state.selector.index = 0;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;
@@ -176,6 +188,13 @@ pub(super) fn handle_skill_selector_key(app: &mut App, key: KeyEvent) {
     let item_count = skills.len();
 
     if let ModalState::SkillSelector(ref mut state) = app.modal_state {
+        // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
+        if item_count > 0 {
+            state.selector.index = state.selector.index.min(item_count - 1);
+        } else {
+            state.selector.index = 0;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;

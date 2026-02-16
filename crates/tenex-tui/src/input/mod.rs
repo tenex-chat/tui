@@ -115,7 +115,8 @@ pub(crate) fn handle_key(
     // GLOBAL AUDIO PLAYER CONTROLS (work from anywhere)
     // =========================================================================
 
-    // Alt+S: Stop audio playback
+    // Alt+S: Stop audio playback (only when NOT in chat editing mode, to allow Alt+K for skills)
+    // Note: Alt+K is used for skill selector in editing mode, Alt+S is safe for audio stop globally
     if code == KeyCode::Char('s') && modifiers.contains(KeyModifiers::ALT) {
         app.audio_player.stop();
         app.set_warning_status("Audio stopped");
