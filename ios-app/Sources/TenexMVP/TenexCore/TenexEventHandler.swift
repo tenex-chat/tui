@@ -31,10 +31,25 @@ final class TenexEventHandler: EventCallback {
             case .inboxUpsert(let item):
                 coreManager.applyInboxUpsert(item)
 
-                // Trigger audio notification for mentions, but only for new events
-                // (skip stale inbox items that arrived before this session started)
-                if item.eventType == "mention" && item.status == "waiting"
-                    && item.createdAt >= coreManager.sessionStartTimestamp {
+                // Only process new events (skip stale inbox items from before this session)
+                guard item.status == "waiting" && item.createdAt >= coreManager.sessionStartTimestamp else {
+                    break
+                }
+
+                if item.eventType == "ask" {
+                    // Trigger local push notification for ask events
+                    Task {
+                        await NotificationService.shared.scheduleAskNotification(
+                            askEventId: item.id,
+                            title: item.title,
+                            body: item.content,
+                            fromAgent: item.fromAgent,
+                            projectId: item.projectId,
+                            conversationId: item.conversationId
+                        )
+                    }
+                } else if item.eventType == "mention" {
+                    // Trigger audio notification for mentions
                     Task {
                         await coreManager.triggerAudioNotification(
                             agentPubkey: item.authorPubkey,
