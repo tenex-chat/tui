@@ -96,8 +96,13 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Ctrl+N = open nudge selector
-        KeyCode::Char('n') if has_ctrl => {
+        // Ctrl+N or Ctrl+/ = open nudge selector
+        // Note: Ctrl+_ is included for terminal compatibility (some terminals send
+        // ASCII 0x1F for Ctrl+/, which crossterm reports as Ctrl+_)
+        // These bindings are handled directly here rather than through the hotkey
+        // registry because they only apply during text editing and need to be
+        // processed before regular character input.
+        KeyCode::Char('n') | KeyCode::Char('/') | KeyCode::Char('_') if has_ctrl => {
             app.open_nudge_selector();
         }
         // Ctrl+R = open history search
