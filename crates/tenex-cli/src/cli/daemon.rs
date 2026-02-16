@@ -575,6 +575,10 @@ fn handle_request(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let skill_ids: Vec<String> = request.params["skill_ids"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
 
             let (project_slug, thread_id, recipient_slug, content) =
                 match (project_slug, thread_id, recipient_slug, content) {
@@ -614,7 +618,7 @@ fn handle_request(
                         agent_pubkey: Some(result.agent_pubkey),
                         reply_to: Some(thread_id.to_string()),
                         nudge_ids: vec![],
-                        skill_ids: vec![],
+                        skill_ids,
                         ask_author_pubkey: None,
                         response_tx: Some(response_tx),
                     }) {
@@ -683,6 +687,10 @@ fn handle_request(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let skill_ids: Vec<String> = request.params["skill_ids"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
 
             let (project_slug, recipient_slug, content) =
                 match (project_slug, recipient_slug, content) {
@@ -729,7 +737,7 @@ fn handle_request(
                         content: content.to_string(),
                         agent_pubkey: Some(result.agent_pubkey),
                         nudge_ids: vec![],
-                        skill_ids: vec![],
+                        skill_ids,
                         reference_conversation_id: None,
                         fork_message_id: None,
                         response_tx: Some(response_tx),
@@ -904,6 +912,27 @@ fn handle_request(
                 })
                 .collect();
             (Response::success(id, serde_json::json!(mcp_tools)), false)
+        }
+
+        "list_skills" => {
+            let store = data_store.lock().unwrap();
+            let skills: Vec<_> = store
+                .content.get_skills()
+                .iter()
+                .map(|skill| {
+                    serde_json::json!({
+                        "id": skill.id,
+                        "pubkey": skill.pubkey,
+                        "title": skill.title,
+                        "description": skill.description,
+                        "content": skill.content,
+                        "hashtags": skill.hashtags,
+                        "file_ids": skill.file_ids,
+                        "created_at": skill.created_at,
+                    })
+                })
+                .collect();
+            (Response::success(id, serde_json::json!(skills)), false)
         }
 
         "show_project" => {

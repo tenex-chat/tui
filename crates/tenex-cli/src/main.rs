@@ -79,6 +79,9 @@ enum Commands {
         /// Wait for project status (24010 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
+        /// Skill event IDs to attach (can be specified multiple times)
+        #[arg(long, short = 'S')]
+        skill: Vec<String>,
         /// Message content (all remaining arguments are joined)
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -96,6 +99,9 @@ enum Commands {
         /// Wait for project status (24010 event) before proceeding
         #[arg(long, short = 'W')]
         wait_for_project: bool,
+        /// Skill event IDs to attach (can be specified multiple times)
+        #[arg(long, short = 'S')]
+        skill: Vec<String>,
         /// Message content (all remaining arguments are joined)
         #[arg(trailing_var_arg = true, num_args = 1..)]
         message: Vec<String>,
@@ -125,6 +131,9 @@ enum Commands {
 
     /// List all MCP tools (kind:4200 events)
     ListMCPTools,
+
+    /// List all skills (kind:4202 events)
+    ListSkills,
 
     /// Show detailed project information (from kind:24010)
     ShowProject {
@@ -214,7 +223,7 @@ fn main() {
         Some(Commands::ListAgents { project_slug, wait }) => CliCommand::ListAgents { project_slug, wait_for_project: wait },
         Some(Commands::ListMessages { thread_id }) => CliCommand::ListMessages { thread_id },
         Some(Commands::GetState) => CliCommand::GetState,
-        Some(Commands::SendMessage { project_slug, thread_id, recipient_slug, wait, wait_for_project, message }) => {
+        Some(Commands::SendMessage { project_slug, thread_id, recipient_slug, wait, wait_for_project, skill, message }) => {
             CliCommand::SendMessage {
                 project_slug,
                 thread_id,
@@ -222,15 +231,17 @@ fn main() {
                 content: message.join(" "),
                 wait_secs: wait,
                 wait_for_project,
+                skill_ids: skill,
             }
         }
-        Some(Commands::CreateThread { project_slug, recipient_slug, wait, wait_for_project, message }) => {
+        Some(Commands::CreateThread { project_slug, recipient_slug, wait, wait_for_project, skill, message }) => {
             CliCommand::CreateThread {
                 project_slug,
                 recipient_slug,
                 content: message.join(" "),
                 wait_secs: wait,
                 wait_for_project,
+                skill_ids: skill,
             }
         }
         Some(Commands::BootProject { project_slug, wait }) => CliCommand::BootProject { project_slug, wait },
@@ -265,6 +276,7 @@ fn main() {
         Some(Commands::Shutdown) => CliCommand::Shutdown,
         Some(Commands::ListAgentDefinitions) => CliCommand::ListAgentDefinitions,
         Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
+        Some(Commands::ListSkills) => CliCommand::ListSkills,
         Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
         Some(Commands::SaveProject { slug, name, description, agent, mcp_tool_ids }) => {
             // Validate and normalize name
