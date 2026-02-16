@@ -252,14 +252,9 @@ struct MessageComposerView: View {
                     }
                 }
 
-                // Nudge chips (for all conversations)
+                // Nudge and Skill chips (for all conversations)
                 if selectedProject != nil {
-                    nudgeChipsView
-                }
-
-                // Skill chips (for new conversations)
-                if isNewConversation && selectedProject != nil {
-                    skillChipsView
+                    nudgeAndSkillChipsView
                 }
 
                 // Image attachment chips (for all conversations)
@@ -672,7 +667,7 @@ struct MessageComposerView: View {
         .background(Color.systemGray6)
     }
 
-    private var nudgeChipsView: some View {
+    private var nudgeAndSkillChipsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 // Selected nudge chips
@@ -680,6 +675,15 @@ struct MessageComposerView: View {
                     NudgeChipView(nudge: nudge) {
                         isDirty = true
                         draft.removeNudge(nudge.id)
+                    }
+                }
+
+                // Selected skill chips
+                ForEach(selectedSkills, id: \.id) { skill in
+                    SkillChipView(skill: skill) {
+                        isDirty = true
+                        draft.removeSkill(skill.id)
+                        persistSelectedSkillIds()
                     }
                 }
 
@@ -700,24 +704,6 @@ struct MessageComposerView: View {
                     .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 16)
-        }
-        .padding(.vertical, 12)
-        .background(Color.systemGray6)
-    }
-
-    private var skillChipsView: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                // Selected skill chips
-                ForEach(selectedSkills, id: \.id) { skill in
-                    SkillChipView(skill: skill) {
-                        isDirty = true
-                        draft.removeSkill(skill.id)
-                        persistSelectedSkillIds()
-                    }
-                }
 
                 // Add skill button
                 Button(action: { showSkillSelector = true }) {
@@ -1216,7 +1202,8 @@ struct MessageComposerView: View {
                         projectId: project.id,
                         content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
-                        nudgeIds: Array(draft.selectedNudgeIds)
+                        nudgeIds: Array(draft.selectedNudgeIds),
+                        skillIds: Array(draft.selectedSkillIds)
                     )
                 }
 
