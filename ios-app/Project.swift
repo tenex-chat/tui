@@ -25,7 +25,7 @@ let project = Project(
                 "UIBackgroundModes": ["audio"]
             ]),
             sources: [
-                "Sources/TenexMVP/**/*.swift",
+                .glob("Sources/TenexMVP/**/*.swift", excluding: ["Sources/TenexMVP/TenexCoreFFI/tenex_core.swift"]),
                 "../swift-bindings/tenex_core.swift"
             ],
             resources: ["Sources/TenexMVP/Resources/**"],
