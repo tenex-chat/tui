@@ -861,6 +861,7 @@ struct TenexMVPApp: App {
     @State private var userNpub = ""
     @State private var isAttemptingAutoLogin = false
     @State private var autoLoginError: String?
+    @State private var showNotificationDeniedAlert = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// Check for debug nsec from launch arguments or environment variables.
@@ -938,7 +939,23 @@ struct TenexMVPApp: App {
                     // Initial data fetch on login with proper authorization sequencing
                     Task { @MainActor in
                         // Request authorization FIRST so badge can be set after data load
-                        await NotificationService.shared.requestAuthorization()
+                        // This checks status first - only shows dialog if status is .notDetermined
+                        let result = await NotificationService.shared.requestAuthorization()
+
+                        // Handle the authorization result
+                        switch result {
+                        case .granted:
+                            print("[App] Notification permission granted")
+                        case .denied:
+                            print("[App] Notification permission denied by user")
+                        case .previouslyDenied:
+                            // User previously denied - show alert directing them to Settings
+                            print("[App] Notification permission was previously denied")
+                            showNotificationDeniedAlert = true
+                        case .error(let error):
+                            print("[App] Notification authorization error: \(error)")
+                        }
+
                         await coreManager.fetchData()
                         // Update badge after both authorization and data load complete
                         coreManager.updateAppBadge()
@@ -965,6 +982,16 @@ struct TenexMVPApp: App {
                     }
                 }
             }
+            #if os(iOS)
+            .alert("Notifications Disabled", isPresented: $showNotificationDeniedAlert) {
+                Button("Open Settings") {
+                    NotificationService.shared.openNotificationSettings()
+                }
+                Button("Not Now", role: .cancel) { }
+            } message: {
+                Text("To receive notifications when agents need your input, please enable notifications in Settings.")
+            }
+            #endif
         }
         #if os(macOS)
         .defaultSize(width: 1200, height: 800)
