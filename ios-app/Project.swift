@@ -26,7 +26,7 @@ let project = Project(
                 "UIBackgroundModes": ["audio", "fetch", "remote-notification"]
             ]),
             sources: [
-                "Sources/TenexMVP/**/*.swift",
+                .glob("Sources/TenexMVP/**/*.swift", excluding: ["Sources/TenexMVP/TenexCoreFFI/tenex_core.swift"]),
                 "../swift-bindings/tenex_core.swift"
             ],
             resources: ["Sources/TenexMVP/Resources/**"],

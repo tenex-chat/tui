@@ -23,7 +23,10 @@ struct SearchView: View {
     @State private var groupedResults: [ConversationSearchGroup] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var navigateToConversation: SearchNavigationData?
+    @State private var selectedConversation: ConversationFullInfo?
+    @State private var isLoadingConversation = false
+    @State private var loadingConversationId: String?  // Track which conversation we're loading for "latest wins"
+    @State private var loadErrorMessage: String?  // Error feedback for failed loads
 
     var body: some View {
         List {
@@ -44,9 +47,7 @@ struct SearchView: View {
                     Section {
                         // Conversation header - tappable to navigate
                         Button {
-                            navigateToConversation = SearchNavigationData(
-                                conversationId: group.id
-                            )
+                            Task { await loadAndSelectConversation(id: group.id) }
                         } label: {
                             ConversationGroupHeader(group: group)
                         }
@@ -57,9 +58,7 @@ struct SearchView: View {
                         ForEach(group.matches, id: \.eventId) { result in
                             Button {
                                 if let threadId = result.threadId {
-                                    navigateToConversation = SearchNavigationData(
-                                        conversationId: threadId
-                                    )
+                                    Task { await loadAndSelectConversation(id: threadId) }
                                 }
                             } label: {
                                 MatchingMessageRow(result: result, searchTerm: searchText)
@@ -92,16 +91,39 @@ struct SearchView: View {
                 }
             }
         }
-        .navigationDestination(item: $navigateToConversation) { navData in
-            SearchConversationView(
-                conversationId: navData.conversationId
-            )
-            .environmentObject(coreManager)
+        #if os(iOS)
+        .sheet(item: $selectedConversation) { conversation in
+            NavigationStack {
+                ConversationDetailView(conversation: conversation)
+                    .environmentObject(coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") {
+                                selectedConversation = nil
+                            }
+                        }
+                    }
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
         }
+        #endif
         .overlay {
-            if isSearching {
+            if isSearching || isLoadingConversation {
                 ProgressView()
                     .scaleEffect(1.2)
+            }
+        }
+        .alert("Unable to Load Conversation", isPresented: .init(
+            get: { loadErrorMessage != nil },
+            set: { if !$0 { loadErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {
+                loadErrorMessage = nil
+            }
+        } message: {
+            if let message = loadErrorMessage {
+                Text(message)
             }
         }
     }
@@ -163,6 +185,33 @@ struct SearchView: View {
 
             await MainActor.run {
                 groupedResults = groups
+            }
+        }
+    }
+
+    /// Fetch conversation details and present the detail sheet
+    /// Uses "latest request wins" pattern to prevent race conditions when user taps multiple results quickly
+    private func loadAndSelectConversation(id: String) async {
+        // Mark this as the current loading target - any previous in-flight request becomes stale
+        await MainActor.run {
+            loadingConversationId = id
+            isLoadingConversation = true
+        }
+
+        let conversations = await coreManager.safeCore.getConversationsByIds(conversationIds: [id])
+
+        await MainActor.run {
+            // Only process if this is still the latest request (prevents race condition)
+            guard loadingConversationId == id else { return }
+
+            isLoadingConversation = false
+            loadingConversationId = nil
+
+            if let conversation = conversations.first {
+                selectedConversation = conversation
+            } else {
+                // Show error feedback when conversation can't be loaded
+                loadErrorMessage = "This conversation may have been deleted or is no longer available."
             }
         }
     }
@@ -313,150 +362,5 @@ struct MatchingMessageRow: View {
         }
 
         return Text(result)
-    }
-}
-
-// MARK: - Navigation Data
-
-struct SearchNavigationData: Identifiable, Hashable {
-    let id = UUID()
-    let conversationId: String
-    // Note: projectId removed - not needed for message fetching
-}
-
-// MARK: - Search Conversation View
-
-struct SearchConversationView: View {
-    let conversationId: String
-    // Note: projectId removed - conversation IDs are globally unique Nostr event IDs
-    // and getMessages(conversationId:) doesn't accept projectId parameter
-    @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var messages: [MessageInfo] = []
-    @State private var isLoading = false
-    @State private var loadTask: Task<Void, Never>?
-
-    var body: some View {
-        Group {
-            if messages.isEmpty {
-                VStack(spacing: 16) {
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(.largeTitle))
-                        .foregroundStyle(.secondary)
-                    Text("No Messages")
-                        .font(.title2)
-                        .fontWeight(.semibold)
-                    if isLoading {
-                        ProgressView()
-                            .padding(.top, 8)
-                    }
-                }
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(messages, id: \.id) { message in
-                            SearchMessageBubble(message: message)
-                        }
-                    }
-                    .padding()
-                }
-            }
-        }
-        .navigationTitle("Conversation")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadMessages()
-        }
-        .onReceive(coreManager.$messagesByConversation) { cache in
-            if let updated = cache[conversationId] {
-                messages = updated
-            }
-        }
-        .onDisappear {
-            loadTask?.cancel()
-        }
-    }
-
-    private func loadMessages() async {
-        loadTask?.cancel()
-
-        let task = Task { @MainActor in
-            isLoading = true
-            defer { isLoading = false }
-
-            await coreManager.ensureMessagesLoaded(conversationId: conversationId)
-            let fetched = coreManager.messagesByConversation[conversationId] ?? []
-            self.messages = fetched
-        }
-
-        loadTask = task
-        await task.value
-    }
-}
-
-// MARK: - Search Message Bubble
-
-struct SearchMessageBubble: View {
-    let message: MessageInfo
-
-    private var isUser: Bool {
-        message.role == "user"
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if isUser { Spacer(minLength: 50) }
-
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                // Author header
-                HStack(spacing: 6) {
-                    if !isUser {
-                        Circle()
-                            .fill(Color.blue.gradient)
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Image(systemName: "sparkle")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white)
-                            }
-                    }
-
-                    Text(message.author)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-
-                    Text(relativeTime(from: message.createdAt))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if isUser {
-                        Circle()
-                            .fill(Color.green.gradient)
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Image(systemName: "person.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white)
-                            }
-                    }
-                }
-
-                // Message content
-                Text(message.content)
-                    .font(.body)
-                    .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
-
-            if !isUser { Spacer(minLength: 50) }
-        }
-    }
-
-    private func relativeTime(from timestamp: UInt64) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
     }
 }
