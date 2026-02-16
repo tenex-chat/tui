@@ -336,6 +336,12 @@ pub enum NostrCommand {
     GetRelayStatus {
         response_tx: Sender<usize>,
     },
+    /// Force reconnection to relays and restart subscriptions
+    /// Used by pull-to-refresh to ensure fresh data is fetched
+    ForceReconnect {
+        /// Optional response channel to signal when reconnection is complete
+        response_tx: Option<Sender<Result<(), String>>>,
+    },
     Shutdown,
 }
 
@@ -570,6 +576,16 @@ impl NostrWorker {
                             }
                         });
                         let _ = response_tx.send(connected_count);
+                    }
+                    NostrCommand::ForceReconnect { response_tx } => {
+                        debug_log("Worker: Force reconnecting");
+                        let result = rt.block_on(self.handle_force_reconnect());
+                        if let Err(ref e) = result {
+                            tlog!("ERROR", "Failed to force reconnect: {}", e);
+                        }
+                        if let Some(tx) = response_tx {
+                            let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
+                        }
                     }
                     NostrCommand::Shutdown => {
                         debug_log("Worker: Shutting down");
@@ -1593,6 +1609,33 @@ impl NostrWorker {
         self.keys = None;
         self.user_pubkey = None;
         self.cancel_tx = None;
+        Ok(())
+    }
+
+    /// Force reconnect to relays and restart all subscriptions.
+    /// Used by pull-to-refresh to ensure fresh data is fetched from relays.
+    async fn handle_force_reconnect(&mut self) -> Result<()> {
+        // Save keys and user_pubkey before disconnect clears them
+        let keys = match self.keys.clone() {
+            Some(k) => k,
+            None => return Err(anyhow::anyhow!("No keys - not logged in")),
+        };
+        let user_pubkey = match self.user_pubkey.clone() {
+            Some(p) => p,
+            None => return Err(anyhow::anyhow!("No user_pubkey - not logged in")),
+        };
+
+        tlog!("CONN", "Force reconnect: disconnecting...");
+
+        // Disconnect (this clears client, keys, user_pubkey, and cancels background tasks)
+        self.handle_disconnect().await?;
+
+        tlog!("CONN", "Force reconnect: reconnecting...");
+
+        // Reconnect with the same credentials
+        self.handle_connect(keys, user_pubkey).await?;
+
+        tlog!("CONN", "Force reconnect: completed");
         Ok(())
     }
 

@@ -204,9 +204,28 @@ class TenexCoreManager: ObservableObject {
         print("[TenexCoreManager] Event callback unregistered")
     }
 
-    /// Manual refresh for pull-to-refresh gesture (optional)
+    /// Manual refresh for pull-to-refresh gesture.
+    ///
+    /// This performs a full reconnection to relays to ensure fresh data is fetched.
+    /// Unlike the automatic refresh which only drains pending events, this:
+    /// 1. Disconnects from all relays
+    /// 2. Reconnects with the same credentials
+    /// 3. Restarts all subscriptions
+    /// 4. Triggers a new negentropy sync to fetch any missed events
+    /// 5. Refreshes all data from the store
     func manualRefresh() async {
-        await syncNow()
+        do {
+            // Force reconnect to relays and restart subscriptions
+            try await safeCore.forceReconnect()
+            // After reconnection, fetch fresh data from the store
+            await fetchData()
+        } catch {
+            // If force reconnect fails, fall back to regular refresh
+            print("[TenexCoreManager] Force reconnect failed: \(error), falling back to regular refresh")
+            _ = await safeCore.refresh()
+            // Also fetch fresh data after fallback refresh to ensure UI is updated
+            await fetchData()
+        }
     }
 
     // MARK: - Push-Based Delta Application

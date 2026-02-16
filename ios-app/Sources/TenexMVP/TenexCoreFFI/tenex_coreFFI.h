@@ -317,6 +317,11 @@ void uniffi_tenex_core_fn_method_tenexcore_boot_project(void*_Nonnull ptr, RustB
 void uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_FORCE_RECONNECT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_FORCE_RECONNECT
+void uniffi_tenex_core_fn_method_tenexcore_force_reconnect(void*_Nonnull ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_GENERATE_AUDIO_NOTIFICATION
 RustBuffer uniffi_tenex_core_fn_method_tenexcore_generate_audio_notification(void*_Nonnull ptr, RustBuffer agent_pubkey, RustBuffer conversation_title, RustBuffer message_text, RustBuffer elevenlabs_api_key, RustBuffer openrouter_api_key, RustCallStatus *_Nonnull out_status
@@ -976,6 +981,12 @@ uint16_t uniffi_tenex_core_checksum_method_tenexcore_boot_project(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_CLEAR_EVENT_CALLBACK
 uint16_t uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_FORCE_RECONNECT
+#define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_CHECKSUM_METHOD_TENEXCORE_FORCE_RECONNECT
+uint16_t uniffi_tenex_core_checksum_method_tenexcore_force_reconnect(void
     
 );
 #endif
