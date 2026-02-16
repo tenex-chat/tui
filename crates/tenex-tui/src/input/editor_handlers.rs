@@ -275,7 +275,7 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key events when context line is focused (agent/model/branch selection)
+/// Handle key events when context line is focused (agent/model/project/nudge selection)
 fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
     use crate::ui::ModalState;
 
@@ -284,24 +284,43 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         None => return,
     };
 
+    // Check if current tab is a draft (new conversation) - project selector only available for drafts
+    let is_draft_tab = app.tabs.active_tab().map(|t| t.is_draft()).unwrap_or(false);
+
     match key.code {
         // Up or Esc = return to text input
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (Nudge -> Model -> Agent)
+        // Left = move to previous item (Nudge -> Project -> Model -> Agent)
+        // Project is only included for draft tabs
         KeyCode::Left => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Agent, // Already at leftmost
                 InputContextFocus::Model => InputContextFocus::Agent,
-                InputContextFocus::Nudge => InputContextFocus::Model,
+                InputContextFocus::Project => InputContextFocus::Model,
+                InputContextFocus::Nudge => {
+                    if is_draft_tab {
+                        InputContextFocus::Project
+                    } else {
+                        InputContextFocus::Model
+                    }
+                }
             });
         }
-        // Right = move to next item (Agent -> Model -> Nudge)
+        // Right = move to next item (Agent -> Model -> Project -> Nudge)
+        // Project is only included for draft tabs
         KeyCode::Right => {
             app.input_context_focus = Some(match focus {
                 InputContextFocus::Agent => InputContextFocus::Model,
-                InputContextFocus::Model => InputContextFocus::Nudge,
+                InputContextFocus::Model => {
+                    if is_draft_tab {
+                        InputContextFocus::Project
+                    } else {
+                        InputContextFocus::Nudge
+                    }
+                }
+                InputContextFocus::Project => InputContextFocus::Nudge,
                 InputContextFocus::Nudge => InputContextFocus::Nudge, // Already at rightmost
             });
         }
@@ -340,6 +359,13 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                             app.input_context_focus = None;
                             app.modal_state = ModalState::AgentSettings(settings_state);
                         }
+                    }
+                }
+                InputContextFocus::Project => {
+                    // Only allow project selection for draft tabs (new conversations)
+                    if is_draft_tab {
+                        app.input_context_focus = None;
+                        app.open_composer_project_selector();
                     }
                 }
                 InputContextFocus::Nudge => {

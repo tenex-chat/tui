@@ -246,6 +246,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_projects_modal(f, app, area);
     }
 
+    // Render composer project selector modal if showing (for changing project in new conversations)
+    if matches!(app.modal_state, ModalState::ComposerProjectSelector { .. }) {
+        super::super::render_composer_project_selector(f, app, area);
+    }
+
     // Command palette overlay (Ctrl+T)
     if let ModalState::CommandPalette(ref state) = app.modal_state {
         super::super::render_command_palette(f, area, app, state.selected_index);

@@ -77,7 +77,14 @@ fn execute_prefix_trigger(app: &mut App, trigger: PrefixTrigger) {
             app.open_nudge_selector();
         }
         PrefixTrigger::ProjectSelector => {
-            app.open_projects_selector_for_switch();
+            // Only allow project switching for new conversations (draft tabs)
+            // Existing conversations have an immutable project association
+            let is_draft = app.tabs.active_tab().map(|t| t.is_draft()).unwrap_or(false);
+            if is_draft {
+                app.open_composer_project_selector();
+            } else {
+                app.set_warning_status("Cannot change project for existing conversations");
+            }
         }
     }
 }
