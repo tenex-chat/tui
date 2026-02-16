@@ -509,7 +509,7 @@ RustBuffer uniffi_tenex_core_fn_method_tenexcore_search(void*_Nonnull ptr, RustB
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_MESSAGE
 #define UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_MESSAGE
-RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_message(void*_Nonnull ptr, RustBuffer conversation_id, RustBuffer project_id, RustBuffer content, RustBuffer agent_pubkey, RustCallStatus *_Nonnull out_status
+RustBuffer uniffi_tenex_core_fn_method_tenexcore_send_message(void*_Nonnull ptr, RustBuffer conversation_id, RustBuffer project_id, RustBuffer content, RustBuffer agent_pubkey, RustBuffer nudge_ids, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_TENEX_CORE_FN_METHOD_TENEXCORE_SEND_THREAD

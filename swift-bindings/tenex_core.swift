@@ -936,7 +936,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Creates a new kind:1 event with e-tag pointing to the thread root.
      * Returns the event ID on success.
      */
-    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?) throws  -> SendMessageResult
+    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws  -> SendMessageResult
     
     /**
      * Send a new conversation (thread) to a project.
@@ -1729,13 +1729,14 @@ open func search(query: String, limit: Int32) -> [SearchResult]  {
      * Creates a new kind:1 event with e-tag pointing to the thread root.
      * Returns the event ID on success.
      */
-open func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?)throws  -> SendMessageResult  {
+open func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String])throws  -> SendMessageResult  {
     return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_send_message(self.uniffiClonePointer(),
         FfiConverterString.lower(conversationId),
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(content),
-        FfiConverterOptionString.lower(agentPubkey),$0
+        FfiConverterOptionString.lower(agentPubkey),
+        FfiConverterSequenceString.lower(nudgeIds),$0
     )
 })
 }
@@ -8504,7 +8505,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_search() != 189) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 24304) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 55434) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 27250) {
