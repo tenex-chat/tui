@@ -1,5 +1,28 @@
 import SwiftUI
 
+// MARK: - Project Badge
+
+/// Badge showing the project name for a conversation
+struct ProjectBadge: View {
+    let projectTitle: String
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "folder.fill")
+                .font(.caption2)
+            Text(projectTitle)
+                .font(.caption)
+                .fontWeight(.medium)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Color.purple.opacity(0.15))
+        .foregroundStyle(.purple)
+        .clipShape(Capsule())
+    }
+}
+
 // MARK: - Shared Status Badge
 
 /// Unified status badge component used across conversation views
