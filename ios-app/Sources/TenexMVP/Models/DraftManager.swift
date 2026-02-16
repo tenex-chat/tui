@@ -366,6 +366,62 @@ final class DraftManager {
         scheduleSave()
     }
 
+    /// Update a draft's selected skill IDs with debounced auto-save
+    /// - Parameters:
+    ///   - skillIds: The set of selected skill IDs
+    ///   - conversationId: The conversation ID (nil for new thread)
+    ///   - projectId: The project ID
+    func updateSkillIds(_ skillIds: Set<String>, conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
+        let key = Draft.storageKey(for: conversationId, projectId: projectId)
+
+        if var draft = drafts[key] {
+            draft.selectedSkillIds = skillIds
+            draft.lastEdited = Date()
+            drafts[key] = draft
+        } else {
+            var newDraft: Draft
+            if let conversationId = conversationId {
+                newDraft = Draft(conversationId: conversationId, projectId: projectId, selectedSkillIds: skillIds)
+            } else {
+                newDraft = Draft(projectId: projectId, selectedSkillIds: skillIds)
+            }
+            drafts[key] = newDraft
+        }
+
+        scheduleSave()
+    }
+
+    /// Update a draft's selected nudge IDs with debounced auto-save
+    /// - Parameters:
+    ///   - nudgeIds: The set of selected nudge IDs
+    ///   - conversationId: The conversation ID (nil for new thread)
+    ///   - projectId: The project ID
+    func updateNudgeIds(_ nudgeIds: Set<String>, conversationId: String?, projectId: String) async {
+        // Wait for initial load to complete to avoid race conditions
+        await ensureLoaded()
+
+        let key = Draft.storageKey(for: conversationId, projectId: projectId)
+
+        if var draft = drafts[key] {
+            draft.selectedNudgeIds = nudgeIds
+            draft.lastEdited = Date()
+            drafts[key] = draft
+        } else {
+            var newDraft: Draft
+            if let conversationId = conversationId {
+                newDraft = Draft(conversationId: conversationId, projectId: projectId, selectedNudgeIds: nudgeIds)
+            } else {
+                newDraft = Draft(projectId: projectId, selectedNudgeIds: nudgeIds)
+            }
+            drafts[key] = newDraft
+        }
+
+        scheduleSave()
+    }
+
     /// Force save immediately, cancelling any pending debounced save
     /// - Note: This is truly synchronous - blocks until save completes
     /// - Throws: Error if save fails (including if load failed and saves are blocked)

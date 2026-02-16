@@ -1,4 +1,4 @@
-use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge};
+use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, Skill};
 use nostrdb::{Filter, Ndb, Note, Transaction};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,6 +9,7 @@ pub struct ContentStore {
     pub agent_definitions: HashMap<String, AgentDefinition>,
     pub mcp_tools: HashMap<String, MCPTool>,
     pub nudges: HashMap<String, Nudge>,
+    pub skills: HashMap<String, Skill>,
     pub lessons: HashMap<String, Lesson>,
 }
 
@@ -18,6 +19,7 @@ impl ContentStore {
             agent_definitions: HashMap::new(),
             mcp_tools: HashMap::new(),
             nudges: HashMap::new(),
+            skills: HashMap::new(),
             lessons: HashMap::new(),
         }
     }
@@ -26,6 +28,7 @@ impl ContentStore {
         self.agent_definitions.clear();
         self.mcp_tools.clear();
         self.nudges.clear();
+        self.skills.clear();
         self.lessons.clear();
     }
 
@@ -61,6 +64,16 @@ impl ContentStore {
         self.nudges.get(id)
     }
 
+    pub fn get_skills(&self) -> Vec<&Skill> {
+        let mut skills: Vec<_> = self.skills.values().collect();
+        skills.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        skills
+    }
+
+    pub fn get_skill(&self, id: &str) -> Option<&Skill> {
+        self.skills.get(id)
+    }
+
     pub fn get_lesson(&self, lesson_id: &str) -> Option<&Lesson> {
         self.lessons.get(lesson_id)
     }
@@ -85,6 +98,12 @@ impl ContentStore {
                 self.nudges.remove(superseded_id);
             }
             self.nudges.insert(nudge.id.clone(), nudge);
+        }
+    }
+
+    pub fn handle_skill_event(&mut self, note: &Note) {
+        if let Some(skill) = Skill::from_note(note) {
+            self.skills.insert(skill.id.clone(), skill);
         }
     }
 
@@ -171,6 +190,25 @@ impl ContentStore {
             self.nudges.insert(nudge.id.clone(), nudge);
         }
     }
+
+    pub fn load_skills(&mut self, ndb: &Arc<Ndb>) {
+        let Ok(txn) = Transaction::new(ndb) else {
+            return;
+        };
+
+        let filter = Filter::new().kinds([4202]).build();
+        let Ok(results) = ndb.query(&txn, &[filter], 1000) else {
+            return;
+        };
+
+        for result in results {
+            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                if let Some(skill) = Skill::from_note(&note) {
+                    self.skills.insert(skill.id.clone(), skill);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,12 +281,26 @@ mod tests {
         }
     }
 
+    fn make_test_skill(id: &str, title: &str, created_at: u64) -> Skill {
+        Skill {
+            id: id.to_string(),
+            pubkey: "pubkey1".to_string(),
+            title: title.to_string(),
+            description: String::new(),
+            content: String::new(),
+            hashtags: vec![],
+            created_at,
+            file_ids: vec![],
+        }
+    }
+
     #[test]
     fn test_empty_store_returns_empty() {
         let store = ContentStore::new();
         assert!(store.get_agent_definitions().is_empty());
         assert!(store.get_mcp_tools().is_empty());
         assert!(store.get_nudges().is_empty());
+        assert!(store.get_skills().is_empty());
         assert!(store.get_lesson("nonexistent").is_none());
     }
 
@@ -310,6 +362,28 @@ mod tests {
     }
 
     #[test]
+    fn test_skills_sorted_descending() {
+        let mut store = ContentStore::new();
+        store.skills.insert("s1".to_string(), make_test_skill("s1", "Old Skill", 100));
+        store.skills.insert("s2".to_string(), make_test_skill("s2", "New Skill", 200));
+
+        let skills = store.get_skills();
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].title, "New Skill");
+        assert_eq!(skills[1].title, "Old Skill");
+    }
+
+    #[test]
+    fn test_skill_lookup() {
+        let mut store = ContentStore::new();
+        store.skills.insert("s1".to_string(), make_test_skill("s1", "Skill One", 100));
+
+        assert!(store.get_skill("s1").is_some());
+        assert_eq!(store.get_skill("s1").unwrap().title, "Skill One");
+        assert!(store.get_skill("missing").is_none());
+    }
+
+    #[test]
     fn test_lesson_lookup() {
         let mut store = ContentStore::new();
         store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
@@ -325,6 +399,7 @@ mod tests {
         store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
         store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
         store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store.skills.insert("s1".to_string(), make_test_skill("s1", "Skill", 100));
         store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
 
         store.clear();
@@ -332,6 +407,7 @@ mod tests {
         assert!(store.get_agent_definitions().is_empty());
         assert!(store.get_mcp_tools().is_empty());
         assert!(store.get_nudges().is_empty());
+        assert!(store.get_skills().is_empty());
         assert!(store.get_lesson("l1").is_none());
     }
 }

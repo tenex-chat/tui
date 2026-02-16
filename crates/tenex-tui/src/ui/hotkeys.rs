@@ -91,6 +91,7 @@ pub enum HotkeyId {
     CancelEdit,
     HistorySearch,
     OpenNudgeSelector,
+    SkillSelector,
 
     // === Agent Browser ===
     ViewAgent,
@@ -145,6 +146,7 @@ pub enum HotkeyContext {
     ViewRawEventModal,
     HotkeyHelpModal,
     NudgeSelectorModal,
+    SkillSelectorModal,
     ReportViewerModal,
     AgentSettingsModal,
     ProjectSettingsModal,
@@ -195,6 +197,7 @@ impl HotkeyContext {
             ModalState::ViewRawEvent { .. } => return HotkeyContext::ViewRawEventModal,
             ModalState::HotkeyHelp => return HotkeyContext::HotkeyHelpModal,
             ModalState::NudgeSelector(_) => return HotkeyContext::NudgeSelectorModal,
+            ModalState::SkillSelector(_) => return HotkeyContext::SkillSelectorModal,
             ModalState::ReportViewer(_) => return HotkeyContext::ReportViewerModal,
             ModalState::AgentSettings(_) => return HotkeyContext::AgentSettingsModal,
             ModalState::ProjectSettings(_) => return HotkeyContext::ProjectSettingsModal,
@@ -809,6 +812,13 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         HotkeyId::OpenNudgeSelector,
         KeyCode::Char('n'),
         "Open Nudge Selector",
+        "Input",
+        &[HotkeyContext::ChatEditing],
+    ),
+    HotkeyBinding::alt(
+        HotkeyId::SkillSelector,
+        KeyCode::Char('k'),
+        "Select Skills",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),

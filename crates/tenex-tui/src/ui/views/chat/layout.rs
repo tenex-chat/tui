@@ -216,6 +216,11 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_nudge_selector(f, app, area, state);
     }
 
+    // Render skill selector modal if showing
+    if let ModalState::SkillSelector(ref state) = app.modal_state {
+        super::super::render_skill_selector(f, app, area, state);
+    }
+
     // Render chat actions modal if showing (Ctrl+T /)
     if let ModalState::ChatActions(ref state) = app.modal_state {
         render_chat_actions_modal(f, area, state);

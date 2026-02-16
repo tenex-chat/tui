@@ -95,6 +95,11 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                             tab.draft_id = Some(format!("{}:new", a_tag));
                             tab.thread_title = format!("New: {}", project_name);
 
+                            // Clear project-scoped selections when switching projects
+                            // Skills and nudges may not exist in the new project
+                            tab.selected_skill_ids.clear();
+                            tab.selected_nudge_ids.clear();
+
                             // Save the draft content under the new project key
                             app.save_chat_draft();
                         }
@@ -204,6 +209,13 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
     let item_count = nudges.len();
 
     if let ModalState::NudgeSelector(ref mut state) = app.modal_state {
+        // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
+        if item_count > 0 {
+            state.selector.index = state.selector.index.min(item_count - 1);
+        } else {
+            state.selector.index = 0;
+        }
+
         match key.code {
             KeyCode::Esc => {
                 app.modal_state = ModalState::None;
@@ -234,6 +246,64 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
                         state.selected_nudge_ids.remove(pos);
                     } else {
                         state.selected_nudge_ids.push(nudge_id);
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                state.selector.filter.push(c);
+                state.selector.index = 0;
+            }
+            KeyCode::Backspace => {
+                state.selector.filter.pop();
+                state.selector.index = 0;
+            }
+            _ => {}
+        }
+    }
+}
+
+pub(super) fn handle_skill_selector_key(app: &mut App, key: KeyEvent) {
+    let skills = app.filtered_skills();
+    let item_count = skills.len();
+
+    if let ModalState::SkillSelector(ref mut state) = app.modal_state {
+        // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
+        if item_count > 0 {
+            state.selector.index = state.selector.index.min(item_count - 1);
+        } else {
+            state.selector.index = 0;
+        }
+
+        match key.code {
+            KeyCode::Esc => {
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Enter => {
+                // Apply to current tab (per-tab isolated)
+                let selected_ids = state.selected_skill_ids.clone();
+                if let Some(tab) = app.tabs.active_tab_mut() {
+                    tab.selected_skill_ids = selected_ids;
+                }
+                app.modal_state = ModalState::None;
+            }
+            KeyCode::Up => {
+                if state.selector.index > 0 {
+                    state.selector.index -= 1;
+                }
+            }
+            KeyCode::Down => {
+                if item_count > 0 && state.selector.index < item_count - 1 {
+                    state.selector.index += 1;
+                }
+            }
+            KeyCode::Char(' ') => {
+                if let Some(skill) = skills.get(state.selector.index) {
+                    let skill_id = skill.id.clone();
+                    if let Some(pos) = state.selected_skill_ids.iter().position(|id| id == &skill_id)
+                    {
+                        state.selected_skill_ids.remove(pos);
+                    } else {
+                        state.selected_skill_ids.push(skill_id);
                     }
                 }
             }

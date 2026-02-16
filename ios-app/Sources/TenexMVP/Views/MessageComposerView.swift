@@ -55,6 +55,8 @@ struct MessageComposerView: View {
     @State private var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
     @State private var availableNudges: [NudgeInfo] = []
     @State private var showNudgeSelector = false
+    @State private var availableSkills: [SkillInfo] = []
+    @State private var showSkillSelector = false
     @State private var isSending = false
     @State private var sendError: String?
     @State private var showSendError = false
@@ -129,6 +131,10 @@ struct MessageComposerView: View {
 
     private var selectedNudges: [NudgeInfo] {
         availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
+    }
+
+    private var selectedSkills: [SkillInfo] {
+        availableSkills.filter { draft.selectedSkillIds.contains($0.id) }
     }
 
     /// Hide scheduled conversations preference (synced with ConversationsTabView)
@@ -249,6 +255,11 @@ struct MessageComposerView: View {
                 // Nudge chips (for all conversations)
                 if selectedProject != nil {
                     nudgeChipsView
+                }
+
+                // Skill chips (for new conversations)
+                if isNewConversation && selectedProject != nil {
+                    skillChipsView
                 }
 
                 // Image attachment chips (for all conversations)
@@ -376,6 +387,7 @@ struct MessageComposerView: View {
                     loadDraft()
                     loadAgents()
                     loadNudges()
+                    loadSkills()
                 }
             }
             .sheet(isPresented: $showProjectSelector) {
@@ -409,6 +421,27 @@ struct MessageComposerView: View {
                     selectedNudgeIds: $draft.selectedNudgeIds,
                     onDone: {
                         isDirty = true // Mark as dirty when user selects nudges
+                        // Persist nudge selections to DraftManager
+                        if let projectId = selectedProject?.id {
+                            Task {
+                                await draftManager.updateNudgeIds(draft.selectedNudgeIds, conversationId: conversationId, projectId: projectId)
+                            }
+                        }
+                    }
+                )
+            }
+            .sheet(isPresented: $showSkillSelector) {
+                SkillSelectorSheet(
+                    skills: availableSkills,
+                    selectedSkillIds: $draft.selectedSkillIds,
+                    onDone: {
+                        isDirty = true // Mark as dirty when user selects skills
+                        // Persist skill selections to DraftManager
+                        if let projectId = selectedProject?.id {
+                            Task {
+                                await draftManager.updateSkillIds(draft.selectedSkillIds, conversationId: conversationId, projectId: projectId)
+                            }
+                        }
                     }
                 )
             }
@@ -674,6 +707,42 @@ struct MessageComposerView: View {
         .background(Color.systemGray6)
     }
 
+    private var skillChipsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Selected skill chips
+                ForEach(selectedSkills, id: \.id) { skill in
+                    SkillChipView(skill: skill) {
+                        isDirty = true
+                        draft.removeSkill(skill.id)
+                        persistSelectedSkillIds()
+                    }
+                }
+
+                // Add skill button
+                Button(action: { showSkillSelector = true }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "bolt")
+                            .font(.caption)
+                        Text("Add Skill")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 12)
+        .background(Color.systemGray6)
+    }
+
     private var imageAttachmentChipsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -868,6 +937,17 @@ struct MessageComposerView: View {
         .background(Color.systemBackground)
     }
 
+    // MARK: - Skill Sync
+
+    /// Persists selected skill IDs to DraftManager.
+    /// Call after modifying draft.selectedSkillIds to persist changes.
+    private func persistSelectedSkillIds() {
+        guard let projectId = selectedProject?.id else { return }
+        Task {
+            await draftManager.updateSkillIds(draft.selectedSkillIds, conversationId: conversationId, projectId: projectId)
+        }
+    }
+
     // MARK: - Actions
 
     private func loadDraft() {
@@ -988,6 +1068,17 @@ struct MessageComposerView: View {
         }
     }
 
+    private func loadSkills() {
+        Task {
+            // No refresh needed - use data already available from centralized state
+            do {
+                availableSkills = try await coreManager.safeCore.getSkills()
+            } catch {
+                print("[MessageComposerView] Failed to load skills: \(error)")
+            }
+        }
+    }
+
     private func projectChanged() {
         guard let project = selectedProject else { return }
 
@@ -1051,8 +1142,10 @@ struct MessageComposerView: View {
             draft.clearAgent()
             await draftManager.updateAgent(nil, conversationId: conversationId, projectId: project.id)
 
-            // Load agents for the new project
+            // Load agents, nudges, and skills for the new project
             loadAgents()
+            loadNudges()
+            loadSkills()
 
             // BLOCKER #2 FIX: Re-enable editing after project switch completes
             isSwitchingProject = false
@@ -1114,7 +1207,8 @@ struct MessageComposerView: View {
                         title: "",
                         content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
-                        nudgeIds: Array(draft.selectedNudgeIds)
+                        nudgeIds: Array(draft.selectedNudgeIds),
+                        skillIds: Array(draft.selectedSkillIds)
                     )
                 } else {
                     result = try await coreManager.safeCore.sendMessage(

@@ -105,6 +105,10 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') | KeyCode::Char('/') | KeyCode::Char('_') if has_ctrl => {
             app.open_nudge_selector();
         }
+        // Alt+K = open skill selector (K for sKills; Alt+S conflicts with global audio stop)
+        KeyCode::Char('k') if has_alt => {
+            app.open_skill_selector();
+        }
         // Ctrl+R = open history search
         KeyCode::Char('r') if has_ctrl => {
             app.open_history_search();
@@ -297,7 +301,7 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (Nudge -> Project -> Model -> Agent)
+        // Left = move to previous item (Skill -> Nudge -> Project -> Model -> Agent)
         // Project is only included for draft tabs
         KeyCode::Left => {
             app.input_context_focus = Some(match focus {
@@ -311,9 +315,10 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                         InputContextFocus::Model
                     }
                 }
+                InputContextFocus::Skill => InputContextFocus::Nudge,
             });
         }
-        // Right = move to next item (Agent -> Model -> Project -> Nudge)
+        // Right = move to next item (Agent -> Model -> Project -> Nudge -> Skill)
         // Project is only included for draft tabs
         KeyCode::Right => {
             app.input_context_focus = Some(match focus {
@@ -326,7 +331,8 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                     }
                 }
                 InputContextFocus::Project => InputContextFocus::Nudge,
-                InputContextFocus::Nudge => InputContextFocus::Nudge, // Already at rightmost
+                InputContextFocus::Nudge => InputContextFocus::Skill,
+                InputContextFocus::Skill => InputContextFocus::Skill, // Already at rightmost
             });
         }
         // Enter = open the appropriate selector modal
@@ -377,6 +383,10 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                     app.input_context_focus = None;
                     app.open_nudge_selector();
                 }
+                InputContextFocus::Skill => {
+                    app.input_context_focus = None;
+                    app.open_skill_selector();
+                }
             }
         }
         _ => {}
@@ -404,8 +414,9 @@ fn handle_send_message(app: &mut App) {
         {
             let project_a_tag = project.a_tag();
             let agent_pubkey = app.selected_agent().map(|a| a.pubkey.clone());
-            // Per-tab isolated nudge selection
+            // Per-tab isolated nudge and skill selection
             let nudge_ids = app.selected_nudge_ids();
+            let skill_ids = app.selected_skill_ids();
 
             if let Some(thread) = app.selected_thread() {
                 // Reply to existing thread
@@ -436,6 +447,7 @@ fn handle_send_message(app: &mut App) {
                     agent_pubkey,
                     reply_to,
                     nudge_ids,
+                    skill_ids: skill_ids.clone(),
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
                 }) {
@@ -499,6 +511,7 @@ fn handle_send_message(app: &mut App) {
                     content,
                     agent_pubkey,
                     nudge_ids,
+                    skill_ids,
                     reference_conversation_id,
                     fork_message_id,
                     response_tx: Some(response_tx),

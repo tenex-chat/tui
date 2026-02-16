@@ -16,6 +16,7 @@ pub mod login;
 pub mod nudge_crud;
 pub mod nudge_selector;
 pub mod project_settings;
+pub mod skill_selector;
 pub mod report_viewer;
 pub mod stats;
 pub mod workspace_modal;
@@ -38,6 +39,7 @@ pub use nudge_crud::{
     render_nudge_detail, render_nudge_delete_confirm,
 };
 pub use nudge_selector::render_nudge_selector;
+pub use skill_selector::render_skill_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
 pub use report_viewer::render_report_viewer;
 pub use stats::render_stats;

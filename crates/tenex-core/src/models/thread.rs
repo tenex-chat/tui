@@ -71,7 +71,15 @@ impl Thread {
                 }
                 Some("e") => {
                     // Thread must NOT have e-tags (messages have e-tags)
-                    has_e_tag = true;
+                    // EXCEPTION: e-tags with "skill" marker are skill references, not thread/reply markers
+                    // NIP-10 format: ["e", id, relay, marker] - marker at index 3
+                    // Some clients omit relay: ["e", id, "skill"] - marker at index 2
+                    let marker_at_3 = tag.get(3).and_then(|t| t.variant().str());
+                    let marker_at_2 = tag.get(2).and_then(|t| t.variant().str());
+                    let is_skill = marker_at_3 == Some("skill") || marker_at_2 == Some("skill");
+                    if !is_skill {
+                        has_e_tag = true;
+                    }
                 }
                 Some("delegation") | Some("parent") => {
                     // Parent tag format: ["parent", "<parent-conversation-id>"]

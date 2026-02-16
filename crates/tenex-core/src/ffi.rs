@@ -994,6 +994,22 @@ pub struct NudgeInfo {
     pub description: String,
 }
 
+/// A skill (kind:4202 event) for agent instruction sets.
+/// Used by iOS/CLI for skill selection in new conversations.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SkillInfo {
+    /// Event ID of the skill
+    pub id: String,
+    /// Public key of the skill author
+    pub pubkey: String,
+    /// Title of the skill
+    pub title: String,
+    /// Description of the skill
+    pub description: String,
+    /// Full content of the skill
+    pub content: String,
+}
+
 /// Information about the current logged-in user.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct UserInfo {
@@ -2672,6 +2688,31 @@ impl TenexCore {
             .collect())
     }
 
+    /// Get all skills (kind:4202 events).
+    ///
+    /// Returns all skills sorted by created_at descending (most recent first).
+    /// Used by iOS/CLI for skill selection in new conversations.
+    pub fn get_skills(&self) -> Result<Vec<SkillInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store.content.get_skills()
+            .into_iter()
+            .map(|s| SkillInfo {
+                id: s.id.clone(),
+                pubkey: s.pubkey.clone(),
+                title: s.title.clone(),
+                description: s.description.clone(),
+                content: s.content.clone(),
+            })
+            .collect())
+    }
+
     /// Get online agents for a project from the project status (kind:24010).
     ///
     /// These are actual agent instances with their own Nostr keypairs.
@@ -3009,6 +3050,7 @@ impl TenexCore {
         content: String,
         agent_pubkey: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
     ) -> Result<SendMessageResult, TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -3023,8 +3065,8 @@ impl TenexCore {
                 title,
                 content,
                 agent_pubkey,
-
                 nudge_ids,
+                skill_ids,
                 reference_conversation_id: None,
                 fork_message_id: None,
                 response_tx: Some(response_tx),
@@ -3073,6 +3115,7 @@ impl TenexCore {
                 reply_to: None,
 
                 nudge_ids,
+                skill_ids: Vec::new(),
                 ask_author_pubkey: None,
                 response_tx: Some(response_tx),
             })
@@ -3121,8 +3164,8 @@ impl TenexCore {
                 content,
                 agent_pubkey: None,
                 reply_to: Some(ask_event_id),
-
                 nudge_ids: Vec::new(),
+                skill_ids: Vec::new(),
                 ask_author_pubkey: Some(ask_author_pubkey),
                 response_tx: Some(response_tx),
             })
