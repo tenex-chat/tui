@@ -90,6 +90,7 @@ pub enum HotkeyId {
     InsertNewline,
     CancelEdit,
     HistorySearch,
+    OpenNudgeSelector,
 
     // === Agent Browser ===
     ViewAgent,
@@ -791,6 +792,23 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         HotkeyId::HistorySearch,
         KeyCode::Char('r'),
         "Search History",
+        "Input",
+        &[HotkeyContext::ChatEditing],
+    ),
+    // Nudge selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
+    // Note: Ctrl+_ is also handled in editor_handlers.rs for terminal compatibility
+    // (some terminals report Ctrl+/ as Ctrl+_)
+    HotkeyBinding::ctrl(
+        HotkeyId::OpenNudgeSelector,
+        KeyCode::Char('/'),
+        "Open Nudge Selector",
+        "Input",
+        &[HotkeyContext::ChatEditing],
+    ),
+    HotkeyBinding::ctrl(
+        HotkeyId::OpenNudgeSelector,
+        KeyCode::Char('n'),
+        "Open Nudge Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
