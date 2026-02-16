@@ -575,10 +575,23 @@ fn handle_request(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
-            let skill_ids: Vec<String> = request.params["skill_ids"]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                .unwrap_or_default();
+
+            // Validate skill_ids parameter: if present, must be an array
+            let skill_ids_param = &request.params["skill_ids"];
+            let skill_ids: Vec<String> = if skill_ids_param.is_null() {
+                Vec::new()
+            } else if let Some(arr) = skill_ids_param.as_array() {
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            } else {
+                return (
+                    Response::error(
+                        id,
+                        "INVALID_PARAMS",
+                        "skill_ids must be an array of strings",
+                    ),
+                    false,
+                );
+            };
 
             let (project_slug, thread_id, recipient_slug, content) =
                 match (project_slug, thread_id, recipient_slug, content) {
@@ -687,10 +700,23 @@ fn handle_request(
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
             let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
-            let skill_ids: Vec<String> = request.params["skill_ids"]
-                .as_array()
-                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
-                .unwrap_or_default();
+
+            // Validate skill_ids parameter: if present, must be an array
+            let skill_ids_param = &request.params["skill_ids"];
+            let skill_ids: Vec<String> = if skill_ids_param.is_null() {
+                Vec::new()
+            } else if let Some(arr) = skill_ids_param.as_array() {
+                arr.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+            } else {
+                return (
+                    Response::error(
+                        id,
+                        "INVALID_PARAMS",
+                        "skill_ids must be an array of strings",
+                    ),
+                    false,
+                );
+            };
 
             let (project_slug, recipient_slug, content) =
                 match (project_slug, recipient_slug, content) {
