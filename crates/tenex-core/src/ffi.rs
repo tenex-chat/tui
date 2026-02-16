@@ -3098,6 +3098,7 @@ impl TenexCore {
         content: String,
         agent_pubkey: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
     ) -> Result<SendMessageResult, TenexError> {
         let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
         let core_handle = get_core_handle(&self.core_handle)?;
@@ -3115,7 +3116,7 @@ impl TenexCore {
                 reply_to: None,
 
                 nudge_ids,
-                skill_ids: Vec::new(),
+                skill_ids,
                 ask_author_pubkey: None,
                 response_tx: Some(response_tx),
             })

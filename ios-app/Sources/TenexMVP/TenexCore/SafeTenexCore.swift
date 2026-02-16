@@ -199,10 +199,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a message to an existing conversation.
-    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
+    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendMessage") {
             do {
-                return try core.sendMessage(conversationId: conversationId, projectId: projectId, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds)
+                return try core.sendMessage(conversationId: conversationId, projectId: projectId, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: skillIds)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
