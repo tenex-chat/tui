@@ -269,21 +269,23 @@ struct ReportsTabRowView: View {
                             .foregroundStyle(.blue)
                             .clipShape(Capsule())
                     }
+                }
 
-                    // Tags (show first 2)
-                    if !report.tags.isEmpty {
-                        HStack(spacing: 4) {
-                            ForEach(report.tags.prefix(2), id: \.self) { tag in
-                                Text("#\(tag)")
-                                    .font(.caption2)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange.opacity(0.15))
-                                    .foregroundStyle(.orange)
-                                    .clipShape(Capsule())
-                            }
+                // Tags row
+                if !report.tags.isEmpty {
+                    FlowLayout(spacing: 4) {
+                        ForEach(report.tags, id: \.self) { tag in
+                            Text("#\(tag)")
+                                .font(.caption2)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.orange.opacity(0.15))
+                                .foregroundStyle(.orange)
+                                .clipShape(Capsule())
+                                .lineLimit(1)
                         }
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
 

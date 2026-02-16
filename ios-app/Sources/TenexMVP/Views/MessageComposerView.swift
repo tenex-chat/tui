@@ -1132,8 +1132,7 @@ struct MessageComposerView: View {
                         title: "",
                         content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
-                        nudgeIds: Array(draft.selectedNudgeIds),
-                        
+                        nudgeIds: Array(draft.selectedNudgeIds)
                     )
                 } else {
                     result = try await coreManager.safeCore.sendMessage(
