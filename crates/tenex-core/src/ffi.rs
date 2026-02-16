@@ -3576,6 +3576,56 @@ impl TenexCore {
         ok
     }
 
+    /// Force reconnection to relays and restart all subscriptions.
+    ///
+    /// This is used by pull-to-refresh to ensure fresh data is fetched from relays.
+    /// Unlike `refresh()` which only drains pending events from the subscription stream,
+    /// this method:
+    /// 1. Disconnects from all relays
+    /// 2. Reconnects with the same credentials
+    /// 3. Restarts all subscriptions
+    /// 4. Triggers a new negentropy sync
+    ///
+    /// This is useful when the app has been backgrounded and may have missed events,
+    /// or when the user explicitly wants to ensure they have the latest data.
+    ///
+    /// Returns an error if not logged in or if reconnection fails.
+    pub fn force_reconnect(&self) -> Result<(), TenexError> {
+        use std::sync::mpsc::channel;
+
+        // Check login state early to avoid unnecessary work
+        if !self.is_logged_in() {
+            return Err(TenexError::NotLoggedIn);
+        }
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        // Create a channel to wait for the reconnect to complete
+        let (response_tx, response_rx) = channel();
+
+        core_handle
+            .send(NostrCommand::ForceReconnect {
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send force reconnect command: {}", e),
+            })?;
+
+        // Wait for the reconnect to complete (with timeout)
+        match response_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(e)) => Err(TenexError::Internal {
+                message: format!("Force reconnect failed: {}", e),
+            }),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(TenexError::Internal {
+                message: "Force reconnect timed out after 30 seconds".to_string(),
+            }),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => Err(TenexError::Internal {
+                message: "Force reconnect channel disconnected".to_string(),
+            }),
+        }
+    }
+
     // ===== Diagnostics Methods =====
 
     /// Get a comprehensive diagnostics snapshot for the iOS Diagnostics view.

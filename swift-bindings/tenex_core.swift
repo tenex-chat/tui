@@ -648,6 +648,24 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func clearEventCallback() 
     
     /**
+     * Force reconnection to relays and restart all subscriptions.
+     *
+     * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
+     * Unlike `refresh()` which only drains pending events from the subscription stream,
+     * this method:
+     * 1. Disconnects from all relays
+     * 2. Reconnects with the same credentials
+     * 3. Restarts all subscriptions
+     * 4. Triggers a new negentropy sync
+     *
+     * This is useful when the app has been backgrounded and may have missed events,
+     * or when the user explicitly wants to ensure they have the latest data.
+     *
+     * Returns an error if not logged in or if reconnection fails.
+     */
+    func forceReconnect() throws 
+    
+    /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
      * API keys are passed directly so iOS can provide them from its native Keychain.
@@ -1230,6 +1248,28 @@ open func bootProject(projectId: String)throws   {try rustCallWithError(FfiConve
      */
 open func clearEventCallback()  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(self.uniffiClonePointer(),$0
+    )
+}
+}
+    
+    /**
+     * Force reconnection to relays and restart all subscriptions.
+     *
+     * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
+     * Unlike `refresh()` which only drains pending events from the subscription stream,
+     * this method:
+     * 1. Disconnects from all relays
+     * 2. Reconnects with the same credentials
+     * 3. Restarts all subscriptions
+     * 4. Triggers a new negentropy sync
+     *
+     * This is useful when the app has been backgrounded and may have missed events,
+     * or when the user explicitly wants to ensure they have the latest data.
+     *
+     * Returns an error if not logged in or if reconnection fails.
+     */
+open func forceReconnect()throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
+    uniffi_tenex_core_fn_method_tenexcore_force_reconnect(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -8564,6 +8604,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_tenex_core_checksum_method_tenexcore_force_reconnect() != 25198) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_audio_notification() != 5454) {
