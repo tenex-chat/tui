@@ -584,6 +584,15 @@ pub static COMMANDS: &[Command] = &[
             app.save_named_draft();
         },
     },
+    Command {
+        key: 'K',
+        label: "Select Skills",
+        section: "Input",
+        available: |app| app.view == View::Chat,
+        execute: |app| {
+            app.open_skill_selector();
+        },
+    },
     // =========================================================================
     // UNDO - Available in Home and Chat
     // =========================================================================
