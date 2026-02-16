@@ -10,6 +10,7 @@ use ratatui::{
     widgets::Paragraph,
     Frame,
 };
+use unicode_width::UnicodeWidthStr;
 
 /// Maximum number of visible content lines before scrolling kicks in
 pub(crate) const MAX_VISIBLE_LINES: usize = 15;
@@ -328,6 +329,19 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         format!("[{}]", nudge_titles.join(", "))
     };
 
+    // Build skill display string - always show "⚡" even if empty (for selection)
+    // Uses per-tab isolated skill selections
+    let selected_skill_ids = app.selected_skill_ids();
+    let skill_display = if selected_skill_ids.is_empty() {
+        "⚡".to_string()
+    } else {
+        let skill_titles: Vec<String> = selected_skill_ids
+            .iter()
+            .filter_map(|id| app.data_store.borrow().content.get_skill(id).map(|s| format!("/{}", s.title)))
+            .collect();
+        format!("[{}]", skill_titles.join(", "))
+    };
+
     // Context line at bottom: agent (model) branch project [nudges]
     // Add scroll indicator if we're scrolling
     let scroll_indicator = if total_content_lines > available_content_lines {
@@ -348,12 +362,13 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
             .add_modifier(Modifier::BOLD)
     };
 
-    // Calculate context string for padding
+    // Calculate context string for padding (use unicode width for proper display width with emoji)
     let nudge_str = format!(" {}", nudge_display);
     let project_str = format!(" {}", project_display);
-    let context_str = format!("{} {}{}{}{}", agent_display, agent_model_display, project_str, nudge_str, scroll_indicator);
+    let skill_str = format!(" {}", skill_display);
+    let context_str = format!("{} {}{}{}{}{}", agent_display, agent_model_display, project_str, nudge_str, skill_str, scroll_indicator);
     let context_pad =
-        area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
+        area.width.saturating_sub(context_str.width() as u16 + (1 + input_padding * 2) as u16) as usize;
 
     // Build context line with highlighting based on focus
     let mut context_spans = vec![
@@ -401,6 +416,15 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         Style::default().fg(theme::ACCENT_WARNING).bg(input_bg)
     };
     context_spans.push(Span::styled(nudge_display, nudge_style));
+
+    // Skill display (highlighted if focused) - always shown
+    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
+    let skill_style = if context_focus == Some(InputContextFocus::Skill) {
+        focused_style(theme::ACCENT_SPECIAL)
+    } else {
+        Style::default().fg(theme::ACCENT_SPECIAL).bg(input_bg)
+    };
+    context_spans.push(Span::styled(skill_display, skill_style));
 
     // Add scroll indicator if scrolling
     if !scroll_indicator.is_empty() {

@@ -21,6 +21,7 @@ struct Draft: Codable, Identifiable, Equatable {
         case content
         case agentPubkey
         case selectedNudgeIds
+        case selectedSkillIds
         case isNewConversation
         case lastEdited
         case referenceConversationId
@@ -48,6 +49,9 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Selected nudge IDs for this conversation (multi-select)
     var selectedNudgeIds: Set<String>
 
+    /// Selected skill IDs for this conversation (multi-select)
+    var selectedSkillIds: Set<String>
+
     /// Whether this is for a new conversation (thread)
     var isNewConversation: Bool
 
@@ -72,7 +76,7 @@ struct Draft: Codable, Identifiable, Equatable {
     // MARK: - Initialization
 
     /// Create a new draft for a new conversation
-    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
+    init(projectId: String, title: String = "", content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = nil
         self.projectId = projectId
@@ -80,6 +84,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.content = content
         self.agentPubkey = agentPubkey
         self.selectedNudgeIds = selectedNudgeIds
+        self.selectedSkillIds = selectedSkillIds
         self.isNewConversation = true
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
@@ -88,7 +93,7 @@ struct Draft: Codable, Identifiable, Equatable {
     }
 
     /// Create a new draft for an existing conversation
-    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
+    init(conversationId: String, projectId: String, content: String = "", agentPubkey: String? = nil, selectedNudgeIds: Set<String> = [], selectedSkillIds: Set<String> = [], referenceConversationId: String? = nil, referenceReportATag: String? = nil) {
         self.id = UUID().uuidString
         self.conversationId = conversationId
         self.projectId = projectId
@@ -96,6 +101,7 @@ struct Draft: Codable, Identifiable, Equatable {
         self.content = content
         self.agentPubkey = agentPubkey
         self.selectedNudgeIds = selectedNudgeIds
+        self.selectedSkillIds = selectedSkillIds
         self.isNewConversation = false
         self.lastEdited = Date()
         self.referenceConversationId = referenceConversationId
@@ -122,6 +128,8 @@ struct Draft: Codable, Identifiable, Equatable {
         self.agentPubkey = try container.decodeIfPresent(String.self, forKey: .agentPubkey)
         // Migration: selectedNudgeIds is new, default to empty set
         self.selectedNudgeIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedNudgeIds) ?? []
+        // Migration: selectedSkillIds is new, default to empty set
+        self.selectedSkillIds = try container.decodeIfPresent(Set<String>.self, forKey: .selectedSkillIds) ?? []
         self.isNewConversation = try container.decode(Bool.self, forKey: .isNewConversation)
         self.lastEdited = try container.decode(Date.self, forKey: .lastEdited)
         // Migration: referenceConversationId is new, default to nil
@@ -194,6 +202,7 @@ struct Draft: Codable, Identifiable, Equatable {
         content = ""
         agentPubkey = nil
         selectedNudgeIds = []
+        selectedSkillIds = []
         referenceConversationId = nil
         referenceReportATag = nil
         imageAttachments = []
@@ -216,6 +225,24 @@ struct Draft: Codable, Identifiable, Equatable {
     /// Clear all selected nudges
     mutating func clearNudges() {
         selectedNudgeIds = []
+        lastEdited = Date()
+    }
+
+    /// Add a skill to the selection
+    mutating func addSkill(_ skillId: String) {
+        selectedSkillIds.insert(skillId)
+        lastEdited = Date()
+    }
+
+    /// Remove a skill from the selection
+    mutating func removeSkill(_ skillId: String) {
+        selectedSkillIds.remove(skillId)
+        lastEdited = Date()
+    }
+
+    /// Clear all selected skills
+    mutating func clearSkills() {
+        selectedSkillIds = []
         lastEdited = Date()
     }
 

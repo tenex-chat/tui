@@ -26,6 +26,7 @@ const KIND_PROJECT_METADATA: u16 = 513;
 const KIND_AGENT: u16 = 4199;
 const KIND_MCP_TOOL: u16 = 4200;
 const KIND_NUDGE: u16 = 4201;
+const KIND_SKILL: u16 = 4202;
 const KIND_PROJECT_STATUS: u16 = 24010;
 const KIND_PROJECT_DRAFT: u16 = 31933;
 const KIND_AGENT_STATUS: u16 = 24133;
@@ -219,6 +220,7 @@ pub enum NostrCommand {
         content: String,
         agent_pubkey: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
         /// Optional reference to another conversation (adds "context" tag for referencing source conversations)
         reference_conversation_id: Option<String>,
         /// Optional fork message ID (used with reference_conversation_id to create a "fork" tag)
@@ -233,6 +235,7 @@ pub enum NostrCommand {
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
         /// Pubkey of the ask event author (for p-tagging when replying to ask events)
         ask_author_pubkey: Option<String>,
         /// Optional channel to send back the event ID after signing
@@ -453,9 +456,9 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, nudge_ids, reference_conversation_id, fork_message_id, response_tx } => {
+                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, nudge_ids, skill_ids, reference_conversation_id, fork_message_id, response_tx } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, nudge_ids, reference_conversation_id, fork_message_id)) {
+                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, nudge_ids, skill_ids, reference_conversation_id, fork_message_id)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -466,9 +469,9 @@ impl NostrWorker {
                             }
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, ask_author_pubkey, response_tx } => {
+                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, skill_ids, ask_author_pubkey, response_tx } => {
                         tlog!("SEND", "Worker received PublishMessage command");
-                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, ask_author_pubkey)) {
+                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, skill_ids, ask_author_pubkey)) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -729,17 +732,17 @@ impl NostrWorker {
 
         tlog!("CONN", "Subscribed to status events (kind:{}, kind:{})", KIND_PROJECT_STATUS, KIND_AGENT_STATUS);
 
-        // 3. Global event definitions (kind:4199, 4200, 4201)
+        // 3. Global event definitions (kind:4199, 4200, 4201, 4202)
         let global_filter = Filter::new()
-            .kinds(vec![Kind::Custom(KIND_AGENT), Kind::Custom(KIND_MCP_TOOL), Kind::Custom(KIND_NUDGE)]);
+            .kinds(vec![Kind::Custom(KIND_AGENT), Kind::Custom(KIND_MCP_TOOL), Kind::Custom(KIND_NUDGE), Kind::Custom(KIND_SKILL)]);
         let global_filter_json = serde_json::to_string(&global_filter).ok();
         let output = client.subscribe(global_filter.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE], None)
+            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL], None)
                 .with_raw_filter(global_filter_json.unwrap_or_default()),
         );
-        tlog!("CONN", "Subscribed to global definitions (kind:{}, kind:{}, kind:{})", KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE);
+        tlog!("CONN", "Subscribed to global definitions (kind:{}, kind:{}, kind:{}, kind:{})", KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL);
 
         // 4. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
         // OPTIMIZATION: We no longer subscribe to ALL projects at startup.
@@ -969,6 +972,7 @@ impl NostrWorker {
         content: String,
         agent_pubkey: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
         reference_conversation_id: Option<String>,
         fork_message_id: Option<String>,
     ) -> Result<String> {
@@ -1004,6 +1008,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("nudge")),
                 vec![nudge_id],
+            ));
+        }
+
+        // Skill tags (e-tags with "skill" marker per NIP-10)
+        for skill_id in skill_ids {
+            event = event.tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![skill_id, "".to_string(), "skill".to_string()],
             ));
         }
 
@@ -1062,6 +1074,7 @@ impl NostrWorker {
         agent_pubkey: Option<String>,
         reply_to: Option<String>,
         nudge_ids: Vec<String>,
+        skill_ids: Vec<String>,
         ask_author_pubkey: Option<String>,
     ) -> Result<String> {
         let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
@@ -1112,6 +1125,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("nudge")),
                 vec![nudge_id],
+            ));
+        }
+
+        // Skill tags (e-tags with "skill" marker per NIP-10)
+        for skill_id in skill_ids {
+            event = event.tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::E)),
+                vec![skill_id, "".to_string(), "skill".to_string()],
             ));
         }
 
@@ -1894,6 +1915,10 @@ async fn sync_all_filters(
     // Nudges (kind 4201) - global, like agent definitions
     let nudge_filter = Filter::new().kind(Kind::Custom(4201));
     total_new += sync_filter(client, nudge_filter, "4201", stats).await;
+
+    // Skills (kind 4202) - global, like nudges and agent definitions
+    let skill_filter = Filter::new().kind(Kind::Custom(4202));
+    total_new += sync_filter(client, skill_filter, "4202", stats).await;
 
     // Messages (kind 1) and long-form content (kind 30023) with project a-tags
     // OPTIMIZATION: Only sync for projects we're actually subscribed to (online/active projects)

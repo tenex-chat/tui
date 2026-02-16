@@ -372,6 +372,7 @@ async fn responses_handler(
         content: user_content.clone(),
         agent_pubkey: Some(agent_pubkey.clone()),
         nudge_ids: Vec::new(),
+        skill_ids: Vec::new(),
         reference_conversation_id,
         fork_message_id: None,
         response_tx: Some(response_tx),
