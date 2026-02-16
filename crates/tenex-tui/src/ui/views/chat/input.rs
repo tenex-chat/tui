@@ -152,11 +152,15 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         })
         .unwrap_or_else(|| ("none".to_string(), String::new()));
 
+    // Check if current tab is a draft (new conversation) - project selector only available for drafts
+    let is_draft_tab = app.tabs.active_tab().map(|t| t.is_draft()).unwrap_or(false);
+
+    // Project display - shown as selectable only for draft tabs
     let project_display = app
         .selected_project
         .as_ref()
-        .map(|p| format!(" {}", p.name))
-        .unwrap_or_default();
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| "no project".to_string());
 
     // Build input card with padding and context line at bottom
     let input_text = app.chat_editor().text.as_str();
@@ -346,7 +350,8 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Calculate context string for padding
     let nudge_str = format!(" {}", nudge_display);
-    let context_str = format!("{} {}{}{}{}", agent_display, agent_model_display, project_display, nudge_str, scroll_indicator);
+    let project_str = format!(" {}", project_display);
+    let context_str = format!("{} {}{}{}{}", agent_display, agent_model_display, project_str, nudge_str, scroll_indicator);
     let context_pad =
         area.width.saturating_sub(context_str.len() as u16 + (1 + input_padding * 2) as u16) as usize;
 
@@ -375,11 +380,18 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     context_spans.push(Span::styled(agent_model_display.clone(), model_style));
 
-    // Project (not selectable, always muted)
-    context_spans.push(Span::styled(
-        project_display.clone(),
-        Style::default().fg(theme::TEXT_MUTED).bg(input_bg),
-    ));
+    // Project (selectable only for draft tabs, otherwise muted)
+    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
+    let project_style = if is_draft_tab && context_focus == Some(InputContextFocus::Project) {
+        focused_style(theme::ACCENT_SUCCESS)
+    } else if is_draft_tab {
+        // Show as selectable (colored) for draft tabs
+        Style::default().fg(theme::ACCENT_SUCCESS).bg(input_bg)
+    } else {
+        // Show as non-selectable (muted) for existing conversations
+        Style::default().fg(theme::TEXT_MUTED).bg(input_bg)
+    };
+    context_spans.push(Span::styled(project_display.clone(), project_style));
 
     // Nudge display (highlighted if focused) - always shown
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));

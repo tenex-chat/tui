@@ -155,6 +155,8 @@ pub enum InputContextFocus {
     Agent,
     /// Model selector is selected
     Model,
+    /// Project selector is selected (only available for new conversations/draft tabs)
+    Project,
     /// Nudge selector is selected
     Nudge,
 }
@@ -1307,7 +1309,12 @@ impl App {
     /// Archived projects are hidden unless show_archived is true
     /// When a workspace is active, only shows projects in that workspace
     pub fn filtered_projects(&self) -> (Vec<Project>, Vec<Project>) {
-        let filter = self.projects_modal_filter();
+        // Check both ProjectsModal and ComposerProjectSelector for the active filter
+        let filter = match &self.modal_state {
+            ModalState::ProjectsModal { selector, .. } => &selector.filter,
+            ModalState::ComposerProjectSelector { selector } => &selector.filter,
+            _ => "",
+        };
         let store = self.data_store.borrow();
         let projects = store.get_projects();
         let prefs = self.preferences.borrow();
@@ -1402,6 +1409,28 @@ impl App {
         };
     }
 
+    /// Open the composer project selector for changing the project on a draft tab
+    /// This is specifically for new conversations (draft tabs) and allows changing
+    /// which project the new conversation will be tagged to.
+    pub fn open_composer_project_selector(&mut self) {
+        // Guard: Check if there are any projects to select from
+        let (online, offline) = self.filtered_projects();
+        if online.is_empty() && offline.is_empty() {
+            let has_projects = !self.data_store.borrow().get_projects().is_empty();
+            let message = if has_projects {
+                "No projects match current filters. Check workspace/archived settings."
+            } else {
+                "No projects available. Create a project first."
+            };
+            self.set_warning_status(message);
+            return;
+        }
+
+        self.modal_state = ModalState::ComposerProjectSelector {
+            selector: SelectorState::new(),
+        };
+    }
+
     /// DEPRECATED: Use open_projects_selector_for_new_thread() or open_projects_selector_for_switch() instead.
     /// This method remains for temporary backwards compatibility but will be removed.
     #[deprecated(
@@ -1438,6 +1467,22 @@ impl App {
     pub fn projects_modal_filter(&self) -> &str {
         match &self.modal_state {
             ModalState::ProjectsModal { selector, .. } => &selector.filter,
+            _ => "",
+        }
+    }
+
+    /// Get composer project selector index (from ModalState)
+    pub fn composer_project_selector_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::ComposerProjectSelector { selector } => selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get composer project selector filter (from ModalState)
+    pub fn composer_project_selector_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::ComposerProjectSelector { selector } => &selector.filter,
             _ => "",
         }
     }
