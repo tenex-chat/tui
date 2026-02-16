@@ -65,6 +65,28 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Force reconnection to relays and restart all subscriptions.
+    ///
+    /// This is used by pull-to-refresh to ensure fresh data is fetched from relays.
+    /// Unlike `refresh()` which only drains pending events from the subscription stream,
+    /// this method:
+    /// 1. Disconnects from all relays
+    /// 2. Reconnects with the same credentials
+    /// 3. Restarts all subscriptions
+    /// 4. Triggers a new negentropy sync
+    ///
+    /// This is useful when the app has been backgrounded and may have missed events,
+    /// or when the user explicitly wants to ensure they have the latest data.
+    func forceReconnect() throws {
+        try profiler.measureFFI("forceReconnect") {
+            do {
+                try core.forceReconnect()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     // MARK: - Projects
 
     /// Get all projects.
