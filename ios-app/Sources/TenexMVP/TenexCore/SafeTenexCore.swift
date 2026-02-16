@@ -65,27 +65,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Force reconnection to relays and restart all subscriptions.
-    ///
-    /// This is used by pull-to-refresh to ensure fresh data is fetched from relays.
-    /// Unlike `refresh()` which only drains pending events from the subscription stream,
-    /// this method:
-    /// 1. Disconnects from all relays
-    /// 2. Reconnects with the same credentials
-    /// 3. Restarts all subscriptions
-    /// 4. Triggers a new negentropy sync
-    ///
-    /// This is useful when the app has been backgrounded and may have missed events,
-    /// or when the user explicitly wants to ensure they have the latest data.
-    func forceReconnect() throws {
-        try profiler.measureFFI("forceReconnect") {
-            do {
-                try core.forceReconnect()
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
 
     // MARK: - Projects
 
@@ -210,10 +189,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
-                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: skillIds)
+                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -287,7 +266,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Get all nudges (kind:4201 events).
+    /// Get all nudges (kind:24020 events).
     /// Returns nudges sorted by created_at descending (most recent first).
     func getNudges() throws -> [NudgeInfo] {
         try profiler.measureFFI("getNudges") {
@@ -299,17 +278,6 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
-    /// Get all skills (kind:24030 events).
-    /// Returns skills sorted by created_at descending (most recent first).
-    func getSkills() throws -> [SkillInfo] {
-        try profiler.measureFFI("getSkills") {
-            do {
-                return try core.getSkills()
-            } catch let error as TenexError {
-                throw CoreError.tenex(error)
-            }
-        }
-    }
 
     /// Get available configuration options for a project.
     /// Returns all available models and tools from the project status.

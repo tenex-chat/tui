@@ -648,24 +648,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func clearEventCallback() 
     
     /**
-     * Force reconnection to relays and restart all subscriptions.
-     *
-     * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
-     * Unlike `refresh()` which only drains pending events from the subscription stream,
-     * this method:
-     * 1. Disconnects from all relays
-     * 2. Reconnects with the same credentials
-     * 3. Restarts all subscriptions
-     * 4. Triggers a new negentropy sync
-     *
-     * This is useful when the app has been backgrounded and may have missed events,
-     * or when the user explicitly wants to ensure they have the latest data.
-     *
-     * Returns an error if not logged in or if reconnection fails.
-     */
-    func forceReconnect() throws 
-    
-    /**
      * Generate audio notification for a message
      * Note: This is a blocking call that will wait for the async operation to complete
      * API keys are passed directly so iOS can provide them from its native Keychain.
@@ -845,14 +827,6 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
     func getReports(projectId: String)  -> [ReportInfo]
     
     /**
-     * Get all skills (kind:4202 events).
-     *
-     * Returns all skills sorted by created_at descending (most recent first).
-     * Used by iOS/CLI for skill selection in new conversations.
-     */
-    func getSkills() throws  -> [SkillInfo]
-    
-    /**
      * Get comprehensive stats snapshot with full TUI parity.
      * This is a single batched FFI call that returns all stats data pre-computed.
      *
@@ -970,7 +944,7 @@ public protocol TenexCoreProtocol: AnyObject, Sendable {
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws  -> SendMessageResult
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws  -> SendMessageResult
     
     /**
      * Enable or disable audio notifications
@@ -1248,28 +1222,6 @@ open func bootProject(projectId: String)throws   {try rustCallWithError(FfiConve
      */
 open func clearEventCallback()  {try! rustCall() {
     uniffi_tenex_core_fn_method_tenexcore_clear_event_callback(self.uniffiClonePointer(),$0
-    )
-}
-}
-    
-    /**
-     * Force reconnection to relays and restart all subscriptions.
-     *
-     * This is used by pull-to-refresh to ensure fresh data is fetched from relays.
-     * Unlike `refresh()` which only drains pending events from the subscription stream,
-     * this method:
-     * 1. Disconnects from all relays
-     * 2. Reconnects with the same credentials
-     * 3. Restarts all subscriptions
-     * 4. Triggers a new negentropy sync
-     *
-     * This is useful when the app has been backgrounded and may have missed events,
-     * or when the user explicitly wants to ensure they have the latest data.
-     *
-     * Returns an error if not logged in or if reconnection fails.
-     */
-open func forceReconnect()throws   {try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_force_reconnect(self.uniffiClonePointer(),$0
     )
 }
 }
@@ -1597,19 +1549,6 @@ open func getReports(projectId: String) -> [ReportInfo]  {
 }
     
     /**
-     * Get all skills (kind:4202 events).
-     *
-     * Returns all skills sorted by created_at descending (most recent first).
-     * Used by iOS/CLI for skill selection in new conversations.
-     */
-open func getSkills()throws  -> [SkillInfo]  {
-    return try  FfiConverterSequenceTypeSkillInfo.lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
-    uniffi_tenex_core_fn_method_tenexcore_get_skills(self.uniffiClonePointer(),$0
-    )
-})
-}
-    
-    /**
      * Get comprehensive stats snapshot with full TUI parity.
      * This is a single batched FFI call that returns all stats data pre-computed.
      *
@@ -1797,7 +1736,8 @@ open func sendMessage(conversationId: String, projectId: String, content: String
         FfiConverterString.lower(projectId),
         FfiConverterString.lower(content),
         FfiConverterOptionString.lower(agentPubkey),
-        FfiConverterSequenceString.lower(nudgeIds),$0
+        FfiConverterSequenceString.lower(nudgeIds),
+        $0
     )
 })
 }
@@ -1808,7 +1748,7 @@ open func sendMessage(conversationId: String, projectId: String, content: String
      * Creates a new kind:1 event with title tag and project a-tag.
      * Returns the event ID on success.
      */
-open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String])throws  -> SendMessageResult  {
+open func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String])throws  -> SendMessageResult  {
     return try  FfiConverterTypeSendMessageResult_lift(try rustCallWithError(FfiConverterTypeTenexError_lift) {
     uniffi_tenex_core_fn_method_tenexcore_send_thread(self.uniffiClonePointer(),
         FfiConverterString.lower(projectId),
@@ -1816,7 +1756,8 @@ open func sendThread(projectId: String, title: String, content: String, agentPub
         FfiConverterString.lower(content),
         FfiConverterOptionString.lower(agentPubkey),
         FfiConverterSequenceString.lower(nudgeIds),
-        FfiConverterSequenceString.lower(skillIds),$0
+        FfiConverterSequenceString.lower([]),
+        $0
     )
 })
 }
@@ -5834,134 +5775,6 @@ public func FfiConverterTypeSendMessageResult_lower(_ value: SendMessageResult) 
 
 
 /**
- * A skill (kind:4202 event) for agent instruction sets.
- * Used by iOS/CLI for skill selection in new conversations.
- */
-public struct SkillInfo {
-    /**
-     * Event ID of the skill
-     */
-    public var id: String
-    /**
-     * Public key of the skill author
-     */
-    public var pubkey: String
-    /**
-     * Title of the skill
-     */
-    public var title: String
-    /**
-     * Description of the skill
-     */
-    public var description: String
-    /**
-     * Full content of the skill
-     */
-    public var content: String
-
-    // Default memberwise initializers are never public by default, so we
-    // declare one manually.
-    public init(
-        /**
-         * Event ID of the skill
-         */id: String, 
-        /**
-         * Public key of the skill author
-         */pubkey: String, 
-        /**
-         * Title of the skill
-         */title: String, 
-        /**
-         * Description of the skill
-         */description: String, 
-        /**
-         * Full content of the skill
-         */content: String) {
-        self.id = id
-        self.pubkey = pubkey
-        self.title = title
-        self.description = description
-        self.content = content
-    }
-}
-
-#if compiler(>=6)
-extension SkillInfo: Sendable {}
-#endif
-
-
-extension SkillInfo: Equatable, Hashable {
-    public static func ==(lhs: SkillInfo, rhs: SkillInfo) -> Bool {
-        if lhs.id != rhs.id {
-            return false
-        }
-        if lhs.pubkey != rhs.pubkey {
-            return false
-        }
-        if lhs.title != rhs.title {
-            return false
-        }
-        if lhs.description != rhs.description {
-            return false
-        }
-        if lhs.content != rhs.content {
-            return false
-        }
-        return true
-    }
-
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-        hasher.combine(pubkey)
-        hasher.combine(title)
-        hasher.combine(description)
-        hasher.combine(content)
-    }
-}
-
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public struct FfiConverterTypeSkillInfo: FfiConverterRustBuffer {
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> SkillInfo {
-        return
-            try SkillInfo(
-                id: FfiConverterString.read(from: &buf), 
-                pubkey: FfiConverterString.read(from: &buf), 
-                title: FfiConverterString.read(from: &buf), 
-                description: FfiConverterString.read(from: &buf), 
-                content: FfiConverterString.read(from: &buf)
-        )
-    }
-
-    public static func write(_ value: SkillInfo, into buf: inout [UInt8]) {
-        FfiConverterString.write(value.id, into: &buf)
-        FfiConverterString.write(value.pubkey, into: &buf)
-        FfiConverterString.write(value.title, into: &buf)
-        FfiConverterString.write(value.description, into: &buf)
-        FfiConverterString.write(value.content, into: &buf)
-    }
-}
-
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSkillInfo_lift(_ buf: RustBuffer) throws -> SkillInfo {
-    return try FfiConverterTypeSkillInfo.lift(buf)
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
-public func FfiConverterTypeSkillInfo_lower(_ value: SkillInfo) -> RustBuffer {
-    return FfiConverterTypeSkillInfo.lower(value)
-}
-
-
-/**
  * Complete stats snapshot with all data needed for iOS Stats tab
  * This matches full TUI stats parity with pre-computed values
  */
@@ -8379,31 +8192,6 @@ fileprivate struct FfiConverterSequenceTypeSearchResult: FfiConverterRustBuffer 
 #if swift(>=5.8)
 @_documentation(visibility: private)
 #endif
-fileprivate struct FfiConverterSequenceTypeSkillInfo: FfiConverterRustBuffer {
-    typealias SwiftType = [SkillInfo]
-
-    public static func write(_ value: [SkillInfo], into buf: inout [UInt8]) {
-        let len = Int32(value.count)
-        writeInt(&buf, len)
-        for item in value {
-            FfiConverterTypeSkillInfo.write(item, into: &buf)
-        }
-    }
-
-    public static func read(from buf: inout (data: Data, offset: Data.Index)) throws -> [SkillInfo] {
-        let len: Int32 = try readInt(&buf)
-        var seq = [SkillInfo]()
-        seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
-            seq.append(try FfiConverterTypeSkillInfo.read(from: &buf))
-        }
-        return seq
-    }
-}
-
-#if swift(>=5.8)
-@_documentation(visibility: private)
-#endif
 fileprivate struct FfiConverterSequenceTypeSubscriptionDiagnostics: FfiConverterRustBuffer {
     typealias SwiftType = [SubscriptionDiagnostics]
 
@@ -8606,9 +8394,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_clear_event_callback() != 2440) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_force_reconnect() != 25198) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_tenex_core_checksum_method_tenexcore_generate_audio_notification() != 5454) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8684,9 +8469,6 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_get_reports() != 28510) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_get_skills() != 52468) {
-        return InitializationResult.apiChecksumMismatch
-    }
     if (uniffi_tenex_core_checksum_method_tenexcore_get_stats_snapshot() != 9826) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -8729,7 +8511,7 @@ private let initializationResult: InitializationResult = {
     if (uniffi_tenex_core_checksum_method_tenexcore_send_message() != 55434) {
         return InitializationResult.apiChecksumMismatch
     }
-    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 64001) {
+    if (uniffi_tenex_core_checksum_method_tenexcore_send_thread() != 27250) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_tenex_core_checksum_method_tenexcore_set_audio_notifications_enabled() != 31649) {
