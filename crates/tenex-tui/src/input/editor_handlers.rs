@@ -405,6 +405,7 @@ fn handle_send_message(app: &mut App) {
                     agent_pubkey,
                     reply_to,
                     nudge_ids,
+                    skill_ids: Vec::new(), // TODO: Add skill selection UI
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
                 }) {
@@ -468,6 +469,7 @@ fn handle_send_message(app: &mut App) {
                     content,
                     agent_pubkey,
                     nudge_ids,
+                    skill_ids: Vec::new(), // TODO: Add skill selection UI
                     reference_conversation_id,
                     fork_message_id,
                     response_tx: Some(response_tx),

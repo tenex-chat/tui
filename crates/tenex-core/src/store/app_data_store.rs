@@ -285,10 +285,11 @@ impl AppDataStore {
             threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
         }
 
-        // Load content definitions (kind:4199, 4200, 4201)
+        // Load content definitions (kind:4199, 4200, 4201, 4202)
         self.content.load_agent_definitions(&self.ndb);
         self.content.load_mcp_tools(&self.ndb);
         self.content.load_nudges(&self.ndb);
+        self.content.load_skills(&self.ndb);
 
         // NOTE: Ephemeral events (kind:24010, 24133) are intentionally NOT loaded from nostrdb.
         // They are only received via live subscriptions and stored in memory.
@@ -732,6 +733,7 @@ impl AppDataStore {
             4199 => { self.content.handle_agent_definition_event(note); None }
             4200 => { self.content.handle_mcp_tool_event(note); None }
             4201 => { self.content.handle_nudge_event(note); None }
+            4202 => { self.content.handle_skill_event(note); None }
             24133 => { self.operations.handle_operations_status_event(note); None }
             30023 => {
                 let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
@@ -743,15 +745,24 @@ impl AppDataStore {
     }
 
     /// Unified handler for kind:1 events - dispatches to thread or message handler based on e-tag presence
-    /// Thread detection: kind:1 + has a-tag + NO e-tags
-    /// Message detection: kind:1 + has e-tag (with "root" marker per NIP-10)
+    /// Thread detection: kind:1 + has a-tag + NO e-tags (ignoring skill marker e-tags)
+    /// Message detection: kind:1 + has e-tag with "root" or "reply" marker per NIP-10
     fn handle_text_event(&mut self, note: &Note) {
         // Check for e-tags to determine if this is a thread or message
+        // IMPORTANT: Ignore e-tags with "skill" marker - those are skill references, not thread/reply markers
         let mut has_e_tag = false;
         for tag in note.tags() {
             if tag.get(0).and_then(|t| t.variant().str()) == Some("e") {
-                has_e_tag = true;
-                break;
+                // Check if this e-tag has a "skill" marker
+                // NIP-10 format: ["e", id, relay, marker] - marker at index 3
+                // Some clients omit relay: ["e", id, "skill"] - marker at index 2
+                let marker_at_3 = tag.get(3).and_then(|t| t.variant().str());
+                let marker_at_2 = tag.get(2).and_then(|t| t.variant().str());
+                let is_skill = marker_at_3 == Some("skill") || marker_at_2 == Some("skill");
+                if !is_skill {
+                    has_e_tag = true;
+                    break;
+                }
             }
         }
 

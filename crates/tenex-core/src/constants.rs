@@ -19,6 +19,9 @@ pub const DEFAULT_THREAD_TITLE: &str = "Untitled";
 // Nudge defaults
 pub const DEFAULT_NUDGE_TITLE: &str = "Untitled";
 
+// Skill defaults
+pub const DEFAULT_SKILL_TITLE: &str = "Untitled";
+
 /// Staleness threshold in seconds - status older than this is considered offline
 pub const STALENESS_THRESHOLD_SECS: u64 = 5 * 60; // 5 minutes
 
@@ -52,6 +55,8 @@ pub mod kinds {
     pub const AGENT_LESSON: u16 = 4129;
     /// Nudge/prompt
     pub const NUDGE: u16 = 4201;
+    /// Skill (agent skill instruction set)
+    pub const SKILL: u16 = 4202;
     /// Boot request
     pub const BOOT_REQUEST: u16 = 24000;
     /// Project status
