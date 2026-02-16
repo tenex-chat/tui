@@ -3647,6 +3647,110 @@ impl App {
             .unwrap_or_default()
     }
 
+    // ===== Skill Selector Methods (Ctrl+S) =====
+
+    /// Open the skill selector modal
+    pub fn open_skill_selector(&mut self) {
+        use crate::ui::modal::SkillSelectorState;
+        use crate::ui::selector::SelectorState;
+
+        // Get current skill selections from active tab (per-tab isolation)
+        let current_skills = self.tabs.active_tab()
+            .map(|t| t.selected_skill_ids.clone())
+            .unwrap_or_default();
+
+        self.modal_state = ModalState::SkillSelector(SkillSelectorState {
+            selector: SelectorState::new(),
+            selected_skill_ids: current_skills,
+        });
+    }
+
+    /// Close the skill selector modal, applying selections to current tab
+    pub fn close_skill_selector(&mut self, apply: bool) {
+        if let ModalState::SkillSelector(ref state) = self.modal_state {
+            if apply {
+                // Apply to current tab (per-tab isolation)
+                if let Some(tab) = self.tabs.active_tab_mut() {
+                    tab.selected_skill_ids = state.selected_skill_ids.clone();
+                }
+            }
+        }
+        if matches!(self.modal_state, ModalState::SkillSelector(_)) {
+            self.modal_state = ModalState::None;
+        }
+    }
+
+    /// Toggle a skill selection in the skill selector
+    pub fn toggle_skill_selection(&mut self, skill_id: &str) {
+        if let ModalState::SkillSelector(ref mut state) = self.modal_state {
+            if let Some(pos) = state.selected_skill_ids.iter().position(|id| id == skill_id) {
+                state.selected_skill_ids.remove(pos);
+            } else {
+                state.selected_skill_ids.push(skill_id.to_string());
+            }
+        }
+    }
+
+    /// Get filtered skills for the selector
+    pub fn filtered_skills(&self) -> Vec<tenex_core::models::Skill> {
+        let filter = match &self.modal_state {
+            ModalState::SkillSelector(state) => &state.selector.filter,
+            _ => "",
+        };
+        self.data_store.borrow()
+            .content.get_skills()
+            .into_iter()
+            .filter(|s| {
+                fuzzy_matches(&s.title, filter) ||
+                fuzzy_matches(&s.description, filter)
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Get skill selector index
+    pub fn skill_selector_index(&self) -> usize {
+        match &self.modal_state {
+            ModalState::SkillSelector(state) => state.selector.index,
+            _ => 0,
+        }
+    }
+
+    /// Get skill selector filter
+    pub fn skill_selector_filter(&self) -> &str {
+        match &self.modal_state {
+            ModalState::SkillSelector(state) => &state.selector.filter,
+            _ => "",
+        }
+    }
+
+    /// Check if a skill is selected (per-tab isolated)
+    pub fn is_skill_selected(&self, skill_id: &str) -> bool {
+        match &self.modal_state {
+            ModalState::SkillSelector(state) => state.selected_skill_ids.contains(&skill_id.to_string()),
+            _ => {
+                // Use per-tab state
+                self.tabs.active_tab()
+                    .map(|t| t.selected_skill_ids.contains(&skill_id.to_string()))
+                    .unwrap_or(false)
+            }
+        }
+    }
+
+    /// Remove a skill from selected skills (per-tab isolated)
+    pub fn remove_selected_skill(&mut self, skill_id: &str) {
+        if let Some(tab) = self.tabs.active_tab_mut() {
+            tab.selected_skill_ids.retain(|id| id != skill_id);
+        }
+    }
+
+    /// Get selected skill IDs for current tab (per-tab isolated)
+    pub fn selected_skill_ids(&self) -> Vec<String> {
+        self.tabs.active_tab()
+            .map(|t| t.selected_skill_ids.clone())
+            .unwrap_or_default()
+    }
+
     /// Check if a thread has an unsent draft
     pub fn has_draft_for_thread(&self, thread_id: &str) -> bool {
         self.draft_service.load_chat_draft(thread_id)

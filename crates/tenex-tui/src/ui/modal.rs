@@ -523,6 +523,13 @@ pub struct NudgeSelectorState {
     pub selected_nudge_ids: Vec<String>,  // Multi-select
 }
 
+/// State for skill selector modal (multi-select skills for messages)
+#[derive(Debug, Clone)]
+pub struct SkillSelectorState {
+    pub selector: SelectorState,
+    pub selected_skill_ids: Vec<String>,  // Multi-select
+}
+
 /// State for nudge list view (browse/manage nudges)
 #[derive(Debug, Clone)]
 pub struct NudgeListState {
@@ -2111,6 +2118,8 @@ pub enum ModalState {
     CreateProject(CreateProjectState),
     /// Nudge selector for adding nudges to messages
     NudgeSelector(NudgeSelectorState),
+    /// Skill selector for adding skills to messages
+    SkillSelector(SkillSelectorState),
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
     ConversationActions(ConversationActionsState),
     /// Chat action menu in Chat view - shows actions for current conversation (via Ctrl+T)

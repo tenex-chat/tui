@@ -99,6 +99,12 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
+    // Handle skill selector modal when open
+    if matches!(app.modal_state, ModalState::SkillSelector(_)) {
+        selectors::handle_skill_selector_key(app, key);
+        return Ok(true);
+    }
+
     // Handle create agent modal when open (global, works in any view)
     if matches!(app.modal_state, ModalState::CreateAgent(_)) {
         agent::handle_create_agent_key(app, key);

@@ -100,6 +100,10 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('n') if has_ctrl => {
             app.open_nudge_selector();
         }
+        // Ctrl+S = open skill selector
+        KeyCode::Char('s') if has_ctrl => {
+            app.open_skill_selector();
+        }
         // Ctrl+R = open history search
         KeyCode::Char('r') if has_ctrl => {
             app.open_history_search();
@@ -373,8 +377,9 @@ fn handle_send_message(app: &mut App) {
         {
             let project_a_tag = project.a_tag();
             let agent_pubkey = app.selected_agent().map(|a| a.pubkey.clone());
-            // Per-tab isolated nudge selection
+            // Per-tab isolated nudge and skill selection
             let nudge_ids = app.selected_nudge_ids();
+            let skill_ids = app.selected_skill_ids();
 
             if let Some(thread) = app.selected_thread() {
                 // Reply to existing thread
@@ -405,7 +410,7 @@ fn handle_send_message(app: &mut App) {
                     agent_pubkey,
                     reply_to,
                     nudge_ids,
-                    skill_ids: Vec::new(), // TODO: Add skill selection UI
+                    skill_ids: skill_ids.clone(),
                     ask_author_pubkey: None,
                     response_tx: Some(response_tx),
                 }) {
@@ -469,7 +474,7 @@ fn handle_send_message(app: &mut App) {
                     content,
                     agent_pubkey,
                     nudge_ids,
-                    skill_ids: Vec::new(), // TODO: Add skill selection UI
+                    skill_ids,
                     reference_conversation_id,
                     fork_message_id,
                     response_tx: Some(response_tx),
