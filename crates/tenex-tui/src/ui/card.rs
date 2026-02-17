@@ -27,12 +27,12 @@ pub const META_SEPARATOR: &str = " \u{2022} ";
 use ratatui::symbols::border::Set;
 
 pub const OUTER_HALF_BLOCK_BORDER: Set = Set {
-    top_left: "\u{259B}",     // ▛
-    top_right: "\u{259C}",    // ▜
-    bottom_left: "\u{2599}",  // ▙
-    bottom_right: "\u{259F}", // ▟
-    vertical_left: "\u{258C}",  // ▌
-    vertical_right: "\u{2590}", // ▐
-    horizontal_top: "\u{2580}", // ▀
+    top_left: "\u{259B}",          // ▛
+    top_right: "\u{259C}",         // ▜
+    bottom_left: "\u{2599}",       // ▙
+    bottom_right: "\u{259F}",      // ▟
+    vertical_left: "\u{258C}",     // ▌
+    vertical_right: "\u{2590}",    // ▐
+    horizontal_top: "\u{2580}",    // ▀
     horizontal_bottom: "\u{2584}", // ▄
 };

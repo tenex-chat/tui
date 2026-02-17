@@ -186,7 +186,11 @@ pub(super) fn handle_history_search_key(app: &mut App, key: KeyEvent) {
         }
 
         // Search input - ignore control/alt modifiers to prevent Ctrl+R inserting "r"
-        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
             if let ModalState::HistorySearch(ref mut state) = app.modal_state {
                 state.add_char(c);
             }

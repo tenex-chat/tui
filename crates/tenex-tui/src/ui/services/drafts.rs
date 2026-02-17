@@ -53,7 +53,9 @@ impl DraftService {
 
     /// Clear the draft content but preserve agent/branch selections
     pub fn clear_draft_content(&self, conversation_id: &str) -> Result<(), DraftStorageError> {
-        self.draft_storage.borrow_mut().clear_draft_content(conversation_id)
+        self.draft_storage
+            .borrow_mut()
+            .clear_draft_content(conversation_id)
     }
 
     // =========================================================================
@@ -93,7 +95,9 @@ impl DraftService {
     /// Clean up old confirmed publish snapshots (call on app startup)
     /// Returns the number of snapshots cleaned up
     pub fn cleanup_confirmed_publishes(&self) -> Result<usize, DraftStorageError> {
-        self.draft_storage.borrow_mut().cleanup_confirmed_publishes()
+        self.draft_storage
+            .borrow_mut()
+            .cleanup_confirmed_publishes()
     }
 
     /// Get all unpublished drafts (for recovery on startup)
@@ -122,7 +126,10 @@ impl DraftService {
 
     /// Get the last draft storage error (if any)
     pub fn chat_draft_last_error(&self) -> Option<String> {
-        self.draft_storage.borrow().last_error().map(|e| e.to_string())
+        self.draft_storage
+            .borrow()
+            .last_error()
+            .map(|e| e.to_string())
     }
 
     /// Clear the last draft storage error
@@ -206,8 +213,14 @@ impl DraftService {
     }
 
     /// Load a specific versioned draft
-    pub fn load_versioned_draft(&self, conversation_id: &str, message_sequence: u32) -> Option<ChatDraft> {
-        self.draft_storage.borrow().load_versioned(conversation_id, message_sequence)
+    pub fn load_versioned_draft(
+        &self,
+        conversation_id: &str,
+        message_sequence: u32,
+    ) -> Option<ChatDraft> {
+        self.draft_storage
+            .borrow()
+            .load_versioned(conversation_id, message_sequence)
     }
 
     /// Get all versioned drafts for a conversation
@@ -232,7 +245,9 @@ impl DraftService {
 
     /// Get current message sequence for a conversation
     pub fn get_current_sequence(&self, conversation_id: &str) -> u32 {
-        self.draft_storage.borrow().get_current_sequence(conversation_id)
+        self.draft_storage
+            .borrow()
+            .get_current_sequence(conversation_id)
     }
 
     // =========================================================================
@@ -242,18 +257,28 @@ impl DraftService {
     /// Mark draft as pending send (when user hits send button)
     /// NEVER deletes - only transitions state
     pub fn mark_draft_pending_send(&self, conversation_id: &str) -> Result<(), DraftStorageError> {
-        self.draft_storage.borrow_mut().mark_draft_pending_send(conversation_id)
+        self.draft_storage
+            .borrow_mut()
+            .mark_draft_pending_send(conversation_id)
     }
 
     /// Mark draft as sent awaiting confirmation
     pub fn mark_draft_sent_awaiting(&self, conversation_id: &str) -> Result<(), DraftStorageError> {
-        self.draft_storage.borrow_mut().mark_draft_sent_awaiting(conversation_id)
+        self.draft_storage
+            .borrow_mut()
+            .mark_draft_sent_awaiting(conversation_id)
     }
 
     /// Mark draft as confirmed (after relay confirms)
     /// STILL doesn't delete - cleanup happens separately after grace period
-    pub fn mark_draft_confirmed(&self, conversation_id: &str, event_id: Option<String>) -> Result<(), DraftStorageError> {
-        self.draft_storage.borrow_mut().mark_draft_confirmed(conversation_id, event_id)
+    pub fn mark_draft_confirmed(
+        &self,
+        conversation_id: &str,
+        event_id: Option<String>,
+    ) -> Result<(), DraftStorageError> {
+        self.draft_storage
+            .borrow_mut()
+            .mark_draft_confirmed(conversation_id, event_id)
     }
 
     // =========================================================================
@@ -263,7 +288,9 @@ impl DraftService {
     /// Archive old confirmed drafts (move to drafts_archive.json)
     /// Returns number of drafts archived
     pub fn archive_old_confirmed_drafts(&self) -> Result<usize, DraftStorageError> {
-        self.draft_storage.borrow_mut().archive_old_confirmed_drafts()
+        self.draft_storage
+            .borrow_mut()
+            .archive_old_confirmed_drafts()
     }
 
     /// Get all archived drafts
@@ -277,8 +304,13 @@ impl DraftService {
 
     /// Get or create a draft for a new conversation in a project
     /// Uses session ID for tracking before real conversation_id exists
-    pub fn get_or_create_project_draft(&self, project_a_tag: &str) -> Result<ChatDraft, DraftStorageError> {
-        self.draft_storage.borrow_mut().get_or_create_project_draft(project_a_tag)
+    pub fn get_or_create_project_draft(
+        &self,
+        project_a_tag: &str,
+    ) -> Result<ChatDraft, DraftStorageError> {
+        self.draft_storage
+            .borrow_mut()
+            .get_or_create_project_draft(project_a_tag)
     }
 
     /// Migrate a pre-conversation draft to a real conversation ID
@@ -288,7 +320,9 @@ impl DraftService {
         old_draft_key: &str,
         new_conversation_id: &str,
     ) -> Result<(), DraftStorageError> {
-        self.draft_storage.borrow_mut().migrate_draft_to_conversation(old_draft_key, new_conversation_id)
+        self.draft_storage
+            .borrow_mut()
+            .migrate_draft_to_conversation(old_draft_key, new_conversation_id)
     }
 
     /// Get all drafts for a specific project
@@ -322,11 +356,23 @@ impl DraftService {
         let named_storage = self.named_draft_storage.borrow();
 
         AllDrafts {
-            chat_drafts: draft_storage.get_all_drafts().into_iter().cloned().collect(),
-            versioned_drafts: draft_storage.get_all_versioned_drafts().into_iter().cloned().collect(),
+            chat_drafts: draft_storage
+                .get_all_drafts()
+                .into_iter()
+                .cloned()
+                .collect(),
+            versioned_drafts: draft_storage
+                .get_all_versioned_drafts()
+                .into_iter()
+                .cloned()
+                .collect(),
             archived_drafts: draft_storage.get_archived_drafts(),
             named_drafts: named_storage.get_all().into_iter().cloned().collect(),
-            pending_publishes: draft_storage.get_pending_publishes().into_iter().cloned().collect(),
+            pending_publishes: draft_storage
+                .get_pending_publishes()
+                .into_iter()
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -518,7 +564,10 @@ mod tests {
         let loaded = loaded.unwrap();
         assert_eq!(loaded.conversation_id, "test-conv-123");
         assert_eq!(loaded.text, "Hello, this is a test draft");
-        assert_eq!(loaded.selected_agent_pubkey, Some("agent-pubkey".to_string()));
+        assert_eq!(
+            loaded.selected_agent_pubkey,
+            Some("agent-pubkey".to_string())
+        );
     }
 
     #[test]
@@ -542,7 +591,10 @@ mod tests {
         // Create and save multiple named drafts
         let draft1 = NamedDraft::new("First draft content".to_string(), "project-a".to_string());
         let draft2 = NamedDraft::new("Second draft content".to_string(), "project-a".to_string());
-        let draft3 = NamedDraft::new("Third draft for project B".to_string(), "project-b".to_string());
+        let draft3 = NamedDraft::new(
+            "Third draft for project B".to_string(),
+            "project-b".to_string(),
+        );
 
         service.save_named_draft(draft1.clone()).unwrap();
         service.save_named_draft(draft2.clone()).unwrap();
@@ -747,8 +799,9 @@ mod tests {
         assert!(loaded.attachments.is_empty()); // Attachments cleared
         assert!(loaded.reference_conversation_id.is_none()); // Reference cleared
         assert!(loaded.fork_message_id.is_none()); // Fork message cleared
-        // Note: The underlying implementation preserves agent but clears text
-        assert_eq!(loaded.selected_agent_pubkey, Some("agent-123".to_string())); // Preserved
+                                                   // Note: The underlying implementation preserves agent but clears text
+        assert_eq!(loaded.selected_agent_pubkey, Some("agent-123".to_string()));
+        // Preserved
     }
 
     #[test]
@@ -794,7 +847,10 @@ mod tests {
         // Load the draft and verify all fork metadata persists
         let loaded = service.load_chat_draft("fork-persist-test").unwrap();
         assert_eq!(loaded.text, "Forked conversation content");
-        assert_eq!(loaded.reference_conversation_id, Some("source-conv-123".to_string()));
+        assert_eq!(
+            loaded.reference_conversation_id,
+            Some("source-conv-123".to_string())
+        );
         assert_eq!(loaded.fork_message_id, Some("fork-msg-456".to_string()));
         assert_eq!(loaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
 
@@ -806,8 +862,14 @@ mod tests {
         // Load again and verify fork metadata is still preserved after update
         let reloaded = service.load_chat_draft("fork-persist-test").unwrap();
         assert_eq!(reloaded.text, "Updated forked conversation content");
-        assert_eq!(reloaded.reference_conversation_id, Some("source-conv-123".to_string()));
+        assert_eq!(
+            reloaded.reference_conversation_id,
+            Some("source-conv-123".to_string())
+        );
         assert_eq!(reloaded.fork_message_id, Some("fork-msg-456".to_string()));
-        assert_eq!(reloaded.selected_agent_pubkey, Some("agent-xyz".to_string()));
+        assert_eq!(
+            reloaded.selected_agent_pubkey,
+            Some("agent-xyz".to_string())
+        );
     }
 }

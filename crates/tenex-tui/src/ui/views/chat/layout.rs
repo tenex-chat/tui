@@ -1,15 +1,15 @@
 use crate::ui::components::{
-    render_chat_sidebar, render_modal_items, render_modal_items_with_scroll, render_statusbar, render_tab_bar, ConversationMetadata, Modal,
-    ModalItem, ModalSize,
+    render_chat_sidebar, render_modal_items, render_modal_items_with_scroll, render_statusbar,
+    render_tab_bar, ConversationMetadata, Modal, ModalItem, ModalSize,
 };
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::layout;
 use crate::ui::modal::ChatActionsState;
 use crate::ui::state::TabContentType;
+use crate::ui::text_editor::TextEditor;
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
-use crate::ui::text_editor::TextEditor;
-use crate::ui::views::{render_tts_control, render_report_tab};
+use crate::ui::views::{render_report_tab, render_tts_control};
 use crate::ui::{App, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -27,7 +27,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(bg_block, area);
 
     // Check active tab content type and dispatch to appropriate renderer
-    let content_type = app.tabs.active_tab()
+    let content_type = app
+        .tabs
+        .active_tab()
         .map(|t| t.content_type.clone())
         .unwrap_or(TabContentType::Conversation);
 
@@ -53,14 +55,26 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     .split(area);
 
     // Render header
-    let chrome_color = if app.pending_quit { theme::ACCENT_ERROR } else { theme::ACCENT_PRIMARY };
-    let title = app.selected_thread()
+    let chrome_color = if app.pending_quit {
+        theme::ACCENT_ERROR
+    } else {
+        theme::ACCENT_PRIMARY
+    };
+    let title = app
+        .selected_thread()
         .map(|t| t.title.clone())
-        .or_else(|| app.open_tabs().get(app.active_tab_index()).map(|tab| tab.thread_title.clone()))
+        .or_else(|| {
+            app.open_tabs()
+                .get(app.active_tab_index())
+                .map(|tab| tab.thread_title.clone())
+        })
         .unwrap_or_else(|| "Chat".to_string());
     let padding = " ".repeat(layout::CONTENT_PADDING_H as usize);
-    let header = Paragraph::new(format!("\n{}{}", padding, title))
-        .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
+    let header = Paragraph::new(format!("\n{}{}", padding, title)).style(
+        Style::default()
+            .fg(chrome_color)
+            .add_modifier(ratatui::style::Modifier::BOLD),
+    );
     f.render_widget(header, main_chunks[0]);
 
     // Content area (everything below header)
@@ -106,10 +120,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
                         // If profile name is just short pubkey, try project status as fallback
                         if profile_name.ends_with("...") {
-                            project_a_tag.as_ref()
+                            project_a_tag
+                                .as_ref()
                                 .and_then(|a_tag| store.get_project_status(a_tag))
                                 .and_then(|status| {
-                                    status.agents.iter()
+                                    status
+                                        .agents
+                                        .iter()
                                         .find(|a| a.pubkey == *pubkey)
                                         .map(|a| a.name.clone())
                                 })
@@ -145,7 +162,13 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Build layout based on whether we have attachments, status, and tabs
     // Context line is now INSIDE the input card, not separate
-    let chunks = build_layout(content_area, input_height, has_attachments, has_status, has_tabs);
+    let chunks = build_layout(
+        content_area,
+        input_height,
+        has_attachments,
+        has_status,
+        has_tabs,
+    );
 
     // Split messages area horizontally - always show sidebar when visible
     let (messages_area_raw, sidebar_area) =
@@ -158,7 +181,14 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Render chat sidebar (work indicator + todos + delegations + reports + metadata)
     if let Some(sidebar) = sidebar_area {
-        render_chat_sidebar(f, &todo_state, &metadata, &app.sidebar_state, app.spinner_char(), sidebar);
+        render_chat_sidebar(
+            f,
+            &todo_state,
+            &metadata,
+            &app.sidebar_state,
+            app.spinner_char(),
+            sidebar,
+        );
     }
 
     // Calculate chunk indices based on layout
@@ -188,9 +218,19 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     }
 
     // Status bar at the very bottom (always visible)
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
+        app.data_store.borrow_mut().get_statusbar_runtime_ms();
     let audio_playing = app.audio_player.is_playing();
-    render_statusbar(f, chunks[idx], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
+    render_statusbar(
+        f,
+        chunks[idx],
+        app.current_notification(),
+        cumulative_runtime_ms,
+        has_active_agents,
+        active_agent_count,
+        app.wave_offset(),
+        audio_playing,
+    );
 
     // Render agent selector popup if showing
     if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
@@ -232,14 +272,9 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
         super::super::render_report_viewer(f, app, area, state);
     }
 
-    // Render nudge selector modal if showing
-    if let ModalState::NudgeSelector(ref state) = app.modal_state {
-        super::super::render_nudge_selector(f, app, area, state);
-    }
-
-    // Render skill selector modal if showing
-    if let ModalState::SkillSelector(ref state) = app.modal_state {
-        super::super::render_skill_selector(f, app, area, state);
+    // Render unified nudges/skills selector modal if showing
+    if let ModalState::NudgeSkillSelector(ref state) = app.modal_state {
+        super::super::render_nudge_skill_selector(f, app, area, state);
     }
 
     // Render chat actions modal if showing (Ctrl+T /)
@@ -291,8 +326,19 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     if let ModalState::WorkspaceManager(ref state) = app.modal_state {
         let workspaces = app.preferences.borrow().workspaces().to_vec();
         let projects = app.data_store.borrow().get_projects().to_vec();
-        let active_id = app.preferences.borrow().active_workspace_id().map(String::from);
-        super::super::render_workspace_manager(f, area, state, &workspaces, &projects, active_id.as_deref());
+        let active_id = app
+            .preferences
+            .borrow()
+            .active_workspace_id()
+            .map(String::from);
+        super::super::render_workspace_manager(
+            f,
+            area,
+            state,
+            &workspaces,
+            &projects,
+            active_id.as_deref(),
+        );
     }
 
     // App settings modal
@@ -321,62 +367,62 @@ fn build_layout(
     // All layouts end with statusbar at the very bottom
     match (has_attachments, has_status, has_tabs) {
         (true, true, true) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Status line
-            Constraint::Length(1),         // Attachments line
-            Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Status line
+            Constraint::Length(1),                        // Attachments line
+            Constraint::Length(input_height),             // Input (includes context)
+            Constraint::Length(layout::TAB_BAR_HEIGHT),   // Tab bar
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, true, false) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Status line
-            Constraint::Length(1),         // Attachments line
-            Constraint::Length(input_height), // Input (includes context)
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Status line
+            Constraint::Length(1),                        // Attachments line
+            Constraint::Length(input_height),             // Input (includes context)
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, false, true) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Attachments line
-            Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Attachments line
+            Constraint::Length(input_height),             // Input (includes context)
+            Constraint::Length(layout::TAB_BAR_HEIGHT),   // Tab bar
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (true, false, false) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Attachments line
-            Constraint::Length(input_height), // Input (includes context)
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Attachments line
+            Constraint::Length(input_height),             // Input (includes context)
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, true, true) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Status line
-            Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Status line
+            Constraint::Length(input_height),             // Input (includes context)
+            Constraint::Length(layout::TAB_BAR_HEIGHT),   // Tab bar
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, true, false) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(1),         // Status line
-            Constraint::Length(input_height), // Input (includes context)
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(1),                        // Status line
+            Constraint::Length(input_height),             // Input (includes context)
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, false, true) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(input_height), // Input (includes context)
-            Constraint::Length(layout::TAB_BAR_HEIGHT), // Tab bar
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(input_height),             // Input (includes context)
+            Constraint::Length(layout::TAB_BAR_HEIGHT),   // Tab bar
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
         (false, false, false) => Layout::vertical([
-            Constraint::Min(0),            // Messages
-            Constraint::Length(input_height), // Input (includes context)
+            Constraint::Min(0),                           // Messages
+            Constraint::Length(input_height),             // Input (includes context)
             Constraint::Length(layout::STATUSBAR_HEIGHT), // Global statusbar
         ])
         .split(area),
@@ -447,7 +493,10 @@ fn render_attachment_modal(f: &mut Frame, app: &App, area: Rect) {
 fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) {
     let line_count = editor.text.lines().count().max(1);
     let char_count = editor.text.len();
-    let title = format!("Expanded Editor ({} lines, {} chars)", line_count, char_count);
+    let title = format!(
+        "Expanded Editor ({} lines, {} chars)",
+        line_count, char_count
+    );
 
     let (popup_area, content_area) = Modal::new(&title)
         .size(ModalSize {
@@ -477,8 +526,8 @@ fn render_expanded_editor_modal(f: &mut Frame, editor: &TextEditor, area: Rect) 
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("ctrl+s save · esc cancel")
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints =
+        Paragraph::new("ctrl+s save · esc cancel").style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 
     // Show cursor in the modal (offset by content area position)
@@ -635,22 +684,39 @@ fn render_agent_settings_modal(
     let left_width = content_width / 3;
     let right_width = content_width - left_width - 1; // -1 for separator
 
-    let left_area = Rect::new(content_area.x + 2, content_area.y, left_width, content_area.height.saturating_sub(2));
-    let right_area = Rect::new(content_area.x + 3 + left_width, content_area.y, right_width, content_area.height.saturating_sub(2));
+    let left_area = Rect::new(
+        content_area.x + 2,
+        content_area.y,
+        left_width,
+        content_area.height.saturating_sub(2),
+    );
+    let right_area = Rect::new(
+        content_area.x + 3 + left_width,
+        content_area.y,
+        right_width,
+        content_area.height.saturating_sub(2),
+    );
 
     // Render Model section
     let model_header_style = if state.focus == AgentSettingsFocus::Model {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_DIM)
     };
     let model_header = Paragraph::new("Model").style(model_header_style);
     f.render_widget(model_header, left_area);
 
-    let model_list_area = Rect::new(left_area.x, left_area.y + 1, left_area.width, left_area.height.saturating_sub(1));
+    let model_list_area = Rect::new(
+        left_area.x,
+        left_area.y + 1,
+        left_area.width,
+        left_area.height.saturating_sub(1),
+    );
     if state.available_models.is_empty() {
-        let no_models = Paragraph::new("No models available")
-            .style(Style::default().fg(theme::TEXT_MUTED));
+        let no_models =
+            Paragraph::new("No models available").style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(no_models, model_list_area);
     } else {
         for (i, model) in state.available_models.iter().enumerate() {
@@ -667,31 +733,43 @@ fn render_agent_settings_modal(
                 Style::default().fg(theme::TEXT_MUTED)
             };
             let model_text = Paragraph::new(format!("{}{}", prefix, model)).style(style);
-            let item_area = Rect::new(model_list_area.x, model_list_area.y + i as u16, model_list_area.width, 1);
+            let item_area = Rect::new(
+                model_list_area.x,
+                model_list_area.y + i as u16,
+                model_list_area.width,
+                1,
+            );
             f.render_widget(model_text, item_area);
         }
     }
 
     // Render Tools section header
     let tools_header_style = if state.focus == AgentSettingsFocus::Tools {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_DIM)
     };
-    let tools_header = Paragraph::new("Tools (space toggle, a toggle all)")
-        .style(tools_header_style);
+    let tools_header =
+        Paragraph::new("Tools (space toggle, a toggle all)").style(tools_header_style);
     f.render_widget(tools_header, right_area);
 
     // Render tool groups
-    let tools_list_area = Rect::new(right_area.x, right_area.y + 1, right_area.width, right_area.height.saturating_sub(1));
+    let tools_list_area = Rect::new(
+        right_area.x,
+        right_area.y + 1,
+        right_area.width,
+        right_area.height.saturating_sub(1),
+    );
 
     // Adjust scroll offset using actual visible height from the computed tools_list_area
     let visible_height = tools_list_area.height as usize;
     state.adjust_tools_scroll(visible_height.max(1));
 
     if state.tool_groups.is_empty() {
-        let no_tools = Paragraph::new("No tools available")
-            .style(Style::default().fg(theme::TEXT_MUTED));
+        let no_tools =
+            Paragraph::new("No tools available").style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(no_tools, tools_list_area);
     } else {
         let mut y_offset: u16 = 0;
@@ -724,24 +802,53 @@ fn render_agent_settings_modal(
                         Style::default().fg(theme::TEXT_MUTED)
                     };
                     let text = Paragraph::new(format!("{}{}", prefix, tool)).style(style);
-                    let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                    let item_area = Rect::new(
+                        tools_list_area.x,
+                        tools_list_area.y + y_offset,
+                        tools_list_area.width,
+                        1,
+                    );
                     f.render_widget(text, item_area);
                 } else {
                     // Multi-tool group - show as expandable
                     let is_fully = group.is_fully_selected(&state.selected_tools);
                     let is_partial = group.is_partially_selected(&state.selected_tools);
                     let expand_icon = if group.expanded { "▼ " } else { "▶ " };
-                    let check_icon = if is_fully { "[x] " } else if is_partial { "[-] " } else { "[ ] " };
+                    let check_icon = if is_fully {
+                        "[x] "
+                    } else if is_partial {
+                        "[-] "
+                    } else {
+                        "[ ] "
+                    };
 
                     let style = if is_cursor_on_group && state.focus == AgentSettingsFocus::Tools {
-                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
                     } else if is_fully {
-                        Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme::TEXT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
                     } else {
-                        Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme::TEXT_MUTED)
+                            .add_modifier(Modifier::BOLD)
                     };
-                    let text = Paragraph::new(format!("{}{}{} ({})", expand_icon, check_icon, group.name, group.tools.len())).style(style);
-                    let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                    let text = Paragraph::new(format!(
+                        "{}{}{} ({})",
+                        expand_icon,
+                        check_icon,
+                        group.name,
+                        group.tools.len()
+                    ))
+                    .style(style);
+                    let item_area = Rect::new(
+                        tools_list_area.x,
+                        tools_list_area.y + y_offset,
+                        tools_list_area.width,
+                        1,
+                    );
                     f.render_widget(text, item_area);
                 }
                 y_offset += 1;
@@ -763,7 +870,8 @@ fn render_agent_settings_modal(
                         let is_checked = state.selected_tools.contains(tool);
                         let prefix = if is_checked { "  [x] " } else { "  [ ] " };
 
-                        let style = if is_cursor_on_tool && state.focus == AgentSettingsFocus::Tools {
+                        let style = if is_cursor_on_tool && state.focus == AgentSettingsFocus::Tools
+                        {
                             Style::default().fg(theme::ACCENT_PRIMARY)
                         } else if is_checked {
                             Style::default().fg(theme::TEXT_PRIMARY)
@@ -778,8 +886,14 @@ fn render_agent_settings_modal(
                             tool.as_str()
                         };
 
-                        let text = Paragraph::new(format!("{}{}", prefix, display_name)).style(style);
-                        let item_area = Rect::new(tools_list_area.x, tools_list_area.y + y_offset, tools_list_area.width, 1);
+                        let text =
+                            Paragraph::new(format!("{}{}", prefix, display_name)).style(style);
+                        let item_area = Rect::new(
+                            tools_list_area.x,
+                            tools_list_area.y + y_offset,
+                            tools_list_area.width,
+                            1,
+                        );
                         f.render_widget(text, item_area);
                         y_offset += 1;
                     }
@@ -797,8 +911,10 @@ fn render_agent_settings_modal(
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("tab switch · ↑↓ navigate · space toggle · a toggle all · enter save · esc cancel")
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints = Paragraph::new(
+        "tab switch · ↑↓ navigate · space toggle · a toggle all · enter save · esc cancel",
+    )
+    .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 
@@ -831,22 +947,22 @@ fn render_chat_search_bar(f: &mut Frame, app: &App, area: Rect) {
 
     // Build search line (per-tab isolated)
     let search_query = app.chat_search_query();
-    let (current_match, total_matches) = app.chat_search()
+    let (current_match, total_matches) = app
+        .chat_search()
         .map(|s| (s.current_match, s.total_matches))
         .unwrap_or((0, 0));
 
     let query_display = if search_query.is_empty() {
         Span::styled("Type to search...", Style::default().fg(theme::TEXT_MUTED))
     } else {
-        Span::styled(search_query.clone(), Style::default().fg(theme::TEXT_PRIMARY))
+        Span::styled(
+            search_query.clone(),
+            Style::default().fg(theme::TEXT_PRIMARY),
+        )
     };
 
     let match_info = if total_matches > 0 {
-        format!(
-            " [{}/{}]",
-            current_match + 1,
-            total_matches
-        )
+        format!(" [{}/{}]", current_match + 1, total_matches)
     } else if !search_query.is_empty() {
         " [0 matches]".to_string()
     } else {
@@ -888,9 +1004,19 @@ fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
     render_tts_control(f, app, chunks[1]);
 
     // Render statusbar
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
+        app.data_store.borrow_mut().get_statusbar_runtime_ms();
     let audio_playing = app.audio_player.is_playing();
-    render_statusbar(f, chunks[2], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
+    render_statusbar(
+        f,
+        chunks[2],
+        app.current_notification(),
+        cumulative_runtime_ms,
+        has_active_agents,
+        active_agent_count,
+        app.wave_offset(),
+        audio_playing,
+    );
 }
 
 // =============================================================================
@@ -914,7 +1040,17 @@ fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
     render_report_tab(f, app, chunks[1]);
 
     // Render statusbar
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
+        app.data_store.borrow_mut().get_statusbar_runtime_ms();
     let audio_playing = app.audio_player.is_playing();
-    render_statusbar(f, chunks[2], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
+    render_statusbar(
+        f,
+        chunks[2],
+        app.current_notification(),
+        cumulative_runtime_ms,
+        has_active_agents,
+        active_agent_count,
+        app.wave_offset(),
+        audio_playing,
+    );
 }

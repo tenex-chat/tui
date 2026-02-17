@@ -1,9 +1,9 @@
 // crates/tenex-tui/src/ui/views/report_viewer.rs
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::markdown::render_markdown;
-use crate::ui::modal::{ReportCopyOption, ReportViewerFocus, ReportViewerState, ReportViewMode};
-use crate::ui::{card, theme, App};
 use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
+use crate::ui::markdown::render_markdown;
+use crate::ui::modal::{ReportCopyOption, ReportViewMode, ReportViewerFocus, ReportViewerState};
+use crate::ui::{card, theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -72,17 +72,26 @@ fn render_header(f: &mut Frame, app: &App, state: &ReportViewerState, area: Rect
 
     let line1 = Line::from(vec![
         Span::styled("  ", Style::default()),
-        Span::styled(title, Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     // Line 2: View toggle, version nav, copy button, metadata
     let current_style = if state.view_mode == ReportViewMode::Current {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
     let changes_style = if state.view_mode == ReportViewMode::Changes {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
@@ -100,8 +109,13 @@ fn render_header(f: &mut Frame, app: &App, state: &ReportViewerState, area: Rect
         Span::styled("Changes", changes_style),
         Span::styled("]", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(version_str, Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(format!("  y:copy  {} · {} · @{}", reading_time, time_str, author_name),
-            Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!(
+                "  y:copy  {} · {} · @{}",
+                reading_time, time_str, author_name
+            ),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
     ]);
 
     let header = Paragraph::new(vec![line1, Line::from(""), line2]);
@@ -119,8 +133,11 @@ fn render_document_content(f: &mut Frame, app: &App, state: &ReportViewerState, 
     let lines: Vec<Line> = match state.view_mode {
         ReportViewMode::Current => render_markdown(&state.report.content),
         ReportViewMode::Changes => {
-            let previous = app.data_store.borrow()
-                .reports.get_previous_report_version(&state.report.slug, &state.report.id)
+            let previous = app
+                .data_store
+                .borrow()
+                .reports
+                .get_previous_report_version(&state.report.slug, &state.report.id)
                 .map(|r| r.content.clone());
             render_diff_view(&state.report.content, previous.as_deref())
         }
@@ -139,22 +156,21 @@ fn render_document_content(f: &mut Frame, app: &App, state: &ReportViewerState, 
         Style::default().fg(theme::BORDER_INACTIVE)
     };
 
-    let content = Paragraph::new(visible_lines)
-        .block(Block::default()
+    let content = Paragraph::new(visible_lines).block(
+        Block::default()
             .borders(Borders::LEFT)
-            .border_style(border_style));
+            .border_style(border_style),
+    );
 
     f.render_widget(content, content_area);
 }
 
 fn render_diff_view(current: &str, previous: Option<&str>) -> Vec<Line<'static>> {
     let Some(previous) = previous else {
-        return vec![
-            Line::from(Span::styled(
-                "No previous version available for diff".to_string(),
-                Style::default().fg(theme::TEXT_MUTED),
-            ))
-        ];
+        return vec![Line::from(Span::styled(
+            "No previous version available for diff".to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        ))];
     };
 
     let mut lines = Vec::new();
@@ -227,7 +243,12 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
     let header_area = Rect::new(area.x, area.y, area.width, 2);
     let header = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("  Threads", Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  Threads",
+                Style::default()
+                    .fg(theme::TEXT_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled("  n: new", Style::default().fg(theme::TEXT_MUTED)),
         ]),
         Line::from(""),
@@ -235,7 +256,12 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
     f.render_widget(header, header_area);
 
     // Thread list area
-    let list_area = Rect::new(area.x, area.y + 2, area.width, area.height.saturating_sub(2));
+    let list_area = Rect::new(
+        area.x,
+        area.y + 2,
+        area.width,
+        area.height.saturating_sub(2),
+    );
 
     // Get threads for this document (kind:1 events with #a tag referencing this document)
     let threads = get_document_threads(app, &state.report);
@@ -243,7 +269,11 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
     if threads.is_empty() {
         let empty = Paragraph::new("  No discussions yet")
             .style(Style::default().fg(theme::TEXT_MUTED))
-            .block(Block::default().borders(Borders::LEFT).border_style(border_style));
+            .block(
+                Block::default()
+                    .borders(Borders::LEFT)
+                    .border_style(border_style),
+            );
         f.render_widget(empty, list_area);
         return;
     }
@@ -251,7 +281,11 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
     let mut lines: Vec<Line> = Vec::new();
     for (i, thread) in threads.iter().enumerate() {
         let is_selected = is_focused && i == state.selected_thread_index;
-        let bullet = if is_selected { card::BULLET } else { card::SPACER };
+        let bullet = if is_selected {
+            card::BULLET
+        } else {
+            card::SPACER
+        };
         let style = if is_selected {
             Style::default().fg(theme::ACCENT_PRIMARY)
         } else {
@@ -272,19 +306,32 @@ fn render_threads_sidebar(f: &mut Frame, app: &App, state: &ReportViewerState, a
         ]));
         lines.push(Line::from(vec![
             Span::styled("  ", Style::default()),
-            Span::styled(format!("@{} · {}", author_name, time_str), Style::default().fg(theme::TEXT_MUTED)),
+            Span::styled(
+                format!("@{} · {}", author_name, time_str),
+                Style::default().fg(theme::TEXT_MUTED),
+            ),
         ]));
         lines.push(Line::from(""));
     }
 
-    let content = Paragraph::new(lines)
-        .block(Block::default().borders(Borders::LEFT).border_style(border_style));
+    let content = Paragraph::new(lines).block(
+        Block::default()
+            .borders(Borders::LEFT)
+            .border_style(border_style),
+    );
     f.render_widget(content, list_area);
 }
 
-fn get_document_threads(app: &App, report: &tenex_core::models::Report) -> Vec<tenex_core::models::Thread> {
+fn get_document_threads(
+    app: &App,
+    report: &tenex_core::models::Report,
+) -> Vec<tenex_core::models::Thread> {
     let a_tag = report.a_tag();
-    app.data_store.borrow().reports.get_document_threads(&a_tag).to_vec()
+    app.data_store
+        .borrow()
+        .reports
+        .get_document_threads(&a_tag)
+        .to_vec()
 }
 
 fn render_help_bar(f: &mut Frame, state: &ReportViewerState, area: Rect) {
@@ -297,8 +344,7 @@ fn render_help_bar(f: &mut Frame, state: &ReportViewerState, area: Rect) {
         }
     };
 
-    let help = Paragraph::new(format!("  {}", hints))
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let help = Paragraph::new(format!("  {}", hints)).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(help, area);
 }
 
@@ -319,14 +365,23 @@ fn render_copy_menu(f: &mut Frame, state: &ReportViewerState, parent_area: Rect)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE));
     f.render_widget(bg, menu_area);
 
-    let inner = Rect::new(menu_area.x + 1, menu_area.y + 1, menu_area.width - 2, menu_area.height - 2);
+    let inner = Rect::new(
+        menu_area.x + 1,
+        menu_area.y + 1,
+        menu_area.width - 2,
+        menu_area.height - 2,
+    );
 
     let items: Vec<Line> = ReportCopyOption::ALL
         .iter()
         .enumerate()
         .map(|(i, opt)| {
             let is_selected = i == state.copy_menu_index;
-            let bullet = if is_selected { card::BULLET } else { card::SPACER };
+            let bullet = if is_selected {
+                card::BULLET
+            } else {
+                card::SPACER
+            };
             let style = if is_selected {
                 Style::default().fg(theme::ACCENT_PRIMARY)
             } else {

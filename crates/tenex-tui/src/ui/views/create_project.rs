@@ -101,13 +101,13 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
 
     // Name field
     let name_label_style = if state.focus == CreateProjectFocus::Name {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let name_label = Paragraph::new(Line::from(vec![
-        Span::styled("Name: ", name_label_style),
-    ]));
+    let name_label = Paragraph::new(Line::from(vec![Span::styled("Name: ", name_label_style)]));
     f.render_widget(name_label, Rect::new(area.x, y, area.width, 1));
     y += 1;
 
@@ -138,13 +138,16 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
 
     // Description field
     let desc_label_style = if state.focus == CreateProjectFocus::Description {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let desc_label = Paragraph::new(Line::from(vec![
-        Span::styled("Description: ", desc_label_style),
-    ]));
+    let desc_label = Paragraph::new(Line::from(vec![Span::styled(
+        "Description: ",
+        desc_label_style,
+    )]));
     f.render_widget(desc_label, Rect::new(area.x, y, area.width, 1));
     y += 1;
 
@@ -154,13 +157,14 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
     } else {
         theme::BORDER_INACTIVE
     };
-    let desc_value = if state.description.is_empty() && state.focus == CreateProjectFocus::Description {
-        "Enter description (optional)...".to_string()
-    } else if state.description.is_empty() {
-        "(optional)".to_string()
-    } else {
-        state.description.clone()
-    };
+    let desc_value =
+        if state.description.is_empty() && state.focus == CreateProjectFocus::Description {
+            "Enter description (optional)...".to_string()
+        } else if state.description.is_empty() {
+            "(optional)".to_string()
+        } else {
+            state.description.clone()
+        };
     let desc_style = if state.description.is_empty() {
         Style::default().fg(theme::TEXT_DIM)
     } else {
@@ -184,7 +188,10 @@ fn render_details_step(f: &mut Frame, area: Rect, state: &CreateProjectState) {
     if state.name.trim().is_empty() {
         let hint = Paragraph::new(Line::from(vec![
             Span::styled("* ", Style::default().fg(theme::ACCENT_ERROR)),
-            Span::styled("Project name is required", Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                "Project name is required",
+                Style::default().fg(theme::TEXT_DIM),
+            ),
         ]));
         f.render_widget(hint, Rect::new(area.x, y, area.width, 1));
     }
@@ -215,7 +222,10 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
         f.render_widget(empty_msg, list_area);
     } else {
         let visible_height = list_area.height as usize;
-        let selected_index = state.agent_selector.index.min(filtered_agents.len().saturating_sub(1));
+        let selected_index = state
+            .agent_selector
+            .index
+            .min(filtered_agents.len().saturating_sub(1));
 
         let scroll_offset = if selected_index >= visible_height {
             selected_index - visible_height + 1
@@ -245,14 +255,19 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
 
                 // Cursor indicator
                 if is_cursor {
-                    spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled(" ", Style::default()));
                 }
 
                 // Agent name
                 let name_style = if is_cursor {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else if is_selected {
                     Style::default().fg(theme::ACCENT_SUCCESS)
                 } else {
@@ -267,7 +282,10 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
                     } else {
                         format!(" - {}", agent.description)
                     };
-                    spans.push(Span::styled(desc_preview, Style::default().fg(theme::TEXT_MUTED)));
+                    spans.push(Span::styled(
+                        desc_preview,
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
 
                 ListItem::new(Line::from(spans))
@@ -292,7 +310,8 @@ fn render_agents_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjec
 
 fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProjectState) {
     // Search bar
-    let remaining = render_modal_search(f, area, &state.tool_selector.filter, "Search MCP tools...");
+    let remaining =
+        render_modal_search(f, area, &state.tool_selector.filter, "Search MCP tools...");
 
     // Get filtered tools
     let filtered_tools = app.mcp_tools_filtered_by(&state.tool_selector.filter);
@@ -315,7 +334,10 @@ fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProject
         f.render_widget(empty_msg, list_area);
     } else {
         let visible_height = list_area.height as usize;
-        let selected_index = state.tool_selector.index.min(filtered_tools.len().saturating_sub(1));
+        let selected_index = state
+            .tool_selector
+            .index
+            .min(filtered_tools.len().saturating_sub(1));
 
         let scroll_offset = if selected_index >= visible_height {
             selected_index - visible_height + 1
@@ -345,14 +367,19 @@ fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProject
 
                 // Cursor indicator
                 if is_cursor {
-                    spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled(" ", Style::default()));
                 }
 
                 // Tool name
                 let name_style = if is_cursor {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else if is_selected {
                     Style::default().fg(theme::ACCENT_SUCCESS)
                 } else {
@@ -367,7 +394,10 @@ fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProject
                     } else {
                         format!(" - {}", tool.description)
                     };
-                    spans.push(Span::styled(desc_preview, Style::default().fg(theme::TEXT_MUTED)));
+                    spans.push(Span::styled(
+                        desc_preview,
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
 
                 ListItem::new(Line::from(spans))
@@ -391,7 +421,11 @@ fn render_tools_step(f: &mut Frame, app: &App, area: Rect, state: &CreateProject
     let manual_count = state.mcp_tool_ids.len();
 
     let count_text = if total_tool_count > manual_count {
-        format!("{} tool(s) selected ({} from agents)", total_tool_count, total_tool_count - manual_count)
+        format!(
+            "{} tool(s) selected ({} from agents)",
+            total_tool_count,
+            total_tool_count - manual_count
+        )
     } else {
         format!("{} tool(s) selected", total_tool_count)
     };

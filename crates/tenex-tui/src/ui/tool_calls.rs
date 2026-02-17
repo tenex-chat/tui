@@ -159,7 +159,18 @@ pub fn extract_target(tool_call: &ToolCall) -> Option<String> {
     let name = tool_call.name.to_lowercase();
 
     // For file operations (fs_read, fs_write, fs_edit, etc.), prefer description over path
-    if matches!(name.as_str(), "read" | "file_read" | "fs_read" | "write" | "file_write" | "fs_write" | "edit" | "str_replace_editor" | "fs_edit") {
+    if matches!(
+        name.as_str(),
+        "read"
+            | "file_read"
+            | "fs_read"
+            | "write"
+            | "file_write"
+            | "fs_write"
+            | "edit"
+            | "str_replace_editor"
+            | "fs_edit"
+    ) {
         if let Some(desc) = params.get("description").and_then(|v| v.as_str()) {
             return Some(truncate_with_ellipsis(desc, 60));
         }
@@ -227,56 +238,57 @@ pub fn render_tool_line(
             // Bash: "$ command" or "$ description"
             "bash" | "execute_bash" | "shell" => format!("$ {}", target),
 
-        // Ask: "Asking: "title" [Question1, Question2, ...]"
-        "ask" | "askuserquestion" => {
-            let title = tool_call
-                .parameters
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Question");
+            // Ask: "Asking: "title" [Question1, Question2, ...]"
+            "ask" | "askuserquestion" => {
+                let title = tool_call
+                    .parameters
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Question");
 
-            // Extract question headers from questions array
-            let question_headers: Vec<String> = tool_call
-                .parameters
-                .get("questions")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|q| {
-                            q.get("header")
-                                .and_then(|h| h.as_str())
-                                .map(|s| s.to_string())
-                        })
-                        .collect()
-                })
-                .unwrap_or_default();
+                // Extract question headers from questions array
+                let question_headers: Vec<String> = tool_call
+                    .parameters
+                    .get("questions")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|q| {
+                                q.get("header")
+                                    .and_then(|h| h.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-            if question_headers.is_empty() {
-                format!("Asking: \"{}\"", title)
-            } else {
-                format!("Asking: \"{}\" [{}]", title, question_headers.join(", "))
+                if question_headers.is_empty() {
+                    format!("Asking: \"{}\"", title)
+                } else {
+                    format!("Asking: \"{}\" [{}]", title, question_headers.join(", "))
+                }
             }
-        }
 
-        // File operations: emoji + target/description
-        "read" | "file_read" | "fs_read" => format!("📖 {}", target),
-        "write" | "file_write" | "fs_write" => format!("✏️ {}", target),
-        "edit" | "str_replace_editor" | "fs_edit" => format!("✏️ {}", target),
+            // File operations: emoji + target/description
+            "read" | "file_read" | "fs_read" => format!("📖 {}", target),
+            "write" | "file_write" | "fs_write" => format!("✏️ {}", target),
+            "edit" | "str_replace_editor" | "fs_edit" => format!("✏️ {}", target),
 
-        // Search: emoji + pattern
-        "glob" | "find" | "grep" | "search" | "web_search" | "websearch" | "fs_glob" | "fs_grep" => {
-            format!("🔍 {}", target)
-        }
+            // Search: emoji + pattern
+            "glob" | "find" | "grep" | "search" | "web_search" | "websearch" | "fs_glob"
+            | "fs_grep" => {
+                format!("🔍 {}", target)
+            }
 
-        // Task/Agent: show description
-        "task" | "agent" => {
-            let desc = tool_call
-                .parameters
-                .get("description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("agent");
-            format!("▶ {}", truncate_with_ellipsis(desc, 40))
-        }
+            // Task/Agent: show description
+            "task" | "agent" => {
+                let desc = tool_call
+                    .parameters
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("agent");
+                format!("▶ {}", truncate_with_ellipsis(desc, 40))
+            }
 
             // Model change: show variant being switched to
             "change_model" => {
@@ -373,7 +385,10 @@ mod tests {
     fn test_parse_tool_call() {
         let content = r#"Here is a tool call: {"name": "search", "parameters": {"query": "test"}}"#;
         match parse_message_content(content) {
-            MessageContent::Mixed { text_parts: _, tool_calls } => {
+            MessageContent::Mixed {
+                text_parts: _,
+                tool_calls,
+            } => {
                 assert_eq!(tool_calls.len(), 1);
                 assert_eq!(tool_calls[0].name, "search");
             }
@@ -409,8 +424,14 @@ mod tests {
         // Check that the line contains the expected content
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("📜"), "Should contain conversation icon");
-        assert!(text.contains("aae52c600997"), "Should contain conversation ID");
-        assert!(text.contains("Extract the final summary"), "Should contain the prompt");
+        assert!(
+            text.contains("aae52c600997"),
+            "Should contain conversation ID"
+        );
+        assert!(
+            text.contains("Extract the final summary"),
+            "Should contain the prompt"
+        );
     }
 
     #[test]
@@ -428,9 +449,15 @@ mod tests {
         // Check that the line contains the expected content
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("📜"), "Should contain conversation icon");
-        assert!(text.contains("abc123def456"), "Should contain conversation ID");
+        assert!(
+            text.contains("abc123def456"),
+            "Should contain conversation ID"
+        );
         // Should NOT contain the arrow since there's no prompt
-        assert!(!text.contains("→"), "Should not contain arrow without prompt");
+        assert!(
+            !text.contains("→"),
+            "Should not contain arrow without prompt"
+        );
     }
 
     #[test]
@@ -553,9 +580,15 @@ mod tests {
 
         let text: String = line.spans.iter().map(|s| s.content.to_string()).collect();
         assert!(text.contains("📜"), "Should contain conversation icon");
-        assert!(text.contains("abc123def456"), "Should contain conversation ID");
+        assert!(
+            text.contains("abc123def456"),
+            "Should contain conversation ID"
+        );
         // Empty prompt should be treated as absent - no arrow or quotes
-        assert!(!text.contains("→"), "Should not contain arrow with empty prompt");
+        assert!(
+            !text.contains("→"),
+            "Should not contain arrow with empty prompt"
+        );
         assert!(!text.contains("\"\""), "Should not contain empty quotes");
     }
 
@@ -576,6 +609,9 @@ mod tests {
         assert!(text.contains("📜"), "Should contain conversation icon");
         assert!(text.contains("conv987"), "Should contain conversation ID");
         // Whitespace-only prompt should be treated as absent - no arrow or quotes
-        assert!(!text.contains("→"), "Should not contain arrow with whitespace-only prompt");
+        assert!(
+            !text.contains("→"),
+            "Should not contain arrow with whitespace-only prompt"
+        );
     }
 }

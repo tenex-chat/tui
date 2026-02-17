@@ -374,12 +374,16 @@ impl TTSControlState {
     pub fn clear_completed(&mut self) {
         // Remove items with Completed status (not based on index position)
         let old_len = self.queue.len();
-        self.queue.retain(|item| item.status != TTSQueueItemStatus::Completed);
+        self.queue
+            .retain(|item| item.status != TTSQueueItemStatus::Completed);
 
         // Recalculate playing_index if items were removed
         if self.queue.len() != old_len {
             // Find the new playing index (item still marked as Playing)
-            self.playing_index = self.queue.iter().position(|item| item.status == TTSQueueItemStatus::Playing);
+            self.playing_index = self
+                .queue
+                .iter()
+                .position(|item| item.status == TTSQueueItemStatus::Playing);
             // Clamp selected_index to valid range
             if self.selected_index >= self.queue.len() {
                 self.selected_index = self.queue.len().saturating_sub(1);
@@ -394,15 +398,16 @@ impl TTSControlState {
 
     /// Check if TTS is active (has items that are playing, generating, ready, or pending)
     pub fn is_active(&self) -> bool {
-        self.playing_index.is_some() || self.queue.iter().any(|i| {
-            matches!(
-                i.status,
-                TTSQueueItemStatus::Pending |
-                TTSQueueItemStatus::Generating |
-                TTSQueueItemStatus::Ready |
-                TTSQueueItemStatus::Playing
-            )
-        })
+        self.playing_index.is_some()
+            || self.queue.iter().any(|i| {
+                matches!(
+                    i.status,
+                    TTSQueueItemStatus::Pending
+                        | TTSQueueItemStatus::Generating
+                        | TTSQueueItemStatus::Ready
+                        | TTSQueueItemStatus::Playing
+                )
+            })
     }
 }
 
@@ -873,9 +878,9 @@ impl TabManager {
 
     /// Find a report tab by slug (deprecated - use find_report_tab_by_a_tag for uniqueness)
     pub fn find_report_tab(&self, slug: &str) -> Option<usize> {
-        self.tabs.iter().position(|t| {
-            matches!(&t.content_type, TabContentType::Report { slug: s, .. } if s == slug)
-        })
+        self.tabs.iter().position(
+            |t| matches!(&t.content_type, TabContentType::Report { slug: s, .. } if s == slug),
+        )
     }
 
     /// Get mutable reference to TTS state for the TTS control tab
@@ -1132,7 +1137,8 @@ impl TabManager {
     /// Clean up view history after a tab is removed
     fn cleanup_view_history(&mut self, removed_index: usize) {
         // Remove references to the removed tab
-        self.view_history.retain(|loc| *loc != ViewLocation::Tab(removed_index));
+        self.view_history
+            .retain(|loc| *loc != ViewLocation::Tab(removed_index));
         // Adjust indices for tabs that shifted down
         for loc in self.view_history.iter_mut() {
             if let ViewLocation::Tab(idx) = loc {
@@ -1364,7 +1370,6 @@ mod tests {
         assert!(tabs.find_by_thread_id("t0").is_none()); // First was evicted
         assert!(tabs.find_by_thread_id("tnew").is_some());
     }
-
 }
 
 // =============================================================================
@@ -1454,7 +1459,8 @@ impl ConversationState {
         reasoning_delta: Option<String>,
         is_finish: bool,
     ) {
-        let buffer = self.local_stream_buffers
+        let buffer = self
+            .local_stream_buffers
             .entry(conversation_id)
             .or_default();
 
@@ -1921,7 +1927,10 @@ mod home_view_state_tests {
         // User selects an agent to view details
         state.enter_agent_detail("selected-agent-id".to_string());
         assert!(state.in_agent_detail());
-        assert_eq!(state.viewing_agent_id, Some("selected-agent-id".to_string()));
+        assert_eq!(
+            state.viewing_agent_id,
+            Some("selected-agent-id".to_string())
+        );
 
         // User exits back to list
         state.exit_agent_detail();

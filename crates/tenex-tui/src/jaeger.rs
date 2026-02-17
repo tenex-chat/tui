@@ -37,16 +37,24 @@ pub fn open_trace_url(url: &str) -> Result<(), String> {
     let result = std::process::Command::new("xdg-open").arg(url).spawn();
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    let result: Result<std::process::Child, std::io::Error> =
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Unsupported platform"));
+    let result: Result<std::process::Child, std::io::Error> = Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Unsupported platform",
+    ));
 
-    result.map(|_| ()).map_err(|e| format!("Failed to open browser: {}", e))
+    result
+        .map(|_| ())
+        .map_err(|e| format!("Failed to open browser: {}", e))
 }
 
 /// Builds a Jaeger trace URL for a specific trace and optional span.
 ///
 /// Returns the formatted URL or an error if the endpoint is invalid.
-pub fn build_trace_url(endpoint: &str, trace_id: &str, span_id: Option<&str>) -> Result<String, String> {
+pub fn build_trace_url(
+    endpoint: &str,
+    trace_id: &str,
+    span_id: Option<&str>,
+) -> Result<String, String> {
     let normalized_endpoint = validate_and_normalize_endpoint(endpoint)?;
 
     let url = if let Some(span) = span_id {

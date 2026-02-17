@@ -93,21 +93,15 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle nudge selector modal when open
-    if matches!(app.modal_state, ModalState::NudgeSelector(_)) {
-        selectors::handle_nudge_selector_key(app, key);
+    // Handle unified nudge/skill selector modal when open
+    if matches!(app.modal_state, ModalState::NudgeSkillSelector(_)) {
+        selectors::handle_nudge_skill_selector_key(app, key);
         return Ok(true);
     }
 
     // Handle composer project selector modal when open (for changing project in new conversations)
     if matches!(app.modal_state, ModalState::ComposerProjectSelector { .. }) {
         selectors::handle_composer_project_selector_key(app, key)?;
-        return Ok(true);
-    }
-
-    // Handle skill selector modal when open
-    if matches!(app.modal_state, ModalState::SkillSelector(_)) {
-        selectors::handle_skill_selector_key(app, key);
         return Ok(true);
     }
 

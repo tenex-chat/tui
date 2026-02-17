@@ -11,7 +11,11 @@ const UPPER_HALF_BLOCK: char = '▀';
 /// Create a top padding line using lower half blocks (creates bottom-half fill effect)
 /// The ▄ character: fg fills bottom half, bg fills top half
 /// We want: top = terminal bg (BG_APP), bottom = card color
-pub(crate) fn top_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
+pub(crate) fn top_half_block_line(
+    indicator_color: Color,
+    bg: Color,
+    width: usize,
+) -> Line<'static> {
     let mut spans = vec![
         // Indicator: bottom-half = indicator color, top-half = terminal bg
         Span::styled(
@@ -21,8 +25,13 @@ pub(crate) fn top_half_block_line(indicator_color: Color, bg: Color, width: usiz
     ];
     // Rest of the line: bottom-half = card bg, top-half = terminal bg
     if width > 1 {
-        let fill: String = std::iter::repeat(LOWER_HALF_BLOCK).take(width - 1).collect();
-        spans.push(Span::styled(fill, Style::default().fg(bg).bg(theme::BG_APP)));
+        let fill: String = std::iter::repeat(LOWER_HALF_BLOCK)
+            .take(width - 1)
+            .collect();
+        spans.push(Span::styled(
+            fill,
+            Style::default().fg(bg).bg(theme::BG_APP),
+        ));
     }
     Line::from(spans)
 }
@@ -30,7 +39,11 @@ pub(crate) fn top_half_block_line(indicator_color: Color, bg: Color, width: usiz
 /// Create a bottom padding line using upper half blocks (creates top-half fill effect)
 /// The ▀ character: fg fills top half, bg fills bottom half
 /// We want: top = card color, bottom = terminal bg (BG_APP)
-pub(crate) fn bottom_half_block_line(indicator_color: Color, bg: Color, width: usize) -> Line<'static> {
+pub(crate) fn bottom_half_block_line(
+    indicator_color: Color,
+    bg: Color,
+    width: usize,
+) -> Line<'static> {
     let mut spans = vec![
         // Indicator: top-half = indicator color, bottom-half = terminal bg
         Span::styled(
@@ -40,8 +53,13 @@ pub(crate) fn bottom_half_block_line(indicator_color: Color, bg: Color, width: u
     ];
     // Rest of the line: top-half = card bg, bottom-half = terminal bg
     if width > 1 {
-        let fill: String = std::iter::repeat(UPPER_HALF_BLOCK).take(width - 1).collect();
-        spans.push(Span::styled(fill, Style::default().fg(bg).bg(theme::BG_APP)));
+        let fill: String = std::iter::repeat(UPPER_HALF_BLOCK)
+            .take(width - 1)
+            .collect();
+        spans.push(Span::styled(
+            fill,
+            Style::default().fg(bg).bg(theme::BG_APP),
+        ));
     }
     Line::from(spans)
 }
@@ -263,7 +281,8 @@ fn format_llm_value(key: &str, value: &str) -> String {
             if num >= 1000.0 {
                 let formatted = format!("{:.1}k", num / 1000.0);
                 // Remove trailing .0 (e.g., "6.0k" -> "6k")
-                return formatted.trim_end_matches(".0k").to_string() + if formatted.ends_with(".0k") { "k" } else { "" };
+                return formatted.trim_end_matches(".0k").to_string()
+                    + if formatted.ends_with(".0k") { "k" } else { "" };
             }
         }
     }
@@ -310,7 +329,9 @@ pub(crate) fn reasoning_lines(
 ) -> Vec<Line<'static>> {
     let content_width = width.saturating_sub(PREFIX_WIDTH);
     let mut out = Vec::new();
-    let muted_style = Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC);
+    let muted_style = Style::default()
+        .fg(theme::TEXT_MUTED)
+        .add_modifier(Modifier::ITALIC);
 
     for md_line in markdown_lines {
         // Wrap the content spans first
@@ -335,10 +356,7 @@ pub(crate) fn reasoning_lines(
 }
 
 /// Render author line for reasoning/thinking messages (muted style, no bg)
-pub(crate) fn reasoning_author_line(
-    author: &str,
-    indicator_color: Color,
-) -> Line<'static> {
+pub(crate) fn reasoning_author_line(author: &str, indicator_color: Color) -> Line<'static> {
     Line::from(vec![
         Span::styled("│", Style::default().fg(indicator_color)),
         Span::styled("  ", Style::default()), // 2 spaces for consistent padding
@@ -396,7 +414,10 @@ pub(crate) fn author_line_with_recipient(
     // Add recipient names
     for (i, recipient) in recipients.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(", ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+            spans.push(Span::styled(
+                ", ",
+                Style::default().fg(theme::TEXT_MUTED).bg(bg),
+            ));
             current_len += 2;
         }
         spans.push(Span::styled(

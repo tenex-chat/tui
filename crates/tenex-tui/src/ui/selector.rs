@@ -100,7 +100,10 @@ where
     F: FnOnce(usize) -> Option<T>,
 {
     // Ignore keys with Ctrl/Alt modifiers - they shouldn't mutate selector state
-    if key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) {
+    if key
+        .modifiers
+        .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+    {
         return SelectorAction::Continue;
     }
 

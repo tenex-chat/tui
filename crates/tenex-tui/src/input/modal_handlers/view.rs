@@ -113,7 +113,8 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                 let versions = app
                     .data_store
                     .borrow()
-                    .reports.get_report_versions(&slug)
+                    .reports
+                    .get_report_versions(&slug)
                     .into_iter()
                     .cloned()
                     .collect::<Vec<_>>();
@@ -132,7 +133,8 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                     let versions = app
                         .data_store
                         .borrow()
-                        .reports.get_report_versions(&slug)
+                        .reports
+                        .get_report_versions(&slug)
                         .into_iter()
                         .cloned()
                         .collect::<Vec<_>>();
@@ -193,7 +195,8 @@ pub(super) fn handle_report_viewer_modal_key(app: &mut App, key: KeyEvent) {
                     let threads = app
                         .data_store
                         .borrow()
-                        .reports.get_document_threads(&a_tag)
+                        .reports
+                        .get_document_threads(&a_tag)
                         .to_vec();
                     if let Some(thread) = threads.get(state.selected_thread_index) {
                         app.open_thread_from_home(thread, &project_a_tag);
@@ -297,7 +300,8 @@ pub(super) fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
                 if let ModalState::DebugStats(ref mut state) = app.modal_state {
                     if !state.e_tag_query_results.is_empty() {
                         if key.code == KeyCode::Up {
-                            state.e_tag_selected_index = state.e_tag_selected_index.saturating_sub(1);
+                            state.e_tag_selected_index =
+                                state.e_tag_selected_index.saturating_sub(1);
                         } else if state.e_tag_selected_index + 1 < state.e_tag_query_results.len() {
                             state.e_tag_selected_index += 1;
                         }
@@ -391,7 +395,8 @@ pub(super) fn handle_debug_stats_modal_key(app: &mut App, key: KeyEvent) {
                         state.e_tag_selected_index = state.e_tag_selected_index.saturating_sub(1);
                     }
                     DebugStatsTab::Subscriptions if state.sub_sidebar_focused => {
-                        state.sub_selected_filter_index = state.sub_selected_filter_index.saturating_sub(1);
+                        state.sub_selected_filter_index =
+                            state.sub_selected_filter_index.saturating_sub(1);
                     }
                     _ => {
                         state.scroll_offset = state.scroll_offset.saturating_sub(1);

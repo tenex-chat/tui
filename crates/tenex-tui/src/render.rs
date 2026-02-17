@@ -42,15 +42,24 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     .split(f.area());
 
     // Determine chrome color based on pending_quit state
-    let chrome_color = if app.pending_quit { ui::theme::ACCENT_ERROR } else { ui::theme::ACCENT_PRIMARY };
+    let chrome_color = if app.pending_quit {
+        ui::theme::ACCENT_ERROR
+    } else {
+        ui::theme::ACCENT_PRIMARY
+    };
 
     // Header
     let title: String = match app.view {
         View::Login => "TENEX - Login".to_string(),
         View::Home => "TENEX - Home".to_string(), // Won't reach here
-        View::Chat => app.selected_thread()
+        View::Chat => app
+            .selected_thread()
             .map(|t| t.title.clone())
-            .or_else(|| app.open_tabs().get(app.active_tab_index()).map(|tab| tab.thread_title.clone()))
+            .or_else(|| {
+                app.open_tabs()
+                    .get(app.active_tab_index())
+                    .map(|tab| tab.thread_title.clone())
+            })
             .unwrap_or_else(|| "Chat".to_string()),
         View::LessonViewer => "TENEX - Lesson".to_string(),
         View::AgentBrowser => "TENEX - Agent Definitions".to_string(),
@@ -59,8 +68,11 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     // Apply consistent padding to header
     let padding = " ".repeat(layout::CONTENT_PADDING_H as usize);
     if app.view == View::Chat {
-        let header = Paragraph::new(format!("\n{}{}", padding, title))
-            .style(Style::default().fg(chrome_color).add_modifier(ratatui::style::Modifier::BOLD));
+        let header = Paragraph::new(format!("\n{}{}", padding, title)).style(
+            Style::default()
+                .fg(chrome_color)
+                .add_modifier(ratatui::style::Modifier::BOLD),
+        );
         f.render_widget(header, chunks[0]);
     } else {
         let header = Paragraph::new(format!("{}{}", padding, title))
@@ -85,13 +97,17 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
 
     // Footer - show quit warning if pending, otherwise normal hints
     let (footer_text, footer_style) = if app.pending_quit {
-        ("⚠ Press Ctrl+C again to quit".to_string(), Style::default().fg(ui::theme::ACCENT_ERROR))
+        (
+            "⚠ Press Ctrl+C again to quit".to_string(),
+            Style::default().fg(ui::theme::ACCENT_ERROR),
+        )
     } else {
         let text = match (&app.view, &app.input_mode) {
             (View::Login, InputMode::Editing) => format!("> {}", "*".repeat(app.input.len())),
             (View::Chat, InputMode::Normal) => {
                 // Check if selected item (thread or delegation) has active operations
-                let is_busy = app.get_stop_target_thread_id()
+                let is_busy = app
+                    .get_stop_target_thread_id()
                     .map(|id| app.data_store.borrow().operations.is_event_busy(&id))
                     .unwrap_or(false);
                 if is_busy {
@@ -107,15 +123,28 @@ pub(crate) fn render(f: &mut Frame, app: &mut App, login_step: &LoginStep) {
     };
 
     // Apply consistent padding to footer (same as content areas)
-    let formatted_footer = format!("{}{}", " ".repeat(layout::CONTENT_PADDING_H as usize), footer_text);
-    let footer = Paragraph::new(formatted_footer)
-        .style(footer_style);
+    let formatted_footer = format!(
+        "{}{}",
+        " ".repeat(layout::CONTENT_PADDING_H as usize),
+        footer_text
+    );
+    let footer = Paragraph::new(formatted_footer).style(footer_style);
     f.render_widget(footer, chunks[2]);
 
     // Status bar at the very bottom (always visible)
-    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) =
+        app.data_store.borrow_mut().get_statusbar_runtime_ms();
     let audio_playing = app.audio_player.is_playing();
-    render_statusbar(f, chunks[3], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
+    render_statusbar(
+        f,
+        chunks[3],
+        app.current_notification(),
+        cumulative_runtime_ms,
+        has_active_agents,
+        active_agent_count,
+        app.wave_offset(),
+        audio_playing,
+    );
 
     // Global modal overlays - render AppSettings modal for views that don't handle it themselves
     // (Home, Chat, and AgentBrowser handle modals in their own render functions)

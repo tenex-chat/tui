@@ -58,7 +58,10 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
 
     let (list_height, preview_height) = if use_single_pane {
         // Single pane: all space goes to list (minus indicator + help = 2 lines)
-        let list_h = content_area.height.saturating_sub(reserved_for_single).max(1);
+        let list_h = content_area
+            .height
+            .saturating_sub(reserved_for_single)
+            .max(1);
         (list_h, 0u16)
     } else {
         // Split pane: proper 40/60 split of available space (after reservations)
@@ -122,7 +125,10 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
 
                 // Selection indicator
                 if is_selected {
-                    spans.push(Span::styled("▌ ", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌ ",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled("  ", Style::default()));
                 }
@@ -186,7 +192,10 @@ pub fn render_history_search(f: &mut Frame, area: Rect, state: &HistorySearchSta
         if results.len() > visible_height {
             let indicator = format!(" {}/{} ", selected_index + 1, results.len());
             let indicator_area = Rect::new(
-                content_area.x + content_area.width.saturating_sub(indicator.len() as u16 + 2),
+                content_area.x
+                    + content_area
+                        .width
+                        .saturating_sub(indicator.len() as u16 + 2),
                 content_area.y,
                 indicator.len() as u16 + 2,
                 1,

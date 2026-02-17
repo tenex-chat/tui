@@ -66,7 +66,10 @@ pub fn render_draft_navigator(f: &mut Frame, area: Rect, state: &DraftNavigatorS
 
                 // Selection indicator
                 if is_selected {
-                    spans.push(Span::styled("▌ ", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌ ",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled("  ", Style::default()));
                 }
@@ -108,19 +111,18 @@ pub fn render_draft_navigator(f: &mut Frame, area: Rect, state: &DraftNavigatorS
 
         // Show scroll indicator if needed
         if drafts.len() > visible_height {
-            let indicator = format!(
-                " {}/{} ",
-                selected_index + 1,
-                drafts.len()
-            );
+            let indicator = format!(" {}/{} ", selected_index + 1, drafts.len());
             let indicator_area = Rect::new(
-                content_area.x + content_area.width.saturating_sub(indicator.len() as u16 + 2),
+                content_area.x
+                    + content_area
+                        .width
+                        .saturating_sub(indicator.len() as u16 + 2),
                 content_area.y,
                 indicator.len() as u16 + 2,
                 1,
             );
-            let indicator_widget = Paragraph::new(indicator)
-                .style(Style::default().fg(theme::TEXT_MUTED));
+            let indicator_widget =
+                Paragraph::new(indicator).style(Style::default().fg(theme::TEXT_MUTED));
             f.render_widget(indicator_widget, indicator_area);
         }
     }

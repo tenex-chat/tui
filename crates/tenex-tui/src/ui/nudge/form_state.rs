@@ -274,7 +274,8 @@ impl NudgeFormState {
         }
 
         // Check for mixed modes (should be prevented by UI, but validate anyway)
-        let has_additive = !self.permissions.allow_tools.is_empty() || !self.permissions.deny_tools.is_empty();
+        let has_additive =
+            !self.permissions.allow_tools.is_empty() || !self.permissions.deny_tools.is_empty();
         let has_exclusive = !self.permissions.only_tools.is_empty();
         if has_additive && has_exclusive {
             errors.push("Cannot mix 'only-tool' with 'allow-tool'/'deny-tool'".to_string());
@@ -440,7 +441,10 @@ impl NudgeFormState {
             // Clamp column to line length
             let lines: Vec<&str> = self.content.lines().collect();
             if self.content_cursor.0 < lines.len() {
-                self.content_cursor.1 = self.content_cursor.1.min(lines[self.content_cursor.0].len());
+                self.content_cursor.1 = self
+                    .content_cursor
+                    .1
+                    .min(lines[self.content_cursor.0].len());
             }
         }
     }
@@ -453,7 +457,10 @@ impl NudgeFormState {
             // Clamp column to line length
             let lines: Vec<&str> = self.content.lines().collect();
             if self.content_cursor.0 < lines.len() {
-                self.content_cursor.1 = self.content_cursor.1.min(lines[self.content_cursor.0].len());
+                self.content_cursor.1 = self
+                    .content_cursor
+                    .1
+                    .min(lines[self.content_cursor.0].len());
             }
         }
     }
@@ -507,12 +514,12 @@ impl NudgeFormState {
         use super::tool_permissions::ToolMode;
 
         match self.permissions.mode {
-            ToolMode::Exclusive => {
-                self.permissions.only_tools
-                    .iter()
-                    .map(|t| (t.clone(), "only"))
-                    .collect()
-            }
+            ToolMode::Exclusive => self
+                .permissions
+                .only_tools
+                .iter()
+                .map(|t| (t.clone(), "only"))
+                .collect(),
             ToolMode::Additive => {
                 let mut tools = Vec::new();
                 for t in &self.permissions.allow_tools {
@@ -540,13 +547,11 @@ impl NudgeFormState {
             ToolMode::Exclusive => {
                 self.permissions.remove_only_tool(tool);
             }
-            ToolMode::Additive => {
-                match *category {
-                    "allow" => self.permissions.remove_allow_tool(tool),
-                    "deny" => self.permissions.remove_deny_tool(tool),
-                    _ => {}
-                }
-            }
+            ToolMode::Additive => match *category {
+                "allow" => self.permissions.remove_allow_tool(tool),
+                "deny" => self.permissions.remove_deny_tool(tool),
+                _ => {}
+            },
         }
 
         // Adjust index if needed
@@ -580,8 +585,8 @@ impl Default for NudgeFormState {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tool_permissions::ToolMode;
+    use super::*;
 
     #[test]
     fn test_can_submit_requires_title() {
@@ -693,8 +698,12 @@ mod tests {
 
         let configured = state.get_configured_tools();
         assert_eq!(configured.len(), 2);
-        assert!(configured.iter().any(|(t, c)| t == "AllowTool" && *c == "allow"));
-        assert!(configured.iter().any(|(t, c)| t == "DenyTool" && *c == "deny"));
+        assert!(configured
+            .iter()
+            .any(|(t, c)| t == "AllowTool" && *c == "allow"));
+        assert!(configured
+            .iter()
+            .any(|(t, c)| t == "DenyTool" && *c == "deny"));
     }
 
     #[test]

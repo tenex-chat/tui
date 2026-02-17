@@ -34,11 +34,16 @@ impl TodoState {
     }
 
     pub fn completed_count(&self) -> usize {
-        self.items.iter().filter(|i| i.status == TodoStatus::Done).count()
+        self.items
+            .iter()
+            .filter(|i| i.status == TodoStatus::Done)
+            .count()
     }
 
     pub fn in_progress_item(&self) -> Option<&TodoItem> {
-        self.items.iter().find(|i| i.status == TodoStatus::InProgress)
+        self.items
+            .iter()
+            .find(|i| i.status == TodoStatus::InProgress)
     }
 }
 
@@ -73,10 +78,7 @@ fn parse_status(s: &str) -> TodoStatus {
 
 /// Check if a tool name is a todo_write variant
 pub fn is_todo_write(name: &str) -> bool {
-    matches!(
-        name,
-        "todo_write" | "todowrite" | "mcp__tenex__todo_write"
-    )
+    matches!(name, "todo_write" | "todowrite" | "mcp__tenex__todo_write")
 }
 
 /// Aggregate todo state from a list of messages
@@ -122,24 +124,22 @@ pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
                     id_counter = 0;
 
                     for todo_item in todos_array {
-                        let title = todo_item.content
-                            .or(todo_item.title)
-                            .unwrap_or_default();
+                        let title = todo_item.content.or(todo_item.title).unwrap_or_default();
 
                         if !title.is_empty() {
                             // Preserve MCP-provided ID, fallback to generated ID
-                            let id = todo_item.id
-                                .unwrap_or_else(|| {
-                                    let generated = format!("todo-{}", id_counter);
-                                    id_counter += 1;
-                                    generated
-                                });
+                            let id = todo_item.id.unwrap_or_else(|| {
+                                let generated = format!("todo-{}", id_counter);
+                                id_counter += 1;
+                                generated
+                            });
 
                             items.push(TodoItem {
                                 id,
                                 title,
                                 description: todo_item.active_form.or(todo_item.description),
-                                status: todo_item.status
+                                status: todo_item
+                                    .status
                                     .map(|s| parse_status(&s))
                                     .unwrap_or(TodoStatus::Pending),
                                 skip_reason: todo_item.skip_reason,
@@ -209,7 +209,9 @@ mod tests {
     #[test]
     fn test_todo_write_parsing() {
         // Test lowercase todo_write (backend standard)
-        let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "First task", "status": "pending", "activeForm": "Working on first task"}, {"content": "Second task", "status": "in_progress", "activeForm": "Doing second task"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "First task", "status": "pending", "activeForm": "Working on first task"}, {"content": "Second task", "status": "in_progress", "activeForm": "Doing second task"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 
@@ -224,7 +226,9 @@ mod tests {
     #[test]
     fn test_todo_write_pascal_case() {
         // Test TodoWrite (PascalCase) - used by different agent types
-        let msg = make_message(r#"{"name": "TodoWrite", "parameters": {"todos": [{"content": "Task", "status": "pending"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "TodoWrite", "parameters": {"todos": [{"content": "Task", "status": "pending"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 
@@ -235,8 +239,12 @@ mod tests {
 
     #[test]
     fn test_todo_write_replaces_list() {
-        let msg1 = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Task A", "status": "pending"}]}}"#);
-        let msg2 = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Task B", "status": "done"}]}}"#);
+        let msg1 = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Task A", "status": "pending"}]}}"#,
+        );
+        let msg2 = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Task B", "status": "done"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg1, msg2]);
 
@@ -247,7 +255,9 @@ mod tests {
 
     #[test]
     fn test_completed_count() {
-        let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Done task", "status": "done"}, {"content": "Pending task", "status": "pending"}, {"content": "Another done", "status": "completed"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Done task", "status": "done"}, {"content": "Pending task", "status": "pending"}, {"content": "Another done", "status": "completed"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 
@@ -256,7 +266,9 @@ mod tests {
 
     #[test]
     fn test_in_progress_item() {
-        let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Done task", "status": "done"}, {"content": "Active task", "status": "in_progress"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Done task", "status": "done"}, {"content": "Active task", "status": "in_progress"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 
@@ -308,19 +320,26 @@ mod tests {
 
     #[test]
     fn test_skipped_status() {
-        let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Skipped task", "status": "skipped", "skip_reason": "No longer needed"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"content": "Skipped task", "status": "skipped", "skip_reason": "No longer needed"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 
         assert_eq!(state.items.len(), 1);
         assert_eq!(state.items[0].status, TodoStatus::Skipped);
-        assert_eq!(state.items[0].skip_reason, Some("No longer needed".to_string()));
+        assert_eq!(
+            state.items[0].skip_reason,
+            Some("No longer needed".to_string())
+        );
     }
 
     #[test]
     fn test_todo_write_with_title_field() {
         // Test using title field instead of content
-        let msg = make_message(r#"{"name": "todo_write", "parameters": {"todos": [{"title": "Task via title", "status": "pending"}]}}"#);
+        let msg = make_message(
+            r#"{"name": "todo_write", "parameters": {"todos": [{"title": "Task via title", "status": "pending"}]}}"#,
+        );
 
         let state = aggregate_todo_state(&[msg]);
 

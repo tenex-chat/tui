@@ -74,7 +74,12 @@ fn format_today_label(cumulative_runtime_ms: u64) -> String {
 ///
 /// # Returns
 /// A Line containing spans with dynamically calculated colors for the wave effect
-fn build_wave_runtime_line(runtime_str: &str, padding: usize, wave_offset: usize, active_agent_count: usize) -> Line<'static> {
+fn build_wave_runtime_line(
+    runtime_str: &str,
+    padding: usize,
+    wave_offset: usize,
+    active_agent_count: usize,
+) -> Line<'static> {
     let mut spans = vec![Span::raw(" ".repeat(padding))];
 
     // Dynamic parameters based on active agent count
@@ -89,8 +94,11 @@ fn build_wave_runtime_line(runtime_str: &str, padding: usize, wave_offset: usize
     for (i, ch) in runtime_str.chars().enumerate() {
         // Create a traveling sine wave
         // wave_offset moves the wave (scaled by agent count), i determines position along the string
-        let phase = ((wave_offset as f32 * WAVE_PHASE_SPEED * speed_multiplier) + (i as f32 * WAVE_WAVELENGTH))
-            * std::f32::consts::PI * 2.0 / WAVE_PERIOD;
+        let phase = ((wave_offset as f32 * WAVE_PHASE_SPEED * speed_multiplier)
+            + (i as f32 * WAVE_WAVELENGTH))
+            * std::f32::consts::PI
+            * 2.0
+            / WAVE_PERIOD;
 
         // Sine wave gives us a value between -1 and 1
         let wave_value = phase.sin();
@@ -150,8 +158,8 @@ pub fn render_statusbar(
         ]
     } else {
         vec![
-            Constraint::Min(0),                        // Notification (fills remaining space)
-            Constraint::Length(runtime_column_width),  // Runtime (dynamic width)
+            Constraint::Min(0),                       // Notification (fills remaining space)
+            Constraint::Length(runtime_column_width), // Runtime (dynamic width)
         ]
     };
     let chunks = Layout::horizontal(constraints).split(area);
@@ -162,10 +170,10 @@ pub fn render_statusbar(
     // Render notification (left side) - truncate to fit available width
     let notification_paragraph = if let Some(notification) = current_notification {
         let (icon, color) = match notification.level {
-            NotificationLevel::Info => ("\u{2139}", theme::ACCENT_PRIMARY),    // ℹ
+            NotificationLevel::Info => ("\u{2139}", theme::ACCENT_PRIMARY), // ℹ
             NotificationLevel::Success => ("\u{2713}", theme::ACCENT_SUCCESS), // ✓
             NotificationLevel::Warning => ("\u{26A0}", theme::ACCENT_WARNING), // ⚠
-            NotificationLevel::Error => ("\u{2717}", theme::ACCENT_ERROR),     // ✗
+            NotificationLevel::Error => ("\u{2717}", theme::ACCENT_ERROR),  // ✗
         };
 
         // Calculate available width for message (account for icon + spaces)
@@ -195,8 +203,8 @@ pub fn render_statusbar(
             format!("{} ", audio_icon),
             Style::default().fg(theme::ACCENT_SUCCESS),
         ));
-        let audio_paragraph = Paragraph::new(audio_line)
-            .style(Style::default().bg(theme::BG_SIDEBAR));
+        let audio_paragraph =
+            Paragraph::new(audio_line).style(Style::default().bg(theme::BG_SIDEBAR));
         f.render_widget(audio_paragraph, audio_area);
     }
 
@@ -213,11 +221,14 @@ pub fn render_statusbar(
     } else {
         // RED mode - no animation
         let padded_runtime = format!("{}{}", " ".repeat(padding), runtime_str);
-        Line::from(Span::styled(padded_runtime, Style::default().fg(theme::ACCENT_ERROR)))
+        Line::from(Span::styled(
+            padded_runtime,
+            Style::default().fg(theme::ACCENT_ERROR),
+        ))
     };
 
-    let runtime_paragraph = Paragraph::new(runtime_line)
-        .style(Style::default().bg(theme::BG_SIDEBAR));
+    let runtime_paragraph =
+        Paragraph::new(runtime_line).style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(runtime_paragraph, runtime_area);
 }

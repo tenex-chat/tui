@@ -54,7 +54,10 @@ fn render_tab_bar(active_tab: DebugStatsTab) -> Vec<Line<'static>> {
 
     for (i, tab) in DebugStatsTab::ALL.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" │ ", Style::default().fg(theme::BORDER_INACTIVE)));
+            spans.push(Span::styled(
+                " │ ",
+                Style::default().fg(theme::BORDER_INACTIVE),
+            ));
         }
 
         let label = format!("[{}] {}", i + 1, tab.label());
@@ -114,10 +117,7 @@ fn render_events_tab(app: &App) -> Vec<Line<'static>> {
 
         for (kind, count) in &network_by_kind {
             let name = kind_name(*kind);
-            lines.push(Line::from(format!(
-                "  {:6} {:15} {:>6}",
-                kind, name, count
-            )));
+            lines.push(Line::from(format!("  {:6} {:15} {:>6}", kind, name, count)));
         }
 
         lines.push(Line::from(""));
@@ -156,7 +156,10 @@ fn render_events_tab(app: &App) -> Vec<Line<'static>> {
                     format!("  {} ", project_name),
                     Style::default().fg(theme::TEXT_PRIMARY),
                 ),
-                Span::styled(format!("({})", total), Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(
+                    format!("({})", total),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
             ]));
 
             let mut kind_list: Vec<_> = kinds.iter().collect();
@@ -202,10 +205,7 @@ fn render_events_tab(app: &App) -> Vec<Line<'static>> {
 
         for (kind, count) in &cache_list {
             let name = kind_name(**kind);
-            lines.push(Line::from(format!(
-                "  {:6} {:15} {:>6}",
-                kind, name, count
-            )));
+            lines.push(Line::from(format!("  {:6} {:15} {:>6}", kind, name, count)));
         }
 
         lines.push(Line::from(""));
@@ -216,7 +216,11 @@ fn render_events_tab(app: &App) -> Vec<Line<'static>> {
 }
 
 /// Render the Subscriptions tab content with sidebar
-fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u16) -> Vec<Line<'static>> {
+fn render_subscriptions_tab(
+    app: &App,
+    state: &DebugStatsState,
+    content_width: u16,
+) -> Vec<Line<'static>> {
     use std::collections::HashMap;
 
     let mut lines: Vec<Line> = Vec::new();
@@ -296,13 +300,22 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
     let mut sidebar_items: Vec<(String, Option<String>, usize, u64)> = Vec::new(); // (display_name, a_tag, sub_count, event_count)
 
     // "All" option
-    let total_events: u64 = sub_stats.subscriptions.values().map(|i| i.events_received).sum();
+    let total_events: u64 = sub_stats
+        .subscriptions
+        .values()
+        .map(|i| i.events_received)
+        .sum();
     sidebar_items.push(("All".to_string(), None, sub_stats.count(), total_events));
 
     // Global subscriptions (if any)
     if !global_subs.is_empty() {
         let global_events: u64 = global_subs.iter().map(|(_, i)| i.events_received).sum();
-        sidebar_items.push(("Global".to_string(), Some("__global__".to_string()), global_subs.len(), global_events));
+        sidebar_items.push((
+            "Global".to_string(),
+            Some("__global__".to_string()),
+            global_subs.len(),
+            global_events,
+        ));
     }
 
     // Projects
@@ -313,16 +326,19 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
     }
 
     // Get selected filter
-    let selected_filter = state.sub_project_filters
+    let selected_filter = state
+        .sub_project_filters
         .get(state.sub_selected_filter_index)
         .cloned()
         .flatten();
 
     // Filter subscriptions based on selection
-    let filtered_subs: Vec<(&String, &tenex_core::stats::SubscriptionInfo)> = match &selected_filter {
+    let filtered_subs: Vec<(&String, &tenex_core::stats::SubscriptionInfo)> = match &selected_filter
+    {
         None => sub_stats.by_events_received(), // All
         Some(f) if f == "__global__" => global_subs.clone(),
-        Some(f) => projects.iter()
+        Some(f) => projects
+            .iter()
             .find(|(a, _)| a == f)
             .map(|(_, subs)| subs.clone())
             .unwrap_or_default(),
@@ -355,9 +371,12 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
                 (Some(sel), Some(tag)) => sel == tag,
                 _ => false,
             };
-            let is_focused = state.sub_sidebar_focused &&
-                state.sub_selected_filter_index < state.sub_project_filters.len() &&
-                match (&state.sub_project_filters[state.sub_selected_filter_index], a_tag) {
+            let is_focused = state.sub_sidebar_focused
+                && state.sub_selected_filter_index < state.sub_project_filters.len()
+                && match (
+                    &state.sub_project_filters[state.sub_selected_filter_index],
+                    a_tag,
+                ) {
                     (None, None) => true,
                     (Some(sel), Some(tag)) => sel == tag,
                     _ => false,
@@ -372,7 +391,9 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
 
             let sidebar_text = format!("{}{:<16} {:>3} {:>5}", prefix, name_display, count, events);
             let style = if is_focused {
-                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default().fg(theme::TEXT_PRIMARY)
             } else {
@@ -383,14 +404,14 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
                 style,
             ));
         } else {
-            spans.push(Span::styled(
-                " ".repeat(sidebar_width),
-                Style::default(),
-            ));
+            spans.push(Span::styled(" ".repeat(sidebar_width), Style::default()));
         }
 
         // Separator
-        spans.push(Span::styled(" │ ", Style::default().fg(theme::BORDER_INACTIVE)));
+        spans.push(Span::styled(
+            " │ ",
+            Style::default().fg(theme::BORDER_INACTIVE),
+        ));
 
         // Content column
         let sub_index = i / (content_lines_per_sub + 1);
@@ -402,15 +423,26 @@ fn render_subscriptions_tab(app: &App, state: &DebugStatsState, content_width: u
                 0 => {
                     // Description line
                     let desc = if info.description.len() > right_width.saturating_sub(15) {
-                        format!("{}...", &info.description[..right_width.saturating_sub(18).min(info.description.len())])
+                        format!(
+                            "{}...",
+                            &info.description
+                                [..right_width.saturating_sub(18).min(info.description.len())]
+                        )
                     } else {
                         info.description.clone()
                     };
-                    format!("{:<width$} {:>6} events", desc, info.events_received, width = right_width.saturating_sub(14))
+                    format!(
+                        "{:<width$} {:>6} events",
+                        desc,
+                        info.events_received,
+                        width = right_width.saturating_sub(14)
+                    )
                 }
                 1 => {
                     // Kinds line
-                    let kinds_str: String = info.kinds.iter()
+                    let kinds_str: String = info
+                        .kinds
+                        .iter()
                         .map(|k| format!("{}", k))
                         .collect::<Vec<_>>()
                         .join(",");
@@ -487,7 +519,10 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
     if let Some(instant) = neg_stats.last_cycle_time() {
         lines.push(Line::from(vec![
             Span::styled("  Last cycle: ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(format_time_ago(instant), Style::default().fg(theme::TEXT_PRIMARY)),
+            Span::styled(
+                format_time_ago(instant),
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ),
         ]));
     } else {
         lines.push(Line::from(vec![
@@ -500,7 +535,10 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
     if let Some(instant) = neg_stats.last_filter_time() {
         lines.push(Line::from(vec![
             Span::styled("  Last filter: ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(format_time_ago(instant), Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                format_time_ago(instant),
+                Style::default().fg(theme::TEXT_DIM),
+            ),
         ]));
     }
 
@@ -525,7 +563,10 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
 
     // Success/failure counts
     lines.push(Line::from(vec![
-        Span::styled("  Successful syncs: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Successful syncs: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", neg_stats.successful_syncs),
             Style::default().fg(theme::ACCENT_SUCCESS),
@@ -545,7 +586,10 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
     ]));
 
     lines.push(Line::from(vec![
-        Span::styled("  Unsupported (relay): ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Unsupported (relay): ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", neg_stats.unsupported_syncs),
             Style::default().fg(theme::TEXT_DIM),
@@ -553,7 +597,10 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
     ]));
 
     lines.push(Line::from(vec![
-        Span::styled("  Events reconciled: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Events reconciled: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", neg_stats.total_events_reconciled),
             Style::default().fg(theme::ACCENT_PRIMARY),
@@ -615,16 +662,20 @@ fn render_negentropy_tab(app: &App) -> Vec<Line<'static>> {
                 }
             };
 
-            let events_str = if result.status == NegentropySyncStatus::Ok && result.events_received > 0 {
-                format!("{:>5}", result.events_received)
-            } else {
-                "    -".to_string()
-            };
+            let events_str =
+                if result.status == NegentropySyncStatus::Ok && result.events_received > 0 {
+                    format!("{:>5}", result.events_received)
+                } else {
+                    "    -".to_string()
+                };
 
             let time_str = format_time_ago(result.completed_at);
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:6}", result.kind_label), Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::styled(
+                    format!("  {:6}", result.kind_label),
+                    Style::default().fg(theme::TEXT_PRIMARY),
+                ),
                 Span::raw("    "),
                 status_span,
                 Span::raw("    "),
@@ -782,7 +833,10 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
 
     // Show visible_projects
     lines.push(Line::from(vec![
-        Span::styled("  Visible projects: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Visible projects: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", app.visible_projects.len()),
             Style::default().fg(theme::ACCENT_SUCCESS),
@@ -810,7 +864,11 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
     lines.push(Line::from(vec![
         Span::styled("  Time filter: ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(
-            app.home.time_filter.as_ref().map(|tf| tf.label()).unwrap_or("None"),
+            app.home
+                .time_filter
+                .as_ref()
+                .map(|tf| tf.label())
+                .unwrap_or("None"),
             Style::default().fg(theme::TEXT_PRIMARY),
         ),
     ]));
@@ -827,7 +885,10 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
 
     let total_threads: usize = store.threads_by_project.values().map(|v| v.len()).sum();
     lines.push(Line::from(vec![
-        Span::styled("  Total threads in memory: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Total threads in memory: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", total_threads),
             Style::default().fg(theme::ACCENT_PRIMARY),
@@ -858,7 +919,9 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
             Span::raw("  "),
             Span::styled("Vis", Style::default().fg(theme::TEXT_MUTED)),
         ]));
-        lines.push(Line::from("  ─────────────────────────────────────────────"));
+        lines.push(Line::from(
+            "  ─────────────────────────────────────────────",
+        ));
 
         for (a_tag, loaded_count) in &project_counts {
             let project_name = format_project_name(a_tag);
@@ -884,9 +947,15 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
             };
 
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:<22}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
+                Span::styled(
+                    format!("  {:<22}", display_name),
+                    Style::default().fg(theme::TEXT_PRIMARY),
+                ),
                 Span::styled(format!("{:>7}", index_count), index_style),
-                Span::styled(format!("{:>7}", loaded_count), Style::default().fg(theme::ACCENT_PRIMARY)),
+                Span::styled(
+                    format!("{:>7}", loaded_count),
+                    Style::default().fg(theme::ACCENT_PRIMARY),
+                ),
                 visibility_indicator,
             ]));
         }
@@ -902,7 +971,10 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
     )]));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("  Projects loaded: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  Projects loaded: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{}", store.projects.len()),
             Style::default().fg(theme::ACCENT_PRIMARY),
@@ -920,10 +992,17 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
     )]));
     lines.push(Line::from(""));
     lines.push(Line::from(vec![
-        Span::styled("  recent_threads() returned: ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "  recent_threads() returned: ",
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
         Span::styled(
             format!("{} threads", recent.len()),
-            Style::default().fg(if recent.is_empty() { theme::ACCENT_ERROR } else { theme::ACCENT_SUCCESS }),
+            Style::default().fg(if recent.is_empty() {
+                theme::ACCENT_ERROR
+            } else {
+                theme::ACCENT_SUCCESS
+            }),
         ),
     ]));
 
@@ -976,7 +1055,9 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
         Span::raw("  "),
         Span::styled("InMem", Style::default().fg(theme::TEXT_MUTED)),
     ]));
-    lines.push(Line::from("  ─────────────────────────────────────────────────────"));
+    lines.push(Line::from(
+        "  ─────────────────────────────────────────────────────",
+    ));
 
     let store = app.data_store.borrow();
     for info in &db_stats {
@@ -1001,10 +1082,22 @@ fn render_data_store_tab(app: &App) -> Vec<Line<'static>> {
         };
 
         lines.push(Line::from(vec![
-            Span::styled(format!("  {:<18}", display_name), Style::default().fg(theme::TEXT_PRIMARY)),
-            Span::styled(format!("{:>6}", info.raw_db_kind1_count), Style::default().fg(theme::ACCENT_PRIMARY)),
-            Span::styled(format!("{:>9}", info.threads_count), Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled(format!("{:>6}", info.messages_count), Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                format!("  {:<18}", display_name),
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ),
+            Span::styled(
+                format!("{:>6}", info.raw_db_kind1_count),
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ),
+            Span::styled(
+                format!("{:>9}", info.threads_count),
+                Style::default().fg(theme::ACCENT_SUCCESS),
+            ),
+            Span::styled(
+                format!("{:>6}", info.messages_count),
+                Style::default().fg(theme::TEXT_DIM),
+            ),
             Span::styled(format!("{:>7}", in_mem_count), in_mem_style),
         ]));
     }

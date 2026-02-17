@@ -4,7 +4,9 @@ mod sidebar;
 
 pub use crate::ui::views::home_helpers::HierarchicalThread;
 pub use content::get_hierarchical_threads;
-pub use modals::{render_composer_project_selector, render_projects_modal, render_search_modal, render_tab_modal};
+pub use modals::{
+    render_composer_project_selector, render_projects_modal, render_search_modal, render_tab_modal,
+};
 pub use sidebar::{get_project_at_index, selectable_project_count};
 
 use crate::ui::components::{render_statusbar, render_tab_bar};
@@ -65,7 +67,9 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
         sidebar::render_sidebar_search_results(f, app, padded_content);
     } else {
         match app.home_panel_focus {
-            HomeTab::Conversations => content::render_conversations_with_feed(f, app, padded_content),
+            HomeTab::Conversations => {
+                content::render_conversations_with_feed(f, app, padded_content)
+            }
             HomeTab::Inbox => content::render_inbox_cards(f, app, padded_content),
             HomeTab::Reports => content::render_reports_list(f, app, padded_content),
             HomeTab::ActiveWork => content::render_active_work(f, app, padded_content),
@@ -184,7 +188,11 @@ pub fn render_home(f: &mut Frame, app: &mut App, area: Rect) {
     if let ModalState::WorkspaceManager(ref state) = app.modal_state {
         let workspaces = app.preferences.borrow().workspaces().to_vec();
         let projects = app.data_store.borrow().get_projects().to_vec();
-        let active_id = app.preferences.borrow().active_workspace_id().map(String::from);
+        let active_id = app
+            .preferences
+            .borrow()
+            .active_workspace_id()
+            .map(String::from);
         super::render_workspace_manager(
             f,
             area,
@@ -221,7 +229,9 @@ fn render_tab_header(f: &mut Frame, app: &App, area: Rect) {
 
     let tab_style = |tab: HomeTab| {
         if app.home_panel_focus == tab {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_MUTED)
         }

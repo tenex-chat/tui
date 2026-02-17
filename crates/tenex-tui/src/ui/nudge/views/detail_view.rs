@@ -46,15 +46,19 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
 
     // Description
     if !nudge.description.is_empty() {
-        let desc = Paragraph::new(&*nudge.description)
-            .style(Style::default().fg(theme::TEXT_MUTED));
+        let desc =
+            Paragraph::new(&*nudge.description).style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(desc, Rect::new(content_area.x, y, content_area.width, 1));
         y += 2;
     }
 
     // Metadata row: author, created_at, hashtags
     let author_short = if nudge.pubkey.len() > 16 {
-        format!("{}...{}", &nudge.pubkey[..8], &nudge.pubkey[nudge.pubkey.len()-8..])
+        format!(
+            "{}...{}",
+            &nudge.pubkey[..8],
+            &nudge.pubkey[nudge.pubkey.len() - 8..]
+        )
     } else {
         nudge.pubkey.clone()
     };
@@ -63,12 +67,18 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
 
     let meta_spans = vec![
         Span::styled("by ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(&author_short, Style::default().fg(theme::user_color(&nudge.pubkey))),
+        Span::styled(
+            &author_short,
+            Style::default().fg(theme::user_color(&nudge.pubkey)),
+        ),
         Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(created_at, Style::default().fg(theme::TEXT_MUTED)),
     ];
     let meta_line = Paragraph::new(Line::from(meta_spans));
-    f.render_widget(meta_line, Rect::new(content_area.x, y, content_area.width, 1));
+    f.render_widget(
+        meta_line,
+        Rect::new(content_area.x, y, content_area.width, 1),
+    );
     y += 1;
 
     // Hashtags
@@ -78,13 +88,19 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
             .iter()
             .flat_map(|t| {
                 vec![
-                    Span::styled(format!("#{}", t), Style::default().fg(theme::ACCENT_WARNING)),
+                    Span::styled(
+                        format!("#{}", t),
+                        Style::default().fg(theme::ACCENT_WARNING),
+                    ),
                     Span::styled(" ", Style::default()),
                 ]
             })
             .collect();
         let tags_line = Paragraph::new(Line::from(tags));
-        f.render_widget(tags_line, Rect::new(content_area.x, y, content_area.width, 1));
+        f.render_widget(
+            tags_line,
+            Rect::new(content_area.x, y, content_area.width, 1),
+        );
         y += 1;
     }
 
@@ -98,30 +114,50 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
         if has_only_tools {
             // Exclusive mode: only-tool display
             let only_count = nudge.only_tools.len();
-            let tools_preview: String = nudge.only_tools.iter()
+            let tools_preview: String = nudge
+                .only_tools
+                .iter()
                 .take(6)
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", ");
-            let suffix = if only_count > 6 { format!(" +{} more", only_count - 6) } else { String::new() };
+            let suffix = if only_count > 6 {
+                format!(" +{} more", only_count - 6)
+            } else {
+                String::new()
+            };
 
             let perms_line = Line::from(vec![
                 Span::styled("⚡ ", Style::default().fg(theme::ACCENT_WARNING)),
-                Span::styled("EXCLUSIVE MODE", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-                Span::styled(format!(" ({} tools): ", only_count), Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(
+                    "EXCLUSIVE MODE",
+                    Style::default()
+                        .fg(theme::ACCENT_WARNING)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(" ({} tools): ", only_count),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
                 Span::styled(tools_preview, Style::default().fg(theme::TEXT_PRIMARY)),
                 Span::styled(suffix, Style::default().fg(theme::TEXT_DIM)),
             ]);
-            f.render_widget(Paragraph::new(perms_line), Rect::new(content_area.x, y, content_area.width, 1));
+            f.render_widget(
+                Paragraph::new(perms_line),
+                Rect::new(content_area.x, y, content_area.width, 1),
+            );
             y += 1;
         } else {
             // Additive mode: allow/deny display
-            let mut perms_spans = vec![
-                Span::styled("Tools: ", Style::default().fg(theme::TEXT_MUTED)),
-            ];
+            let mut perms_spans = vec![Span::styled(
+                "Tools: ",
+                Style::default().fg(theme::TEXT_MUTED),
+            )];
 
             if !nudge.allowed_tools.is_empty() {
-                let allow_preview: String = nudge.allowed_tools.iter()
+                let allow_preview: String = nudge
+                    .allowed_tools
+                    .iter()
                     .take(3)
                     .cloned()
                     .collect::<Vec<_>>()
@@ -131,9 +167,18 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
                 } else {
                     String::new()
                 };
-                perms_spans.push(Span::styled("✓ ", Style::default().fg(theme::ACCENT_SUCCESS)));
-                perms_spans.push(Span::styled(allow_preview, Style::default().fg(theme::ACCENT_SUCCESS)));
-                perms_spans.push(Span::styled(allow_suffix, Style::default().fg(theme::TEXT_DIM)));
+                perms_spans.push(Span::styled(
+                    "✓ ",
+                    Style::default().fg(theme::ACCENT_SUCCESS),
+                ));
+                perms_spans.push(Span::styled(
+                    allow_preview,
+                    Style::default().fg(theme::ACCENT_SUCCESS),
+                ));
+                perms_spans.push(Span::styled(
+                    allow_suffix,
+                    Style::default().fg(theme::TEXT_DIM),
+                ));
             }
 
             if !nudge.allowed_tools.is_empty() && !nudge.denied_tools.is_empty() {
@@ -141,7 +186,9 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
             }
 
             if !nudge.denied_tools.is_empty() {
-                let deny_preview: String = nudge.denied_tools.iter()
+                let deny_preview: String = nudge
+                    .denied_tools
+                    .iter()
                     .take(3)
                     .cloned()
                     .collect::<Vec<_>>()
@@ -152,12 +199,21 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
                     String::new()
                 };
                 perms_spans.push(Span::styled("✗ ", Style::default().fg(theme::ACCENT_ERROR)));
-                perms_spans.push(Span::styled(deny_preview, Style::default().fg(theme::ACCENT_ERROR)));
-                perms_spans.push(Span::styled(deny_suffix, Style::default().fg(theme::TEXT_DIM)));
+                perms_spans.push(Span::styled(
+                    deny_preview,
+                    Style::default().fg(theme::ACCENT_ERROR),
+                ));
+                perms_spans.push(Span::styled(
+                    deny_suffix,
+                    Style::default().fg(theme::TEXT_DIM),
+                ));
             }
 
             let perms_line = Paragraph::new(Line::from(perms_spans));
-            f.render_widget(perms_line, Rect::new(content_area.x, y, content_area.width, 1));
+            f.render_widget(
+                perms_line,
+                Rect::new(content_area.x, y, content_area.width, 1),
+            );
             y += 1;
         }
     }
@@ -165,9 +221,15 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
     y += 1;
 
     // Content section
-    let content_label = Paragraph::new("Content")
-        .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD));
-    f.render_widget(content_label, Rect::new(content_area.x, y, content_area.width, 1));
+    let content_label = Paragraph::new("Content").style(
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    );
+    f.render_widget(
+        content_label,
+        Rect::new(content_area.x, y, content_area.width, 1),
+    );
     y += 1;
 
     // Content in a bordered box
@@ -194,7 +256,12 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
         let line_para = Paragraph::new(*line).style(Style::default().fg(theme::TEXT_PRIMARY));
         f.render_widget(
             line_para,
-            Rect::new(content_inner.x, content_inner.y + i as u16, content_inner.width, 1),
+            Rect::new(
+                content_inner.x,
+                content_inner.y + i as u16,
+                content_inner.width,
+                1,
+            ),
         );
     }
 
@@ -205,7 +272,8 @@ pub fn render_nudge_detail(f: &mut Frame, app: &App, area: Rect, state: &NudgeDe
             state.scroll_offset + 1,
             lines.len().saturating_sub(visible_height) + 1
         );
-        let indicator_para = Paragraph::new(indicator).style(Style::default().fg(theme::TEXT_MUTED));
+        let indicator_para =
+            Paragraph::new(indicator).style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(
             indicator_para,
             Rect::new(

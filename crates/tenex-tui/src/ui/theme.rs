@@ -149,7 +149,9 @@ pub fn text_dim() -> Style {
 }
 
 pub fn text_bold() -> Style {
-    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(TEXT_PRIMARY)
+        .add_modifier(Modifier::BOLD)
 }
 
 // -----------------------------------------------------------------------------
@@ -177,7 +179,9 @@ pub fn interactive_normal() -> Style {
 }
 
 pub fn interactive_selected() -> Style {
-    Style::default().fg(ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(ACCENT_PRIMARY)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn interactive_hover() -> Style {
@@ -237,7 +241,9 @@ pub fn card_bg_selected() -> Style {
 // -----------------------------------------------------------------------------
 
 pub fn markdown_heading() -> Style {
-    Style::default().fg(TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(TEXT_PRIMARY)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn markdown_code() -> Style {
@@ -245,11 +251,15 @@ pub fn markdown_code() -> Style {
 }
 
 pub fn markdown_quote() -> Style {
-    Style::default().fg(TEXT_MUTED).add_modifier(Modifier::ITALIC)
+    Style::default()
+        .fg(TEXT_MUTED)
+        .add_modifier(Modifier::ITALIC)
 }
 
 pub fn markdown_link() -> Style {
-    Style::default().fg(ACCENT_PRIMARY).add_modifier(Modifier::UNDERLINED)
+    Style::default()
+        .fg(ACCENT_PRIMARY)
+        .add_modifier(Modifier::UNDERLINED)
 }
 
 pub fn markdown_list_bullet() -> Style {
@@ -276,7 +286,9 @@ pub fn tab_inactive() -> Style {
 }
 
 pub fn tab_unread() -> Style {
-    Style::default().fg(ACCENT_WARNING).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(ACCENT_WARNING)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn tab_waiting_for_user() -> Style {
@@ -337,7 +349,9 @@ pub fn agent_name() -> Style {
 // -----------------------------------------------------------------------------
 
 pub fn streaming_indicator() -> Style {
-    Style::default().fg(ACCENT_SPECIAL).add_modifier(Modifier::ITALIC)
+    Style::default()
+        .fg(ACCENT_SPECIAL)
+        .add_modifier(Modifier::ITALIC)
 }
 
 pub fn typing_indicator() -> Style {
@@ -403,9 +417,7 @@ pub fn modal_item_shortcut() -> Style {
 
 /// Modal item shortcut when selected
 pub fn modal_item_shortcut_selected() -> Style {
-    Style::default()
-        .fg(Color::Black)
-        .bg(ACCENT_WARNING)
+    Style::default().fg(Color::Black).bg(ACCENT_WARNING)
 }
 
 /// Check if a color is light (for text contrast)
@@ -417,8 +429,14 @@ pub fn is_light_color(color: Color) -> bool {
             let luminance = (0.299 * r as f32 + 0.587 * g as f32 + 0.114 * b as f32) / 255.0;
             luminance > 0.5
         }
-        Color::White | Color::LightRed | Color::LightGreen | Color::LightYellow
-        | Color::LightBlue | Color::LightMagenta | Color::LightCyan | Color::Gray => true,
+        Color::White
+        | Color::LightRed
+        | Color::LightGreen
+        | Color::LightYellow
+        | Color::LightBlue
+        | Color::LightMagenta
+        | Color::LightCyan
+        | Color::Gray => true,
         _ => false,
     }
 }

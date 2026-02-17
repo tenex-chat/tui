@@ -143,7 +143,6 @@ impl SidebarSearchState {
         }
     }
 
-
     /// Get currently selected result (clamped to valid range) - legacy flat format
     pub fn selected_result(&self) -> Option<&SearchResult> {
         if self.results.is_empty() {
@@ -364,12 +363,14 @@ pub fn search_conversations(
                 };
 
                 // Get first matching reply for legacy format
-                let matching_reply = match_result.matching_messages.first().map(|msg| {
-                    MatchingReply {
-                        content: msg.content.clone(),
-                        author_pubkey: msg.author_pubkey.clone(),
-                    }
-                });
+                let matching_reply =
+                    match_result
+                        .matching_messages
+                        .first()
+                        .map(|msg| MatchingReply {
+                            content: msg.content.clone(),
+                            author_pubkey: msg.author_pubkey.clone(),
+                        });
 
                 results.push(SearchResult {
                     thread: thread.clone(),
@@ -420,7 +421,10 @@ pub fn search_reports(
         let title_matches = report.title.to_lowercase().contains(&filter);
         let summary_matches = report.summary.to_lowercase().contains(&filter);
         let content_matches = report.content.to_lowercase().contains(&filter);
-        let hashtag_matches = report.hashtags.iter().any(|h| h.to_lowercase().contains(&filter));
+        let hashtag_matches = report
+            .hashtags
+            .iter()
+            .any(|h| h.to_lowercase().contains(&filter));
 
         if title_matches || summary_matches || content_matches || hashtag_matches {
             results.push(report.clone());
@@ -451,7 +455,8 @@ fn text_starts_with_ascii(text: &str, prefix: &str) -> bool {
     }
 
     prefix_chars.iter().enumerate().all(|(i, pc)| {
-        text_chars.get(i)
+        text_chars
+            .get(i)
             .map_or(false, |c| c.eq_ignore_ascii_case(pc))
     })
 }
@@ -700,7 +705,8 @@ pub fn search_conversations_hierarchical(
         let ancestors = store.get_runtime_ancestors(conv_id);
         for ancestor_id in ancestors {
             // Only include if not already a match and we have the thread data (from visible projects)
-            if !matches_by_conv.contains_key(&ancestor_id) && all_threads.contains_key(&ancestor_id) {
+            if !matches_by_conv.contains_key(&ancestor_id) && all_threads.contains_key(&ancestor_id)
+            {
                 ancestor_ids.insert(ancestor_id);
             }
         }
@@ -708,10 +714,8 @@ pub fn search_conversations_hierarchical(
 
     // Step 3: Build the hierarchical tree structure
     // Find root nodes (conversations with matches or as ancestors that have no parent in our set)
-    let all_relevant_ids: HashSet<&String> = matches_by_conv
-        .keys()
-        .chain(ancestor_ids.iter())
-        .collect();
+    let all_relevant_ids: HashSet<&String> =
+        matches_by_conv.keys().chain(ancestor_ids.iter()).collect();
 
     // Build parent -> children map for our relevant conversations
     let mut children_map: HashMap<String, Vec<String>> = HashMap::new();
@@ -721,14 +725,20 @@ pub fn search_conversations_hierarchical(
         if let Some((thread, _)) = all_threads.get(*id) {
             if let Some(ref parent_id) = thread.parent_conversation_id {
                 if all_relevant_ids.contains(parent_id) {
-                    children_map.entry(parent_id.clone()).or_default().push((*id).clone());
+                    children_map
+                        .entry(parent_id.clone())
+                        .or_default()
+                        .push((*id).clone());
                     has_parent.insert((*id).clone());
                 }
             } else {
                 // Also check runtime hierarchy for parent
                 if let Some(parent_id) = store.get_runtime_ancestors(*id).first() {
                     if all_relevant_ids.contains(parent_id) {
-                        children_map.entry(parent_id.clone()).or_default().push((*id).clone());
+                        children_map
+                            .entry(parent_id.clone())
+                            .or_default()
+                            .push((*id).clone());
                         has_parent.insert((*id).clone());
                     }
                 }
@@ -739,8 +749,14 @@ pub fn search_conversations_hierarchical(
     // Sort children by last_activity descending
     for children in children_map.values_mut() {
         children.sort_by(|a, b| {
-            let a_activity = all_threads.get(a).map(|(t, _)| t.last_activity).unwrap_or(0);
-            let b_activity = all_threads.get(b).map(|(t, _)| t.last_activity).unwrap_or(0);
+            let a_activity = all_threads
+                .get(a)
+                .map(|(t, _)| t.last_activity)
+                .unwrap_or(0);
+            let b_activity = all_threads
+                .get(b)
+                .map(|(t, _)| t.last_activity)
+                .unwrap_or(0);
             b_activity.cmp(&a_activity)
         });
     }
@@ -754,8 +770,14 @@ pub fn search_conversations_hierarchical(
 
     // Sort roots by last_activity descending
     root_ids.sort_by(|a, b| {
-        let a_activity = all_threads.get(a).map(|(t, _)| t.last_activity).unwrap_or(0);
-        let b_activity = all_threads.get(b).map(|(t, _)| t.last_activity).unwrap_or(0);
+        let a_activity = all_threads
+            .get(a)
+            .map(|(t, _)| t.last_activity)
+            .unwrap_or(0);
+        let b_activity = all_threads
+            .get(b)
+            .map(|(t, _)| t.last_activity)
+            .unwrap_or(0);
         b_activity.cmp(&a_activity)
     });
 
@@ -991,22 +1013,14 @@ mod tests {
     #[test]
     fn test_scan_single_term_matches_message() {
         let terms = vec!["critical".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "msg-1",
-                content: "This is critical information",
-                pubkey: "author-1",
-                created_at: 1000,
-            },
-        ];
+        let messages = vec![MessageContent {
+            id: "msg-1",
+            content: "This is critical information",
+            pubkey: "author-1",
+            created_at: 1000,
+        }];
 
-        let result = scan_thread_for_terms(
-            "thread-123",
-            "No match",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result = scan_thread_for_terms("thread-123", "No match", "No match", &messages, &terms);
 
         assert!(result.all_terms_matched);
         assert!(!result.title_matched());
@@ -1037,14 +1051,12 @@ mod tests {
     fn test_scan_multi_term_and_semantics_split_across_locations() {
         // "error" in title, "timeout" in message: should match (AND across conversation)
         let terms = vec!["error".to_string(), "timeout".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "msg-1",
-                content: "Timeout occurred",
-                pubkey: "author-1",
-                created_at: 1000,
-            },
-        ];
+        let messages = vec![MessageContent {
+            id: "msg-1",
+            content: "Timeout occurred",
+            pubkey: "author-1",
+            created_at: 1000,
+        }];
 
         let result = scan_thread_for_terms(
             "thread-123",
@@ -1118,13 +1130,7 @@ mod tests {
             },
         ];
 
-        let result = scan_thread_for_terms(
-            "thread-123",
-            "No match",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result = scan_thread_for_terms("thread-123", "No match", "No match", &messages, &terms);
 
         assert!(result.all_terms_matched);
         // Should have 2 matching messages (error + warning), not the unrelated one
@@ -1135,22 +1141,14 @@ mod tests {
     fn test_scan_skips_root_message() {
         // Message with same ID as thread should be skipped
         let terms = vec!["secret".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "thread-123", // Same as thread ID - should be skipped
-                content: "This contains secret",
-                pubkey: "author-1",
-                created_at: 1000,
-            },
-        ];
+        let messages = vec![MessageContent {
+            id: "thread-123", // Same as thread ID - should be skipped
+            content: "This contains secret",
+            pubkey: "author-1",
+            created_at: 1000,
+        }];
 
-        let result = scan_thread_for_terms(
-            "thread-123",
-            "No match",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result = scan_thread_for_terms("thread-123", "No match", "No match", &messages, &terms);
 
         // Root message is skipped, so no match in messages
         assert!(!result.all_terms_matched);
@@ -1162,13 +1160,8 @@ mod tests {
         let terms = vec!["abc12".to_string()];
         let messages: Vec<MessageContent> = vec![];
 
-        let result = scan_thread_for_terms(
-            "ABC123456789",
-            "No match",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("ABC123456789", "No match", "No match", &messages, &terms);
 
         assert!(result.all_terms_matched);
         assert!(result.id_matched());
@@ -1180,13 +1173,8 @@ mod tests {
         let terms = vec!["error".to_string()];
         let messages: Vec<MessageContent> = vec![];
 
-        let result = scan_thread_for_terms(
-            "thread-123",
-            "ERROR MESSAGE",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("thread-123", "ERROR MESSAGE", "No match", &messages, &terms);
 
         assert!(result.all_terms_matched);
         assert!(result.title_matched());
@@ -1195,7 +1183,11 @@ mod tests {
     #[test]
     fn test_scan_three_terms_all_required() {
         // Three terms: all must be found
-        let terms = vec!["error".to_string(), "warning".to_string(), "info".to_string()];
+        let terms = vec![
+            "error".to_string(),
+            "warning".to_string(),
+            "info".to_string(),
+        ];
         let messages = vec![
             MessageContent {
                 id: "msg-1",
@@ -1226,23 +1218,20 @@ mod tests {
     #[test]
     fn test_scan_three_terms_one_missing() {
         // Three terms: if one is missing, no match
-        let terms = vec!["error".to_string(), "warning".to_string(), "critical".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "msg-1",
-                content: "Error happened",
-                pubkey: "author-1",
-                created_at: 1000,
-            },
+        let terms = vec![
+            "error".to_string(),
+            "warning".to_string(),
+            "critical".to_string(),
         ];
+        let messages = vec![MessageContent {
+            id: "msg-1",
+            content: "Error happened",
+            pubkey: "author-1",
+            created_at: 1000,
+        }];
 
-        let result = scan_thread_for_terms(
-            "thread-123",
-            "Warning here",
-            "No match",
-            &messages,
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("thread-123", "Warning here", "No match", &messages, &terms);
 
         // "critical" is missing - should not match
         assert!(!result.all_terms_matched);
@@ -1272,35 +1261,38 @@ mod tests {
         );
 
         // Should NOT match because "auth" is missing
-        assert!(!result.all_terms_matched, "Should not match when one term is missing");
+        assert!(
+            !result.all_terms_matched,
+            "Should not match when one term is missing"
+        );
     }
 
     #[test]
     fn test_and_semantics_term_in_reply_only() {
         // Verify AND semantics: a term can be found in a reply to satisfy the AND
         let terms = vec!["api".to_string(), "auth".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "reply-1",
-                content: "Added auth middleware",
-                pubkey: "dev-1",
-                created_at: 1000,
-            },
-        ];
+        let messages = vec![MessageContent {
+            id: "reply-1",
+            content: "Added auth middleware",
+            pubkey: "dev-1",
+            created_at: 1000,
+        }];
 
         // "api" in title, "auth" only in reply
-        let result = scan_thread_for_terms(
-            "conv-1",
-            "API Design",
-            "Some content",
-            &messages,
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("conv-1", "API Design", "Some content", &messages, &terms);
 
         // Should match because both terms are found across conversation
-        assert!(result.all_terms_matched, "Should match when both terms found across title and reply");
+        assert!(
+            result.all_terms_matched,
+            "Should match when both terms found across title and reply"
+        );
         assert!(result.title_matched(), "Title should be marked as matched");
-        assert_eq!(result.matching_messages.len(), 1, "Reply containing auth should be in matching_messages");
+        assert_eq!(
+            result.matching_messages.len(),
+            1,
+            "Reply containing auth should be in matching_messages"
+        );
     }
 
     #[test]
@@ -1335,44 +1327,50 @@ mod tests {
             },
         ];
 
-        let result = scan_thread_for_terms(
-            "conv-1",
-            "Bug Report",
-            "System issues",
-            &messages,
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("conv-1", "Bug Report", "System issues", &messages, &terms);
 
         assert!(result.all_terms_matched);
         // Should collect 3 messages: msg-1 (error), msg-3 (crash), msg-4 (both)
-        assert_eq!(result.matching_messages.len(), 3, "Should collect all messages that match any term");
+        assert_eq!(
+            result.matching_messages.len(),
+            3,
+            "Should collect all messages that match any term"
+        );
     }
 
     #[test]
     fn test_term_tracking_across_locations() {
         // Verify term indices are properly tracked (used for highlighting)
         let terms = vec!["bug".to_string(), "fix".to_string(), "test".to_string()];
-        let messages = vec![
-            MessageContent {
-                id: "msg-1",
-                content: "Added a test for the issue",
-                pubkey: "dev-1",
-                created_at: 1000,
-            },
-        ];
+        let messages = vec![MessageContent {
+            id: "msg-1",
+            content: "Added a test for the issue",
+            pubkey: "dev-1",
+            created_at: 1000,
+        }];
 
         let result = scan_thread_for_terms(
             "conv-1",
-            "Bug Fix Required",  // "bug" and "fix" here
+            "Bug Fix Required", // "bug" and "fix" here
             "Some content",
             &messages,
             &terms,
         );
 
         assert!(result.all_terms_matched);
-        assert!(result.terms_in_title.contains(&0), "Term 'bug' should be tracked in title");
-        assert!(result.terms_in_title.contains(&1), "Term 'fix' should be tracked in title");
-        assert!(result.terms_in_messages.contains(&2), "Term 'test' should be tracked in messages");
+        assert!(
+            result.terms_in_title.contains(&0),
+            "Term 'bug' should be tracked in title"
+        );
+        assert!(
+            result.terms_in_title.contains(&1),
+            "Term 'fix' should be tracked in title"
+        );
+        assert!(
+            result.terms_in_messages.contains(&2),
+            "Term 'test' should be tracked in messages"
+        );
     }
 
     #[test]
@@ -1380,13 +1378,7 @@ mod tests {
         // Verify empty terms result in no match (edge case)
         let terms: Vec<String> = vec![];
 
-        let result = scan_thread_for_terms(
-            "conv-1",
-            "Any Title",
-            "Any content",
-            &[],
-            &terms,
-        );
+        let result = scan_thread_for_terms("conv-1", "Any Title", "Any content", &[], &terms);
 
         assert!(!result.all_terms_matched, "Empty terms should not match");
     }
@@ -1397,15 +1389,13 @@ mod tests {
         let terms = vec!["error".to_string()];
 
         // Term only in content
-        let result = scan_thread_for_terms(
-            "conv-1",
-            "System Report",
-            "An error occurred",
-            &[],
-            &terms,
-        );
+        let result =
+            scan_thread_for_terms("conv-1", "System Report", "An error occurred", &[], &terms);
 
-        assert!(result.all_terms_matched, "Single term in content should match");
+        assert!(
+            result.all_terms_matched,
+            "Single term in content should match"
+        );
         assert!(result.content_matched());
         assert!(!result.title_matched());
     }

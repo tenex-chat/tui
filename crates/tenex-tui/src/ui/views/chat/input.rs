@@ -62,8 +62,10 @@ pub(crate) fn render_status_line(f: &mut Frame, app: &App, area: Rect) {
 }
 
 pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
-    let mut attachment_spans: Vec<Span> =
-        vec![Span::styled("Attachments: ", Style::default().fg(theme::TEXT_MUTED))];
+    let mut attachment_spans: Vec<Span> = vec![Span::styled(
+        "Attachments: ",
+        Style::default().fg(theme::TEXT_MUTED),
+    )];
     let img_count = app.chat_editor().image_attachments.len();
 
     // Show image attachments (focus index 0..img_count)
@@ -114,7 +116,8 @@ pub(crate) fn render_attachments_line(f: &mut Frame, app: &App, area: Rect) {
 pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     // Update wrap width for visual line navigation - use consistent padding
     let input_padding = layout::CONTENT_PADDING_H as usize;
-    let input_content_width_val = area.width.saturating_sub((1 + input_padding * 2) as u16) as usize;
+    let input_content_width_val =
+        area.width.saturating_sub((1 + input_padding * 2) as u16) as usize;
     app.chat_input_wrap_width = input_content_width_val;
     // Normal chat input - deterministic color border based on user's pubkey
     let is_input_active =
@@ -145,7 +148,8 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     let (agent_display, agent_model_display) = app
         .selected_agent()
         .map(|a| {
-            let model = a.model
+            let model = a
+                .model
                 .as_ref()
                 .map(|m| format!("({})", m))
                 .unwrap_or_else(|| "(no model)".to_string());
@@ -200,7 +204,11 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
 
     if input_text.is_empty() {
         // Placeholder text when empty
-        let placeholder = if is_input_active { "Type your message..." } else { "" };
+        let placeholder = if is_input_active {
+            "Type your message..."
+        } else {
+            ""
+        };
         let pad = input_content_width.saturating_sub(placeholder.len());
         content_lines.push(Line::from(vec![
             Span::styled("│", Style::default().fg(input_indicator_color).bg(input_bg)),
@@ -300,7 +308,11 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
 
     // Add visible content lines
     let visible_end = (scroll_offset + available_content_lines).min(total_content_lines);
-    for line in content_lines.into_iter().skip(scroll_offset).take(visible_end - scroll_offset) {
+    for line in content_lines
+        .into_iter()
+        .skip(scroll_offset)
+        .take(visible_end - scroll_offset)
+    {
         lines.push(line);
     }
 
@@ -324,7 +336,13 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let nudge_titles: Vec<String> = selected_nudge_ids
             .iter()
-            .filter_map(|id| app.data_store.borrow().content.get_nudge(id).map(|n| format!("/{}", n.title)))
+            .filter_map(|id| {
+                app.data_store
+                    .borrow()
+                    .content
+                    .get_nudge(id)
+                    .map(|n| format!("/{}", n.title))
+            })
             .collect();
         format!("[{}]", nudge_titles.join(", "))
     };
@@ -337,7 +355,13 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     } else {
         let skill_titles: Vec<String> = selected_skill_ids
             .iter()
-            .filter_map(|id| app.data_store.borrow().content.get_skill(id).map(|s| format!("/{}", s.title)))
+            .filter_map(|id| {
+                app.data_store
+                    .borrow()
+                    .content
+                    .get_skill(id)
+                    .map(|s| format!("/{}", s.title))
+            })
             .collect();
         format!("[{}]", skill_titles.join(", "))
     };
@@ -366,9 +390,14 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     let nudge_str = format!(" {}", nudge_display);
     let project_str = format!(" {}", project_display);
     let skill_str = format!(" {}", skill_display);
-    let context_str = format!("{} {}{}{}{}{}", agent_display, agent_model_display, project_str, nudge_str, skill_str, scroll_indicator);
-    let context_pad =
-        area.width.saturating_sub(context_str.width() as u16 + (1 + input_padding * 2) as u16) as usize;
+    let context_str = format!(
+        "{} {}{}{}{}{}",
+        agent_display, agent_model_display, project_str, nudge_str, skill_str, scroll_indicator
+    );
+    let context_pad = area
+        .width
+        .saturating_sub(context_str.width() as u16 + (1 + input_padding * 2) as u16)
+        as usize;
 
     // Build context line with highlighting based on focus
     let mut context_spans = vec![
@@ -434,12 +463,19 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         ));
     }
 
-    context_spans.push(Span::styled(" ".repeat(context_pad.max(0)), Style::default().bg(input_bg)));
+    context_spans.push(Span::styled(
+        " ".repeat(context_pad.max(0)),
+        Style::default().bg(input_bg),
+    ));
     lines.push(Line::from(context_spans));
 
     // Render with half-block borders for visual padding effect
-    let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄
-    let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER.horizontal_top.repeat(area.width as usize); // ▀
+    let half_block_top = card::OUTER_HALF_BLOCK_BORDER
+        .horizontal_bottom
+        .repeat(area.width as usize); // ▄
+    let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER
+        .horizontal_top
+        .repeat(area.width as usize); // ▀
 
     // Top half-block line (fg=input bg color, no bg - creates "growing down" effect)
     let top_area = Rect::new(area.x, area.y, area.width, 1);
@@ -450,7 +486,12 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_widget(top_line, top_area);
 
     // Content area (with input background)
-    let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
+    let content_area = Rect::new(
+        area.x,
+        area.y + 1,
+        area.width,
+        area.height.saturating_sub(2),
+    );
     let input = Paragraph::new(lines).style(Style::default().bg(input_bg));
     f.render_widget(input, content_area);
 

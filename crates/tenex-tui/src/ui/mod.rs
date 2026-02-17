@@ -25,11 +25,11 @@ pub use app::{App, HomeTab, InputMode, StatsSubtab, UndoAction, View};
 // AnimationClock and NotificationManager are now private services accessed via App methods
 // State types are accessed via app.tabs or crate::ui::state::{...}
 // Hotkey registry - used for centralized hotkey resolution and help generation
+pub use audio_player::{AudioPlaybackState, AudioPlayer};
 #[allow(unused_imports)]
 pub use hotkeys::{
-    HotkeyContext, HotkeyId, HotkeyBinding, HotkeyResolver,
-    resolver as hotkey_resolver, resolve_hotkey, get_binding, get_bindings_for_context,
+    get_binding, get_bindings_for_context, resolve_hotkey, resolver as hotkey_resolver,
+    HotkeyBinding, HotkeyContext, HotkeyId, HotkeyResolver,
 };
 pub use modal::ModalState;
 pub use terminal::{init as init_terminal, restore as restore_terminal, Tui};
-pub use audio_player::{AudioPlayer, AudioPlaybackState};

@@ -6,10 +6,10 @@
 //!
 //! Tab key switches focus between content and chat.
 
+use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
 use crate::ui::markdown::render_markdown;
 use crate::ui::state::{ReportTabFocus, ReportTabState};
 use crate::ui::{card, theme, App};
-use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -21,8 +21,7 @@ use ratatui::{
 /// Render the report tab content
 pub fn render_report_tab(f: &mut Frame, app: &App, area: Rect) {
     // Get report state from the active tab
-    let report_state = app.tabs.active_tab()
-        .and_then(|t| t.report_state.as_ref());
+    let report_state = app.tabs.active_tab().and_then(|t| t.report_state.as_ref());
 
     let Some(state) = report_state else {
         render_no_report_state(f, area);
@@ -44,29 +43,34 @@ pub fn render_report_tab(f: &mut Frame, app: &App, area: Rect) {
     let report: tenex_core::models::Report = report.clone();
     let author_name = data_store.get_profile_name(&report.author);
     // Get previous version for diff view if available
-    let previous_content: Option<String> = data_store.reports
+    let previous_content: Option<String> = data_store
+        .reports
         .get_previous_report_version(&state.slug, &report.id)
         .map(|r| r.content.clone());
     drop(data_store);
 
     // Layout: Header | Content (split) | Help Bar
     let chunks = Layout::vertical([
-        Constraint::Length(3),  // Header
-        Constraint::Min(0),     // Content area
-        Constraint::Length(1),  // Help bar
+        Constraint::Length(3), // Header
+        Constraint::Min(0),    // Content area
+        Constraint::Length(1), // Help bar
     ])
     .split(area);
 
     render_header(f, &report, &author_name, state, chunks[0]);
 
     // Split content area: 65% report, 35% chat sidebar
-    let content_chunks = Layout::horizontal([
-        Constraint::Percentage(65),
-        Constraint::Percentage(35),
-    ])
-    .split(chunks[1]);
+    let content_chunks =
+        Layout::horizontal([Constraint::Percentage(65), Constraint::Percentage(35)])
+            .split(chunks[1]);
 
-    render_report_content(f, &report, state, previous_content.as_deref(), content_chunks[0]);
+    render_report_content(
+        f,
+        &report,
+        state,
+        previous_content.as_deref(),
+        content_chunks[0],
+    );
     render_chat_sidebar(f, app, state, &author_name, content_chunks[1]);
 
     render_help_bar(f, state, chunks[2]);
@@ -80,7 +84,11 @@ fn render_no_report_state(f: &mut Frame, area: Rect) {
             Style::default().fg(theme::TEXT_MUTED),
         )),
     ])
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+    );
     f.render_widget(message, area);
 }
 
@@ -97,7 +105,11 @@ fn render_report_not_found(f: &mut Frame, area: Rect, slug: &str) {
             Style::default().fg(theme::TEXT_MUTED),
         )),
     ])
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+    );
     f.render_widget(message, area);
 }
 
@@ -117,14 +129,29 @@ fn render_header(
 
     let line1 = Line::from(vec![
         Span::styled("  ", Style::default()),
-        Span::styled(title, Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title,
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]);
 
     // Line 2: View mode indicator and metadata
     let view_mode = if state.show_diff {
-        Span::styled("[Changes]", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "[Changes]",
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        Span::styled("[Current]", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD))
+        Span::styled(
+            "[Current]",
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )
     };
 
     let focus_indicator = match state.focus {
@@ -135,10 +162,14 @@ fn render_header(
     let line2 = Line::from(vec![
         Span::styled("  ", Style::default()),
         view_mode,
-        Span::styled(format!("  {} · {} · @{}", reading_time, time_str, author_name),
-            Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(format!("  [Focus: {}]", focus_indicator),
-            Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("  {} · {} · @{}", reading_time, time_str, author_name),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
+        Span::styled(
+            format!("  [Focus: {}]", focus_indicator),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
     ]);
 
     let header = Paragraph::new(vec![line1, Line::from(""), line2]);
@@ -179,10 +210,11 @@ fn render_report_content(
         Style::default().fg(theme::BORDER_INACTIVE)
     };
 
-    let content = Paragraph::new(visible_lines)
-        .block(Block::default()
+    let content = Paragraph::new(visible_lines).block(
+        Block::default()
             .borders(Borders::LEFT | Borders::RIGHT)
-            .border_style(border_style));
+            .border_style(border_style),
+    );
 
     f.render_widget(content, content_area);
 }
@@ -199,7 +231,9 @@ fn render_diff_view(current_content: &str, previous_content: Option<&str>) -> Ve
             let mut result: Vec<Line<'static>> = Vec::new();
             result.push(Line::from(Span::styled(
                 "═══ Changes from previous version ═══".to_string(),
-                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
             )));
             result.push(Line::from(""));
 
@@ -277,22 +311,25 @@ fn render_chat_sidebar(
 
     // Split into header, messages, and input
     let chunks = Layout::vertical([
-        Constraint::Length(2),  // Header
-        Constraint::Min(0),     // Messages
-        Constraint::Length(3),  // Input
+        Constraint::Length(2), // Header
+        Constraint::Min(0),    // Messages
+        Constraint::Length(3), // Input
     ])
     .split(area);
 
     // Header
-    let header = Paragraph::new(vec![
-        Line::from(vec![
-            Span::styled("  Chat with ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(format!("@{}", author_name), Style::default().fg(theme::ACCENT_PRIMARY)),
-        ]),
-    ])
-    .block(Block::default()
-        .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
-        .border_style(border_style));
+    let header = Paragraph::new(vec![Line::from(vec![
+        Span::styled("  Chat with ", Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            format!("@{}", author_name),
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ),
+    ])])
+    .block(
+        Block::default()
+            .borders(Borders::TOP | Borders::LEFT | Borders::RIGHT)
+            .border_style(border_style),
+    );
     f.render_widget(header, chunks[0]);
 
     // Messages area (placeholder for now - will show conversation with author)
@@ -303,9 +340,11 @@ fn render_chat_sidebar(
             Style::default().fg(theme::TEXT_MUTED),
         )),
     ])
-    .block(Block::default()
-        .borders(Borders::LEFT | Borders::RIGHT)
-        .border_style(border_style));
+    .block(
+        Block::default()
+            .borders(Borders::LEFT | Borders::RIGHT)
+            .border_style(border_style),
+    );
     f.render_widget(messages, chunks[1]);
 
     // Input area
@@ -328,26 +367,24 @@ fn render_chat_sidebar(
         Style::default().fg(theme::TEXT_PRIMARY)
     };
 
-    let input = Paragraph::new(display_text)
-        .style(input_style)
-        .block(Block::default()
+    let input = Paragraph::new(display_text).style(input_style).block(
+        Block::default()
             .borders(Borders::ALL)
             .border_style(border_style)
-            .title(Span::styled(" Message ", Style::default().fg(theme::TEXT_MUTED))));
+            .title(Span::styled(
+                " Message ",
+                Style::default().fg(theme::TEXT_MUTED),
+            )),
+    );
     f.render_widget(input, chunks[2]);
 }
 
 fn render_help_bar(f: &mut Frame, state: &ReportTabState, area: Rect) {
     let hints = match state.focus {
-        ReportTabFocus::Content => {
-            "j/k: scroll · Tab: focus chat · d: toggle diff · q/Esc: close"
-        }
-        ReportTabFocus::Chat => {
-            "Tab: focus content · Enter: send · q/Esc: close"
-        }
+        ReportTabFocus::Content => "j/k: scroll · Tab: focus chat · d: toggle diff · q/Esc: close",
+        ReportTabFocus::Chat => "Tab: focus content · Enter: send · q/Esc: close",
     };
 
-    let help = Paragraph::new(format!("  {}", hints))
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let help = Paragraph::new(format!("  {}", hints)).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(help, area);
 }

@@ -71,7 +71,10 @@ fn execute_project_action(
                 }) {
                     app.set_warning_status(&format!("Failed to boot: {}", e));
                 } else {
-                    app.set_warning_status(&format!("Boot request sent for {}", state.project_name));
+                    app.set_warning_status(&format!(
+                        "Boot request sent for {}",
+                        state.project_name
+                    ));
                 }
             }
             app.modal_state = ModalState::None;
@@ -111,7 +114,8 @@ fn execute_project_action(
                 // Auto-select PM agent from status
                 let pm_agent = {
                     let store = app.data_store.borrow();
-                    store.get_project_status(&a_tag)
+                    store
+                        .get_project_status(&a_tag)
                         .and_then(|status| status.pm_agent().cloned())
                 };
                 if let Some(pm) = pm_agent {

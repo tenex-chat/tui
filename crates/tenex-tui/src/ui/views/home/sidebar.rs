@@ -35,7 +35,10 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-        .title(Span::styled(" Search ", Style::default().fg(theme::ACCENT_PRIMARY)));
+        .title(Span::styled(
+            " Search ",
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ));
     let inner = block.inner(area);
     f.render_widget(block, area);
 
@@ -50,7 +53,10 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     // Text before cursor
     if cursor_pos > 0 {
         let before: String = query.chars().take(cursor_pos).collect();
-        spans.push(Span::styled(before, Style::default().fg(theme::TEXT_PRIMARY)));
+        spans.push(Span::styled(
+            before,
+            Style::default().fg(theme::TEXT_PRIMARY),
+        ));
     }
 
     // Cursor (block character when focused)
@@ -67,7 +73,10 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
     // Text after cursor
     if cursor_pos < char_count {
         let after: String = query.chars().skip(cursor_pos + 1).collect();
-        spans.push(Span::styled(after, Style::default().fg(theme::TEXT_PRIMARY)));
+        spans.push(Span::styled(
+            after,
+            Style::default().fg(theme::TEXT_PRIMARY),
+        ));
     }
 
     // Placeholder when empty (different hints for different tabs)
@@ -77,7 +86,10 @@ fn render_sidebar_search_input(f: &mut Frame, app: &App, area: Rect) {
         } else {
             "type to search (use + for AND)..."
         };
-        spans.push(Span::styled(placeholder, Style::default().fg(theme::TEXT_MUTED)));
+        spans.push(Span::styled(
+            placeholder,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
     }
 
     let search_line = Paragraph::new(Line::from(spans));
@@ -99,7 +111,10 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
     use crate::ui::search::HierarchicalSearchItem;
 
     let results = &app.sidebar_search.hierarchical_results;
-    let selected_idx = app.sidebar_search.selected_index.min(results.len().saturating_sub(1));
+    let selected_idx = app
+        .sidebar_search
+        .selected_index
+        .min(results.len().saturating_sub(1));
     let query = &app.sidebar_search.query;
 
     if results.is_empty() {
@@ -116,7 +131,9 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
                 // Context ancestors are compact: just title line
                 1
             }
-            HierarchicalSearchItem::MatchedConversation { matching_messages, .. } => {
+            HierarchicalSearchItem::MatchedConversation {
+                matching_messages, ..
+            } => {
                 // Title line + up to 3 matching message previews (each 2 lines: arrow prefix + content)
                 let msg_lines = matching_messages.len().min(3) as u16 * 2;
                 1 + msg_lines + 1 // title + messages + spacing
@@ -175,20 +192,24 @@ fn render_conversation_search_results(f: &mut Frame, app: &App, area: Rect) {
             break;
         }
 
-        let card_area = Rect::new(
-            area.x,
-            area.y + y_offset,
-            area.width,
-            card_height,
-        );
+        let card_area = Rect::new(area.x, area.y + y_offset, area.width, card_height);
 
         render_hierarchical_search_item(f, item, is_selected, card_area, &store, query);
         y_offset += card_height;
     }
 
     // Show result count at bottom
-    let count_text = format!("{} match{}", match_count, if match_count == 1 { "" } else { "es" });
-    let count_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+    let count_text = format!(
+        "{} match{}",
+        match_count,
+        if match_count == 1 { "" } else { "es" }
+    );
+    let count_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
     let count_line = Paragraph::new(count_text)
         .style(Style::default().fg(theme::TEXT_MUTED))
         .alignment(ratatui::layout::Alignment::Right);
@@ -212,15 +233,26 @@ fn render_hierarchical_search_item(
     let indent_width = depth * 2;
 
     match item {
-        HierarchicalSearchItem::ContextAncestor { thread_title, project_a_tag, .. } => {
+        HierarchicalSearchItem::ContextAncestor {
+            thread_title,
+            project_a_tag,
+            ..
+        } => {
             // Context ancestors are dimmed and compact
-            let title_max = (area.width as usize).saturating_sub(indent_width).saturating_sub(5).max(10);
+            let title_max = (area.width as usize)
+                .saturating_sub(indent_width)
+                .saturating_sub(5)
+                .max(10);
             let title = crate::ui::format::truncate_with_ellipsis(thread_title, title_max);
 
             let style = if is_selected {
-                Style::default().fg(theme::TEXT_MUTED).bg(theme::BG_SELECTED)
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .bg(theme::BG_SELECTED)
             } else {
-                Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM)
             };
 
             let line = Line::from(vec![
@@ -229,7 +261,9 @@ fn render_hierarchical_search_item(
                 Span::styled("  ", Style::default()),
                 Span::styled(
                     store.get_project_name(project_a_tag),
-                    Style::default().fg(theme::project_color(project_a_tag)).add_modifier(Modifier::DIM)
+                    Style::default()
+                        .fg(theme::project_color(project_a_tag))
+                        .add_modifier(Modifier::DIM),
                 ),
             ]);
 
@@ -257,7 +291,7 @@ fn render_hierarchical_search_item(
             // For multi-term search, show [+] indicator
             let is_multi_term = matched_terms.len() > 1;
             let type_indicator = if is_multi_term {
-                "[+]"  // Multi-term AND match
+                "[+]" // Multi-term AND match
             } else if *id_matched {
                 "[I]"
             } else if *title_matched {
@@ -268,7 +302,7 @@ fn render_hierarchical_search_item(
                 "[R]"
             };
             let type_color = if is_multi_term {
-                theme::ACCENT_WARNING  // Special color for multi-term matches
+                theme::ACCENT_WARNING // Special color for multi-term matches
             } else if *id_matched {
                 theme::TEXT_MUTED
             } else if *title_matched {
@@ -279,17 +313,27 @@ fn render_hierarchical_search_item(
                 theme::ACCENT_SUCCESS
             };
 
-            let title_max = (area.width as usize).saturating_sub(indent_width).saturating_sub(30).max(10);
+            let title_max = (area.width as usize)
+                .saturating_sub(indent_width)
+                .saturating_sub(30)
+                .max(10);
 
             // Highlight matching text in title if title matched
             // For multi-term, highlight all matching terms
             let title_spans = if *title_matched {
-                highlight_text_spans_multi(thread_title, matched_terms, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY)
+                highlight_text_spans_multi(
+                    thread_title,
+                    matched_terms,
+                    theme::TEXT_PRIMARY,
+                    theme::ACCENT_PRIMARY,
+                )
             } else {
                 vec![Span::styled(
                     crate::ui::format::truncate_with_ellipsis(thread_title, title_max),
                     if is_selected {
-                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default().fg(theme::TEXT_PRIMARY)
                     },
@@ -312,7 +356,10 @@ fn render_hierarchical_search_item(
 
             // Matching message previews (up to 3)
             let message_indent = format!("{}  -> ", indent);
-            let content_width = (area.width as usize).saturating_sub(message_indent.len()).saturating_sub(2).max(10);
+            let content_width = (area.width as usize)
+                .saturating_sub(message_indent.len())
+                .saturating_sub(2)
+                .max(10);
 
             for msg in matching_messages.iter().take(3) {
                 // Author line
@@ -325,11 +372,20 @@ fn render_hierarchical_search_item(
                 ]));
 
                 // Message content with bracket highlighting (supports multi-term)
-                let preview: String = msg.content.lines().next().unwrap_or("").chars().take(content_width).collect();
-                let highlighted_spans = build_bracket_highlight_spans_multi(&preview, matched_terms, content_width);
-                let mut content_line_spans = vec![
-                    Span::styled(&message_indent, Style::default().fg(theme::TEXT_MUTED)),
-                ];
+                let preview: String = msg
+                    .content
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .chars()
+                    .take(content_width)
+                    .collect();
+                let highlighted_spans =
+                    build_bracket_highlight_spans_multi(&preview, matched_terms, content_width);
+                let mut content_line_spans = vec![Span::styled(
+                    &message_indent,
+                    Style::default().fg(theme::TEXT_MUTED),
+                )];
                 content_line_spans.extend(highlighted_spans);
                 lines.push(Line::from(content_line_spans));
             }
@@ -351,7 +407,10 @@ fn render_hierarchical_search_item(
 /// Uses char indices to avoid Unicode byte offset panics
 fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> Vec<Span<'static>> {
     if query.is_empty() {
-        return vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))];
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        )];
     }
 
     let query_chars: Vec<char> = query.chars().collect();
@@ -373,7 +432,9 @@ fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> 
             let match_text: String = text_chars[i..i + query_char_count].iter().collect();
             spans.push(Span::styled(
                 format!("[{}]", match_text),
-                Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD),
             ));
             last_char_end = i + query_char_count;
             i = last_char_end;
@@ -385,11 +446,17 @@ fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> 
     // Add remaining text
     if last_char_end < text_chars.len() {
         let remaining: String = text_chars[last_char_end..].iter().collect();
-        spans.push(Span::styled(remaining, Style::default().fg(theme::TEXT_MUTED)));
+        spans.push(Span::styled(
+            remaining,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
     }
 
     if spans.is_empty() {
-        vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))]
+        vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        )]
     } else {
         spans
     }
@@ -397,9 +464,16 @@ fn build_bracket_highlight_spans(text: &str, query: &str, _max_width: usize) -> 
 
 /// Build highlighted spans with [brackets] around matching text for multiple terms
 /// Each term is highlighted where it appears in the text
-fn build_bracket_highlight_spans_multi(text: &str, terms: &[String], _max_width: usize) -> Vec<Span<'static>> {
+fn build_bracket_highlight_spans_multi(
+    text: &str,
+    terms: &[String],
+    _max_width: usize,
+) -> Vec<Span<'static>> {
     if terms.is_empty() {
-        return vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))];
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        )];
     }
 
     // For single term, delegate to existing function
@@ -463,7 +537,9 @@ fn build_bracket_highlight_spans_multi(text: &str, terms: &[String], _max_width:
         let match_text: String = text_chars[start..end].iter().collect();
         spans.push(Span::styled(
             format!("[{}]", match_text),
-            Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
         ));
         last_end = end;
     }
@@ -471,11 +547,17 @@ fn build_bracket_highlight_spans_multi(text: &str, terms: &[String], _max_width:
     // Add remaining text
     if last_end < text_len {
         let remaining: String = text_chars[last_end..].iter().collect();
-        spans.push(Span::styled(remaining, Style::default().fg(theme::TEXT_MUTED)));
+        spans.push(Span::styled(
+            remaining,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
     }
 
     if spans.is_empty() {
-        vec![Span::styled(text.to_string(), Style::default().fg(theme::TEXT_MUTED))]
+        vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(theme::TEXT_MUTED),
+        )]
     } else {
         spans
     }
@@ -490,7 +572,10 @@ fn highlight_text_spans_multi(
     highlight_color: ratatui::style::Color,
 ) -> Vec<Span<'static>> {
     if terms.is_empty() {
-        return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(normal_color),
+        )];
     }
 
     // For single term, delegate to existing function
@@ -549,7 +634,9 @@ fn highlight_text_spans_multi(
         let match_text: String = text_chars[start..end].iter().collect();
         spans.push(Span::styled(
             match_text,
-            Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(highlight_color)
+                .add_modifier(Modifier::BOLD),
         ));
         last_end = end;
     }
@@ -560,7 +647,10 @@ fn highlight_text_spans_multi(
     }
 
     if spans.is_empty() {
-        vec![Span::styled(text.to_string(), Style::default().fg(normal_color))]
+        vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(normal_color),
+        )]
     } else {
         spans
     }
@@ -569,7 +659,10 @@ fn highlight_text_spans_multi(
 /// Render report search results
 fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
     let results = &app.sidebar_search.report_results;
-    let selected_idx = app.sidebar_search.selected_index.min(results.len().saturating_sub(1));
+    let selected_idx = app
+        .sidebar_search
+        .selected_index
+        .min(results.len().saturating_sub(1));
     let query = &app.sidebar_search.query;
 
     if results.is_empty() {
@@ -607,12 +700,7 @@ fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
             break;
         }
 
-        let card_area = Rect::new(
-            area.x,
-            area.y + y_offset,
-            area.width,
-            card_height,
-        );
+        let card_area = Rect::new(area.x, area.y + y_offset, area.width, card_height);
 
         render_report_search_result_card(f, report, is_selected, card_area, &query_lower);
         y_offset += card_height;
@@ -620,8 +708,17 @@ fn render_report_search_results(f: &mut Frame, app: &App, area: Rect) {
 
     // Show result count at bottom
     let result_count = results.len();
-    let count_text = format!("{} report{}", result_count, if result_count == 1 { "" } else { "s" });
-    let count_area = Rect::new(area.x, area.y + area.height.saturating_sub(1), area.width, 1);
+    let count_text = format!(
+        "{} report{}",
+        result_count,
+        if result_count == 1 { "" } else { "s" }
+    );
+    let count_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(1),
+        area.width,
+        1,
+    );
     let count_line = Paragraph::new(count_text)
         .style(Style::default().fg(theme::TEXT_MUTED))
         .alignment(ratatui::layout::Alignment::Right);
@@ -654,7 +751,12 @@ fn render_report_search_result_card(
     }
 
     // Line 1: Title with highlighting
-    let title_line = highlight_text_spans(&report.title, query, theme::TEXT_PRIMARY, theme::ACCENT_PRIMARY);
+    let title_line = highlight_text_spans(
+        &report.title,
+        query,
+        theme::TEXT_PRIMARY,
+        theme::ACCENT_PRIMARY,
+    );
     let title_para = Paragraph::new(Line::from(title_line));
     let title_area = Rect::new(inner.x, inner.y, inner.width, 1);
     f.render_widget(title_para, title_area);
@@ -662,7 +764,8 @@ fn render_report_search_result_card(
     // Line 2: Summary (truncated) with highlighting
     if inner.height > 1 {
         let summary: String = report.summary.chars().take(100).collect();
-        let summary_line = highlight_text_spans(&summary, query, theme::TEXT_MUTED, theme::ACCENT_PRIMARY);
+        let summary_line =
+            highlight_text_spans(&summary, query, theme::TEXT_MUTED, theme::ACCENT_PRIMARY);
         let summary_para = Paragraph::new(Line::from(summary_line));
         let summary_area = Rect::new(inner.x, inner.y + 1, inner.width, 1);
         f.render_widget(summary_para, summary_area);
@@ -670,7 +773,9 @@ fn render_report_search_result_card(
 
     // Line 3: Hashtags
     if inner.height > 2 && !report.hashtags.is_empty() {
-        let tags = report.hashtags.iter()
+        let tags = report
+            .hashtags
+            .iter()
             .take(5)
             .map(|t| format!("#{}", t))
             .collect::<Vec<_>>()
@@ -683,16 +788,30 @@ fn render_report_search_result_card(
 
 /// Check if query chars match at position in text chars using ASCII case-insensitive comparison
 /// This avoids Unicode casefold expansion issues (e.g., Turkish İ → i̇)
-fn chars_match_ascii_ignore_case(text_chars: &[char], query_chars: &[char], start_idx: usize) -> bool {
+fn chars_match_ascii_ignore_case(
+    text_chars: &[char],
+    query_chars: &[char],
+    start_idx: usize,
+) -> bool {
     query_chars.iter().enumerate().all(|(i, qc)| {
-        text_chars.get(start_idx + i).map_or(false, |tc| tc.eq_ignore_ascii_case(qc))
+        text_chars
+            .get(start_idx + i)
+            .map_or(false, |tc| tc.eq_ignore_ascii_case(qc))
     })
 }
 
 /// Highlight matching text in a string with spans
-fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::Color, highlight_color: ratatui::style::Color) -> Vec<Span<'static>> {
+fn highlight_text_spans(
+    text: &str,
+    query: &str,
+    normal_color: ratatui::style::Color,
+    highlight_color: ratatui::style::Color,
+) -> Vec<Span<'static>> {
     if query.is_empty() {
-        return vec![Span::styled(text.to_string(), Style::default().fg(normal_color))];
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(normal_color),
+        )];
     }
 
     let query_chars: Vec<char> = query.chars().collect();
@@ -716,7 +835,9 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
             let match_text: String = chars[i..i + query_char_count].iter().collect();
             spans.push(Span::styled(
                 match_text,
-                Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(highlight_color)
+                    .add_modifier(Modifier::BOLD),
             ));
             last_char_end = i + query_char_count;
             i = last_char_end;
@@ -732,7 +853,10 @@ fn highlight_text_spans(text: &str, query: &str, normal_color: ratatui::style::C
     }
 
     if spans.is_empty() {
-        vec![Span::styled(text.to_string(), Style::default().fg(normal_color))]
+        vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(normal_color),
+        )]
     } else {
         spans
     }
@@ -755,7 +879,12 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     if !online_projects.is_empty() {
         items.push(ListItem::new(Line::from(vec![
             Span::styled(card::BULLET, Style::default().fg(theme::ACCENT_SUCCESS)),
-            Span::styled("Online", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Online",
+                Style::default()
+                    .fg(theme::ACCENT_SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
         ])));
     }
 
@@ -767,25 +896,37 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
-        let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
-        let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
+        let checkbox = if is_visible {
+            card::CHECKBOX_ON_PAD
+        } else {
+            card::CHECKBOX_OFF_PAD
+        };
+        let focus_indicator = if is_focused {
+            card::COLLAPSE_CLOSED
+        } else {
+            card::SPACER
+        };
         // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
         let name_max = match (is_busy, is_archived) {
-            (true, true) => 8,   // Both spinner and archived
-            (true, false) => 18, // Just spinner
-            (false, true) => 10, // Just archived
+            (true, true) => 8,    // Both spinner and archived
+            (true, false) => 18,  // Just spinner
+            (false, true) => 10,  // Just archived
             (false, false) => 20, // Neither
         };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::ACCENT_PRIMARY)
         };
 
         let name_style = if is_focused {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
@@ -798,7 +939,12 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
         // Add archived tag if project is archived
         if is_archived {
-            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            spans.push(Span::styled(
+                " [archived]",
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
         }
 
         // Add spinner if project is busy
@@ -837,25 +983,37 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
         let is_busy = app.data_store.borrow().operations.is_project_busy(&a_tag);
         let is_archived = app.is_project_archived(&a_tag);
 
-        let checkbox = if is_visible { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
-        let focus_indicator = if is_focused { card::COLLAPSE_CLOSED } else { card::SPACER };
+        let checkbox = if is_visible {
+            card::CHECKBOX_ON_PAD
+        } else {
+            card::CHECKBOX_OFF_PAD
+        };
+        let focus_indicator = if is_focused {
+            card::COLLAPSE_CLOSED
+        } else {
+            card::SPACER
+        };
         // Reserve space for spinner (2 chars) and/or archived tag (10 chars)
         let name_max = match (is_busy, is_archived) {
-            (true, true) => 8,   // Both spinner and archived
-            (true, false) => 18, // Just spinner
-            (false, true) => 10, // Just archived
+            (true, true) => 8,    // Both spinner and archived
+            (true, false) => 18,  // Just spinner
+            (false, true) => 10,  // Just archived
             (false, false) => 20, // Neither
         };
         let name = truncate_with_ellipsis(&project.name, name_max);
 
         let checkbox_style = if is_focused {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_MUTED)
         };
 
         let name_style = if is_focused {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_MUTED)
         };
@@ -868,7 +1026,12 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
 
         // Add archived tag if project is archived
         if is_archived {
-            spans.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            spans.push(Span::styled(
+                " [archived]",
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
         }
 
         // Add spinner if project is busy (unlikely for offline, but for consistency)
@@ -891,9 +1054,11 @@ fn render_projects_list(f: &mut Frame, app: &App, area: Rect) {
     }
 
     let list = List::new(items)
-        .block(Block::default()
-            .borders(Borders::NONE)
-            .padding(Padding::new(2, 2, 1, 0))) // Reduced left padding to fit indicator
+        .block(
+            Block::default()
+                .borders(Borders::NONE)
+                .padding(Padding::new(2, 2, 1, 0)),
+        ) // Reduced left padding to fit indicator
         .style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(list, area);
@@ -913,7 +1078,9 @@ pub fn get_project_at_index(app: &App, index: usize) -> Option<(crate::models::P
         online_projects.get(index).map(|p| (p.clone(), true))
     } else {
         let offline_index = index - online_projects.len();
-        offline_projects.get(offline_index).map(|p| (p.clone(), false))
+        offline_projects
+            .get(offline_index)
+            .map(|p| (p.clone(), false))
     }
 }
 
@@ -922,4 +1089,3 @@ pub fn selectable_project_count(app: &App) -> usize {
     let (online, offline) = app.filtered_projects();
     online.len() + offline.len()
 }
-

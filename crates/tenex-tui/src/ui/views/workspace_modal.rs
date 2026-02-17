@@ -1,7 +1,7 @@
 //! Workspace manager modal view for creating, editing, and switching workspaces.
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::{WorkspaceFocus, WorkspaceMode, WorkspaceManagerState};
+use crate::ui::modal::{WorkspaceFocus, WorkspaceManagerState, WorkspaceMode};
 use crate::ui::theme;
 use ratatui::{
     layout::Rect,
@@ -69,16 +69,16 @@ fn render_list_mode(
     } else {
         // Sort workspaces: pinned first, then by name
         let mut sorted_workspaces: Vec<&Workspace> = workspaces.iter().collect();
-        sorted_workspaces.sort_by(|a, b| {
-            match (a.pinned, b.pinned) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.cmp(&b.name),
-            }
+        sorted_workspaces.sort_by(|a, b| match (a.pinned, b.pinned) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.cmp(&b.name),
         });
 
         let visible_height = list_area.height as usize;
-        let selected_index = state.selected_index.min(sorted_workspaces.len().saturating_sub(1));
+        let selected_index = state
+            .selected_index
+            .min(sorted_workspaces.len().saturating_sub(1));
 
         let scroll_offset = if selected_index >= visible_height {
             selected_index - visible_height + 1
@@ -99,7 +99,10 @@ fn render_list_mode(
 
                 // Selection indicator
                 if is_selected {
-                    spans.push(Span::styled("▌ ", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌ ",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled("  ", Style::default()));
                 }
@@ -132,7 +135,10 @@ fn render_list_mode(
 
                 // Active indicator
                 if is_active {
-                    spans.push(Span::styled(" ✓", Style::default().fg(theme::ACCENT_SUCCESS)));
+                    spans.push(Span::styled(
+                        " ✓",
+                        Style::default().fg(theme::ACCENT_SUCCESS),
+                    ));
                 }
 
                 let line = Line::from(spans);
@@ -194,12 +200,7 @@ fn render_edit_mode(
         .render_frame(f, area);
 
     // Name input area (top portion)
-    let name_area = Rect::new(
-        content_area.x,
-        content_area.y,
-        content_area.width,
-        3,
-    );
+    let name_area = Rect::new(content_area.x, content_area.y, content_area.width, 3);
 
     let name_focused = state.focus == WorkspaceFocus::Name;
     let name_border_color = if name_focused {
@@ -213,7 +214,11 @@ fn render_edit_mode(
         .border_style(Style::default().fg(name_border_color))
         .title(Span::styled(
             " Name ",
-            Style::default().fg(if name_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED }),
+            Style::default().fg(if name_focused {
+                theme::ACCENT_PRIMARY
+            } else {
+                theme::TEXT_MUTED
+            }),
         ));
 
     let name_text = if state.editing_name.is_empty() && name_focused {
@@ -247,7 +252,11 @@ fn render_edit_mode(
         .border_style(Style::default().fg(projects_border_color))
         .title(Span::styled(
             format!(" Projects ({} selected) ", state.editing_project_ids.len()),
-            Style::default().fg(if projects_focused { theme::ACCENT_PRIMARY } else { theme::TEXT_MUTED }),
+            Style::default().fg(if projects_focused {
+                theme::ACCENT_PRIMARY
+            } else {
+                theme::TEXT_MUTED
+            }),
         ));
 
     let inner_area = projects_block.inner(projects_area);
@@ -255,7 +264,9 @@ fn render_edit_mode(
 
     // Render project list
     let visible_height = inner_area.height as usize;
-    let selected_index = state.project_selector_index.min(projects.len().saturating_sub(1));
+    let selected_index = state
+        .project_selector_index
+        .min(projects.len().saturating_sub(1));
 
     let scroll_offset = if selected_index >= visible_height {
         selected_index - visible_height + 1
@@ -276,7 +287,10 @@ fn render_edit_mode(
 
             // Cursor indicator
             if is_cursor {
-                spans.push(Span::styled("▌ ", Style::default().fg(theme::ACCENT_PRIMARY)));
+                spans.push(Span::styled(
+                    "▌ ",
+                    Style::default().fg(theme::ACCENT_PRIMARY),
+                ));
             } else {
                 spans.push(Span::styled("  ", Style::default()));
             }
@@ -293,7 +307,9 @@ fn render_edit_mode(
 
             // Project name
             let name_style = if is_cursor {
-                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
             } else if is_selected {
                 Style::default().fg(theme::TEXT_PRIMARY)
             } else {
@@ -356,12 +372,7 @@ fn render_delete_mode(
         .render_frame(f, area);
 
     // Confirmation message
-    let msg_area = Rect::new(
-        content_area.x,
-        content_area.y + 1,
-        content_area.width,
-        3,
-    );
+    let msg_area = Rect::new(content_area.x, content_area.y + 1, content_area.width, 3);
 
     let msg = Paragraph::new(format!(
         "Are you sure you want to delete \"{}\"?\n\nThis cannot be undone.",

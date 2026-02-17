@@ -95,8 +95,7 @@ fn render_project_selector_modal_inner(
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new(hints_text)
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 
@@ -148,7 +147,11 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
     // Home entry (option 1)
     let home_selected = app.tab_modal_index() == 0 && app.open_tabs().is_empty();
     let home_active = app.view == View::Home;
-    let home_marker = if home_active { card::BULLET } else { card::SPACER };
+    let home_marker = if home_active {
+        card::BULLET
+    } else {
+        card::SPACER
+    };
     items.push(
         ModalItem::new(format!("{}Home (Dashboard)", home_marker))
             .with_shortcut("1".to_string())
@@ -172,7 +175,11 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
         };
         let title_display = truncate_with_ellipsis(&thread_title, 30);
 
-        let active_marker = if is_active { card::BULLET } else { card::SPACER };
+        let active_marker = if is_active {
+            card::BULLET
+        } else {
+            card::SPACER
+        };
         let text = format!("{}{} · {}", active_marker, project_name, title_display);
 
         // Tab number is i+2 (since 1 is Home)
@@ -182,7 +189,11 @@ pub fn render_tab_modal(f: &mut Frame, app: &App, area: Rect) {
             String::new()
         };
 
-        items.push(ModalItem::new(text).with_shortcut(shortcut).selected(is_selected));
+        items.push(
+            ModalItem::new(text)
+                .with_shortcut(shortcut)
+                .selected(is_selected),
+        );
     }
     drop(data_store);
 
@@ -231,8 +242,7 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
             "No results found"
         };
 
-        let placeholder = Paragraph::new(msg)
-            .style(Style::default().fg(theme::TEXT_MUTED));
+        let placeholder = Paragraph::new(msg).style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(placeholder, content_area);
     } else {
         // Build items list from results
@@ -247,7 +257,10 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
                     SearchMatchType::Thread => {
                         let title = truncate_with_ellipsis(&result.thread.title, 50);
                         if let Some(excerpt) = &result.excerpt {
-                            ("T", format!("{} - {}", title, truncate_with_ellipsis(excerpt, 30)))
+                            (
+                                "T",
+                                format!("{} - {}", title, truncate_with_ellipsis(excerpt, 30)),
+                            )
                         } else {
                             ("T", title)
                         }
@@ -260,7 +273,10 @@ pub fn render_search_modal(f: &mut Frame, app: &App, area: Rect) {
                     SearchMatchType::Message { .. } => {
                         let title = truncate_with_ellipsis(&result.thread.title, 25);
                         let excerpt = result.excerpt.as_deref().unwrap_or("");
-                        ("M", format!("{} - {}", title, truncate_with_ellipsis(excerpt, 35)))
+                        (
+                            "M",
+                            format!("{} - {}", title, truncate_with_ellipsis(excerpt, 35)),
+                        )
                     }
                 };
 
@@ -327,7 +343,11 @@ pub(super) fn render_project_actions_modal(f: &mut Frame, area: Rect, state: &Pr
     f.render_widget(hints, hints_area);
 }
 
-pub(super) fn render_conversation_actions_modal(f: &mut Frame, area: Rect, state: &ConversationActionsState) {
+pub(super) fn render_conversation_actions_modal(
+    f: &mut Frame,
+    area: Rect,
+    state: &ConversationActionsState,
+) {
     let actions = ConversationAction::ALL;
     let content_height = (actions.len() + 2) as u16;
     let total_height = content_height + 4;

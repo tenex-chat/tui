@@ -45,7 +45,9 @@ pub fn build_thread_hierarchy(
     // Build the mappings using both delegation tags and q-tags
     for (thread, a_tag) in threads {
         // Primary: use delegation tag if present
-        let parent_id = thread.parent_conversation_id.as_deref()
+        let parent_id = thread
+            .parent_conversation_id
+            .as_deref()
             // Fallback: use q-tag relationship if no delegation tag
             .or_else(|| q_tag_child_to_parent.get(thread.id.as_str()).copied());
 

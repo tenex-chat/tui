@@ -6,8 +6,8 @@
 //! - Additive: allow-tool + deny-tool (modifies agent's defaults)
 //! - Exclusive: only-tool (complete override)
 
-use super::ToolPermissions;
 use super::tool_permissions::ToolMode;
+use super::ToolPermissions;
 
 /// Validation errors for nudge data
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,10 +53,16 @@ impl std::fmt::Display for NudgeValidationError {
                 write!(f, "Unknown tool: '{}'", tool)
             }
             NudgeValidationError::MixedModes => {
-                write!(f, "Cannot mix 'only-tool' with 'allow-tool'/'deny-tool' - choose one mode")
+                write!(
+                    f,
+                    "Cannot mix 'only-tool' with 'allow-tool'/'deny-tool' - choose one mode"
+                )
             }
             NudgeValidationError::EmptyExclusiveTools => {
-                write!(f, "Exclusive mode with no tools - agent will have no tools!")
+                write!(
+                    f,
+                    "Exclusive mode with no tools - agent will have no tools!"
+                )
             }
         }
     }
@@ -76,7 +82,7 @@ impl Default for NudgeValidation {
     fn default() -> Self {
         Self {
             max_title_length: 100,
-            max_content_length: 0, // No limit by default
+            max_content_length: 0,      // No limit by default
             validate_tool_names: false, // Don't require tools to be in registry
         }
     }
@@ -157,7 +163,8 @@ impl NudgeValidation {
         let mut errors = Vec::new();
 
         // Check for mixed modes (should be prevented by UI, but validate anyway)
-        let has_additive = !permissions.allow_tools.is_empty() || !permissions.deny_tools.is_empty();
+        let has_additive =
+            !permissions.allow_tools.is_empty() || !permissions.deny_tools.is_empty();
         let has_exclusive = !permissions.only_tools.is_empty();
 
         if has_additive && has_exclusive {
@@ -180,12 +187,14 @@ impl NudgeValidation {
                     if let Some(tools) = available_tools {
                         for tool in &permissions.allow_tools {
                             if !tools.contains(tool) {
-                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                                errors
+                                    .push(NudgeValidationError::UnknownTool { tool: tool.clone() });
                             }
                         }
                         for tool in &permissions.deny_tools {
                             if !tools.contains(tool) {
-                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                                errors
+                                    .push(NudgeValidationError::UnknownTool { tool: tool.clone() });
                             }
                         }
                     }
@@ -202,7 +211,8 @@ impl NudgeValidation {
                     if let Some(tools) = available_tools {
                         for tool in &permissions.only_tools {
                             if !tools.contains(tool) {
-                                errors.push(NudgeValidationError::UnknownTool { tool: tool.clone() });
+                                errors
+                                    .push(NudgeValidationError::UnknownTool { tool: tool.clone() });
                             }
                         }
                     }
@@ -279,7 +289,10 @@ mod tests {
 
         let errors = v.validate_permissions(&perms, None);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(errors[0], NudgeValidationError::ToolConflict { .. }));
+        assert!(matches!(
+            errors[0],
+            NudgeValidationError::ToolConflict { .. }
+        ));
     }
 
     #[test]
@@ -316,7 +329,10 @@ mod tests {
 
         let errors = v.validate_permissions(&perms, None);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(errors[0], NudgeValidationError::EmptyExclusiveTools));
+        assert!(matches!(
+            errors[0],
+            NudgeValidationError::EmptyExclusiveTools
+        ));
     }
 
     #[test]

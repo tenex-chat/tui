@@ -4,7 +4,7 @@ use crate::nostr::NostrCommand;
 use crate::ui::{self, App, ModalState};
 
 pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::{NudgeDetailState, NudgeDeleteConfirmState};
+    use ui::modal::{NudgeDeleteConfirmState, NudgeDetailState};
     use ui::nudge::NudgeFormState;
 
     let state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
@@ -44,7 +44,8 @@ pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
             if let Some(id) = nudge_id {
                 let nudge = app.data_store.borrow().content.nudges.get(&id).cloned();
                 if let Some(nudge) = nudge {
-                    app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
+                    app.modal_state =
+                        ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
                 } else {
                     app.modal_state = ModalState::NudgeList(state);
                 }
@@ -70,7 +71,11 @@ pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
                 app.modal_state = ModalState::NudgeList(state);
             }
         }
-        KeyCode::Char(c) if !key.modifiers.intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) => {
+        KeyCode::Char(c)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
             // Filter input
             let mut new_state = state;
             new_state.add_filter_char(c);
@@ -101,7 +106,9 @@ fn get_selected_nudge_id(app: &App, state: &ui::modal::NudgeListState) -> Option
             n.title.to_lowercase().contains(&filter_lower)
                 || n.description.to_lowercase().contains(&filter_lower)
                 || n.content.to_lowercase().contains(&filter_lower)
-                || n.hashtags.iter().any(|h| h.to_lowercase().contains(&filter_lower))
+                || n.hashtags
+                    .iter()
+                    .any(|h| h.to_lowercase().contains(&filter_lower))
         })
         .collect();
 
@@ -147,26 +154,26 @@ pub(super) fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                     // Space adds hashtag in hashtag field
                     state.add_hashtag();
                 }
-                KeyCode::Char(c) => {
-                    match state.focus {
-                        NudgeFormFocus::Title => state.title.push(c),
-                        NudgeFormFocus::Description => state.description.push(c),
-                        NudgeFormFocus::Hashtags => state.hashtag_input.push(c),
+                KeyCode::Char(c) => match state.focus {
+                    NudgeFormFocus::Title => state.title.push(c),
+                    NudgeFormFocus::Description => state.description.push(c),
+                    NudgeFormFocus::Hashtags => state.hashtag_input.push(c),
+                },
+                KeyCode::Backspace => match state.focus {
+                    NudgeFormFocus::Title => {
+                        state.title.pop();
                     }
-                }
-                KeyCode::Backspace => {
-                    match state.focus {
-                        NudgeFormFocus::Title => { state.title.pop(); }
-                        NudgeFormFocus::Description => { state.description.pop(); }
-                        NudgeFormFocus::Hashtags => {
-                            if state.hashtag_input.is_empty() {
-                                state.hashtags.pop();
-                            } else {
-                                state.hashtag_input.pop();
-                            }
+                    NudgeFormFocus::Description => {
+                        state.description.pop();
+                    }
+                    NudgeFormFocus::Hashtags => {
+                        if state.hashtag_input.is_empty() {
+                            state.hashtags.pop();
+                        } else {
+                            state.hashtag_input.pop();
                         }
                     }
-                }
+                },
                 _ => {}
             }
         }
@@ -386,19 +393,27 @@ pub(super) fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
                             // Mode-aware tool permissions:
                             // - Exclusive mode: only send only_tools, ignore allow/deny
                             // - Additive mode: send allow/deny (with conflict resolution), ignore only_tools
-                            let (sanitized_allow_tools, sanitized_deny_tools, only_tools) = if state.permissions.is_exclusive_mode() {
-                                // Exclusive mode: only send only_tools
-                                (Vec::new(), Vec::new(), state.permissions.only_tools.clone())
-                            } else {
-                                // Additive mode: sanitize allow list - "Deny wins" conflict resolution
-                                let deny_set: std::collections::HashSet<_> = state.permissions.deny_tools.iter().collect();
-                                let sanitized_allow: Vec<String> = state.permissions.allow_tools
-                                    .iter()
-                                    .filter(|tool| !deny_set.contains(tool))
-                                    .cloned()
-                                    .collect();
-                                (sanitized_allow, state.permissions.deny_tools.clone(), Vec::new())
-                            };
+                            let (sanitized_allow_tools, sanitized_deny_tools, only_tools) =
+                                if state.permissions.is_exclusive_mode() {
+                                    // Exclusive mode: only send only_tools
+                                    (Vec::new(), Vec::new(), state.permissions.only_tools.clone())
+                                } else {
+                                    // Additive mode: sanitize allow list - "Deny wins" conflict resolution
+                                    let deny_set: std::collections::HashSet<_> =
+                                        state.permissions.deny_tools.iter().collect();
+                                    let sanitized_allow: Vec<String> = state
+                                        .permissions
+                                        .allow_tools
+                                        .iter()
+                                        .filter(|tool| !deny_set.contains(tool))
+                                        .cloned()
+                                        .collect();
+                                    (
+                                        sanitized_allow,
+                                        state.permissions.deny_tools.clone(),
+                                        Vec::new(),
+                                    )
+                                };
 
                             let result = core_handle.send(NostrCommand::CreateNudge {
                                 title: state.title.clone(),
@@ -412,10 +427,16 @@ pub(super) fn handle_nudge_form_key(app: &mut App, key: KeyEvent) {
 
                             match result {
                                 Ok(_) => {
-                                    app.set_warning_status(&format!("Nudge '{}' created", state.title));
+                                    app.set_warning_status(&format!(
+                                        "Nudge '{}' created",
+                                        state.title
+                                    ));
                                 }
                                 Err(e) => {
-                                    app.set_warning_status(&format!("Failed to create nudge: {}", e));
+                                    app.set_warning_status(&format!(
+                                        "Failed to create nudge: {}",
+                                        e
+                                    ));
                                 }
                             }
                         } else {
@@ -469,7 +490,13 @@ pub(super) fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
             // The visible height in detail view is approximately 20 lines
             // (80% modal height minus ~10 lines for header, metadata, borders, hints)
             let visible_height = 20;
-            let nudge = app.data_store.borrow().content.nudges.get(&state.nudge_id).cloned();
+            let nudge = app
+                .data_store
+                .borrow()
+                .content
+                .nudges
+                .get(&state.nudge_id)
+                .cloned();
             let max_scroll = nudge
                 .map(|n| n.content.lines().count().saturating_sub(visible_height))
                 .unwrap_or(0);
@@ -480,7 +507,13 @@ pub(super) fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char('e') => {
             // Copy this nudge (pre-populate wizard with nudge data to create a new one)
             // Note: Nostr events are immutable - we can't edit, only copy and create new
-            let nudge = app.data_store.borrow().content.nudges.get(&state.nudge_id).cloned();
+            let nudge = app
+                .data_store
+                .borrow()
+                .content
+                .nudges
+                .get(&state.nudge_id)
+                .cloned();
             if let Some(nudge) = nudge {
                 app.modal_state = ModalState::NudgeCreate(NudgeFormState::copy_from_nudge(&nudge));
             } else {
@@ -489,7 +522,8 @@ pub(super) fn handle_nudge_detail_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('d') => {
             // Delete this nudge
-            app.modal_state = ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new(state.nudge_id));
+            app.modal_state =
+                ModalState::NudgeDeleteConfirm(NudgeDeleteConfirmState::new(state.nudge_id));
         }
         KeyCode::Char('c') => {
             // Copy nudge ID to clipboard

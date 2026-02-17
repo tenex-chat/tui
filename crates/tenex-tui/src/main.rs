@@ -77,7 +77,9 @@ fn connect_and_init(
 ) -> Result<(), String> {
     let user_pubkey = nostr::get_current_pubkey(&keys);
     app.keys = Some(keys.clone());
-    app.data_store.borrow_mut().set_user_pubkey(user_pubkey.clone());
+    app.data_store
+        .borrow_mut()
+        .set_user_pubkey(user_pubkey.clone());
 
     core_handle
         .send(NostrCommand::Connect {
@@ -100,29 +102,24 @@ fn resolve_authentication(
     nsec_source: NsecSource,
 ) -> AuthResult {
     match nsec_source {
-        NsecSource::CliArg(nsec) | NsecSource::EnvVar(nsec) => {
-            match SecretKey::parse(&nsec) {
-                Ok(secret_key) => {
-                    let keys = Keys::new(secret_key);
-                    match connect_and_init(app, core_handle, keys.clone()) {
-                        Ok(()) => AuthResult::Success,
-                        Err(e) => {
-                            AuthResult::ShowLogin(LoginStep::Nsec, Some(e))
-                        }
-                    }
-                }
-                Err(e) => {
-                    AuthResult::ShowLogin(
-                        LoginStep::Nsec,
-                        Some(format!("Invalid nsec provided: {}", e)),
-                    )
+        NsecSource::CliArg(nsec) | NsecSource::EnvVar(nsec) => match SecretKey::parse(&nsec) {
+            Ok(secret_key) => {
+                let keys = Keys::new(secret_key);
+                match connect_and_init(app, core_handle, keys.clone()) {
+                    Ok(()) => AuthResult::Success,
+                    Err(e) => AuthResult::ShowLogin(LoginStep::Nsec, Some(e)),
                 }
             }
-        }
+            Err(e) => AuthResult::ShowLogin(
+                LoginStep::Nsec,
+                Some(format!("Invalid nsec provided: {}", e)),
+            ),
+        },
         NsecSource::Stored => {
             // Check credentials state upfront to avoid borrow conflicts
             let has_creds = nostr::has_stored_credentials(&app.preferences.borrow());
-            let needs_password = has_creds && nostr::credentials_need_password(&app.preferences.borrow());
+            let needs_password =
+                has_creds && nostr::credentials_need_password(&app.preferences.borrow());
 
             if !has_creds {
                 // No credentials - show nsec prompt
@@ -135,20 +132,14 @@ fn resolve_authentication(
                 // Load keys first, then connect (to avoid borrow conflicts)
                 let keys_result = nostr::load_unencrypted_keys(&app.preferences.borrow());
                 match keys_result {
-                    Ok(keys) => {
-                        match connect_and_init(app, core_handle, keys.clone()) {
-                            Ok(()) => AuthResult::Success,
-                            Err(e) => {
-                                AuthResult::ShowLogin(LoginStep::Nsec, Some(e))
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        AuthResult::ShowLogin(
-                            LoginStep::Nsec,
-                            Some(format!("Failed to load credentials: {}", e)),
-                        )
-                    }
+                    Ok(keys) => match connect_and_init(app, core_handle, keys.clone()) {
+                        Ok(()) => AuthResult::Success,
+                        Err(e) => AuthResult::ShowLogin(LoginStep::Nsec, Some(e)),
+                    },
+                    Err(e) => AuthResult::ShowLogin(
+                        LoginStep::Nsec,
+                        Some(format!("Failed to load credentials: {}", e)),
+                    ),
                 }
             }
         }
@@ -188,7 +179,14 @@ async fn main() -> Result<()> {
     let event_stats = core_runtime.event_stats();
     let subscription_stats = core_runtime.subscription_stats();
     let negentropy_stats = core_runtime.negentropy_stats();
-    let mut app = App::new(db.clone(), data_store, event_stats, subscription_stats, negentropy_stats, &data_dir);
+    let mut app = App::new(
+        db.clone(),
+        data_store,
+        event_stats,
+        subscription_stats,
+        negentropy_stats,
+        &data_dir,
+    );
     let mut terminal = ui::init_terminal()?;
     let data_rx = core_runtime
         .take_data_rx()
