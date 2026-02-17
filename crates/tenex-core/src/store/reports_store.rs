@@ -49,6 +49,15 @@ impl ReportsStore {
         self.reports.get(slug)
     }
 
+    /// Get report by a_tag (30023:pubkey:slug) - globally unique identifier
+    /// This is preferred over get_report() when you have the a_tag available,
+    /// as it handles slug collisions between different authors.
+    pub fn get_report_by_a_tag(&self, a_tag: &str) -> Option<&Report> {
+        // a_tag format is "30023:pubkey:slug"
+        // We need to search through all reports to find a match
+        self.reports.values().find(|r| r.a_tag() == a_tag)
+    }
+
     pub fn get_report_versions(&self, slug: &str) -> Vec<&Report> {
         self.reports_all_versions
             .get(slug)
