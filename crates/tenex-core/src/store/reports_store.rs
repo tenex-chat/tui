@@ -13,6 +13,12 @@ pub struct ReportsStore {
     pub document_threads: HashMap<String, Vec<Thread>>,
 }
 
+impl Default for ReportsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportsStore {
     pub fn new() -> Self {
         Self {
@@ -115,9 +121,7 @@ impl ReportsStore {
         known_project_a_tags: &[String],
     ) -> Option<Report> {
         if let Some(report) = Report::from_note(note) {
-            if known_project_a_tags
-                .iter()
-                .any(|tag| *tag == report.project_a_tag)
+            if known_project_a_tags.contains(&report.project_a_tag)
             {
                 self.add_report(report.clone());
                 return Some(report);

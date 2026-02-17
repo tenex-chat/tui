@@ -96,7 +96,6 @@ async fn main() -> Result<()> {
                         println!("\n⚠️  Relay pool shutdown");
                         break;
                     }
-                    Ok(_) => {}
                     Err(e) => {
                         println!("\n❌ Error: {:?}", e);
                         break;

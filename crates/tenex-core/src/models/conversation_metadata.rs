@@ -109,7 +109,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([513]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -148,7 +148,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([513]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -196,7 +196,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([513]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -238,7 +238,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([513]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);

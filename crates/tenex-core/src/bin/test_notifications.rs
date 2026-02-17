@@ -20,9 +20,6 @@ const KIND_AGENT_STATUS: u16 = 24133;
 const KIND_AGENT: u16 = 4199;
 const KIND_MCP_TOOL: u16 = 4200;
 const KIND_NUDGE: u16 = 4201;
-const KIND_TEXT_NOTE: u16 = 1;
-const KIND_PROJECT_METADATA: u16 = 513;
-const KIND_LONG_FORM_CONTENT: u16 = 30023;
 
 struct EventStats {
     total_via_event: u64,

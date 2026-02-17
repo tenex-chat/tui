@@ -617,7 +617,7 @@ mod tests {
         // First check: verify events were ingested using a simple query
         {
             let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
-            let all_messages = db.ndb.query(&txn, &[filter.clone()], 100).unwrap();
+            let all_messages = db.ndb.query(&txn, std::slice::from_ref(&filter), 100).unwrap();
             assert!(!all_messages.is_empty(), "No messages were ingested");
         }
 

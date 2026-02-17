@@ -154,11 +154,7 @@ impl Message {
                     // Extract event ID
                     let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        Some(hex::encode(id_bytes))
-                    } else {
-                        None
-                    };
+                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
 
                     if let Some(eid) = event_id {
                         // Check marker for NIP-10 format: ["e", id, relay, marker]
@@ -204,9 +200,9 @@ impl Message {
                 Some("delegation") | Some("parent") => {
                     // Parent tag format: ["parent", "<parent-conversation-id>"]
                     // (Note: "delegation" is legacy - nostrdb stores hex as Id variant)
-                    delegation_tag = tag.get(1).and_then(|t| match t.variant() {
-                        nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                        nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                    delegation_tag = tag.get(1).map(|t| match t.variant() {
+                        nostrdb::NdbStrVariant::Str(s) => s.to_string(),
+                        nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
                     });
                 }
                 Some("branch") => {
@@ -368,13 +364,13 @@ impl Message {
         let mut chars = self.content.chars().peekable();
 
         while let Some(c) = chars.next() {
-            if c == '!' {
-                if chars.peek() == Some(&'[') {
+            if c == '!'
+                && chars.peek() == Some(&'[') {
                     chars.next();
 
                     // Skip alt text
                     let mut depth = 1;
-                    while let Some(ch) = chars.next() {
+                    for ch in chars.by_ref() {
                         if ch == '[' {
                             depth += 1;
                         } else if ch == ']' {
@@ -405,7 +401,6 @@ impl Message {
                         }
                     }
                 }
-            }
         }
 
         urls
@@ -523,7 +518,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -531,7 +526,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
@@ -565,7 +560,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -573,7 +568,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
@@ -607,7 +602,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -615,7 +610,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
@@ -642,7 +637,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -650,7 +645,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
@@ -674,7 +669,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -682,7 +677,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_thread_note(&note);
@@ -860,14 +855,14 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0);
+        assert!(!results.is_empty());
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let ask_event = Message::parse_ask_event(&note);
@@ -916,14 +911,14 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0);
+        assert!(!results.is_empty());
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let ask_event = Message::parse_ask_event(&note);
@@ -969,14 +964,14 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0);
+        assert!(!results.is_empty());
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let ask_event = Message::parse_ask_event(&note);
@@ -1022,14 +1017,14 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0);
+        assert!(!results.is_empty());
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let ask_event = Message::parse_ask_event(&note);

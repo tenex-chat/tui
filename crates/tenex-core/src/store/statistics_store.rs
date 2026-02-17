@@ -8,6 +8,9 @@ use tracing::{trace, warn};
 /// Default batch size for pagination queries.
 const DEFAULT_PAGINATION_BATCH_SIZE: i32 = 10_000;
 
+/// (user_messages_by_day, all_messages_by_day)
+pub type MessagesByDayCounts = (Vec<(u64, u64)>, Vec<(u64, u64)>);
+
 /// Sub-store for pre-aggregated statistics data.
 /// Supports O(1) lookups for Stats view and Activity grid.
 pub struct StatisticsStore {
@@ -19,6 +22,12 @@ pub struct StatisticsStore {
 
     /// Pre-aggregated runtime totals by day: day_start_timestamp -> total runtime_ms
     pub(crate) runtime_by_day_counts: HashMap<u64, u64>,
+}
+
+impl Default for StatisticsStore {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl StatisticsStore {
@@ -38,7 +47,7 @@ impl StatisticsStore {
 
     // ===== Getters =====
 
-    pub fn get_messages_by_day(&self, num_days: usize) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+    pub fn get_messages_by_day(&self, num_days: usize) -> MessagesByDayCounts {
         if num_days == 0 {
             return (Vec::new(), Vec::new());
         }
@@ -998,7 +1007,7 @@ mod tests {
             Some(&3_u64)
         );
         assert_eq!(
-            message_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            message_result.get(&(base_timestamp + seconds_per_hour)),
             Some(&2_u64)
         );
         assert_eq!(message_result.get(&base_timestamp), Some(&1_u64));
@@ -1009,7 +1018,7 @@ mod tests {
             Some(&999_u64)
         );
         assert_eq!(
-            token_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            token_result.get(&(base_timestamp + seconds_per_hour)),
             Some(&1000_u64)
         );
         assert_eq!(token_result.get(&base_timestamp), Some(&1000_u64));

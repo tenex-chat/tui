@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 // =============================================================================
@@ -681,8 +681,8 @@ impl DraftStorage {
     }
 
     /// Get the path for a backup file (e.g., drafts.json.bak1, drafts.json.bak2)
-    fn backup_path(primary_path: &PathBuf, index: usize) -> PathBuf {
-        let mut backup = primary_path.clone();
+    fn backup_path(primary_path: &Path, index: usize) -> PathBuf {
+        let mut backup = primary_path.to_path_buf();
         let filename = backup
             .file_name()
             .and_then(|f| f.to_str())
@@ -1086,8 +1086,8 @@ impl DraftStorage {
     // =========================================================================
 
     /// Get backup path for archive file (similar to main drafts backups)
-    fn archive_backup_path(archive_path: &PathBuf, index: usize) -> PathBuf {
-        let mut backup = archive_path.clone();
+    fn archive_backup_path(archive_path: &Path, index: usize) -> PathBuf {
+        let mut backup = archive_path.to_path_buf();
         let filename = backup
             .file_name()
             .and_then(|f| f.to_str())

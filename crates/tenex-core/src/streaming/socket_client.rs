@@ -78,14 +78,11 @@ impl SocketStreamClient {
                 .unwrap_or(0),
         };
 
-        match serde_json::to_string(&info) {
-            Ok(content) => {
-                if fs::write(&self.lock_path, content).is_ok() {
-                    debug_log("Acquired streaming socket lock");
-                    return true;
-                }
+        if let Ok(content) = serde_json::to_string(&info) {
+            if fs::write(&self.lock_path, content).is_ok() {
+                debug_log("Acquired streaming socket lock");
+                return true;
             }
-            Err(_) => {}
         }
         false
     }

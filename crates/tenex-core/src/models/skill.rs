@@ -40,9 +40,9 @@ impl Skill {
                 if let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) {
                     // Handle e-tags for file references (NIP-94 kind:1063)
                     if tag_name == "e" {
-                        if let Some(event_id) = tag.get(1).and_then(|t| match t.variant() {
-                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                        if let Some(event_id) = tag.get(1).map(|t| match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => s.to_string(),
+                            nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
                         }) {
                             file_ids.push(event_id);
                         }
@@ -120,7 +120,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4202]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -159,7 +159,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4202]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -196,7 +196,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4202]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -223,7 +223,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4202]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -260,7 +260,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);

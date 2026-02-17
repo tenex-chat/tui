@@ -88,9 +88,9 @@ impl Thread {
                     // Parent tag format: ["parent", "<parent-conversation-id>"]
                     // (Note: "delegation" is legacy - nostrdb has issues with NIP-26 collision)
                     // nostrdb stores 64-char hex strings as Id variant, so we need to handle both
-                    parent_conversation_id = tag.get(1).and_then(|t| match t.variant() {
-                        nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                        nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                    parent_conversation_id = tag.get(1).map(|t| match t.variant() {
+                        nostrdb::NdbStrVariant::Str(s) => s.to_string(),
+                        nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
                     });
                 }
                 Some("p") => {
@@ -165,7 +165,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -205,7 +205,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -213,7 +213,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let thread = Thread::from_note(&note);
@@ -237,7 +237,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();
@@ -245,7 +245,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let thread = Thread::from_note(&note);
@@ -266,7 +266,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([9999]).build();
@@ -274,7 +274,7 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() > 0, "Event should be indexed");
+        assert!(!results.is_empty(), "Event should be indexed");
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let thread = Thread::from_note(&note);
@@ -306,7 +306,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         // Wait for async processing
         let filter = Filter::new().kinds([1]).build();

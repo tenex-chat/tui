@@ -36,21 +36,22 @@ async fn main() -> Result<()> {
     tokio::spawn(async move {
         while let Ok(notification) = notifications.recv().await {
             match notification {
-                RelayPoolNotification::Message { relay_url, message } => {
-                    if let RelayMessage::Ok {
-                        event_id,
-                        status,
-                        message,
-                    } = message
-                    {
-                        println!(
-                            "[OK] relay={} id={} status={} msg={}",
-                            relay_url,
-                            event_id.to_hex(),
+                RelayPoolNotification::Message {
+                    relay_url,
+                    message:
+                        RelayMessage::Ok {
+                            event_id,
                             status,
-                            message
-                        );
-                    }
+                            message,
+                        },
+                } => {
+                    println!(
+                        "[OK] relay={} id={} status={} msg={}",
+                        relay_url,
+                        event_id.to_hex(),
+                        status,
+                        message
+                    );
                 }
                 RelayPoolNotification::Shutdown => {
                     println!("[NOTIF] shutdown");

@@ -9,6 +9,12 @@ pub struct TrustStore {
     pub pending_backend_approvals: Vec<PendingBackendApproval>,
 }
 
+impl Default for TrustStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TrustStore {
     pub fn new() -> Self {
         Self {

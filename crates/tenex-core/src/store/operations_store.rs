@@ -13,6 +13,12 @@ pub struct OperationsStore {
     pub agent_tracking: AgentTrackingState,
 }
 
+impl Default for OperationsStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OperationsStore {
     pub fn new() -> Self {
         Self {

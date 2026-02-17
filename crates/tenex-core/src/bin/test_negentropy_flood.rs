@@ -74,11 +74,12 @@ async fn main() -> Result<()> {
                         event_path_count += 1;
                         unique_ids.insert(event.id.to_hex());
                     }
-                    Ok(RelayPoolNotification::Message { message, .. }) => {
-                        if let RelayMessage::Event { event, .. } = &message {
-                            message_path_count += 1;
-                            unique_ids.insert(event.id.to_hex());
-                        }
+                    Ok(RelayPoolNotification::Message {
+                        message: RelayMessage::Event { event, .. },
+                        ..
+                    }) => {
+                        message_path_count += 1;
+                        unique_ids.insert(event.id.to_hex());
                     }
                     _ => {}
                 }
@@ -86,7 +87,7 @@ async fn main() -> Result<()> {
         }
     }
 
-    let phase1_duration = phase1_start.elapsed();
+    let _phase1_duration = phase1_start.elapsed();
     let phase1_event = event_path_count;
     let phase1_message = message_path_count;
     let phase1_unique = unique_ids.len();
@@ -105,12 +106,10 @@ async fn main() -> Result<()> {
     let sync_start = Instant::now();
 
     // Run negentropy sync (same filters as main app)
-    let sync_filters = vec![
-        Filter::new().kind(Kind::Custom(31933)).author(pubkey),
+    let sync_filters = [Filter::new().kind(Kind::Custom(31933)).author(pubkey),
         Filter::new().kind(Kind::Custom(4199)),
         Filter::new().kind(Kind::Custom(4200)),
-        Filter::new().kind(Kind::Custom(4201)),
-    ];
+        Filter::new().kind(Kind::Custom(4201))];
 
     for (i, filter) in sync_filters.iter().enumerate() {
         let opts = SyncOptions::default();
@@ -140,8 +139,6 @@ async fn main() -> Result<()> {
     let timeout = tokio::time::sleep(Duration::from_secs(30));
     tokio::pin!(timeout);
 
-    let mut last_event_time = Instant::now();
-
     loop {
         tokio::select! {
             _ = &mut timeout => break,
@@ -150,19 +147,18 @@ async fn main() -> Result<()> {
                     Ok(RelayPoolNotification::Event { event, .. }) => {
                         event_path_count += 1;
                         unique_ids.insert(event.id.to_hex());
-                        last_event_time = Instant::now();
                         if event_path_count <= 5 {
                             println!("  [Event] kind:{} id={}", event.kind.as_u16(), &event.id.to_hex()[..16]);
                         }
                     }
-                    Ok(RelayPoolNotification::Message { message, .. }) => {
-                        if let RelayMessage::Event { event, .. } = &message {
-                            message_path_count += 1;
-                            unique_ids.insert(event.id.to_hex());
-                            last_event_time = Instant::now();
-                            if message_path_count <= 5 {
-                                println!("  [Message] kind:{} id={}", event.kind.as_u16(), &event.id.to_hex()[..16]);
-                            }
+                    Ok(RelayPoolNotification::Message {
+                        message: RelayMessage::Event { event, .. },
+                        ..
+                    }) => {
+                        message_path_count += 1;
+                        unique_ids.insert(event.id.to_hex());
+                        if message_path_count <= 5 {
+                            println!("  [Message] kind:{} id={}", event.kind.as_u16(), &event.id.to_hex()[..16]);
                         }
                     }
                     Ok(_) => {}
@@ -182,7 +178,7 @@ async fn main() -> Result<()> {
         );
     }
 
-    let phase3_duration = phase3_start.elapsed();
+    let _phase3_duration = phase3_start.elapsed();
     let phase3_unique = unique_ids.len();
 
     println!("\n╔════════════════════════════════════════════════════════════════╗");

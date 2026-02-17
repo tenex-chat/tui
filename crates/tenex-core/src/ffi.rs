@@ -3,7 +3,7 @@
 //! This module exposes a minimal API for use from Swift/Kotlin via UniFFI.
 //! Keep this API as simple as possible - no async functions, only basic types.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -74,6 +74,77 @@ fn get_data_dir() -> PathBuf {
     // Use a subdirectory in the user's data directory
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
     base.join("tenex").join("nostrdb")
+}
+
+/// Open nostrdb and validate it by creating a transaction and running a tiny query.
+///
+/// This catches cases where `Ndb::new` succeeds but LMDB lock state is stale, causing
+/// all subsequent reads to fail with transaction errors.
+fn open_ndb_with_health_check(
+    data_dir: &Path,
+    config: &nostrdb::Config,
+) -> Result<Arc<Ndb>, String> {
+    let ndb = Ndb::new(data_dir.to_str().unwrap_or("tenex_data"), config)
+        .map_err(|e| format!("open failed: {}", e))?;
+
+    let txn = Transaction::new(&ndb).map_err(|e| format!("transaction probe failed: {}", e))?;
+    let probe_filter = FilterBuilder::new().kinds([31933]).build();
+    ndb.query(&txn, &[probe_filter], 1)
+        .map_err(|e| format!("query probe failed: {}", e))?;
+
+    Ok(Arc::new(ndb))
+}
+
+fn is_likely_stale_lock_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("transaction failed")
+        || lower.contains("lock")
+        || lower.contains("resource temporarily unavailable")
+        || lower.contains("busy")
+        || lower.contains("mdb_bad_rslot")
+        || lower.contains("mdb_readers_full")
+}
+
+/// Try opening nostrdb, and if a stale lock is likely, remove `lock.mdb` and retry once.
+fn open_ndb_with_lock_recovery(
+    data_dir: &Path,
+    config: &nostrdb::Config,
+) -> Result<Arc<Ndb>, String> {
+    match open_ndb_with_health_check(data_dir, config) {
+        Ok(ndb) => Ok(ndb),
+        Err(first_err) => {
+            if !is_likely_stale_lock_error(&first_err) {
+                return Err(first_err);
+            }
+
+            let lock_path = data_dir.join("lock.mdb");
+            if !lock_path.exists() {
+                return Err(first_err);
+            }
+
+            eprintln!(
+                "[TENEX] NostrDB probe failed ({}). Attempting stale lock recovery at {}",
+                first_err,
+                lock_path.display()
+            );
+
+            std::fs::remove_file(&lock_path).map_err(|e| {
+                format!(
+                    "{} (failed to remove stale lock {}: {})",
+                    first_err,
+                    lock_path.display(),
+                    e
+                )
+            })?;
+
+            open_ndb_with_health_check(data_dir, config).map_err(|retry_err| {
+                format!(
+                    "{} (retry after lock recovery failed: {})",
+                    first_err, retry_err
+                )
+            })
+        }
+    }
 }
 
 /// Helper to get the project a_tag from project_id
@@ -574,7 +645,7 @@ fn process_data_changes_with_deltas(
                             if let Some(status) = ProjectStatus::from_value(&event) {
                                 let project_a_tag = status.project_coordinate.clone();
 
-                                if store.project_statuses.get(&project_a_tag).is_some() {
+                                if store.project_statuses.contains_key(&project_a_tag) {
                                     let project_id = project_id_from_a_tag(store, &project_a_tag)
                                         .unwrap_or_default();
                                     let is_online = store.is_project_online(&project_a_tag);
@@ -586,7 +657,7 @@ fn process_data_changes_with_deltas(
                                                 .map(project_agent_to_online_info)
                                                 .collect()
                                         })
-                                        .unwrap_or_else(Vec::new);
+                                        .unwrap_or_default();
 
                                     deltas.push(DataChangeType::ProjectStatusChanged {
                                         project_id,
@@ -1361,12 +1432,6 @@ impl FfiPreferences {
         let contents = std::fs::read_to_string(path).ok()?;
         serde_json::from_str(&contents).ok()
     }
-
-    fn save_to_file(&self, path: &std::path::Path) {
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            let _ = std::fs::write(path, json);
-        }
-    }
 }
 
 /// Wrapper that handles persistence
@@ -1621,8 +1686,8 @@ impl TenexCore {
         // Initialize nostrdb with appropriate mapsize for iOS
         // Use 2GB to avoid MDB_MAP_FULL errors with larger datasets
         let config = nostrdb::Config::new().set_mapsize(2 * 1024 * 1024 * 1024);
-        let ndb = match Ndb::new(data_dir.to_str().unwrap_or("tenex_data"), &config) {
-            Ok(ndb) => Arc::new(ndb),
+        let ndb = match open_ndb_with_lock_recovery(&data_dir, &config) {
+            Ok(ndb) => ndb,
             Err(e) => {
                 eprintln!("Failed to initialize nostrdb: {}", e);
                 return false;
@@ -2353,7 +2418,7 @@ impl TenexCore {
                             content: message.content.clone(),
                             kind: 1, // Messages are kind:1
                             author,
-                            created_at: message.created_at as u64,
+                            created_at: message.created_at,
                             project_a_tag: Some(project_a_tag.clone()),
                         });
 
@@ -2958,7 +3023,7 @@ impl TenexCore {
         match status {
             Some(s) => Ok(ProjectConfigOptions {
                 all_models: s.all_models.clone(),
-                all_tools: s.all_tools.iter().cloned().collect(),
+                all_tools: s.all_tools.to_vec(),
             }),
             None => Ok(ProjectConfigOptions {
                 all_models: Vec::new(),
@@ -3921,9 +3986,7 @@ impl TenexCore {
             resource: "preferences".to_string(),
         })?;
 
-        let prefs_storage = prefs_guard
-            .as_ref()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
         let settings = &prefs_storage.prefs.ai_audio_settings;
 
         // Never expose actual API keys - only return whether they're configured
@@ -3947,9 +4010,7 @@ impl TenexCore {
                 resource: "preferences".to_string(),
             })?;
 
-        let prefs_storage = prefs_guard
-            .as_mut()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
         prefs_storage
             .set_selected_voice_ids(voice_ids)
             .map_err(|e| TenexError::Internal { message: e })?;
@@ -3965,9 +4026,7 @@ impl TenexCore {
                 resource: "preferences".to_string(),
             })?;
 
-        let prefs_storage = prefs_guard
-            .as_mut()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
         prefs_storage
             .set_openrouter_model(model)
             .map_err(|e| TenexError::Internal { message: e })?;
@@ -4030,9 +4089,7 @@ impl TenexCore {
                 resource: "preferences".to_string(),
             })?;
 
-        let prefs_storage = prefs_guard
-            .as_mut()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
         prefs_storage
             .set_audio_prompt(prompt)
             .map_err(|e| TenexError::Internal { message: e })?;
@@ -4048,9 +4105,7 @@ impl TenexCore {
                 resource: "preferences".to_string(),
             })?;
 
-        let prefs_storage = prefs_guard
-            .as_mut()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
         prefs_storage
             .set_tts_inactivity_threshold(secs)
             .map_err(|e| TenexError::Internal { message: e })?;
@@ -4066,9 +4121,7 @@ impl TenexCore {
                 resource: "preferences".to_string(),
             })?;
 
-        let prefs_storage = prefs_guard
-            .as_mut()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
         prefs_storage
             .set_audio_notifications_enabled(enabled)
             .map_err(|e| TenexError::Internal { message: e })?;
@@ -4109,9 +4162,7 @@ impl TenexCore {
         let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
             resource: "preferences".to_string(),
         })?;
-        let prefs_storage = prefs_guard
-            .as_ref()
-            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
         let ai_settings = &prefs_storage.prefs.ai_audio_settings;
 
         let notification = runtime
@@ -4155,7 +4206,7 @@ impl TenexCore {
         let keys_guard = self.keys.read().map_err(|_| TenexError::LockError {
             resource: "keys".to_string(),
         })?;
-        let keys = keys_guard.as_ref().ok_or_else(|| TenexError::NotLoggedIn)?;
+        let keys = keys_guard.as_ref().ok_or(TenexError::NotLoggedIn)?;
 
         // Use shared Tokio runtime for async upload
         let runtime = get_tokio_runtime();
