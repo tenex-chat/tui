@@ -71,9 +71,18 @@ struct NudgeSelectorSheet: View {
                 .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search nudges...")
+            #if os(iOS)
             .navigationTitle("Select Nudges")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Select Nudges").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -96,6 +105,12 @@ struct NudgeSelectorSheet: View {
                 localSelectedIds = selectedNudgeIds
             }
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     // MARK: - Subviews
@@ -184,13 +199,13 @@ struct NudgeRowView: View {
             HStack(spacing: 12) {
                 // Nudge icon
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.purple.opacity(0.15))
+                    .fill(Color.projectBrandBackground)
                     .frame(width: 40, height: 40)
                     .overlay {
                         Text("/")
                             .font(.headline)
                             .fontWeight(.bold)
-                            .foregroundStyle(.purple)
+                            .foregroundStyle(Color.projectBrand)
                     }
 
                 // Nudge info
@@ -212,7 +227,7 @@ struct NudgeRowView: View {
                 // Selection indicator (checkbox for multi-select)
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .font(.title2)
-                    .foregroundStyle(isSelected ? .blue : .secondary)
+                    .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
             }
             .padding(.vertical, 8)
         }
@@ -232,7 +247,7 @@ struct NudgeChipView: View {
             Text("/")
                 .font(.subheadline)
                 .fontWeight(.bold)
-                .foregroundStyle(.purple)
+                .foregroundStyle(Color.projectBrand)
 
             // Nudge title
             Text(nudge.title)

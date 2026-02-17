@@ -72,9 +72,18 @@ struct SkillSelectorSheet: View {
                 .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search skills...")
+            #if os(iOS)
             .navigationTitle("Select Skills")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Select Skills").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -97,6 +106,12 @@ struct SkillSelectorSheet: View {
                 localSelectedIds = selectedSkillIds
             }
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     // MARK: - Subviews
@@ -108,7 +123,7 @@ struct SkillSelectorSheet: View {
                     HStack(spacing: 4) {
                         Image(systemName: "bolt.fill")
                             .font(.caption2)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.skillBrand)
 
                         Text(skill.title)
                             .font(.caption)
@@ -194,12 +209,12 @@ struct SkillRowView: View {
             HStack(spacing: 12) {
                 // Skill icon (bolt for skills, distinguishes from nudges which use "/")
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.orange.opacity(0.15))
+                    .fill(Color.skillBrandBackground)
                     .frame(width: 40, height: 40)
                     .overlay {
                         Image(systemName: "bolt.fill")
                             .font(.headline)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.skillBrand)
                     }
 
                 // Skill info
@@ -230,7 +245,7 @@ struct SkillRowView: View {
                 // Selection indicator (checkbox for multi-select)
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .font(.title2)
-                    .foregroundStyle(isSelected ? .orange : .secondary)
+                    .foregroundStyle(isSelected ? Color.skillBrand : .secondary)
             }
             .padding(.vertical, 8)
         }
@@ -254,7 +269,7 @@ struct SkillChipView: View {
             // Bolt icon
             Image(systemName: "bolt.fill")
                 .font(.subheadline)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color.skillBrand)
 
             // Skill title
             Text(skill.title)

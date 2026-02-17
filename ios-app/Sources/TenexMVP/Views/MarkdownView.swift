@@ -173,7 +173,7 @@ struct MarkdownView: View, Equatable {
                 elements.append(MarkdownElement(view: AnyView(
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark.square.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.todoDone)
                         parseInlineMarkdown(String(line.dropFirst(6)))
                     }
                 )))
@@ -486,7 +486,7 @@ struct InlineLinkView: View {
     var body: some View {
         Link(destination: url) {
             Text(displayText)
-                .foregroundStyle(Color.accentColor)
+                .foregroundStyle(Color.composerAction)
                 .underline()
         }
     }

@@ -18,8 +18,8 @@ struct MessagesChartView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     // Legend
                     HStack(spacing: 16) {
-                        LegendItem(color: .blue, label: "You")
-                        LegendItem(color: .purple, label: "All")
+                        LegendItem(color: Color.statUserMessages, label: "You")
+                        LegendItem(color: Color.statAllMessages, label: "All")
                     }
                     .font(.caption)
 
@@ -31,7 +31,7 @@ struct MessagesChartView: View {
                                 x: .value("Date", dayLabel(for: dayData.dayStart)),
                                 y: .value("Count", dayData.userCount)
                             )
-                            .foregroundStyle(Color.blue.gradient)
+                            .foregroundStyle(Color.statUserMessages.gradient)
                             .position(by: .value("Type", "User"))
                             .accessibilityLabel("\(dayLabel(for: dayData.dayStart)) - You: \(dayData.userCount) messages")
 
@@ -40,7 +40,7 @@ struct MessagesChartView: View {
                                 x: .value("Date", dayLabel(for: dayData.dayStart)),
                                 y: .value("Count", dayData.allCount)
                             )
-                            .foregroundStyle(Color.purple.gradient)
+                            .foregroundStyle(Color.statAllMessages.gradient)
                             .position(by: .value("Type", "All"))
                             .accessibilityLabel("\(dayLabel(for: dayData.dayStart)) - All: \(dayData.allCount) messages")
                         }

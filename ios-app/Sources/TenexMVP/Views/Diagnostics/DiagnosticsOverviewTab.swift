@@ -224,7 +224,7 @@ struct SectionUnavailablePlaceholder: View {
     var body: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundColor(.orange)
+                .foregroundColor(Color.healthWarning)
             Text(message)
                 .font(.subheadline)
                 .foregroundColor(.secondary)

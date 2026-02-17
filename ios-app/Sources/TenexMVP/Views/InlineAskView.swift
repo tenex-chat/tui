@@ -43,7 +43,7 @@ struct InlineAskView: View {
             // Checkmark indicator
             Image(systemName: "checkmark.circle.fill")
                 .font(.title3)
-                .foregroundStyle(.green)
+                .foregroundStyle(Color.statusActive)
 
             VStack(alignment: .leading, spacing: 2) {
                 // Title
@@ -81,11 +81,11 @@ struct InlineAskView: View {
             .buttonStyle(.plain)
         }
         .padding(12)
-        .background(Color.green.opacity(0.1))
+        .background(Color.presenceOnlineBackground)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.green.opacity(0.3), lineWidth: 1)
+                .stroke(Color.presenceOnline.opacity(0.3), lineWidth: 1)
         )
     }
 

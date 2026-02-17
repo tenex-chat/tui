@@ -90,11 +90,7 @@ class TenexCoreManager: ObservableObject {
     @Published var messagesByConversation: [String: [MessageInfo]] = [:]
     @Published private(set) var statsVersion: UInt64 = 0
     @Published private(set) var diagnosticsVersion: UInt64 = 0
-    @Published private(set) var liveFeed: [LiveFeedItem] = []
-    @Published private(set) var liveFeedLastReceivedAt: Date?
     @Published var streamingBuffers: [String: StreamingBuffer] = [:]
-
-    private let liveFeedMaxItems = 400
 
     /// Project online status - updated reactively via event callbacks.
     /// Key: project ID, Value: true if online.
@@ -227,7 +223,6 @@ class TenexCoreManager: ObservableObject {
             messages.sort { $0.createdAt < $1.createdAt }
             setMessagesCache(messages, for: conversationId)
         }
-        recordLiveFeedItem(conversationId: conversationId, message: message)
     }
 
     @MainActor
@@ -523,25 +518,6 @@ class TenexCoreManager: ObservableObject {
             }
         } catch {
         }
-    }
-
-    @MainActor
-    func recordLiveFeedItem(conversationId: String, message: MessageInfo) {
-        if liveFeed.contains(where: { $0.id == message.id }) {
-            return
-        }
-
-        liveFeed.insert(LiveFeedItem(conversationId: conversationId, message: message), at: 0)
-        if liveFeed.count > liveFeedMaxItems {
-            liveFeed.removeLast(liveFeed.count - liveFeedMaxItems)
-        }
-        liveFeedLastReceivedAt = liveFeed.first?.receivedAt
-    }
-
-    @MainActor
-    func clearLiveFeed() {
-        liveFeed.removeAll()
-        liveFeedLastReceivedAt = nil
     }
 
     /// Update hasActiveAgents based on current conversations
@@ -906,7 +882,6 @@ struct TenexMVPApp: App {
             .onChange(of: isLoggedIn) { _, loggedIn in
                 // Register/unregister event callback based on login state
                 if loggedIn {
-                    coreManager.clearLiveFeed()
                     coreManager.registerEventCallback()
                     // Initial data fetch on login with proper authorization sequencing
                     Task { @MainActor in
@@ -932,7 +907,6 @@ struct TenexMVPApp: App {
                     }
                 } else {
                     coreManager.unregisterEventCallback()
-                    coreManager.clearLiveFeed()
                     // Clear badge on logout
                     Task {
                         await NotificationService.shared.clearBadge()
@@ -1070,14 +1044,6 @@ struct MainTabView: View {
                 ReportsTabView()
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
-            }
-
-            Tab("Feed", systemImage: "dot.radiowaves.left.and.right", value: 1) {
-                NavigationStack {
-                    FeedView()
-                        .environmentObject(coreManager)
-                }
-                .nowPlayingInset(coreManager: coreManager)
             }
 
             Tab("Inbox", systemImage: "tray", value: 3) {

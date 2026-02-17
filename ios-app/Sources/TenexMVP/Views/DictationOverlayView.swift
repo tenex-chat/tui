@@ -58,7 +58,7 @@ struct DictationOverlayView: View {
                 if let error = manager.error {
                     Text(error)
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.recordingActive)
                         .padding(.top, 8)
                 }
             }
@@ -86,13 +86,13 @@ struct RecordingView: View {
             // Pulsing mic indicator
             ZStack {
                 Circle()
-                    .fill(Color.red.opacity(0.3))
+                    .fill(Color.recordingActiveBackground)
                     .frame(width: 80, height: 80)
                     .scaleEffect(pulseAnimation ? 1.2 : 1.0)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: pulseAnimation)
 
                 Circle()
-                    .fill(Color.red)
+                    .fill(Color.recordingActive)
                     .frame(width: 60, height: 60)
 
                 Image(systemName: "mic.fill")
@@ -134,7 +134,7 @@ struct RecordingView: View {
                         .font(.subheadline)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.red)
+                .tint(Color.recordingActive)
             }
         }
     }

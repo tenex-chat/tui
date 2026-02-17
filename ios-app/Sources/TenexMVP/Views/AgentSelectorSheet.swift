@@ -94,9 +94,18 @@ struct AgentSelectorSheet: View {
                 .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search agents...")
+            #if os(iOS)
             .navigationTitle("Select Agent")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Select Agent").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -123,6 +132,12 @@ struct AgentSelectorSheet: View {
                     .environmentObject(coreManager)
             }
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     // MARK: - Subviews
@@ -145,7 +160,7 @@ struct AgentSelectorSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.systemGray6)
-        .foregroundStyle(.blue)
+        .foregroundStyle(Color.agentBrand)
     }
 
     private var emptyStateView: some View {
@@ -233,7 +248,7 @@ struct OnlineAgentRowView: View {
                                     .padding(.vertical, 1)
                                     .background(
                                         Capsule()
-                                            .fill(Color.blue)
+                                            .fill(Color.agentBrand)
                                     )
                             }
 
@@ -254,7 +269,7 @@ struct OnlineAgentRowView: View {
                     // Selection indicator
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.body)
-                        .foregroundStyle(isSelected ? .blue : .secondary)
+                        .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
                 }
             }
             .buttonStyle(.plain)

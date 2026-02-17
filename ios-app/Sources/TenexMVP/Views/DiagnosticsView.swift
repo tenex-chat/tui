@@ -97,7 +97,7 @@ struct DiagnosticsTabPill: View {
             .padding(.vertical, 8)
             .background(
                 isSelected
-                    ? Color.blue
+                    ? Color.agentBrand
                     : Color.systemGray5
             )
             .foregroundColor(isSelected ? .white : .primary)
@@ -172,7 +172,7 @@ struct DiagnosticsSectionUnavailableView: View {
         VStack(spacing: 16) {
             Image(systemName: icon)
                 .font(.system(.largeTitle))
-                .foregroundColor(.orange)
+                .foregroundColor(Color.healthWarning)
 
             Text(title)
                 .font(.headline)
@@ -199,7 +199,7 @@ struct DiagnosticsSectionErrorsBanner: View {
             Button(action: { withAnimation { isExpanded.toggle() } }) {
                 HStack {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
+                        .foregroundColor(Color.healthWarning)
 
                     Text("Some sections failed to load")
                         .font(.subheadline)
@@ -229,11 +229,11 @@ struct DiagnosticsSectionErrorsBanner: View {
                 .padding(.bottom, 12)
             }
         }
-        .background(Color.orange.opacity(0.1))
+        .background(Color.healthWarning.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                .stroke(Color.healthWarning.opacity(0.3), lineWidth: 1)
         )
     }
 }
@@ -248,7 +248,7 @@ struct DiagnosticsErrorView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(.largeTitle))
-                .foregroundColor(.orange)
+                .foregroundColor(Color.healthWarning)
 
             Text("Failed to Load Diagnostics")
                 .font(.title2)

@@ -107,7 +107,6 @@ pub enum HomeTab {
     Conversations,
     Inbox,
     Reports,
-    Feed,
     ActiveWork,
     Stats,
 }
@@ -161,17 +160,6 @@ pub enum InputContextFocus {
     Nudge,
     /// Skill selector is selected
     Skill,
-}
-
-/// A feed item representing a kind:1 event (text note) from a project
-#[derive(Debug, Clone)]
-pub struct FeedItem {
-    pub content: String,
-    pub pubkey: String,
-    pub created_at: u64,
-    pub thread_id: String,
-    pub thread_title: String,
-    pub project_a_tag: String,
 }
 
 /// Actions that can be undone
@@ -239,9 +227,6 @@ pub struct App {
 
     /// Event stats for debugging (network events received)
     pub event_stats: tenex_core::stats::SharedEventStats,
-
-    /// Live event feed for debugging (most recent events)
-    pub event_feed: tenex_core::stats::SharedEventFeed,
 
     /// Subscription stats for debugging (active subscriptions and their event counts)
     pub subscription_stats: tenex_core::stats::SharedSubscriptionStats,
@@ -339,7 +324,6 @@ impl App {
         db: Arc<Database>,
         data_store: Rc<RefCell<AppDataStore>>,
         event_stats: tenex_core::stats::SharedEventStats,
-        event_feed: tenex_core::stats::SharedEventFeed,
         subscription_stats: tenex_core::stats::SharedSubscriptionStats,
         negentropy_stats: tenex_core::stats::SharedNegentropySyncStats,
         data_dir: &str,
@@ -375,7 +359,6 @@ impl App {
             chat_input_wrap_width: 80, // Default, updated during rendering
             data_store,
             event_stats,
-            event_feed,
             subscription_stats,
             negentropy_stats,
             tabs: TabManager::new(),
@@ -2364,76 +2347,6 @@ impl App {
             })
             .cloned()
             .collect()
-    }
-
-    /// Get feed items (kind:1 text notes) for Home view Feed tab
-    /// Aggregates all messages from visible projects, sorted by created_at descending (newest first)
-    pub fn feed_items(&self) -> Vec<FeedItem> {
-        // Empty visible_projects = show nothing
-        if self.visible_projects.is_empty() {
-            return vec![];
-        }
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-
-        // Calculate time cutoff if time filter is active
-        let time_cutoff = self.home.time_filter.as_ref().map(|tf| now.saturating_sub(tf.seconds()));
-
-        let store = self.data_store.borrow();
-        let prefs = self.preferences.borrow();
-        let mut feed_items: Vec<FeedItem> = Vec::new();
-
-        // Iterate over visible projects and collect messages from their threads
-        for project_a_tag in &self.visible_projects {
-            let threads = store.get_threads(project_a_tag);
-
-            for thread in threads {
-                // Apply archive filter
-                if !self.show_archived && prefs.is_thread_archived(&thread.id) {
-                    continue;
-                }
-
-                // Apply scheduled filter
-                if self.hide_scheduled && thread.is_scheduled {
-                    continue;
-                }
-
-                let messages = store.get_messages(&thread.id);
-                for msg in messages {
-                    // Apply time filter
-                    if let Some(cutoff) = time_cutoff {
-                        if msg.created_at < cutoff {
-                            continue;
-                        }
-                    }
-
-                    // Skip reasoning messages from feed
-                    if msg.is_reasoning {
-                        continue;
-                    }
-
-                    feed_items.push(FeedItem {
-                        content: msg.content.clone(),
-                        pubkey: msg.pubkey.clone(),
-                        created_at: msg.created_at,
-                        thread_id: thread.id.clone(),
-                        thread_title: thread.title.clone(),
-                        project_a_tag: project_a_tag.clone(),
-                    });
-                }
-            }
-        }
-
-        // Sort by created_at descending (newest first)
-        feed_items.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-
-        // Limit to reasonable number for UI performance
-        feed_items.truncate(200);
-
-        feed_items
     }
 
     /// Open thread from Home view (recent conversations or inbox)

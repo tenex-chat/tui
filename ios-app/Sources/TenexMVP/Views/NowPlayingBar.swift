@@ -164,7 +164,7 @@ struct AudioQueueSheet: View {
                     Section("Now Playing") {
                         HStack(spacing: 12) {
                             Image(systemName: "speaker.wave.2.fill")
-                                .foregroundStyle(Color.accentColor)
+                                .foregroundStyle(Color.agentBrand)
                                 .frame(width: 24)
 
                             VStack(alignment: .leading, spacing: 2) {

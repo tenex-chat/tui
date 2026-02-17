@@ -199,7 +199,7 @@ struct DiagnosticsSyncTab: View {
                 if result.eventsReceived > 0 {
                     Text("+\(result.eventsReceived) events")
                         .font(.caption)
-                        .foregroundColor(.green)
+                        .foregroundColor(Color.healthGood)
                 }
                 Spacer()
                 Text("\(result.secondsAgo)s ago")
@@ -210,7 +210,7 @@ struct DiagnosticsSyncTab: View {
             if let error = result.error {
                 Text(error)
                     .font(.caption2)
-                    .foregroundColor(.red)
+                    .foregroundColor(Color.healthError)
                     .lineLimit(2)
             }
         }

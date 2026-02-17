@@ -21,7 +21,7 @@ struct RuntimeChartView: View {
                             x: .value("Date", dayLabel(for: dayData.dayStart)),
                             y: .value("Runtime (ms)", dayData.runtimeMs)
                         )
-                        .foregroundStyle(Color.blue.gradient)
+                        .foregroundStyle(Color.statRuntime.gradient)
                         .accessibilityLabel("\(dayLabel(for: dayData.dayStart)): \(StatsSnapshot.formatRuntime(dayData.runtimeMs))")
                     }
                 }

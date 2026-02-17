@@ -13,14 +13,14 @@ struct MetricCardsView: View {
                     title: "Total Cost",
                     value: String(format: "$%.2f", snapshot.totalCost14Days),
                     subtitle: "past 2 weeks",
-                    color: .green
+                    color: Color.statCost
                 )
 
                 MetricCard(
                     title: "24h Runtime",
                     value: StatsSnapshot.formatRuntime(snapshot.todayRuntimeMs),
                     subtitle: "today",
-                    color: .blue
+                    color: Color.statRuntime
                 )
             }
 
@@ -29,7 +29,7 @@ struct MetricCardsView: View {
                 title: "Avg (\(snapshot.activeDaysCount)d)",
                 value: StatsSnapshot.formatRuntime(snapshot.avgDailyRuntimeMs),
                 subtitle: "per day",
-                color: .purple
+                color: Color.statAverage
             )
         }
         .accessibilityElement(children: .contain)

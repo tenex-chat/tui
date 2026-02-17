@@ -143,7 +143,7 @@ struct ErrorView: View {
         VStack(spacing: 16) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(.largeTitle))
-                .foregroundColor(.orange)
+                .foregroundColor(Color.healthWarning)
 
             Text("Failed to Load Stats")
                 .font(.title2)

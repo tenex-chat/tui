@@ -227,7 +227,7 @@ struct ConversationGroupHeader: View {
             // Conversation icon
             Image(systemName: "bubble.left.and.bubble.right.fill")
                 .font(.title2)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.agentBrand)
 
             VStack(alignment: .leading, spacing: 2) {
                 // Title
@@ -252,8 +252,8 @@ struct ConversationGroupHeader: View {
                 .fontWeight(.medium)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.orange.opacity(0.2))
-                .foregroundStyle(.orange)
+                .background(Color.askBrandBackground)
+                .foregroundStyle(Color.askBrand)
                 .clipShape(Capsule())
 
             // Navigation chevron
@@ -285,7 +285,7 @@ struct MatchingMessageRow: View {
 
             // Author avatar
             Circle()
-                .fill(isUser ? Color.green.gradient : Color.blue.gradient)
+                .fill(isUser ? Color.messageUserAvatarColor.gradient : Color.agentBrand.gradient)
                 .frame(width: 22, height: 22)
                 .overlay {
                     Image(systemName: isUser ? "person.fill" : "sparkle")
@@ -322,7 +322,7 @@ struct MatchingMessageRow: View {
                         Text("Report")
                             .font(.caption2)
                     }
-                    .foregroundStyle(.blue.opacity(0.8))
+                    .foregroundStyle(Color.agentBrand.opacity(0.8))
                 }
             }
         }

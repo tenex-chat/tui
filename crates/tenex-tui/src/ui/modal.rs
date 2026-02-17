@@ -1944,17 +1944,15 @@ pub enum DebugStatsTab {
     Negentropy,
     ETagQuery,
     DataStore,
-    EventFeed,
 }
 
 impl DebugStatsTab {
-    pub const ALL: [DebugStatsTab; 6] = [
+    pub const ALL: [DebugStatsTab; 5] = [
         DebugStatsTab::Events,
         DebugStatsTab::Subscriptions,
         DebugStatsTab::Negentropy,
         DebugStatsTab::ETagQuery,
         DebugStatsTab::DataStore,
-        DebugStatsTab::EventFeed,
     ];
 
     pub fn label(&self) -> &'static str {
@@ -1964,7 +1962,6 @@ impl DebugStatsTab {
             DebugStatsTab::Negentropy => "Negentropy",
             DebugStatsTab::ETagQuery => "E-Tag Query",
             DebugStatsTab::DataStore => "Data Store",
-            DebugStatsTab::EventFeed => "Event Feed",
         }
     }
 
@@ -1975,7 +1972,6 @@ impl DebugStatsTab {
             DebugStatsTab::Negentropy => 2,
             DebugStatsTab::ETagQuery => 3,
             DebugStatsTab::DataStore => 4,
-            DebugStatsTab::EventFeed => 5,
         }
     }
 
@@ -1986,7 +1982,6 @@ impl DebugStatsTab {
             2 => DebugStatsTab::Negentropy,
             3 => DebugStatsTab::ETagQuery,
             4 => DebugStatsTab::DataStore,
-            5 => DebugStatsTab::EventFeed,
             _ => DebugStatsTab::Events,
         }
     }
@@ -2022,8 +2017,6 @@ pub struct DebugStatsState {
     pub sub_selected_filter_index: usize,
     /// Whether the sidebar is focused (vs the subscription list)
     pub sub_sidebar_focused: bool,
-    /// For event feed tab: selected event index
-    pub event_feed_selected_index: usize,
 }
 
 impl DebugStatsState {
@@ -2038,7 +2031,6 @@ impl DebugStatsState {
             sub_project_filters: vec![None], // Start with just "All"
             sub_selected_filter_index: 0,
             sub_sidebar_focused: true, // Start with sidebar focused
-            event_feed_selected_index: 0,
         }
     }
 

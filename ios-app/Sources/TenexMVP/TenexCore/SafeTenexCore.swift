@@ -192,7 +192,7 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
-                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds)
+                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: [])
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

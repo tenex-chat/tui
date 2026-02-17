@@ -189,13 +189,13 @@ struct ActivityCell: View {
         let intensity = Double(intensityValue) / 255.0
 
         if intensity >= 0.75 {
-            return Color(red: 34/255, green: 197/255, blue: 94/255) // green-500
+            return Color.activityHigh
         } else if intensity >= 0.5 {
-            return Color(red: 74/255, green: 222/255, blue: 128/255) // green-400
+            return Color.activityMediumHigh
         } else if intensity >= 0.25 {
-            return Color(red: 134/255, green: 239/255, blue: 172/255) // green-300
+            return Color.activityMedium
         } else {
-            return Color(red: 187/255, green: 247/255, blue: 208/255) // green-200
+            return Color.activityLow
         }
     }
 
@@ -254,14 +254,10 @@ enum ActivityIntensityLevel: CaseIterable, Identifiable {
 
     var color: Color {
         switch self {
-        case .none:
-            return Color.systemGray6
-        case .low:
-            return Color(red: 187/255, green: 247/255, blue: 208/255) // green-200
-        case .medium:
-            return Color(red: 74/255, green: 222/255, blue: 128/255) // green-400
-        case .high:
-            return Color(red: 34/255, green: 197/255, blue: 94/255) // green-500
+        case .none:   return Color.activityNone
+        case .low:    return Color.activityLow
+        case .medium: return Color.activityMediumHigh
+        case .high:   return Color.activityHigh
         }
     }
 }
