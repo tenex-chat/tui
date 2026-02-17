@@ -7,7 +7,7 @@
 //! - Open source conversations (Enter)
 
 use crate::ui::format::format_relative_time;
-use crate::ui::state::{TTSControlState, TTSQueueItem, TTSQueueItemStatus};
+use crate::ui::state::{TTSControlState, TTSQueueItemStatus};
 use crate::ui::{card, theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},

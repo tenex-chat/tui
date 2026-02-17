@@ -2,12 +2,10 @@ mod content;
 mod modals;
 mod sidebar;
 
-pub use crate::ui::views::home_helpers::HierarchicalThread;
 pub use content::get_hierarchical_threads;
 pub use modals::{
     render_composer_project_selector, render_projects_modal, render_search_modal, render_tab_modal,
 };
-pub use sidebar::{get_project_at_index, selectable_project_count};
 
 use crate::ui::components::{render_statusbar, render_tab_bar};
 use crate::ui::modal::ModalState;

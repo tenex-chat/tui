@@ -4,7 +4,6 @@
 //! from the monolithic App struct to improve encapsulation and testability.
 
 use crate::ui::text_editor::TextEditor;
-use std::path::PathBuf;
 
 /// State for in-conversation search mode.
 ///
@@ -184,8 +183,10 @@ impl TabMessageHistory {
 /// The type of content displayed in a tab.
 /// This enum discriminates between different tab content types in the unified tab system.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum TabContentType {
     /// A conversation thread (existing behavior)
+    #[default]
     Conversation,
     /// TTS Control tab for managing audio playback queue
     TTSControl,
@@ -198,11 +199,6 @@ pub enum TabContentType {
     },
 }
 
-impl Default for TabContentType {
-    fn default() -> Self {
-        TabContentType::Conversation
-    }
-}
 
 // =============================================================================
 // TTS QUEUE STATE

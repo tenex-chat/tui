@@ -646,7 +646,7 @@ pub static COMMANDS: &[Command] = &[
                     .get_agent_definition(agent_id)
                 {
                     app.modal_state =
-                        ModalState::CreateAgent(modal::CreateAgentState::fork_from(&agent));
+                        ModalState::CreateAgent(modal::CreateAgentState::fork_from(agent));
                 }
             }
         },
@@ -665,7 +665,7 @@ pub static COMMANDS: &[Command] = &[
                     .get_agent_definition(agent_id)
                 {
                     app.modal_state =
-                        ModalState::CreateAgent(modal::CreateAgentState::clone_from(&agent));
+                        ModalState::CreateAgent(modal::CreateAgentState::clone_from(agent));
                 }
             }
         },
@@ -1054,7 +1054,7 @@ fn archive_toggle(app: &mut App) {
             }
         }
     } else if app.view == View::Chat {
-        if let Some(ref thread) = app.selected_thread() {
+        if let Some(thread) = app.selected_thread() {
             let thread_id = thread.id.clone();
             let thread_title = thread.title.clone();
             let is_now_archived = app.toggle_thread_archived(&thread_id);
@@ -1128,7 +1128,7 @@ fn archive_and_close_tab(app: &mut App) {
         return;
     }
 
-    if let Some(ref thread) = app.selected_thread() {
+    if let Some(thread) = app.selected_thread() {
         let thread_id = thread.id.clone();
         let thread_title = thread.title.clone();
 
@@ -1160,7 +1160,7 @@ fn archive_and_close_tab(app: &mut App) {
 }
 
 fn copy_conversation_id(app: &mut App) {
-    if let Some(ref thread) = app.selected_thread() {
+    if let Some(thread) = app.selected_thread() {
         let conversation_id = &thread.id;
         // Truncate to first 12 characters (short ID format)
         let short_id: String = conversation_id.chars().take(12).collect();

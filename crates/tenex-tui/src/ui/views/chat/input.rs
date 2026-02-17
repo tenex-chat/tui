@@ -193,7 +193,7 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
             let line_visual_rows = if line.is_empty() {
                 1
             } else {
-                (line.len() + input_content_width.max(1) - 1) / input_content_width.max(1)
+                line.len().div_ceil(input_content_width.max(1))
             };
             cursor_visual_row += line_visual_rows;
         }

@@ -1,16 +1,13 @@
-use crate::models::Thread;
 use crate::ui::card;
-use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
-use crate::ui::views::home_helpers::HierarchicalThread;
-use crate::ui::{layout, theme, App, HomeTab};
+use crate::ui::format::truncate_with_ellipsis;
+use crate::ui::{theme, App, HomeTab};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, ListState, Padding, Paragraph, Row, Table},
+    widgets::{Block, Borders, List, ListItem, Padding, Paragraph},
     Frame,
 };
-use unicode_width::UnicodeWidthStr;
 
 pub(super) fn render_project_sidebar(f: &mut Frame, app: &App, area: Rect) {
     // If sidebar search is visible, add search input at top
@@ -796,7 +793,7 @@ fn chars_match_ascii_ignore_case(
     query_chars.iter().enumerate().all(|(i, qc)| {
         text_chars
             .get(start_idx + i)
-            .map_or(false, |tc| tc.eq_ignore_ascii_case(qc))
+            .is_some_and(|tc| tc.eq_ignore_ascii_case(qc))
     })
 }
 

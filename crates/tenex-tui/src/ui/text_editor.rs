@@ -747,7 +747,7 @@ impl TextEditor {
                 visual_row += if line.is_empty() {
                     1
                 } else {
-                    (line.len() + wrap_width - 1) / wrap_width
+                    line.len().div_ceil(wrap_width)
                 };
             }
         }
@@ -847,7 +847,7 @@ impl TextEditor {
             let prev_visual_lines = if prev_line_len == 0 {
                 1
             } else {
-                (prev_line_len + wrap_width - 1) / wrap_width
+                prev_line_len.div_ceil(wrap_width)
             };
 
             // Go to last visual line of prev logical line, same column
@@ -907,7 +907,7 @@ impl TextEditor {
         let current_visual_lines = if logical_line_len == 0 {
             1
         } else {
-            (logical_line_len + wrap_width - 1) / wrap_width
+            logical_line_len.div_ceil(wrap_width)
         };
 
         // Check if on last visual line of current logical line AND this is the last logical line
@@ -944,7 +944,7 @@ impl TextEditor {
         let current_visual_lines = if logical_line_len == 0 {
             1
         } else {
-            (logical_line_len + wrap_width - 1) / wrap_width
+            logical_line_len.div_ceil(wrap_width)
         };
 
         if visual_line_in_logical < current_visual_lines - 1 {

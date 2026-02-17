@@ -5,10 +5,9 @@ use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::modal::{ConversationAction, ConversationActionsState, ProjectActionsState};
 use crate::ui::{card, theme, App, View};
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, ListState, Paragraph},
+    layout::Rect,
+    style::Style,
+    widgets::Paragraph,
     Frame,
 };
 

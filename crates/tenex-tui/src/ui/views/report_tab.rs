@@ -9,7 +9,7 @@
 use crate::ui::format::{format_relative_time, truncate_with_ellipsis};
 use crate::ui::markdown::render_markdown;
 use crate::ui::state::{ReportTabFocus, ReportTabState};
-use crate::ui::{card, theme, App};
+use crate::ui::{theme, App};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -297,7 +297,7 @@ fn render_diff_view(current_content: &str, previous_content: Option<&str>) -> Ve
 
 fn render_chat_sidebar(
     f: &mut Frame,
-    app: &App,
+    _app: &App,
     state: &ReportTabState,
     author_name: &str,
     area: Rect,

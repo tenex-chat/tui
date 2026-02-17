@@ -3,7 +3,7 @@ use crate::ui::card;
 use crate::ui::format::{format_relative_time, status_label_to_symbol, truncate_with_ellipsis};
 use crate::ui::views::home_helpers::build_thread_hierarchy;
 use crate::ui::views::home_helpers::HierarchicalThread;
-use crate::ui::{layout, theme, App, HomeTab};
+use crate::ui::{theme, App, HomeTab};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},

@@ -1,6 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use crate::ui::{self, App, ModalState};
+use crate::ui::{App, ModalState};
 use tenex_core::stats::query_events_by_e_tag;
 
 pub(super) fn handle_view_raw_event_modal_key(app: &mut App, key: KeyEvent) {

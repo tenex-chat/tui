@@ -22,7 +22,6 @@ pub(super) fn handle_nudge_list_key(app: &mut App, key: KeyEvent) {
         KeyCode::Esc => {
             // Close modal
             app.modal_state = ModalState::None;
-            return;
         }
         KeyCode::Up | KeyCode::Char('k') => {
             let mut new_state = state;

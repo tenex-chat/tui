@@ -86,7 +86,6 @@ pub fn is_todo_write(name: &str) -> bool {
 /// Supports both embedded JSON tool calls (Claude Code style) and tag-based tool calls (TENEX style)
 pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
     let mut items: Vec<TodoItem> = Vec::new();
-    let mut id_counter = 0usize;
 
     for msg in messages {
         // First try content-based parsing (embedded JSON)
@@ -121,7 +120,7 @@ pub fn aggregate_todo_state(messages: &[Message]) -> TodoState {
             if let Ok(payload) = payload_result {
                 if let Some(todos_array) = payload.todos {
                     items.clear();
-                    id_counter = 0;
+                    let mut id_counter = 0usize;
 
                     for todo_item in todos_array {
                         let title = todo_item.content.or(todo_item.title).unwrap_or_default();
