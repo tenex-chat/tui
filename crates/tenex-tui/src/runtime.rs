@@ -11,14 +11,19 @@ use tenex_core::runtime::CoreRuntime;
 use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadResult};
 use crate::input::handle_key;
 use crate::render::render;
+use crate::ui::state::{TTSQueueItem, TTSQueueItemStatus};
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, Tui, View};
 use crate::ui::notifications::Notification;
 
 /// Result from background audio generation task
 enum AudioGenerationResult {
-    /// Audio generated successfully, contains path to the audio file
-    Success(PathBuf),
+    /// Audio generated successfully, contains path to audio file and source thread_id/message_id
+    Success {
+        audio_path: PathBuf,
+        thread_id: String,
+        message_id: String,
+    },
     /// Audio generation failed or was skipped (not enabled, missing config, etc.)
     Skipped(String),
 }
@@ -295,11 +300,67 @@ pub(crate) async fn run_app(
             Some(result) = audio_rx.recv() => {
                 audio_events += 1;
                 match result {
-                    AudioGenerationResult::Success(audio_path) => {
+                    AudioGenerationResult::Success { audio_path, thread_id, message_id } => {
                         log_diagnostic(&format!("AUDIO: Generated notification audio: {:?}", audio_path));
+
+                        // Create a queue item for the TTS Control tab
+                        let file_name = audio_path.file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("audio")
+                            .to_string();
+                        let mut queue_item = TTSQueueItem::new(
+                            format!("tts-{}", std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis())
+                                .unwrap_or(0)),
+                            file_name.clone(),
+                            "default".to_string(),
+                        );
+                        queue_item.audio_path = Some(audio_path.clone());
+                        queue_item.status = TTSQueueItemStatus::Playing;
+                        // Set the source conversation and message for Enter navigation
+                        queue_item.conversation_id = Some(thread_id);
+                        queue_item.message_id = Some(message_id);
+
+                        // Ensure TTS Control tab exists and add item to queue
+                        let tts_tab_idx = app.tabs.open_tts_control();
+
+                        // Add item to queue and set as playing
+                        if let Some(tts_state) = app.tabs.tts_state_mut() {
+                            // Mark any previous playing item as completed
+                            if let Some(playing_idx) = tts_state.playing_index {
+                                if let Some(item) = tts_state.queue.get_mut(playing_idx) {
+                                    item.status = TTSQueueItemStatus::Completed;
+                                }
+                            }
+                            // Add new item and set as playing
+                            tts_state.queue.push(queue_item);
+                            let new_idx = tts_state.queue.len() - 1;
+                            tts_state.playing_index = Some(new_idx);
+                            tts_state.selected_index = new_idx;
+                        }
+
+                        // Switch to TTS tab and Chat view if not already there
+                        if app.view != View::Chat || app.tabs.active_index() != tts_tab_idx {
+                            app.tabs.switch_to(tts_tab_idx);
+                            app.view = View::Chat;
+                            // Force Normal mode so TTS controls respond immediately
+                            // (user may have been in Editing mode in a conversation)
+                            app.input_mode = InputMode::Normal;
+                        }
+
                         // Play the audio using the app's audio player
                         if let Err(e) = app.audio_player.play(&audio_path) {
                             log_diagnostic(&format!("AUDIO: Failed to play audio: {}", e));
+                            // Mark the item as failed so tick_tts_playback doesn't mark it as Completed
+                            if let Some(tts_state) = app.tabs.tts_state_mut() {
+                                if let Some(playing_idx) = tts_state.playing_index {
+                                    if let Some(item) = tts_state.queue.get_mut(playing_idx) {
+                                        item.status = TTSQueueItemStatus::Failed;
+                                    }
+                                }
+                                tts_state.playing_index = None;
+                            }
                         }
                     }
                     AudioGenerationResult::Skipped(reason) => {
@@ -387,6 +448,7 @@ fn handle_core_events(
         match event {
             CoreEvent::Message(message) => {
                 let thread_id = message.thread_id.clone();
+                let message_id = message.id.clone();
                 let message_pubkey = message.pubkey.clone();
                 let message_content = message.content.clone();
                 let p_tags = message.p_tags.clone();
@@ -431,6 +493,7 @@ fn handle_core_events(
                             thread_title,
                             message_content,
                             thread_id.clone(),
+                            message_id.clone(),
                         );
                     }
                 }
@@ -499,6 +562,7 @@ fn trigger_audio_notification(
     conversation_title: String,
     message_text: String,
     thread_id: String,
+    message_id: String,
 ) {
     // Check if audio notifications are enabled in preferences
     let prefs = app.preferences.borrow();
@@ -561,6 +625,10 @@ fn trigger_audio_notification(
     let data_dir = tenex_core::config::CoreConfig::default_data_dir();
     let data_dir_str = data_dir.to_string_lossy().to_string();
 
+    // Clone thread_id and message_id for the async closure
+    let thread_id_for_result = thread_id.clone();
+    let message_id_for_result = message_id;
+
     // Spawn background task to generate audio
     tokio::spawn(async move {
         use tenex_core::ai::AudioNotificationManager;
@@ -586,7 +654,11 @@ fn trigger_audio_notification(
         ).await {
             Ok(notification) => {
                 let path = PathBuf::from(&notification.audio_file_path);
-                let _ = audio_tx.send(AudioGenerationResult::Success(path)).await;
+                let _ = audio_tx.send(AudioGenerationResult::Success {
+                    audio_path: path,
+                    thread_id: thread_id_for_result,
+                    message_id: message_id_for_result,
+                }).await;
             }
             Err(e) => {
                 let _ = audio_tx.send(AudioGenerationResult::Skipped(

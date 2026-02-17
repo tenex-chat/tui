@@ -1,4 +1,5 @@
 use crate::ui::card;
+use crate::ui::state::TabContentType;
 use crate::ui::{theme, App, View};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -192,7 +193,7 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
         bottom_spans.push(Span::raw(gap));
     }
 
-    // === Conversation Tabs ===
+    // === All Tabs (Conversations, TTS Control, Reports) ===
     let max_title_width = 18;
 
     for (i, tab) in app.open_tabs().iter().enumerate() {
@@ -208,34 +209,82 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             "   ".to_string()
         };
 
-        // Indicator priority: @ (waiting) > • (unread) > + (draft) > none
-        let (indicator, indicator_fg) = if tab.waiting_for_user && !is_active {
-            // Waiting for user takes highest priority (yellow @)
-            ("@ ".to_string(), Some(theme::ACCENT_WARNING))
-        } else if tab.has_unread && !is_active {
-            // Unread beats draft
-            (card::BULLET.to_string(), Some(theme::ACCENT_ERROR))
-        } else if tab.is_draft() {
-            ("+".to_string(), Some(theme::ACCENT_SUCCESS))
-        } else {
-            (" ".to_string(), None)
+        // Determine indicator and title based on content type
+        let (indicator, indicator_fg, title, project) = match &tab.content_type {
+            TabContentType::Conversation => {
+                // Indicator priority: @ (waiting) > • (unread) > + (draft) > none
+                let (ind, ind_fg) = if tab.waiting_for_user && !is_active {
+                    ("@ ".to_string(), Some(theme::ACCENT_WARNING))
+                } else if tab.has_unread && !is_active {
+                    (card::BULLET.to_string(), Some(theme::ACCENT_ERROR))
+                } else if tab.is_draft() {
+                    ("+".to_string(), Some(theme::ACCENT_SUCCESS))
+                } else {
+                    (" ".to_string(), None)
+                };
+
+                // Title - look up from store for real threads
+                let thread_title = if tab.is_draft() {
+                    tab.thread_title.clone()
+                } else {
+                    data_store
+                        .get_thread_by_id(&tab.thread_id)
+                        .map(|t| t.title.clone())
+                        .unwrap_or_else(|| tab.thread_title.clone())
+                };
+                let (title, title_width) = truncate_to_width(&thread_title, max_title_width);
+
+                // Project name
+                let project_name = data_store.get_project_name(&tab.project_a_tag);
+                let (proj, _) = truncate_plain_to_width(&project_name, title_width);
+
+                (ind, ind_fg, title, proj)
+            }
+            TabContentType::TTSControl => {
+                // TTS Control tab has special indicator
+                let tts_active = tab.tts_state.as_ref()
+                    .map(|s| s.is_active())
+                    .unwrap_or(false);
+                let tts_paused = tab.tts_state.as_ref()
+                    .map(|s| s.is_paused)
+                    .unwrap_or(false);
+
+                let (ind, ind_fg) = if tts_paused {
+                    ("⏸".to_string(), Some(theme::ACCENT_WARNING))
+                } else if tts_active {
+                    ("▶".to_string(), Some(theme::ACCENT_SUCCESS))
+                } else {
+                    ("♪".to_string(), Some(theme::TEXT_MUTED))
+                };
+
+                let (title, _) = truncate_to_width("TTS Control", max_title_width);
+                let project = "Audio".to_string();
+
+                (ind, ind_fg, title, project)
+            }
+            TabContentType::Report { a_tag, .. } => {
+                // Report tab indicator
+                let (ind, ind_fg) = ("📄".to_string(), Some(theme::ACCENT_PRIMARY));
+
+                // Get report title from store using a_tag (handles slug collisions)
+                let report_title = data_store.reports
+                    .get_report_by_a_tag(a_tag)
+                    .map(|r| r.title.clone())
+                    .unwrap_or_else(|| tab.thread_title.clone());
+                let (title, title_width) = truncate_to_width(&report_title, max_title_width);
+
+                // Get author name for project line
+                let author = data_store.reports
+                    .get_report_by_a_tag(a_tag)
+                    .map(|r| data_store.get_profile_name(&r.author))
+                    .unwrap_or_else(|| "Report".to_string());
+                let (proj, _) = truncate_plain_to_width(&format!("@{}", author), title_width);
+
+                (ind, ind_fg, title, proj)
+            }
         };
 
-        // Title - look up from store for real threads
-        let thread_title = if tab.is_draft() {
-            tab.thread_title.clone()
-        } else {
-            data_store
-                .get_thread_by_id(&tab.thread_id)
-                .map(|t| t.title.clone())
-                .unwrap_or_else(|| tab.thread_title.clone())
-        };
-        let (title, title_width) = truncate_to_width(&thread_title, max_title_width);
-
-        // Project name - truncate to match the title width (not max_title_width)
-        // This ensures the project name fits within the tab's actual width
-        let project_name = data_store.get_project_name(&tab.project_a_tag);
-        let (project, _) = truncate_plain_to_width(&project_name, title_width);
+        let (_, title_width) = truncate_to_width(&title, max_title_width);
 
         let right_pad = " ";
 
