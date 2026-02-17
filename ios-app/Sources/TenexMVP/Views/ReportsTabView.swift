@@ -148,14 +148,16 @@ struct ReportsTabView: View {
                     if useSplitView {
                         ReportsTabRowView(
                             report: report,
-                            projectTitle: projectFor(report: report)?.title
+                            projectTitle: projectFor(report: report)?.title,
+                            showsChevron: false
                         )
                         .tag(report)
                     } else {
                         NavigationLink(value: report) {
                             ReportsTabRowView(
                                 report: report,
-                                projectTitle: projectFor(report: report)?.title
+                                projectTitle: projectFor(report: report)?.title,
+                                showsChevron: true
                             )
                         }
                     }
@@ -297,6 +299,7 @@ struct ReportsTabView: View {
 struct ReportsTabRowView: View {
     let report: ReportInfo
     let projectTitle: String?
+    var showsChevron: Bool = true
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -352,9 +355,11 @@ struct ReportsTabRowView: View {
 
             Spacer()
 
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 8)
     }
