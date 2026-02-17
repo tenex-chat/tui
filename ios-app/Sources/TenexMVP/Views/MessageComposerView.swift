@@ -304,7 +304,6 @@ struct MessageComposerView: View {
                         var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
                         backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-                            print("[MessageComposerView] WARNING: Background save time expired on cancel")
                             if backgroundTaskID != .invalid {
                                 UIApplication.shared.endBackgroundTask(backgroundTaskID)
                                 backgroundTaskID = .invalid
@@ -456,7 +455,6 @@ struct MessageComposerView: View {
                     var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
                     backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-                        print("[MessageComposerView] WARNING: Background save time expired")
                         if backgroundTaskID != .invalid {
                             UIApplication.shared.endBackgroundTask(backgroundTaskID)
                             backgroundTaskID = .invalid
@@ -468,9 +466,7 @@ struct MessageComposerView: View {
                             // HIGH FIX: Flush localText to DraftManager before saving
                             await flushLocalTextToDraftManager()
                             try await draftManager.saveNow()
-                            print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
                         } catch {
-                            print("[MessageComposerView] ERROR: Failed to save on background: \(error)")
                         }
 
                         if backgroundTaskID != .invalid {
@@ -484,9 +480,7 @@ struct MessageComposerView: View {
                             // HIGH FIX: Flush localText to DraftManager before saving
                             await flushLocalTextToDraftManager()
                             try await draftManager.saveNow()
-                            print("[MessageComposerView] Flushed drafts due to scene phase change: \(oldPhase) -> \(newPhase)")
                         } catch {
-                            print("[MessageComposerView] ERROR: Failed to save on background: \(error)")
                         }
                     }
                     #endif
@@ -497,9 +491,7 @@ struct MessageComposerView: View {
                 // This eliminates the need for manual refresh() calls
                 if let projectId = selectedProject?.id {
                     let agents = newAgents[projectId] ?? []
-                    print("[MessageComposerView] onChange(onlineAgents): projectId='\(projectId)' agents.count=\(agents.count)")
                     availableAgents = agents
-                    print("[MessageComposerView] Updated availableAgents to \(availableAgents.count) agents")
                 }
             }
         }
@@ -523,7 +515,7 @@ struct MessageComposerView: View {
         Button(action: { showProjectSelector = true }) {
             HStack(spacing: 12) {
                 Image(systemName: "folder")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.composerAction)
                 Text("Select a project to start")
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -542,7 +534,7 @@ struct MessageComposerView: View {
         Button(action: { showAgentSelector = true }) {
             HStack(spacing: 12) {
                 Image(systemName: "person")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.composerAction)
                 Text("Select an agent (optional)")
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -563,7 +555,7 @@ struct MessageComposerView: View {
             HStack(spacing: 6) {
                 Image(systemName: "folder")
                     .font(.caption)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.composerAction)
                 Text("Select project")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -584,7 +576,7 @@ struct MessageComposerView: View {
             HStack(spacing: 6) {
                 Image(systemName: "person")
                     .font(.caption)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.composerAction)
                 Text("Select agent")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -806,7 +798,7 @@ struct MessageComposerView: View {
             // Show error indicator if agents failed to load
             if agentsLoadError != nil {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.composerWarning)
                     .font(.caption)
             }
 
@@ -820,7 +812,7 @@ struct MessageComposerView: View {
                         .scaleEffect(0.8)
                 } else {
                     Image(systemName: "photo")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.composerAction)
                 }
             }
             .buttonStyle(.plain)
@@ -834,7 +826,7 @@ struct MessageComposerView: View {
                 }
             } label: {
                 Image(systemName: "mic.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.composerAction)
             }
             .buttonStyle(.plain)
             .disabled(!dictationManager.state.isIdle || selectedProject == nil)
@@ -850,7 +842,7 @@ struct MessageComposerView: View {
                     Text("\(localImageAttachments.count)")
                         .font(.caption)
                 }
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.composerAction)
             }
 
             // Character count (use localText for instant feedback)
@@ -864,7 +856,7 @@ struct MessageComposerView: View {
             if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty {
                 Button(action: clearDraft) {
                     Image(systemName: "trash")
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.composerDestructive)
                 }
                 .buttonStyle(.plain)
             }
@@ -924,7 +916,6 @@ struct MessageComposerView: View {
                     await draftManager.updateReferenceConversation(referenceConversationId, conversationId: conversationId, projectId: projectId)
                     await draftManager.updateReferenceReportATag(referenceReportATag, conversationId: conversationId, projectId: projectId)
 
-                    print("[MessageComposerView] Applied initial content from reference (conversation or report)")
                 } else {
                     draft = loadedDraft
                     // PERFORMANCE FIX: Sync localText with loaded draft content
@@ -939,18 +930,15 @@ struct MessageComposerView: View {
                     localImageAttachments = loadedDraft.imageAttachments
                 }
             } else {
-                print("[MessageComposerView] Skipping draft load - user has already made edits (isDirty=true)")
 
                 // RACE CONDITION FIX: Persist reference IDs even if user typed before load completed.
                 // The reference IDs must always be saved regardless of dirty state, otherwise they can be lost
                 // when scheduleContentSync flips isDirty before this async block runs.
                 if let refId = referenceConversationId {
                     await draftManager.updateReferenceConversation(refId, conversationId: conversationId, projectId: projectId)
-                    print("[MessageComposerView] Persisted referenceConversationId despite isDirty=true")
                 }
                 if let refATag = referenceReportATag {
                     await draftManager.updateReferenceReportATag(refATag, conversationId: conversationId, projectId: projectId)
-                    print("[MessageComposerView] Persisted referenceReportATag despite isDirty=true")
                 }
             }
 
@@ -966,9 +954,7 @@ struct MessageComposerView: View {
             // Use centralized cached agents instead of fetching on-demand
             // This eliminates multi-second FFI delays
             let agents = coreManager.onlineAgents[projectId] ?? []
-            print("[MessageComposerView] loadAgents() for projectId='\(projectId)': found \(agents.count) agents in cache")
             availableAgents = agents
-            print("[MessageComposerView] Set availableAgents to \(availableAgents.count) agents")
             agentsLoadError = nil
 
             // If initialAgentPubkey is provided, use it (works for both new conversations and replies)
@@ -989,7 +975,6 @@ struct MessageComposerView: View {
             }
 
             if agents.isEmpty {
-                print("[MessageComposerView] No online agents for this project (using cached state)")
             }
         }
     }
@@ -1000,7 +985,6 @@ struct MessageComposerView: View {
             do {
                 availableNudges = try await coreManager.safeCore.getNudges()
             } catch {
-                print("[MessageComposerView] Failed to load nudges: \(error)")
             }
         }
     }
@@ -1027,7 +1011,6 @@ struct MessageComposerView: View {
                     await flushLocalTextToDraftManager(projectId: previousProjectId)
                     try await draftManager.saveNow()
                 } catch {
-                    print("[MessageComposerView] ERROR: Failed to save before project switch: \(error)")
                     // HIGH #1 FIX: Revert selectedProject to prevent wrong-project editing/sending
                     selectedProject = previousProject
                     // Show error alert and abort project switch
@@ -1061,7 +1044,6 @@ struct MessageComposerView: View {
             }
             // Cancel any pending sync from previous project
             contentSyncTask?.cancel()
-            print("[MessageComposerView] Loaded draft for project '\(project.id)' (absolute data safety: no cross-project content leakage)")
 
             // Validate and clear agent if it doesn't belong to this project
             // (will be validated again before sending)
@@ -1097,7 +1079,6 @@ struct MessageComposerView: View {
                 if !agentExists && !availableAgents.isEmpty {
                     // Only clear if we have agents but this one isn't in the list
                     // If availableAgents is empty, the project might have no agents (valid state)
-                    print("[MessageComposerView] Warning: Agent pubkey '\(agentPubkey)' not found in current project's agents. Clearing agent selection.")
                     // Clear invalid agent from draft
                     draft.clearAgent()
                     Task {
@@ -1343,7 +1324,7 @@ struct ImageAttachmentChipView: View {
             // Image icon
             Image(systemName: "photo.fill")
                 .font(.caption)
-                .foregroundStyle(.blue)
+                .foregroundStyle(Color.composerAction)
 
             // Image label
             Text("Image #\(attachment.id)")
@@ -1362,7 +1343,7 @@ struct ImageAttachmentChipView: View {
         .padding(.vertical, 6)
         .background(
             Capsule()
-                .fill(Color.blue.opacity(0.1))
+                .fill(Color.composerAction.opacity(0.1))
         )
     }
 }

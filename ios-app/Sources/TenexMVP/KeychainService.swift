@@ -438,50 +438,38 @@ final class KeychainService {
 // MARK: - Async Extensions
 
 extension KeychainService {
+    /// Runs synchronous keychain work on a background queue and returns the result asynchronously.
+    private func runAsync<T>(_ operation: @escaping () -> KeychainResult<T>) async -> KeychainResult<T> {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(returning: operation())
+            }
+        }
+    }
 
     /// Saves nsec credential asynchronously on a background thread
     /// - Parameter nsec: The nsec string to save
     /// - Returns: Result indicating success or failure
     func saveNsecAsync(_ nsec: String) async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.saveNsec(nsec)
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.saveNsec(nsec) }
     }
 
     /// Loads nsec credential asynchronously on a background thread
     /// - Returns: Result containing the nsec or failure
     func loadNsecAsync() async -> KeychainResult<String> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.loadNsec()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.loadNsec() }
     }
 
     /// Deletes nsec credential asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteNsecAsync() async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.deleteNsec()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.deleteNsec() }
     }
 
     /// Checks for stored credential asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasStoredNsecAsync() async -> KeychainResult<Bool> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.hasStoredNsec()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.hasStoredNsec() }
     }
 
     // MARK: - ElevenLabs Async Extensions
@@ -490,45 +478,25 @@ extension KeychainService {
     /// - Parameter key: The API key to save
     /// - Returns: Result indicating success or failure
     func saveElevenLabsApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.saveElevenLabsApiKey(key)
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.saveElevenLabsApiKey(key) }
     }
 
     /// Loads ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result containing the API key or failure
     func loadElevenLabsApiKeyAsync() async -> KeychainResult<String> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.loadElevenLabsApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.loadElevenLabsApiKey() }
     }
 
     /// Deletes ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteElevenLabsApiKeyAsync() async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.deleteElevenLabsApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.deleteElevenLabsApiKey() }
     }
 
     /// Checks for stored ElevenLabs API key asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasElevenLabsApiKeyAsync() async -> KeychainResult<Bool> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.hasElevenLabsApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.hasElevenLabsApiKey() }
     }
 
     // MARK: - OpenRouter Async Extensions
@@ -537,44 +505,24 @@ extension KeychainService {
     /// - Parameter key: The API key to save
     /// - Returns: Result indicating success or failure
     func saveOpenRouterApiKeyAsync(_ key: String) async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.saveOpenRouterApiKey(key)
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.saveOpenRouterApiKey(key) }
     }
 
     /// Loads OpenRouter API key asynchronously on a background thread
     /// - Returns: Result containing the API key or failure
     func loadOpenRouterApiKeyAsync() async -> KeychainResult<String> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.loadOpenRouterApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.loadOpenRouterApiKey() }
     }
 
     /// Deletes OpenRouter API key asynchronously on a background thread
     /// - Returns: Result indicating success or failure
     func deleteOpenRouterApiKeyAsync() async -> KeychainResult<Void> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.deleteOpenRouterApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.deleteOpenRouterApiKey() }
     }
 
     /// Checks for stored OpenRouter API key asynchronously on a background thread
     /// - Returns: Result indicating whether credential exists
     func hasOpenRouterApiKeyAsync() async -> KeychainResult<Bool> {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let result = self.hasOpenRouterApiKey()
-                continuation.resume(returning: result)
-            }
-        }
+        await runAsync { self.hasOpenRouterApiKey() }
     }
 }

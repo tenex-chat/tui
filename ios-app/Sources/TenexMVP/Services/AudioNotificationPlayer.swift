@@ -73,7 +73,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             try audioSession.setCategory(.playback, mode: .default, options: .duckOthers)
             try audioSession.setActive(true)
         } catch {
-            print("[AudioNotificationPlayer] Failed to activate audio session: \(error)")
         }
         #endif
     }
@@ -84,7 +83,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
-            print("[AudioNotificationPlayer] Failed to deactivate audio session: \(error)")
         }
         #endif
     }
@@ -115,7 +113,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
             do {
                 try playImmediate(notification: notification, conversationId: conversationId)
             } catch {
-                print("[AudioNotificationPlayer] Failed to play: \(error)")
                 playNext()
             }
         } else {
@@ -213,7 +210,6 @@ final class AudioNotificationPlayer: NSObject, ObservableObject {
         do {
             try playImmediate(notification: next.notification, conversationId: next.conversationId)
         } catch {
-            print("[AudioNotificationPlayer] Failed to play queued item: \(error)")
             playNext()
         }
     }
@@ -286,7 +282,6 @@ extension AudioNotificationPlayer: AVAudioPlayerDelegate {
             self.playbackProgress = 0
             self.clearMetadata()
             if let error = error {
-                print("[AudioNotificationPlayer] Decode error: \(error)")
             }
             self.playNext()
         }

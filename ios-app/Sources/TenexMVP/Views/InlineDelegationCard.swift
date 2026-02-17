@@ -132,7 +132,6 @@ struct InlineDelegationCard: View {
             conversationId: "test-conversation-id",
             recipientPubkeys: ["abc123"]
         ) {
-            print("Tapped delegation")
         }
         .environmentObject(TenexCoreManager())
     }

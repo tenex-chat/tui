@@ -38,7 +38,7 @@ struct AgentConfigSheet: View {
                     VStack(spacing: 16) {
                         Image(systemName: "exclamationmark.triangle")
                             .font(.system(.largeTitle))
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.skillBrand)
                         Text("Failed to load options")
                             .font(.headline)
                         Text(error)
@@ -54,9 +54,18 @@ struct AgentConfigSheet: View {
                     configContent
                 }
             }
+            #if os(iOS)
             .navigationTitle("Configure \(agent.name)")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Configure \(agent.name)").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
@@ -76,6 +85,12 @@ struct AgentConfigSheet: View {
         .task {
             await loadConfigOptions()
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 440, idealWidth: 500, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     // MARK: - Config Content
@@ -187,10 +202,10 @@ struct AgentConfigSheet: View {
         } label: {
             if group.isFullySelected(selectedTools) {
                 Image(systemName: "checkmark.square.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.agentBrand)
             } else if group.isPartiallySelected(selectedTools) {
                 Image(systemName: "minus.square.fill")
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.agentBrand)
             } else {
                 Image(systemName: "square")
                     .foregroundStyle(.secondary)
@@ -275,7 +290,6 @@ struct AgentConfigSheet: View {
             dismiss()
         } catch {
             // Could show an alert here, but for now just log
-            print("Failed to update agent config: \(error)")
             isSaving = false
         }
     }

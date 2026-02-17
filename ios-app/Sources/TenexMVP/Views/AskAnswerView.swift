@@ -57,15 +57,15 @@ struct AskAnswerView: View {
             if let error = errorMessage {
                 Text(error)
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(Color.healthError)
             }
         }
         .padding(16)
-        .background(Color.orange.opacity(0.05))
+        .background(Color.askBrandSubtleBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                .stroke(Color.askBrandBorder, lineWidth: 1)
         )
     }
 
@@ -75,7 +75,7 @@ struct AskAnswerView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.circle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Color.askBrand)
                     .font(.title2)
 
                 if let title = askEvent.title {
@@ -94,7 +94,7 @@ struct AskAnswerView: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(Color.orange.opacity(0.2))
+                    .background(Color.askBrandBackground)
                     .clipShape(Capsule())
             }
 
@@ -102,9 +102,9 @@ struct AskAnswerView: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Rectangle()
-                        .fill(Color.orange.opacity(0.2))
+                        .fill(Color.askBrandBackground)
                     Rectangle()
-                        .fill(Color.orange)
+                        .fill(Color.askBrand)
                         .frame(width: geometry.size.width * CGFloat(answers.count) / CGFloat(askEvent.questions.count))
                 }
             }
@@ -122,7 +122,7 @@ struct AskAnswerView: View {
             Text(getTitle(question))
                 .font(.caption)
                 .fontWeight(.semibold)
-                .foregroundStyle(.orange)
+                .foregroundStyle(Color.askBrand)
 
             // Question text
             Text(getQuestionText(question))
@@ -196,7 +196,7 @@ struct AskAnswerView: View {
                     Label("Next", systemImage: "chevron.right")
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.orange)
+                .tint(Color.askBrand)
                 .disabled(!hasCurrentAnswer)
             } else {
                 Button {
@@ -211,7 +211,7 @@ struct AskAnswerView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(.green)
+                .tint(Color.statusActive)
                 .disabled(!isComplete || isSubmitting)
             }
         }
@@ -399,7 +399,7 @@ private struct SelectableChoiceRow: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.orange.opacity(0.15) : Color.systemGray6)
+            .background(isSelected ? Color.askBrandBackground : Color.systemGray6)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
@@ -431,7 +431,6 @@ private struct SelectableChoiceRow: View {
         conversationId: "test-conversation",
         projectId: "test-project"
     ) {
-        print("Submitted!")
     }
     .environmentObject(TenexCoreManager())
     .padding()
