@@ -106,7 +106,7 @@ struct InlineDelegationCard: View {
             .background(Color.systemGray6)
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .task {
             await loadConversationInfo()
         }

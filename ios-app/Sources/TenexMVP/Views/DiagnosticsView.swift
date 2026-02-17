@@ -12,35 +12,37 @@ struct DiagnosticsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                // Show section errors banner if any sections failed (not for Settings tab)
-                if viewModel.selectedTab != .settings,
-                   let snapshot = viewModel.snapshot,
-                   !snapshot.sectionErrors.isEmpty {
-                    DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
-                        .padding(.horizontal)
-                        .padding(.top, 8)
-                }
-
-                // Tab Navigation - always visible
-                DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
+        VStack(spacing: 0) {
+            // Show section errors banner if any sections failed (not for Settings tab)
+            if viewModel.selectedTab != .settings,
+               let snapshot = viewModel.snapshot,
+               !snapshot.sectionErrors.isEmpty {
+                DiagnosticsSectionErrorsBanner(errors: snapshot.sectionErrors)
                     .padding(.horizontal)
                     .padding(.top, 8)
+            }
 
-                Divider()
-                    .padding(.top, 8)
+            // Tab Navigation - always visible
+            DiagnosticsTabNavigation(selectedTab: $viewModel.selectedTab)
+                .padding(.horizontal)
+                .padding(.top, 8)
 
-                // Tab Content - Settings tab is handled separately
-                if viewModel.selectedTab == .settings {
-                    AISettingsView()
-                        .environmentObject(coreManager)
-                } else if let snapshot = viewModel.snapshot {
-                    DiagnosticsTabContent(
-                        snapshot: snapshot,
-                        selectedTab: viewModel.selectedTab
-                    )
-                    .padding()
+            Divider()
+                .padding(.top, 8)
+
+            // Tab Content
+            if viewModel.selectedTab == .settings {
+                AISettingsView(isEmbedded: true)
+                    .environmentObject(coreManager)
+            } else {
+                ScrollView {
+                    if let snapshot = viewModel.snapshot {
+                        DiagnosticsTabContent(
+                            snapshot: snapshot,
+                            selectedTab: viewModel.selectedTab
+                        )
+                        .padding()
+                    }
                 }
             }
         }
@@ -215,7 +217,7 @@ struct DiagnosticsSectionErrorsBanner: View {
                 }
                 .padding(12)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 4) {

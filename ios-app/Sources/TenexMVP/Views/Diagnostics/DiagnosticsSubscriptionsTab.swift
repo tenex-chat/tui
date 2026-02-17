@@ -134,7 +134,7 @@ struct SubscriptionRow: View {
                 }
                 .padding()
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
 
             // Expanded Details
             if isExpanded {

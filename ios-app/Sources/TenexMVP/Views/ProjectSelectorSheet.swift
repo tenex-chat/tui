@@ -45,6 +45,17 @@ struct ProjectSelectorSheet: View {
         }
     }
 
+    private var selectedProjectIdBinding: Binding<String?> {
+        Binding(
+            get: { localSelectedProject?.id },
+            set: { newValue in
+                localSelectedProject = newValue.flatMap { selectedId in
+                    projects.first(where: { $0.id == selectedId })
+                }
+            }
+        )
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -56,37 +67,14 @@ struct ProjectSelectorSheet: View {
                 }
 
                 // Search and project list
-                List {
-                    if filteredProjects.isEmpty {
-                        emptyStateView
-                    } else {
-                        ForEach(filteredProjects, id: \.id) { project in
-                            ProjectRowSelectView(
-                                project: project,
-                                isOnline: projectOnlineStatus[project.id] ?? false,
-                                isSelected: localSelectedProject?.id == project.id
-                            ) {
-                                selectProject(project)
-                            }
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .contentMargins(.top, 0, for: .scrollContent)
+                projectList
             }
             .searchable(text: $searchText, prompt: "Search projects...")
-            #if os(iOS)
             .navigationTitle("Select Project")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #else
-            .navigationTitle("")
             #endif
             .toolbar {
-                #if os(macOS)
-                ToolbarItem(placement: .principal) {
-                    Text("Select Project").fontWeight(.semibold)
-                }
-                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -110,14 +98,52 @@ struct ProjectSelectorSheet: View {
             }
         }
         #if os(iOS)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .tenexModalPresentation(detents: [.medium, .large])
         #else
         .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
         #endif
     }
 
     // MARK: - Subviews
+
+    @ViewBuilder
+    private var projectList: some View {
+        #if os(macOS)
+        List(selection: selectedProjectIdBinding) {
+            if filteredProjects.isEmpty {
+                emptyStateView
+            } else {
+                ForEach(filteredProjects, id: \.id) { project in
+                    ProjectRowSelectView(
+                        project: project,
+                        isOnline: projectOnlineStatus[project.id] ?? false,
+                        isSelected: localSelectedProject?.id == project.id,
+                        onTap: nil
+                    )
+                    .tag(project.id)
+                }
+            }
+        }
+        .listStyle(.inset)
+        #else
+        List {
+            if filteredProjects.isEmpty {
+                emptyStateView
+            } else {
+                ForEach(filteredProjects, id: \.id) { project in
+                    ProjectRowSelectView(
+                        project: project,
+                        isOnline: projectOnlineStatus[project.id] ?? false,
+                        isSelected: localSelectedProject?.id == project.id
+                    ) {
+                        selectProject(project)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        #endif
+    }
 
     private func selectedProjectBar(_ project: ProjectInfo) -> some View {
         HStack(spacing: 8) {
@@ -130,14 +156,13 @@ struct ProjectSelectorSheet: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
 
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
-        .foregroundStyle(Color.agentBrand)
+        .background(.bar)
     }
 
     private var emptyStateView: some View {
@@ -184,51 +209,59 @@ struct ProjectRowSelectView: View {
     let project: ProjectInfo
     var isOnline: Bool = false
     let isSelected: Bool
-    let onTap: () -> Void
+    var onTap: (() -> Void)?
 
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 12) {
-                // Project icon
-                projectIcon
+    private var rowContent: some View {
+        HStack(spacing: 12) {
+            // Project icon
+            projectIcon
 
-                // Project info
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(project.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
+            // Project info
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Text(project.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
 
-                        if isOnline {
-                            Circle()
-                                .fill(Color.presenceOnline)
-                                .frame(width: 8, height: 8)
-                        }
+                    if isOnline {
+                        Circle()
+                            .fill(Color.presenceOnline)
+                            .frame(width: 8, height: 8)
                     }
-
-                    if let description = project.description, !description.isEmpty {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                    }
-
-                    Text(project.id)
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-                        .lineLimit(1)
                 }
 
-                Spacer()
+                if let description = project.description, !description.isEmpty {
+                    Text(description)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
 
-                // Selection indicator
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isSelected ? .blue : .secondary)
+                Text(project.id)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
-            .padding(.vertical, 8)
+
+            Spacer()
+
+            // Selection indicator
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title2)
+                .foregroundStyle(isSelected ? .blue : .secondary)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 8)
+    }
+
+    var body: some View {
+        if let onTap {
+            Button(action: onTap) {
+                rowContent
+            }
+            .buttonStyle(.borderless)
+        } else {
+            rowContent
+        }
     }
 
     private var projectIcon: some View {

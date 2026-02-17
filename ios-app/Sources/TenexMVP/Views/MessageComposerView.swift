@@ -7,6 +7,11 @@ import CryptoKit
 /// A premium message composition view for both new conversations and replies.
 /// Supports project selection (for new conversations), agent selection, draft persistence, and markdown input.
 struct MessageComposerView: View {
+    enum DisplayStyle {
+        case modal
+        case inline
+    }
+
     // MARK: - Properties
 
     /// The project this message belongs to (nil for new conversations with project selection)
@@ -38,6 +43,9 @@ struct MessageComposerView: View {
     /// Callback when the view is dismissed
     var onDismiss: (() -> Void)?
 
+    /// Rendering style for the composer container
+    let displayStyle: DisplayStyle
+
     // MARK: - Environment
 
     @Environment(\.dismiss) private var dismiss
@@ -54,13 +62,16 @@ struct MessageComposerView: View {
     @State private var showAgentSelector = false
     @State private var replyTargetAgentName: String?  // Agent name for reply target (resolved from initialAgentPubkey)
     @State private var availableNudges: [NudgeInfo] = []
-    @State private var showNudgeSelector = false
+    @State private var availableSkills: [SkillInfo] = []
+    @State private var showNudgeSkillSelector = false
+    @State private var nudgeSkillSelectorInitialMode: NudgeSkillSelectorMode = .all
+    @State private var nudgeSkillSelectorInitialQuery: String = ""
+    @State private var agentSelectorInitialQuery: String = ""
     @State private var isSending = false
     @State private var sendError: String?
     @State private var showSendError = false
     @State private var isDirty = false // Track if user has made edits before load completes
     @State private var showLoadFailedAlert = false
-    @State private var isLoadingDraft = true // Track if draft is still loading
     @State private var isSwitchingProject = false // Track if project switch is in progress
     @State private var showSaveFailedAlert = false
     @State private var saveFailedError: String?
@@ -82,6 +93,7 @@ struct MessageComposerView: View {
 
     // Flag to suppress onChange sync during programmatic localText updates (load/switch/dictation)
     @State private var isProgrammaticUpdate: Bool = false
+    @State private var triggerDetectionTask: Task<Void, Never>?
 
     // MARK: - Computed
 
@@ -101,11 +113,6 @@ struct MessageComposerView: View {
 
         // CRITICAL DATA SAFETY: Block sending if draft load failed
         guard !draftManager.loadFailed else {
-            return false
-        }
-
-        // BLOCKER #1 FIX: Block sending until draft load completes
-        guard !isLoadingDraft else {
             return false
         }
 
@@ -129,6 +136,14 @@ struct MessageComposerView: View {
 
     private var selectedNudges: [NudgeInfo] {
         availableNudges.filter { draft.selectedNudgeIds.contains($0.id) }
+    }
+
+    private var selectedSkills: [SkillInfo] {
+        availableSkills.filter { draft.selectedSkillIds.contains($0.id) }
+    }
+
+    private var isInlineComposer: Bool {
+        displayStyle == .inline
     }
 
     /// Hide scheduled conversations preference (synced with ConversationsTabView)
@@ -166,6 +181,7 @@ struct MessageComposerView: View {
         initialContent: String? = nil,
         referenceConversationId: String? = nil,
         referenceReportATag: String? = nil,
+        displayStyle: DisplayStyle = .modal,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
@@ -176,6 +192,7 @@ struct MessageComposerView: View {
         self.initialContent = initialContent
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
+        self.displayStyle = displayStyle
         self.onSend = onSend
         self.onDismiss = onDismiss
 
@@ -201,300 +218,329 @@ struct MessageComposerView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                // Project and Agent row (for new conversations)
-                if isNewConversation {
-                    HStack(spacing: 12) {
-                        if let project = selectedProject {
-                            ProjectChipView(project: project) {
-                                showProjectSelector = true
-                            }
-                        } else {
-                            projectPromptButton
-                        }
+        composerViewWithLifecycle
+    }
 
-                        if selectedProject != nil {
-                            if let agent = selectedAgent {
-                                OnlineAgentChipView(agent: agent) {
-                                    showAgentSelector = true
-                                }
-                                .environmentObject(coreManager)
-                            } else {
-                                agentPromptButton
-                            }
-                        }
+    @ViewBuilder
+    private var composerBaseView: some View {
+        Group {
+            if isInlineComposer {
+                composerContent
+            } else {
+                NavigationStack {
+                    composerContent
+                        .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
+                        .navigationBarTitleDisplayMode(.inline)
+                        .toolbar {
+                            ToolbarItem(placement: .cancellationAction) {
+                                Button("Cancel") {
+                                    #if os(iOS)
+                                    // CRITICAL DATA SAFETY: Use background task to guarantee save completes
+                                    var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(Color.systemGray6)
-                }
+                                    backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                                        if backgroundTaskID != .invalid {
+                                            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                            backgroundTaskID = .invalid
+                                        }
+                                    }
 
-                // Agent chip for replies (not new conversations)
-                if !isNewConversation {
-                    if let agent = selectedAgent {
-                        agentChipView(agent)
-                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
-                        // Show the reply target even if they're not in online agents list
-                        replyTargetChipView(name: targetName, pubkey: targetPubkey) {
-                            showAgentSelector = true
-                        }
-                    } else if selectedProject != nil {
-                        agentPromptView
-                    }
-                }
+                                    Task {
+                                        do {
+                                            // HIGH FIX: Flush localText to DraftManager before saving
+                                            // This prevents losing the last ~300ms of typing
+                                            await flushLocalTextToDraftManager()
+                                            try await draftManager.saveNow()
 
-                // Nudge chips (for all conversations)
-                if selectedProject != nil {
-                    nudgeChipsView
-                }
+                                            if backgroundTaskID != .invalid {
+                                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                                backgroundTaskID = .invalid
+                                            }
 
-                // Image attachment chips (for all conversations)
-                if !localImageAttachments.isEmpty && selectedProject != nil {
-                    imageAttachmentChipsView
-                }
+                                            onDismiss?()
+                                            dismiss()
+                                        } catch {
+                                            if backgroundTaskID != .invalid {
+                                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                                                backgroundTaskID = .invalid
+                                            }
 
-                Divider()
-
-                // Content editor
-                contentEditorView
-
-                Divider()
-
-                // Toolbar
-                toolbarView
-            }
-            #if os(iOS)
-            .overlay {
-                if showDictationOverlay {
-                    DictationOverlayView(
-                        manager: dictationManager,
-                        onComplete: { text in
-                            // Append dictated text to localText (instant update)
-                            let appendedText = localText + (localText.isEmpty ? "" : " ") + text
-                            localText = appendedText
-                            // Dictation is user-initiated content, so mark dirty and sync
-                            isDirty = true
-                            // Sync to draft directly (bypass onChange which is suppressed during programmatic updates)
-                            if let projectId = selectedProject?.id {
-                                Task {
-                                    await draftManager.updateContent(appendedText, conversationId: conversationId, projectId: projectId)
+                                            saveFailedError = error.localizedDescription
+                                            showSaveFailedAlert = true
+                                        }
+                                    }
+                                    #else
+                                    Task {
+                                        do {
+                                            // HIGH FIX: Flush localText to DraftManager before saving
+                                            await flushLocalTextToDraftManager()
+                                            try await draftManager.saveNow()
+                                            onDismiss?()
+                                            dismiss()
+                                        } catch {
+                                            saveFailedError = error.localizedDescription
+                                            showSaveFailedAlert = true
+                                        }
+                                    }
+                                    #endif
                                 }
                             }
-                            showDictationOverlay = false
-                            dictationManager.reset()
-                        },
-                        onCancel: {
-                            dictationManager.cancelRecording()
-                            showDictationOverlay = false
-                        }
-                    )
-                }
-            }
-            #endif
-            .navigationTitle(isNewConversation ? "New Conversation" : "Reply")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        #if os(iOS)
-                        // CRITICAL DATA SAFETY: Use background task to guarantee save completes
-                        var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
 
-                        backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-                            if backgroundTaskID != .invalid {
-                                UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                                backgroundTaskID = .invalid
-                            }
-                        }
-
-                        Task {
-                            do {
-                                // HIGH FIX: Flush localText to DraftManager before saving
-                                // This prevents losing the last ~300ms of typing
-                                await flushLocalTextToDraftManager()
-                                try await draftManager.saveNow()
-
-                                if backgroundTaskID != .invalid {
-                                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                                    backgroundTaskID = .invalid
+                            ToolbarItem(placement: .primaryAction) {
+                                Button("Send") {
+                                    sendMessage()
                                 }
-
-                                onDismiss?()
-                                dismiss()
-                            } catch {
-                                if backgroundTaskID != .invalid {
-                                    UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                                    backgroundTaskID = .invalid
-                                }
-
-                                saveFailedError = error.localizedDescription
-                                showSaveFailedAlert = true
+                                .disabled(!canSend)
+                                .fontWeight(.semibold)
                             }
                         }
-                        #else
-                        Task {
-                            do {
-                                // HIGH FIX: Flush localText to DraftManager before saving
-                                await flushLocalTextToDraftManager()
-                                try await draftManager.saveNow()
-                                onDismiss?()
-                                dismiss()
-                            } catch {
-                                saveFailedError = error.localizedDescription
-                                showSaveFailedAlert = true
-                            }
-                        }
-                        #endif
-                    }
                 }
-
-                ToolbarItem(placement: .primaryAction) {
-                    Button("Send") {
-                        sendMessage()
-                    }
-                    .disabled(!canSend)
-                    .fontWeight(.semibold)
-                }
-            }
-            .onAppear {
-                // Auto-select project with most recent activity if none provided
-                if selectedProject == nil && initialProject == nil {
-                    if let mostActiveProject = projectWithMostRecentActivity() {
-                        selectedProject = mostActiveProject
-                        draft = Draft(projectId: mostActiveProject.id)
-                    }
-                }
-
-                // BLOCKER #1 FIX: If no project selected, no draft to load - mark as not loading
-                if selectedProject == nil {
-                    isLoadingDraft = false
-                } else {
-                    loadDraft()
-                    loadAgents()
-                    loadNudges()
-                }
-            }
-            .sheet(isPresented: $showProjectSelector) {
-                ProjectSelectorSheet(
-                    projects: coreManager.projects,
-                    projectOnlineStatus: coreManager.projectOnlineStatus,
-                    selectedProject: $selectedProject,
-                    onDone: {
-                        projectChanged()
-                    }
-                )
-            }
-            .sheet(isPresented: $showAgentSelector) {
-                AgentSelectorSheet(
-                    agents: availableAgents,
-                    projectId: selectedProject?.id ?? "",
-                    selectedPubkey: $draft.agentPubkey,
-                    onDone: {
-                        isDirty = true // Mark as dirty when user selects agent
-                        if let projectId = selectedProject?.id {
-                            Task {
-                                await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
-                            }
-                        }
-                    }
-                )
-            }
-            .sheet(isPresented: $showNudgeSelector) {
-                NudgeSelectorSheet(
-                    nudges: availableNudges,
-                    selectedNudgeIds: $draft.selectedNudgeIds,
-                    onDone: {
-                        isDirty = true // Mark as dirty when user selects nudges
-                        // Persist nudge selections to DraftManager
-                        if let projectId = selectedProject?.id {
-                            Task {
-                                await draftManager.updateNudgeIds(draft.selectedNudgeIds, conversationId: conversationId, projectId: projectId)
-                            }
-                        }
-                    }
-                )
-            }
-            #if os(iOS)
-            .sheet(isPresented: $showImagePicker) {
-                ImagePicker { imageData, mimeType in
-                    handleImageSelected(data: imageData, mimeType: mimeType)
-                }
-            }
-            #endif
-            .alert("Image Upload Failed", isPresented: $showImageUploadError) {
-                Button("OK") { }
-            } message: {
-                Text(imageUploadError ?? "Unknown error")
-            }
-            .alert("Send Failed", isPresented: $showSendError) {
-                Button("OK") { }
-            } message: {
-                Text(sendError ?? "Unknown error")
-            }
-            .alert("Draft Load Failed", isPresented: $showLoadFailedAlert) {
-                Button("OK") {
-                    // Dismiss the composer when user acknowledges the error
-                    onDismiss?()
-                    dismiss()
-                }
-            } message: {
-                Text("Failed to load existing drafts. The corrupted file has been quarantined for recovery. Editing is blocked to prevent data loss. Please fix the corrupted file or restore from backup.")
-            }
-            .alert("Save Failed", isPresented: $showSaveFailedAlert) {
-                Button("OK") { }
-            } message: {
-                Text("Failed to save your draft: \(saveFailedError ?? "Unknown error"). Your changes may be lost if you dismiss now. Please try again or contact support.")
-            }
-            .onChange(of: scenePhase) { oldPhase, newPhase in
-                // Flush drafts immediately when app goes to background
-                if newPhase == .background || newPhase == .inactive {
-                    #if os(iOS)
-                    var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
-
-                    backgroundTaskID = UIApplication.shared.beginBackgroundTask {
-                        if backgroundTaskID != .invalid {
-                            UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                            backgroundTaskID = .invalid
-                        }
-                    }
-
-                    Task {
-                        do {
-                            // HIGH FIX: Flush localText to DraftManager before saving
-                            await flushLocalTextToDraftManager()
-                            try await draftManager.saveNow()
-                        } catch {
-                        }
-
-                        if backgroundTaskID != .invalid {
-                            UIApplication.shared.endBackgroundTask(backgroundTaskID)
-                            backgroundTaskID = .invalid
-                        }
-                    }
-                    #else
-                    Task {
-                        do {
-                            // HIGH FIX: Flush localText to DraftManager before saving
-                            await flushLocalTextToDraftManager()
-                            try await draftManager.saveNow()
-                        } catch {
-                        }
-                    }
-                    #endif
-                }
-            }
-            .onChange(of: coreManager.onlineAgents) { oldAgents, newAgents in
-                // Reactively update availableAgents when centralized state changes
-                // This eliminates the need for manual refresh() calls
-                if let projectId = selectedProject?.id {
-                    let agents = newAgents[projectId] ?? []
-                    availableAgents = agents
-                }
+                .tenexModalPresentation(detents: [.large])
             }
         }
+    }
+
+    private var composerViewWithDialogs: some View {
+        composerBaseView
+        .onAppear {
+            // Auto-select project with most recent activity if none provided
+            if selectedProject == nil && initialProject == nil {
+                if let mostActiveProject = projectWithMostRecentActivity() {
+                    selectedProject = mostActiveProject
+                    draft = Draft(projectId: mostActiveProject.id)
+                }
+            }
+
+            if selectedProject != nil {
+                loadDraft()
+                loadAgents()
+                loadNudges()
+                loadSkills()
+            }
+        }
+        .sheet(isPresented: $showProjectSelector) {
+            ProjectSelectorSheet(
+                projects: coreManager.projects,
+                projectOnlineStatus: coreManager.projectOnlineStatus,
+                selectedProject: $selectedProject,
+                onDone: {
+                    projectChanged()
+                }
+            )
+        }
+        .sheet(isPresented: $showAgentSelector) {
+            AgentSelectorSheet(
+                agents: availableAgents,
+                projectId: selectedProject?.id ?? "",
+                selectedPubkey: $draft.agentPubkey,
+                onDone: {
+                    isDirty = true // Mark as dirty when user selects agent
+                    if let projectId = selectedProject?.id {
+                        Task {
+                            await draftManager.updateAgent(draft.agentPubkey, conversationId: conversationId, projectId: projectId)
+                        }
+                    }
+                },
+                initialSearchQuery: agentSelectorInitialQuery
+            )
+        }
+        .sheet(isPresented: $showNudgeSkillSelector) {
+            NudgeSkillSelectorSheet(
+                nudges: availableNudges,
+                skills: availableSkills,
+                selectedNudgeIds: $draft.selectedNudgeIds,
+                selectedSkillIds: $draft.selectedSkillIds,
+                initialMode: nudgeSkillSelectorInitialMode,
+                initialSearchQuery: nudgeSkillSelectorInitialQuery,
+                onDone: {
+                    isDirty = true // Mark as dirty when user selects nudges/skills
+                    persistSelectedNudgeIds()
+                    persistSelectedSkillIds()
+                }
+            )
+        }
+        #if os(iOS)
+        .sheet(isPresented: $showImagePicker) {
+            ImagePicker { imageData, mimeType in
+                handleImageSelected(data: imageData, mimeType: mimeType)
+            }
+        }
+        #endif
+        .alert("Image Upload Failed", isPresented: $showImageUploadError) {
+            Button("OK") { }
+        } message: {
+            Text(imageUploadError ?? "Unknown error")
+        }
+        .alert("Send Failed", isPresented: $showSendError) {
+            Button("OK") { }
+        } message: {
+            Text(sendError ?? "Unknown error")
+        }
+        .alert("Draft Load Failed", isPresented: $showLoadFailedAlert) {
+            Button("OK") {
+                // Dismiss the composer when user acknowledges the error
+                onDismiss?()
+                dismiss()
+            }
+        } message: {
+            Text("Failed to load existing drafts. The corrupted file has been quarantined for recovery. Editing is blocked to prevent data loss. Please fix the corrupted file or restore from backup.")
+        }
+        .alert("Save Failed", isPresented: $showSaveFailedAlert) {
+            Button("OK") { }
+        } message: {
+            Text("Failed to save your draft: \(saveFailedError ?? "Unknown error"). Your changes may be lost if you dismiss now. Please try again or contact support.")
+        }
+    }
+
+    private var composerViewWithLifecycle: some View {
+        composerViewWithDialogs
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            // Flush drafts immediately when app goes to background
+            if newPhase == .background || newPhase == .inactive {
+                #if os(iOS)
+                var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+
+                backgroundTaskID = UIApplication.shared.beginBackgroundTask {
+                    if backgroundTaskID != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                        backgroundTaskID = .invalid
+                    }
+                }
+
+                Task {
+                    do {
+                        // HIGH FIX: Flush localText to DraftManager before saving
+                        await flushLocalTextToDraftManager()
+                        try await draftManager.saveNow()
+                    } catch {
+                    }
+
+                    if backgroundTaskID != .invalid {
+                        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+                        backgroundTaskID = .invalid
+                    }
+                }
+                #else
+                Task {
+                    do {
+                        // HIGH FIX: Flush localText to DraftManager before saving
+                        await flushLocalTextToDraftManager()
+                        try await draftManager.saveNow()
+                    } catch {
+                    }
+                }
+                #endif
+            }
+        }
+        .onChange(of: coreManager.onlineAgents) { oldAgents, newAgents in
+            // Reactively update availableAgents when centralized state changes
+            // This eliminates the need for manual refresh() calls
+            if let projectId = selectedProject?.id {
+                let agents = newAgents[projectId] ?? []
+                availableAgents = agents
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var composerContent: some View {
+        VStack(spacing: 0) {
+            // Project and Agent row (for new conversations)
+            if isNewConversation {
+                HStack(spacing: 12) {
+                    if let project = selectedProject {
+                        ProjectChipView(project: project) {
+                            showProjectSelector = true
+                        }
+                    } else {
+                        projectPromptButton
+                    }
+
+                    if selectedProject != nil {
+                        if let agent = selectedAgent {
+                            OnlineAgentChipView(agent: agent) {
+                                openAgentSelector()
+                            }
+                            .environmentObject(coreManager)
+                        } else {
+                            agentPromptButton
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(.bar)
+            }
+
+            // Agent chip for replies (not new conversations)
+            if !isNewConversation {
+                if let agent = selectedAgent {
+                    agentChipView(agent)
+                } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
+                    // Show the reply target even if they're not in online agents list
+                    replyTargetChipView(name: targetName, pubkey: targetPubkey) {
+                        openAgentSelector()
+                    }
+                } else if selectedProject != nil {
+                    agentPromptView
+                }
+            }
+
+            // Nudge chips (for all conversations)
+            if selectedProject != nil {
+                nudgeChipsView
+            }
+
+            // Skill chips (for all conversations)
+            if selectedProject != nil {
+                skillChipsView
+            }
+
+            // Image attachment chips (for all conversations)
+            if !localImageAttachments.isEmpty && selectedProject != nil {
+                imageAttachmentChipsView
+            }
+
+            Divider()
+
+            // Content editor
+            contentEditorView
+
+            Divider()
+
+            // Toolbar
+            toolbarView
+        }
+        #if os(iOS)
+        .overlay {
+            if showDictationOverlay {
+                DictationOverlayView(
+                    manager: dictationManager,
+                    onComplete: { text in
+                        // Append dictated text to localText (instant update)
+                        let appendedText = localText + (localText.isEmpty ? "" : " ") + text
+                        localText = appendedText
+                        // Dictation is user-initiated content, so mark dirty and sync
+                        isDirty = true
+                        // Sync to draft directly (bypass onChange which is suppressed during programmatic updates)
+                        if let projectId = selectedProject?.id {
+                            Task {
+                                await draftManager.updateContent(appendedText, conversationId: conversationId, projectId: projectId)
+                            }
+                        }
+                        showDictationOverlay = false
+                        dictationManager.reset()
+                    },
+                    onCancel: {
+                        dictationManager.cancelRecording()
+                        showDictationOverlay = false
+                    }
+                )
+            }
+        }
+        #endif
     }
 
     // MARK: - Subviews
@@ -508,7 +554,7 @@ struct MessageComposerView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
+        .background(.bar)
     }
 
     private var projectPromptView: some View {
@@ -525,13 +571,13 @@ struct MessageComposerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.systemGray6)
+            .background(.bar)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     private var agentPromptView: some View {
-        Button(action: { showAgentSelector = true }) {
+        Button(action: { openAgentSelector() }) {
             HStack(spacing: 12) {
                 Image(systemName: "person")
                     .foregroundStyle(Color.composerAction)
@@ -544,9 +590,9 @@ struct MessageComposerView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
-            .background(Color.systemGray6)
+            .background(.bar)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     /// Compact project prompt button for horizontal layout
@@ -567,12 +613,12 @@ struct MessageComposerView: View {
                     .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     /// Compact agent prompt button for horizontal layout
     private var agentPromptButton: some View {
-        Button(action: { showAgentSelector = true }) {
+        Button(action: { openAgentSelector() }) {
             HStack(spacing: 6) {
                 Image(systemName: "person")
                     .font(.caption)
@@ -588,19 +634,19 @@ struct MessageComposerView: View {
                     .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     private func agentChipView(_ agent: OnlineAgentInfo) -> some View {
         HStack(spacing: 8) {
             OnlineAgentChipView(agent: agent) {
-                showAgentSelector = true
+                openAgentSelector()
             }
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
+        .background(.bar)
     }
 
     /// Shows the reply target agent (used when replying and the agent isn't in online agents list)
@@ -629,12 +675,12 @@ struct MessageComposerView: View {
                         .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
+        .background(.bar)
     }
 
     private var nudgeChipsView: some View {
@@ -645,11 +691,12 @@ struct MessageComposerView: View {
                     NudgeChipView(nudge: nudge) {
                         isDirty = true
                         draft.removeNudge(nudge.id)
+                        persistSelectedNudgeIds()
                     }
                 }
 
                 // Add nudge button
-                Button(action: { showNudgeSelector = true }) {
+                Button(action: { openNudgeSkillSelector(mode: .nudges) }) {
                     HStack(spacing: 4) {
                         Image(systemName: "plus")
                             .font(.caption)
@@ -664,12 +711,48 @@ struct MessageComposerView: View {
                     )
                     .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
+        .background(.bar)
+    }
+
+    private var skillChipsView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                // Selected skill chips
+                ForEach(selectedSkills, id: \.id) { skill in
+                    SkillChipView(skill: skill) {
+                        isDirty = true
+                        draft.removeSkill(skill.id)
+                        persistSelectedSkillIds()
+                    }
+                }
+
+                // Add skill button
+                Button(action: { openNudgeSkillSelector(mode: .skills) }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus")
+                            .font(.caption)
+                        Text("Add Skill")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .strokeBorder(Color.secondary.opacity(0.3), lineWidth: 1)
+                    )
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 16)
+        }
+        .padding(.vertical, 12)
+        .background(.bar)
     }
 
     private var imageAttachmentChipsView: some View {
@@ -684,7 +767,7 @@ struct MessageComposerView: View {
             .padding(.horizontal, 16)
         }
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
+        .background(.bar)
     }
 
     private var contentEditorView: some View {
@@ -696,9 +779,10 @@ struct MessageComposerView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .scrollContentBackground(.hidden)
-            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject)
-            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isLoadingDraft || isSwitchingProject ? 0.5 : 1.0)
+            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
+            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
             .onChange(of: localText) { oldValue, newValue in
+                scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
                 // PERFORMANCE FIX: Debounce draft sync to avoid per-keystroke mutations
                 scheduleContentSync(newValue)
             }
@@ -706,7 +790,7 @@ struct MessageComposerView: View {
             if localText.isEmpty {
                 Text(isNewConversation && selectedProject == nil
                      ? "Select a project to start composing"
-                     : (isLoadingDraft ? "Loading draft..." : (isSwitchingProject ? "Switching project..." : (isNewConversation ? "What would you like to discuss?" : "Type your reply..."))))
+                     : (isSwitchingProject ? "Switching project..." : (isNewConversation ? "What would you like to discuss?" : "Type your reply...")))
                     .foregroundStyle(.tertiary)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 16)
@@ -793,6 +877,75 @@ struct MessageComposerView: View {
         }
     }
 
+    // MARK: - Inline Trigger Detection
+
+    private enum InlineTriggerKind {
+        case agent
+        case nudgeSkill
+    }
+
+    private struct InlineTrigger {
+        let kind: InlineTriggerKind
+        let query: String
+        let range: Range<String.Index>
+    }
+
+    private func scheduleTriggerDetection(previousValue: String, newValue: String) {
+        triggerDetectionTask?.cancel()
+
+        // Only trigger when user is adding text and no selector is already open.
+        guard !isProgrammaticUpdate else { return }
+        guard newValue.count >= previousValue.count else { return }
+        guard selectedProject != nil else { return }
+        guard !showAgentSelector && !showNudgeSkillSelector else { return }
+
+        triggerDetectionTask = Task {
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard let trigger = detectInlineTrigger(in: localText) else { return }
+
+                // Remove trigger token from the editor; selections are represented by chips.
+                localText.removeSubrange(trigger.range)
+
+                switch trigger.kind {
+                case .agent:
+                    openAgentSelector(initialQuery: trigger.query)
+                case .nudgeSkill:
+                    openNudgeSkillSelector(mode: .all, initialQuery: trigger.query)
+                }
+            }
+        }
+    }
+
+    private func detectInlineTrigger(in text: String) -> InlineTrigger? {
+        guard !text.isEmpty else { return nil }
+
+        let tokenStart = text.lastIndex(where: { $0.isWhitespace })
+            .map { text.index(after: $0) } ?? text.startIndex
+        guard tokenStart < text.endIndex else { return nil }
+
+        let token = text[tokenStart..<text.endIndex]
+        guard let prefix = token.first else { return nil }
+        guard prefix == "@" || prefix == "/" else { return nil }
+
+        let queryPart = token.dropFirst()
+        if !queryPart.isEmpty && !queryPart.allSatisfy(isValidTriggerQueryCharacter(_:)) {
+            return nil
+        }
+
+        return InlineTrigger(
+            kind: prefix == "@" ? .agent : .nudgeSkill,
+            query: String(queryPart),
+            range: tokenStart..<text.endIndex
+        )
+    }
+
+    private func isValidTriggerQueryCharacter(_ character: Character) -> Bool {
+        character.isLetter || character.isNumber || character == "-" || character == "_"
+    }
+
     private var toolbarView: some View {
         HStack(spacing: 16) {
             // Show error indicator if agents failed to load
@@ -815,7 +968,7 @@ struct MessageComposerView: View {
                         .foregroundStyle(Color.composerAction)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .disabled(selectedProject == nil || isUploadingImage)
 
             // Voice dictation button
@@ -828,7 +981,7 @@ struct MessageComposerView: View {
                 Image(systemName: "mic.fill")
                     .foregroundStyle(Color.composerAction)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .disabled(!dictationManager.state.isIdle || selectedProject == nil)
             #endif
 
@@ -858,7 +1011,21 @@ struct MessageComposerView: View {
                     Image(systemName: "trash")
                         .foregroundStyle(Color.composerDestructive)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
+            }
+
+            if isInlineComposer {
+                Button(action: sendMessage) {
+                    Image(systemName: "arrow.up")
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(canSend ? Color.agentBrand : Color.secondary.opacity(0.5))
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(!canSend)
+                .help("Send")
             }
         }
         .padding(.horizontal, 16)
@@ -866,7 +1033,16 @@ struct MessageComposerView: View {
         .background(Color.systemBackground)
     }
 
-    // MARK: - Skill Sync
+    // MARK: - Selection Sync
+
+    /// Persists selected nudge IDs to DraftManager.
+    /// Call after modifying draft.selectedNudgeIds to persist changes.
+    private func persistSelectedNudgeIds() {
+        guard let projectId = selectedProject?.id else { return }
+        Task {
+            await draftManager.updateNudgeIds(draft.selectedNudgeIds, conversationId: conversationId, projectId: projectId)
+        }
+    }
 
     /// Persists selected skill IDs to DraftManager.
     /// Call after modifying draft.selectedSkillIds to persist changes.
@@ -875,6 +1051,17 @@ struct MessageComposerView: View {
         Task {
             await draftManager.updateSkillIds(draft.selectedSkillIds, conversationId: conversationId, projectId: projectId)
         }
+    }
+
+    private func openNudgeSkillSelector(mode: NudgeSkillSelectorMode, initialQuery: String = "") {
+        nudgeSkillSelectorInitialMode = mode
+        nudgeSkillSelectorInitialQuery = initialQuery
+        showNudgeSkillSelector = true
+    }
+
+    private func openAgentSelector(initialQuery: String = "") {
+        agentSelectorInitialQuery = initialQuery
+        showAgentSelector = true
     }
 
     // MARK: - Actions
@@ -889,7 +1076,6 @@ struct MessageComposerView: View {
             // CRITICAL DATA SAFETY: Check if load failed and alert user
             if draftManager.loadFailed {
                 showLoadFailedAlert = true
-                isLoadingDraft = false
                 return
             }
 
@@ -942,8 +1128,6 @@ struct MessageComposerView: View {
                 }
             }
 
-            // BLOCKER #1 FIX: Mark loading as complete to enable editing
-            isLoadingDraft = false
         }
     }
 
@@ -984,6 +1168,16 @@ struct MessageComposerView: View {
             // No refresh needed - use data already available from centralized state
             do {
                 availableNudges = try await coreManager.safeCore.getNudges()
+            } catch {
+            }
+        }
+    }
+
+    private func loadSkills() {
+        Task {
+            // No refresh needed - use data already available from centralized state
+            do {
+                availableSkills = try await coreManager.safeCore.getSkills()
             } catch {
             }
         }
@@ -1053,6 +1247,7 @@ struct MessageComposerView: View {
             // Load agents and nudges for the new project
             loadAgents()
             loadNudges()
+            loadSkills()
 
             // BLOCKER #2 FIX: Re-enable editing after project switch completes
             isSwitchingProject = false
@@ -1095,6 +1290,7 @@ struct MessageComposerView: View {
         // PERFORMANCE FIX: Cancel any pending sync and use localText directly
         // This ensures we send what the user typed, even if sync hasn't caught up
         contentSyncTask?.cancel()
+        triggerDetectionTask?.cancel()
 
         // Build full content including image URLs (replaces [Image #N] markers with actual URLs)
         var contentToSend = localText
@@ -1113,7 +1309,8 @@ struct MessageComposerView: View {
                         title: "",
                         content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
-                        nudgeIds: Array(draft.selectedNudgeIds)
+                        nudgeIds: Array(draft.selectedNudgeIds),
+                        skillIds: Array(draft.selectedSkillIds)
                     )
                 } else {
                     result = try await coreManager.safeCore.sendMessage(
@@ -1121,7 +1318,8 @@ struct MessageComposerView: View {
                         projectId: project.id,
                         content: contentToSend,
                         agentPubkey: validatedAgentPubkey,
-                        nudgeIds: Array(draft.selectedNudgeIds)
+                        nudgeIds: Array(draft.selectedNudgeIds),
+                        skillIds: Array(draft.selectedSkillIds)
                     )
                 }
 
@@ -1133,10 +1331,13 @@ struct MessageComposerView: View {
                 }
 
                 // Clear draft on success
-                await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
-                // Notify and dismiss after delete completes
                 onSend?(result)
-                dismiss()
+                if isInlineComposer {
+                    await clearDraftAfterInlineSend(projectId: project.id)
+                } else {
+                    await draftManager.deleteDraft(conversationId: conversationId, projectId: project.id)
+                    dismiss()
+                }
             } catch {
                 isSending = false
                 sendError = error.localizedDescription
@@ -1160,6 +1361,7 @@ struct MessageComposerView: View {
         }
         // Cancel any pending sync since we're clearing
         contentSyncTask?.cancel()
+        triggerDetectionTask?.cancel()
 
         // Clear image attachments
         localImageAttachments = []
@@ -1170,6 +1372,19 @@ struct MessageComposerView: View {
                 await draftManager.clearDraft(conversationId: conversationId, projectId: projectId)
             }
         }
+    }
+
+    /// Clears only typed content after a successful inline send while preserving routing controls.
+    private func clearDraftAfterInlineSend(projectId: String) async {
+        draft.updateContent("")
+        draft.clearImageAttachments()
+        localText = ""
+        localImageAttachments = []
+        isDirty = false
+        contentSyncTask?.cancel()
+        triggerDetectionTask?.cancel()
+        await draftManager.updateContent("", conversationId: conversationId, projectId: projectId)
+        await draftManager.updateImageAttachments([], conversationId: conversationId, projectId: projectId)
     }
 
     // MARK: - Image Attachment Handling
@@ -1265,7 +1480,7 @@ struct ProjectChipView: View {
                     .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .contentShape(Capsule())
     }
 
@@ -1308,7 +1523,7 @@ struct OnlineAgentChipView: View {
                     .shadow(color: .black.opacity(0.1), radius: 2, x: 0, y: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .contentShape(Capsule())
     }
 }
@@ -1337,7 +1552,7 @@ struct ImageAttachmentChipView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

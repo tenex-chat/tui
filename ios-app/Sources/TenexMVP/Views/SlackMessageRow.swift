@@ -164,7 +164,7 @@ struct SlackMessageRow: View {
                         }
                         .foregroundStyle(Color.composerAction)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .padding(.top, 4)
                 }
             }
@@ -185,7 +185,7 @@ struct SlackMessageRow: View {
                     }
                     .foregroundStyle(Color.composerAction)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .padding(.top, 8)
             }
         }

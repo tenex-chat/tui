@@ -15,99 +15,70 @@ struct ConversationSearchGroup: Identifiable {
 
 // MARK: - Search View
 
+enum SearchLayoutMode {
+    case adaptive
+    case shellList
+    case shellDetail
+}
+
 struct SearchView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
-    @Environment(\.dismiss) private var dismiss
+    let layoutMode: SearchLayoutMode
+    private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
 
     @State private var searchText = ""
     @State private var groupedResults: [ConversationSearchGroup] = []
     @State private var isSearching = false
     @State private var searchTask: Task<Void, Never>?
-    @State private var selectedConversation: ConversationFullInfo?
+    @State private var selectedConversationState: ConversationFullInfo?
     @State private var isLoadingConversation = false
     @State private var loadingConversationId: String?  // Track which conversation we're loading for "latest wins"
     @State private var loadErrorMessage: String?  // Error feedback for failed loads
 
-    var body: some View {
-        List {
-            if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
-                ContentUnavailableView(
-                    "No Results",
-                    systemImage: "magnifyingglass",
-                    description: Text("No messages found matching \"\(searchText)\"")
-                )
-            } else if groupedResults.isEmpty && searchText.isEmpty {
-                ContentUnavailableView(
-                    "Search Messages",
-                    systemImage: "magnifyingglass",
-                    description: Text("Enter a search term to find messages across all conversations")
-                )
-            } else {
-                ForEach(groupedResults) { group in
-                    Section {
-                        // Conversation header - tappable to navigate
-                        Button {
-                            Task { await loadAndSelectConversation(id: group.id) }
-                        } label: {
-                            ConversationGroupHeader(group: group)
-                        }
-                        .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+    init(
+        layoutMode: SearchLayoutMode = .adaptive,
+        selectedConversation: Binding<ConversationFullInfo?>? = nil
+    ) {
+        self.layoutMode = layoutMode
+        self.selectedConversationBindingOverride = selectedConversation
+    }
 
-                        // Matching messages (indented)
-                        ForEach(group.matches, id: \.eventId) { result in
-                            Button {
-                                if let threadId = result.threadId {
-                                    Task { await loadAndSelectConversation(id: threadId) }
-                                }
-                            } label: {
-                                MatchingMessageRow(result: result, searchTerm: searchText)
-                            }
-                            .buttonStyle(.plain)
-                            .listRowInsets(EdgeInsets(top: 0, leading: 28, bottom: 2, trailing: 16))
-                        }
-                    }
+    private var selectedConversationBinding: Binding<ConversationFullInfo?> {
+        selectedConversationBindingOverride ?? $selectedConversationState
+    }
+
+    private var useSplitView: Bool {
+        if layoutMode == .shellList || layoutMode == .shellDetail {
+            return true
+        }
+        #if os(macOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
+    }
+
+    var body: some View {
+        Group {
+            switch layoutMode {
+            case .shellList:
+                shellListLayout
+            case .shellDetail:
+                shellDetailLayout
+            case .adaptive:
+                if useSplitView {
+                    splitLayout
+                } else {
+                    stackLayout
                 }
-                #if os(iOS)
-                .listSectionSpacing(4)
-                #endif
             }
         }
-        .listStyle(.plain)
-        #if os(iOS)
-        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
-        #else
-        .searchable(text: $searchText)
-        #endif
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
-        .navigationTitle("Search")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button("Cancel") {
-                    dismiss()
-                }
-            }
-        }
-        #if os(iOS)
-        .sheet(item: $selectedConversation) { conversation in
-            NavigationStack {
-                ConversationDetailView(conversation: conversation)
-                    .environmentObject(coreManager)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") {
-                                selectedConversation = nil
-                            }
-                        }
-                    }
-            }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
-        }
-        #endif
         .overlay {
             if isSearching || isLoadingConversation {
                 ProgressView()
@@ -126,6 +97,127 @@ struct SearchView: View {
                 Text(message)
             }
         }
+    }
+
+    // MARK: - Layouts
+
+    private var stackLayout: some View {
+        NavigationStack {
+            searchResultsList
+                .navigationTitle("Search")
+                .navigationBarTitleDisplayMode(.inline)
+                .navigationDestination(item: selectedConversationBinding) { conversation in
+                    ConversationDetailView(conversation: conversation)
+                        .environmentObject(coreManager)
+                }
+        }
+    }
+
+    private var shellListLayout: some View {
+        searchResultsList
+            .navigationTitle("Search")
+            .accessibilityIdentifier("section_list_column")
+    }
+
+    private var shellDetailLayout: some View {
+        NavigationStack {
+            splitDetailContent
+        }
+        .accessibilityIdentifier("detail_column")
+    }
+
+    private var splitLayout: some View {
+        #if os(macOS)
+        return AnyView(
+            HSplitView {
+                searchResultsList
+                    .frame(minWidth: 340, idealWidth: 420, maxWidth: 520, maxHeight: .infinity)
+
+                NavigationStack {
+                    splitDetailContent
+                }
+                .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        )
+        #else
+        return AnyView(
+            NavigationSplitView {
+                searchResultsList
+                    .navigationTitle("Search")
+            } detail: {
+                NavigationStack {
+                    splitDetailContent
+                }
+            }
+        )
+        #endif
+    }
+
+    @ViewBuilder
+    private var splitDetailContent: some View {
+        if let conversation = selectedConversationBinding.wrappedValue {
+            ConversationDetailView(conversation: conversation)
+                .environmentObject(coreManager)
+        } else {
+            ContentUnavailableView(
+                "Select a Conversation",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Search results will open here")
+            )
+        }
+    }
+
+    private var searchResultsList: some View {
+        List {
+            if groupedResults.isEmpty && !searchText.isEmpty && !isSearching {
+                ContentUnavailableView(
+                    "No Results",
+                    systemImage: "magnifyingglass",
+                    description: Text("No messages found matching \"\(searchText)\"")
+                )
+            } else if groupedResults.isEmpty && searchText.isEmpty {
+                ContentUnavailableView(
+                    "Search Messages",
+                    systemImage: "magnifyingglass",
+                    description: Text("Enter a search term to find messages across all conversations")
+                )
+            } else {
+                ForEach(groupedResults) { group in
+                    Section {
+                        Button {
+                            Task { await loadAndSelectConversation(id: group.id) }
+                        } label: {
+                            ConversationGroupHeader(group: group)
+                        }
+                        .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
+
+                        ForEach(group.matches, id: \.eventId) { result in
+                            Button {
+                                if let threadId = result.threadId {
+                                    Task { await loadAndSelectConversation(id: threadId) }
+                                }
+                            } label: {
+                                MatchingMessageRow(result: result, searchTerm: searchText)
+                            }
+                            .listRowInsets(EdgeInsets(top: 0, leading: 28, bottom: 2, trailing: 16))
+                        }
+                    }
+                }
+                #if os(iOS)
+                .listSectionSpacing(4)
+                #endif
+            }
+        }
+        #if os(iOS)
+        .listStyle(.plain)
+        #else
+        .listStyle(.inset)
+        #endif
+        #if os(iOS)
+        .searchable(text: $searchText, placement: .navigationBarDrawer(displayMode: .always))
+        #else
+        .searchable(text: $searchText)
+        #endif
     }
 
     private func performSearch(query: String) {
@@ -208,7 +300,7 @@ struct SearchView: View {
             loadingConversationId = nil
 
             if let conversation = conversations.first {
-                selectedConversation = conversation
+                selectedConversationBinding.wrappedValue = conversation
             } else {
                 // Show error feedback when conversation can't be loaded
                 loadErrorMessage = "This conversation may have been deleted or is no longer available."

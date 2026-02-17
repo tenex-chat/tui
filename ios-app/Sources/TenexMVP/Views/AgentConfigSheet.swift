@@ -54,18 +54,11 @@ struct AgentConfigSheet: View {
                     configContent
                 }
             }
-            #if os(iOS)
             .navigationTitle("Configure \(agent.name)")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #else
-            .navigationTitle("")
             #endif
             .toolbar {
-                #if os(macOS)
-                ToolbarItem(placement: .principal) {
-                    Text("Configure \(agent.name)").fontWeight(.semibold)
-                }
-                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         dismiss()
@@ -86,8 +79,7 @@ struct AgentConfigSheet: View {
             await loadConfigOptions()
         }
         #if os(iOS)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .tenexModalPresentation(detents: [.medium, .large])
         #else
         .frame(minWidth: 440, idealWidth: 500, minHeight: 420, idealHeight: 520)
         #endif
@@ -193,7 +185,7 @@ struct AgentConfigSheet: View {
                 Spacer()
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     private func groupCheckbox(group: ToolGroup) -> some View {
@@ -211,7 +203,7 @@ struct AgentConfigSheet: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 
     // MARK: - Display Helpers

@@ -82,7 +82,7 @@ struct NowPlayingBar: View {
                         }
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
 
                     Spacer()
 
@@ -95,7 +95,7 @@ struct NowPlayingBar: View {
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
 
                     // Skip to next (only when queue has items)
                     if player.hasQueue {
@@ -107,7 +107,7 @@ struct NowPlayingBar: View {
                                 .frame(width: 44, height: 44)
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
                     }
 
                     // Stop button (stops all + clears queue)
@@ -120,7 +120,7 @@ struct NowPlayingBar: View {
                             .frame(width: 44, height: 44)
                             .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 6)
@@ -219,7 +219,7 @@ struct AudioQueueSheet: View {
                                     Image(systemName: "xmark.circle.fill")
                                         .foregroundStyle(.secondary)
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.borderless)
                             }
                         }
                     }
@@ -247,7 +247,7 @@ struct AudioQueueSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .tenexModalPresentation(detents: [.medium, .large])
     }
 
     private func resolveAgentName(pubkey: String?) -> String? {

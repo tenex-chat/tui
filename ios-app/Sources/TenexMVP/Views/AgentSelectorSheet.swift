@@ -18,6 +18,9 @@ struct AgentSelectorSheet: View {
     /// Callback when selection is confirmed
     var onDone: (() -> Void)?
 
+    /// Optional initial search query (used by @ trigger in composer)
+    var initialSearchQuery: String = ""
+
     // MARK: - Environment
 
     @EnvironmentObject var coreManager: TenexCoreManager
@@ -72,40 +75,14 @@ struct AgentSelectorSheet: View {
                 }
 
                 // Search and agent list
-                List {
-                    if filteredAgents.isEmpty {
-                        emptyStateView
-                    } else {
-                        ForEach(filteredAgents, id: \.pubkey) { agent in
-                            OnlineAgentRowView(
-                                agent: agent,
-                                isSelected: localSelectedPubkey == agent.pubkey,
-                                onTap: {
-                                    selectAgent(agent)
-                                },
-                                onConfig: {
-                                    agentToConfig = agent
-                                }
-                            )
-                        }
-                    }
-                }
-                .listStyle(.plain)
-                .contentMargins(.top, 0, for: .scrollContent)
+                agentList
             }
             .searchable(text: $searchText, prompt: "Search agents...")
-            #if os(iOS)
             .navigationTitle("Select Agent")
+            #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
-            #else
-            .navigationTitle("")
             #endif
             .toolbar {
-                #if os(macOS)
-                ToolbarItem(placement: .principal) {
-                    Text("Select Agent").fontWeight(.semibold)
-                }
-                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -121,11 +98,19 @@ struct AgentSelectorSheet: View {
                         dismiss()
                     }
                     .fontWeight(.semibold)
+                    .keyboardShortcut(.defaultAction)
                 }
             }
             .onAppear {
                 // Initialize local state from parent binding
                 localSelectedPubkey = selectedPubkey
+                if !initialSearchQuery.isEmpty {
+                    searchText = initialSearchQuery
+                    autoSelectBestMatch(for: initialSearchQuery)
+                }
+            }
+            .onChange(of: searchText) { _, newQuery in
+                autoSelectBestMatch(for: newQuery)
             }
             .sheet(item: $agentToConfig) { agent in
                 AgentConfigSheet(agent: agent, projectId: projectId)
@@ -133,8 +118,7 @@ struct AgentSelectorSheet: View {
             }
         }
         #if os(iOS)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
+        .tenexModalPresentation(detents: [.medium, .large])
         #else
         .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
         #endif
@@ -142,25 +126,69 @@ struct AgentSelectorSheet: View {
 
     // MARK: - Subviews
 
+    @ViewBuilder
+    private var agentList: some View {
+        #if os(macOS)
+        List(selection: $localSelectedPubkey) {
+            if filteredAgents.isEmpty {
+                emptyStateView
+            } else {
+                ForEach(filteredAgents, id: \.pubkey) { agent in
+                    OnlineAgentRowView(
+                        agent: agent,
+                        isSelected: localSelectedPubkey == agent.pubkey,
+                        onTap: nil,
+                        onConfig: {
+                            agentToConfig = agent
+                        }
+                    )
+                    .tag(agent.pubkey)
+                }
+            }
+        }
+        .listStyle(.inset)
+        #else
+        List {
+            if filteredAgents.isEmpty {
+                emptyStateView
+            } else {
+                ForEach(filteredAgents, id: \.pubkey) { agent in
+                    OnlineAgentRowView(
+                        agent: agent,
+                        isSelected: localSelectedPubkey == agent.pubkey,
+                        onTap: {
+                            selectAgent(agent)
+                        },
+                        onConfig: {
+                            agentToConfig = agent
+                        }
+                    )
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        #endif
+    }
+
     private func selectedAgentBar(_ agent: OnlineAgentInfo) -> some View {
         HStack(spacing: 8) {
             Text("@\(agent.name)")
                 .font(.subheadline)
                 .fontWeight(.medium)
+                .foregroundStyle(Color.agentBrand)
 
             Button(action: { localSelectedPubkey = nil }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
 
             Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .background(Color.systemGray6)
-        .foregroundStyle(Color.agentBrand)
+        .background(.bar)
     }
 
     private var emptyStateView: some View {
@@ -199,6 +227,60 @@ struct AgentSelectorSheet: View {
             localSelectedPubkey = agent.pubkey
         }
     }
+
+    /// Auto-select the best matching agent for the current query.
+    /// Ranking: exact > prefix > substring > subsequence.
+    private func autoSelectBestMatch(for query: String) {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        var best: (score: Int, distance: Int, pubkey: String)?
+        let normalizedQuery = trimmed.lowercased()
+
+        for agent in filteredAgents {
+            let name = agent.name.lowercased()
+            if let rank = matchRank(name: name, query: normalizedQuery) {
+                if let current = best {
+                    if rank.score < current.score || (rank.score == current.score && rank.distance < current.distance) {
+                        best = (rank.score, rank.distance, agent.pubkey)
+                    }
+                } else {
+                    best = (rank.score, rank.distance, agent.pubkey)
+                }
+            }
+        }
+
+        if let bestPubkey = best?.pubkey {
+            localSelectedPubkey = bestPubkey
+        }
+    }
+
+    private func matchRank(name: String, query: String) -> (score: Int, distance: Int)? {
+        if name == query {
+            return (0, 0)
+        }
+        if name.hasPrefix(query) {
+            return (1, name.count - query.count)
+        }
+        if let range = name.range(of: query) {
+            let startDistance = name.distance(from: name.startIndex, to: range.lowerBound)
+            return (2, startDistance)
+        }
+
+        // Subsequence match for tolerant matching (e.g. "hr" -> "human-resources")
+        var queryIndex = query.startIndex
+        var consumed = 0
+        for ch in name {
+            consumed += 1
+            if queryIndex < query.endIndex && ch == query[queryIndex] {
+                queryIndex = query.index(after: queryIndex)
+                if queryIndex == query.endIndex {
+                    return (3, consumed - query.count)
+                }
+            }
+        }
+        return nil
+    }
 }
 
 // MARK: - OnlineAgentInfo Identifiable
@@ -213,66 +295,73 @@ struct OnlineAgentRowView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     let agent: OnlineAgentInfo
     let isSelected: Bool
-    let onTap: () -> Void
+    var onTap: (() -> Void)?
     var onConfig: (() -> Void)?
+
+    private var mainContent: some View {
+        HStack(spacing: 10) {
+            // Agent avatar - uses actual agent pubkey for profile lookup
+            AgentAvatarView(
+                agentName: agent.name,
+                pubkey: agent.pubkey,
+                size: 36,
+                showBorder: false,
+                isSelected: isSelected
+            )
+            .environmentObject(coreManager)
+
+            // Agent info
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(agent.name)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+
+                    if agent.isPm {
+                        Text("PM")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule()
+                                    .fill(Color.agentBrand)
+                            )
+                    }
+
+                    if let model = agent.model, !model.isEmpty {
+                        Text(model)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Text("@\(agent.name)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            // Selection indicator
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.body)
+                .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+        }
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            // Tappable main content for selection
-            Button(action: onTap) {
-                HStack(spacing: 10) {
-                    // Agent avatar - uses actual agent pubkey for profile lookup
-                    AgentAvatarView(
-                        agentName: agent.name,
-                        pubkey: agent.pubkey,
-                        size: 36,
-                        showBorder: false,
-                        isSelected: isSelected
-                    )
-                    .environmentObject(coreManager)
-
-                    // Agent info
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
-                            Text(agent.name)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(.primary)
-
-                            if agent.isPm {
-                                Text("PM")
-                                    .font(.caption2)
-                                    .fontWeight(.semibold)
-                                    .foregroundStyle(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(
-                                        Capsule()
-                                            .fill(Color.agentBrand)
-                                    )
-                            }
-
-                            if let model = agent.model, !model.isEmpty {
-                                Text(model)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        Text("@\(agent.name)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    // Selection indicator
-                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                        .font(.body)
-                        .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+            if let onTap {
+                Button(action: onTap) {
+                    mainContent
                 }
+                .buttonStyle(.borderless)
+            } else {
+                mainContent
             }
-            .buttonStyle(.plain)
 
             // Config gear button (separate from selection)
             if let onConfig = onConfig {
@@ -283,7 +372,7 @@ struct OnlineAgentRowView: View {
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
             }
         }
         .padding(.vertical, 4)

@@ -25,6 +25,26 @@ extension View {
     func adaptiveGlassButtonStyle() -> some View {
         modifier(AdaptiveButtonStyle())
     }
+
+    /// Applies consistent iOS modal sizing so sheets don't collapse to fitted content.
+    /// On non-iOS platforms this is a no-op.
+    @ViewBuilder
+    func tenexModalPresentation(detents: [PresentationDetent] = [.medium, .large]) -> some View {
+        #if os(iOS)
+        if #available(iOS 26.0, *) {
+            self
+                .presentationSizing(.page)
+                .presentationDetents(Set(detents))
+                .presentationDragIndicator(.visible)
+        } else {
+            self
+                .presentationDetents(Set(detents))
+                .presentationDragIndicator(.visible)
+        }
+        #else
+        self
+        #endif
+    }
 }
 
 // MARK: - Availability-Guarded Glass Effect

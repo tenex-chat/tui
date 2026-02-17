@@ -11,8 +11,6 @@ struct LoginView: View {
     @State private var nsecInput = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
-    @State private var showSuccess = false
-    @State private var credentialSaveWarning: String?
 
     var body: some View {
         NavigationStack {
@@ -81,48 +79,6 @@ struct LoginView: View {
                     .padding(.horizontal)
                 }
 
-                // Success Message
-                if showSuccess {
-                    VStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 40))
-                            .foregroundStyle(Color.healthGood)
-
-                        Text("Login Successful!")
-                            .font(.headline)
-                            .foregroundStyle(Color.healthGood)
-
-                        Text("Your npub:")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text(userNpub)
-                            .font(.system(.caption, design: .monospaced))
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .padding(.horizontal)
-
-                        // Credential save warning (if save failed)
-                        if let warning = credentialSaveWarning {
-                            HStack {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(Color.healthWarning)
-                                Text(warning)
-                                    .foregroundStyle(Color.healthWarning)
-                                    .font(.caption2)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.healthWarning.opacity(0.1))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-                    .padding()
-                    .background(Color.healthGood.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal)
-                }
-
                 // Login Button
                 Button(action: login) {
                     if isLoading {
@@ -135,28 +91,18 @@ struct LoginView: View {
                     }
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(nsecInput.isEmpty || isLoading || showSuccess)
+                .disabled(nsecInput.isEmpty || isLoading)
                 .padding(.horizontal)
-
-                // Continue Button (shown after success)
-                if showSuccess {
-                    Button(action: continueToApp) {
-                        Label("Continue to App", systemImage: "arrow.forward")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .padding(.horizontal)
-                }
 
                 Spacer()
 
                 // Footer Info
                 VStack(spacing: 4) {
-                    Text("Your key is stored securely in Keychain")
+                    Text("Your key is stored securely in Keychain when available")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
 
-                    Text("You'll be auto-logged in on next launch")
+                    Text("If saved, you'll be auto-logged in on next launch")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -169,8 +115,6 @@ struct LoginView: View {
     private func login() {
         // Reset state
         errorMessage = nil
-        showSuccess = false
-        credentialSaveWarning = nil
         isLoading = true
 
         // Validate input format - capture and clear input immediately
@@ -199,19 +143,11 @@ struct LoginView: View {
 
                 if result.success {
                     // Save credential to keychain
-                    let saveError = await coreManager.saveCredential(nsec: trimmedInput)
-
+                    _ = await coreManager.saveCredential(nsec: trimmedInput)
                     isLoading = false
                     userNpub = result.npub
-
-                    if let error = saveError {
-                        // Show warning if credential save failed
-                        credentialSaveWarning = "Could not save credentials: \(error). You'll need to log in again next time."
-                        showSuccess = true
-                    } else {
-                        // Auto-navigate to app on successful login
-                        isLoggedIn = true
-                    }
+                    // Always continue directly to the app after successful auth.
+                    isLoggedIn = true
                 } else {
                     isLoading = false
                     errorMessage = "Login failed"
@@ -244,9 +180,6 @@ struct LoginView: View {
         }
     }
 
-    private func continueToApp() {
-        isLoggedIn = true
-    }
 }
 
 #Preview {

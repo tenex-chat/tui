@@ -78,7 +78,7 @@ struct InlineAskView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
         }
         .padding(12)
         .background(Color.presenceOnlineBackground)
