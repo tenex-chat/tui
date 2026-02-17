@@ -208,7 +208,7 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
             // GitHub-style activity grid (default to week view, tokens visualization)
             render_activity_grid(
                 f,
-                &*data_store,
+                &data_store,
                 ActivityViewMode::Week,
                 ActivityVisualization::Tokens,
                 vertical_chunks[2],
@@ -933,9 +933,9 @@ fn render_empty_state(f: &mut Frame, message: &str, area: Rect) {
 fn format_runtime(ms: u64) -> String {
     let seconds = ms / 1000;
     if seconds == 0 && ms > 0 {
-        return format!("{}ms", ms);
+        format!("{}ms", ms)
     } else if seconds == 0 {
-        return "0s".to_string();
+        "0s".to_string()
     } else if seconds < 60 {
         format!("{}s", seconds)
     } else if seconds < 3600 {
@@ -1266,12 +1266,10 @@ mod tests {
 
             // Verify day part is numeric
             let day_part = result[4..].trim();
-            let day_num: u32 = day_part.parse().expect(&format!(
-                "Timestamp {} produced non-numeric day '{}' in result '{}'",
-                ts, day_part, result
-            ));
+            let day_num: u32 = day_part.parse().unwrap_or_else(|_| panic!("Timestamp {} produced non-numeric day '{}' in result '{}'",
+                ts, day_part, result));
             assert!(
-                day_num >= 1 && day_num <= 31,
+                (1..=31).contains(&day_num),
                 "Day {} out of range for timestamp {}",
                 day_num,
                 ts

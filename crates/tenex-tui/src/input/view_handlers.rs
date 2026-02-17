@@ -644,7 +644,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('1') => {
             // Already on Home, do nothing
         }
-        KeyCode::Char(c) if c >= '2' && c <= '9' => {
+        KeyCode::Char(c) if ('2'..='9').contains(&c) => {
             let tab_index = (c as usize) - ('2' as usize);
             if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
@@ -1197,7 +1197,7 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
     // Handle special cases not covered by hotkey registry
     match code {
         // Number keys 2-9 for tab navigation
-        KeyCode::Char(c) if c >= '2' && c <= '9' => {
+        KeyCode::Char(c) if ('2'..='9').contains(&c) => {
             let tab_index = (c as usize) - ('2' as usize);
             if tab_index < app.open_tabs().len() {
                 app.switch_to_tab(tab_index);
@@ -1440,7 +1440,7 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
     } else if app.view == View::AgentBrowser && !app.home.in_agent_detail() && c != 'q' && c != 'n'
     {
         app.home.append_to_filter(c);
-    } else if c >= '1' && c <= '5' && app.view == View::LessonViewer {
+    } else if ('1'..='5').contains(&c) && app.view == View::LessonViewer {
         let section_index = (c as usize) - ('1' as usize);
         if let Some(ref lesson_id) = app.viewing_lesson_id {
             if let Some(lesson) = app.data_store.borrow().content.get_lesson(lesson_id) {

@@ -79,7 +79,7 @@ fn truncate_plain_to_width(s: &str, max_width: usize) -> (String, usize) {
 /// Create a half-block span that matches the display width of the given text
 fn half_block_span(text: &str, block_char: char, is_active: bool) -> Span<'static> {
     let width = text.width();
-    let content: String = std::iter::repeat(block_char).take(width).collect();
+    let content: String = std::iter::repeat_n(block_char, width).collect();
     if is_active {
         Span::styled(content, Style::default().fg(theme::BG_TAB_ACTIVE))
     } else {

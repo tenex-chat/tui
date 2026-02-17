@@ -13,8 +13,8 @@ use crate::ui::selector::SelectorState;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::state::{
     ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer,
-    NavigationStackEntry, OpenTab, ReportTabFocus, ReportTabState, TTSControlState, TTSQueueItem,
-    TTSQueueItemStatus, TabContentType, TabManager, ViewLocation,
+    NavigationStackEntry, OpenTab,
+    TTSQueueItemStatus, TabManager, ViewLocation,
 };
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
@@ -1855,8 +1855,8 @@ impl App {
         // Also check the thread itself (the original message that started the thread)
         // The thread author might be an agent - use last_activity as timestamp proxy
         // Note: for the thread root, we only consider it if no messages from agents exist yet
-        if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str()) {
-            if user_pubkey
+        if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str())
+            && user_pubkey
                 .as_ref()
                 .map(|pk| pk != &thread.pubkey)
                 .unwrap_or(true)
@@ -1868,7 +1868,6 @@ impl App {
                     &thread.pubkey[..8]
                 );
             }
-        }
 
         // Find and return the matching agent
         let result = latest_agent_pubkey
@@ -2480,7 +2479,7 @@ impl App {
                 .borrow_mut()
                 .set_thread_archived(thread_id, true);
         }
-        self.notify(Notification::info(&format!(
+        self.notify(Notification::info(format!(
             "Archived {} conversations",
             count
         )));
@@ -3942,14 +3941,11 @@ impl App {
 
         // Check if the selected item is a DelegationPreview
         if let Some(item) = grouped.get(self.conversation.selected_message_index) {
-            match item {
-                DisplayItem::DelegationPreview {
+            if let DisplayItem::DelegationPreview {
                     thread_id: delegation_thread_id,
                     ..
-                } => {
-                    return Some(delegation_thread_id.clone());
-                }
-                _ => {}
+                } = item {
+                return Some(delegation_thread_id.clone());
             }
         }
 

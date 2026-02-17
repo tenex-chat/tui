@@ -154,7 +154,7 @@ pub(crate) fn render_messages_panel(
     let content_width = messages_area.width as usize;
 
     // If in subthread, render the root message first as a header
-    if let Some(ref root_msg) = app.subthread_root_message() {
+    if let Some(root_msg) = app.subthread_root_message() {
         let author = app.data_store.borrow().get_profile_name(&root_msg.pubkey);
         messages_text.push(Line::from(Span::styled(
             format!("{}{} :", padding, author),

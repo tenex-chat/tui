@@ -2142,7 +2142,9 @@ impl DebugStatsState {
 
 /// Unified modal state - only one modal can be open at a time
 #[derive(Debug, Clone)]
+#[derive(Default)]
 pub enum ModalState {
+    #[default]
     None,
     /// Command palette (Ctrl+T) - context-sensitive command menu
     CommandPalette(CommandPaletteState),
@@ -2214,11 +2216,6 @@ pub enum ModalState {
     },
 }
 
-impl Default for ModalState {
-    fn default() -> Self {
-        Self::None
-    }
-}
 
 impl ModalState {
     pub fn is_none(&self) -> bool {

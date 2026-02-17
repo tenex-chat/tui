@@ -104,7 +104,7 @@ pub(super) fn handle_tab_modal_key(app: &mut App, key: KeyEvent) {
             app.close_tab_modal();
             app.go_home();
         }
-        KeyCode::Char(c) if c >= '2' && c <= '9' => {
+        KeyCode::Char(c) if ('2'..='9').contains(&c) => {
             let tab_index = (c as usize) - ('2' as usize);
             app.close_tab_modal();
             if tab_index < app.open_tabs().len() {

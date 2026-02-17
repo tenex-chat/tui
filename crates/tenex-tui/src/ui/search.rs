@@ -457,7 +457,7 @@ fn text_starts_with_ascii(text: &str, prefix: &str) -> bool {
     prefix_chars.iter().enumerate().all(|(i, pc)| {
         text_chars
             .get(i)
-            .map_or(false, |c| c.eq_ignore_ascii_case(pc))
+            .is_some_and(|c| c.eq_ignore_ascii_case(pc))
     })
 }
 
@@ -733,7 +733,7 @@ pub fn search_conversations_hierarchical(
                 }
             } else {
                 // Also check runtime hierarchy for parent
-                if let Some(parent_id) = store.get_runtime_ancestors(*id).first() {
+                if let Some(parent_id) = store.get_runtime_ancestors(id).first() {
                     if all_relevant_ids.contains(parent_id) {
                         children_map
                             .entry(parent_id.clone())

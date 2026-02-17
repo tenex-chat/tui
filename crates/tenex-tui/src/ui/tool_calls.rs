@@ -47,7 +47,7 @@ pub fn parse_message_content(content: &str) -> MessageContent {
             let mut in_string = false;
             let mut escape_next = false;
 
-            while let Some(next_ch) = chars.next() {
+            for next_ch in chars.by_ref() {
                 json_str.push(next_ch);
 
                 if escape_next {

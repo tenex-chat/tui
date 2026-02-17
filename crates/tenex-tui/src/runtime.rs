@@ -136,7 +136,7 @@ pub(crate) async fn run_app(
         loop_count += 1;
 
         // Log diagnostics every 1000 iterations
-        if loop_count % 1000 == 0 {
+        if loop_count.is_multiple_of(1000) {
             let elapsed = diag_start.elapsed().as_secs();
             log_diagnostic(&format!(
                 "loops={} elapsed={}s rate={}/s | terminal={} ndb={} tick={} upload={} publish_confirm={} audio={}",
@@ -290,7 +290,7 @@ pub(crate) async fn run_app(
                         ));
                         // BULLETPROOF: Periodically cleanup old confirmed snapshots to prevent accumulation
                         // Run after every 10 confirmations to balance I/O vs. memory
-                        if publish_confirm_events % 10 == 0 {
+                        if publish_confirm_events.is_multiple_of(10) {
                             match app.cleanup_confirmed_publishes() {
                                 Ok(cleaned) if cleaned > 0 => {
                                     log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old confirmed snapshots", cleaned));
@@ -562,13 +562,11 @@ fn handle_core_events(
             CoreEvent::ProjectStatus(status) => {
                 if app.selected_project.as_ref().map(|p| p.a_tag())
                     == Some(status.project_coordinate.clone())
-                {
-                    if app.selected_agent().is_none() {
+                    && app.selected_agent().is_none() {
                         if let Some(pm) = status.pm_agent() {
                             app.set_selected_agent(Some(pm.clone()));
                         }
                     }
-                }
             }
             CoreEvent::PendingBackendApproval(pending) => {
                 // Show approval modal if no modal is currently open
