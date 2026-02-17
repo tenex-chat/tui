@@ -193,7 +193,6 @@ class TenexCoreManager: ObservableObject {
         let handler = TenexEventHandler(coreManager: self)
         eventHandler = handler
         core.setEventCallback(callback: handler)
-        print("[TenexCoreManager] Event callback registered, sessionStart=\(sessionStartTimestamp)")
     }
 
     /// Unregister the event callback.
@@ -201,7 +200,6 @@ class TenexCoreManager: ObservableObject {
     func unregisterEventCallback() {
         core.clearEventCallback()
         eventHandler = nil
-        print("[TenexCoreManager] Event callback unregistered")
     }
 
     /// Manual refresh for pull-to-refresh gesture.
@@ -328,7 +326,6 @@ class TenexCoreManager: ObservableObject {
             do {
                 try await safeCore.approveBackend(pubkey: backendPubkey)
             } catch {
-                print("[TenexCoreManager] Failed to approve backend '\(backendPubkey)': \(error)")
                 return
             }
 
@@ -405,7 +402,6 @@ class TenexCoreManager: ObservableObject {
             do {
                 projects = try await safeCore.getProjects()
             } catch {
-                print("[TenexCoreManager] getProjects failed: \(error)")
                 return
             }
 
@@ -500,7 +496,6 @@ class TenexCoreManager: ObservableObject {
             let threshold: UInt64 = 120
             let now = UInt64(Date().timeIntervalSince1970)
             if now - lastActivity < threshold {
-                print("[TenexCoreManager] Audio notification skipped: user active \(now - lastActivity)s ago (threshold: \(threshold)s)")
                 return
             }
         }
@@ -511,7 +506,6 @@ class TenexCoreManager: ObservableObject {
 
         guard case .success(let elevenlabsKey) = elevenlabsResult,
               case .success(let openrouterKey) = openrouterResult else {
-            print("[TenexCoreManager] Audio notification skipped: API keys not configured in keychain")
             return
         }
 
@@ -528,7 +522,6 @@ class TenexCoreManager: ObservableObject {
                 AudioNotificationPlayer.shared.enqueue(notification: notification, conversationId: conversationId)
             }
         } catch {
-            print("[TenexCoreManager] Audio notification skipped: \(error)")
         }
     }
 
@@ -581,9 +574,7 @@ class TenexCoreManager: ObservableObject {
         let agents: [OnlineAgentInfo]
         do {
             agents = try await safeCore.getOnlineAgents(projectId: projectId)
-            print("[TenexCoreManager] Fetched \(agents.count) agents for project '\(projectId)'")
         } catch {
-            print("[TenexCoreManager] Failed to fetch agents for project '\(projectId)': \(error)")
             // Cache empty array on failure to prevent stale data
             await MainActor.run { self.setOnlineAgentsCache([], for: projectId) }
             return
@@ -592,7 +583,6 @@ class TenexCoreManager: ObservableObject {
         // Only hop to main actor to mutate state
         await MainActor.run {
             self.setOnlineAgentsCache(agents, for: projectId)
-            print("[TenexCoreManager] Cached agents, onlineAgents['\(projectId)'] now has \(self.onlineAgents[projectId]?.count ?? 0) agents")
         }
     }
 
@@ -664,12 +654,9 @@ class TenexCoreManager: ObservableObject {
         do {
             let approved = try await safeCore.approveAllPendingBackends()
             if approved > 0 {
-                print("[TenexCoreManager] Auto-approved \(approved) backend(s)")
             } else {
-                print("[TenexCoreManager] No pending backends to approve")
             }
         } catch {
-            print("[TenexCoreManager] Failed to approve pending backends: \(error)")
         }
 
         do {
@@ -701,7 +688,6 @@ class TenexCoreManager: ObservableObject {
             signalStatsUpdate()
             signalDiagnosticsUpdate()
         } catch {
-            print("[TenexCoreManager] Fetch failed: \(error)")
             // Don't crash - just log and continue with stale data
         }
     }
@@ -726,7 +712,6 @@ class TenexCoreManager: ObservableObject {
             return pictureUrl
         } catch {
             // Log error for debugging but don't crash - graceful degradation
-            print("[TenexCoreManager] Failed to get profile picture for pubkey '\(pubkey.prefix(pubkeyDisplayPrefixLength))...': \(error)")
             // Cache nil to prevent repeated failed calls
             profilePictureCache.store(pubkey, pictureUrl: nil)
             return nil
@@ -746,7 +731,6 @@ class TenexCoreManager: ObservableObject {
                         self?.profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
                     } catch {
                         // Log but don't crash - cache nil to prevent repeated attempts
-                        print("[TenexCoreManager] Prefetch failed for pubkey '\(pubkey.prefix(pubkeyDisplayPrefixLength))...': \(error)")
                         self?.profilePictureCache.store(pubkey, pictureUrl: nil)
                     }
                 }
@@ -863,7 +847,6 @@ struct TenexMVPApp: App {
         if let index = args.firstIndex(of: "--debug-nsec"), index + 1 < args.count {
             let nsec = args[index + 1]
             if nsec.hasPrefix("nsec1") {
-                print("[DEBUG] Found debug nsec from launch arguments")
                 return nsec
             }
         }
@@ -871,7 +854,6 @@ struct TenexMVPApp: App {
         // Check environment variable: TENEX_DEBUG_NSEC=nsec1...
         if let nsec = ProcessInfo.processInfo.environment["TENEX_DEBUG_NSEC"],
            nsec.hasPrefix("nsec1") {
-            print("[DEBUG] Found debug nsec from environment variable")
             return nsec
         }
         #endif
@@ -892,7 +874,7 @@ struct TenexMVPApp: App {
 
                         if let error = coreManager.initializationError {
                             Text(error)
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Color.healthError)
                                 .font(.caption)
                         }
                     }
@@ -935,15 +917,13 @@ struct TenexMVPApp: App {
                         // Handle the authorization result
                         switch result {
                         case .granted:
-                            print("[App] Notification permission granted")
-                        case .denied:
-                            print("[App] Notification permission denied by user")
-                        case .previouslyDenied:
-                            // User previously denied - show alert directing them to Settings
-                            print("[App] Notification permission was previously denied")
+                            break
+                        case .denied, .previouslyDenied:
+                            // User denied notifications - show alert directing them to Settings.
                             showNotificationDeniedAlert = true
                         case .error(let error):
-                            print("[App] Notification authorization error: \(error)")
+                            _ = error
+                            break
                         }
 
                         await coreManager.fetchData()
@@ -988,14 +968,6 @@ struct TenexMVPApp: App {
         #endif
 
         #if os(macOS)
-        WindowGroup(id: "conversation-summary", for: String.self) { $conversationId in
-            if let conversationId {
-                ConversationSummaryWindow(conversationId: conversationId)
-                    .environmentObject(coreManager)
-            }
-        }
-        .defaultSize(width: 700, height: 600)
-
         WindowGroup(id: "full-conversation", for: String.self) { $conversationId in
             if let conversationId {
                 FullConversationWindow(conversationId: conversationId)
@@ -1003,6 +975,14 @@ struct TenexMVPApp: App {
             }
         }
         .defaultSize(width: 800, height: 700)
+
+        WindowGroup(id: "delegation-tree", for: String.self) { $conversationId in
+            if let id = conversationId {
+                DelegationTreeView(rootConversationId: id)
+                    .environmentObject(coreManager)
+            }
+        }
+        .defaultSize(width: 1300, height: 820)
         #endif
     }
 
@@ -1016,23 +996,19 @@ struct TenexMVPApp: App {
         DispatchQueue.global(qos: .userInitiated).async {
             // If debug nsec provided, attempt login with it directly
             if let nsec = debugNsec {
-                print("[DEBUG] Attempting login with debug nsec...")
                 do {
                     let loginResult = try coreManager.core.login(nsec: nsec)
                     DispatchQueue.main.async {
                         isAttemptingAutoLogin = false
                         if loginResult.success {
-                            print("[DEBUG] Debug login successful, npub: \(loginResult.npub)")
                             userNpub = loginResult.npub
                             isLoggedIn = true
                         } else {
-                            print("[DEBUG] Debug login failed - showing login screen")
                             autoLoginError = "Debug nsec login failed"
                         }
                     }
                     return
                 } catch {
-                    print("[DEBUG] Debug login error: \(error)")
                     DispatchQueue.main.async {
                         isAttemptingAutoLogin = false
                         autoLoginError = "Debug nsec invalid: \(error.localizedDescription)"
@@ -1059,7 +1035,6 @@ struct TenexMVPApp: App {
 
                 case .invalidCredential(let error):
                     // Credential was provably invalid - delete it and show login
-                    print("[TENEX] Stored credential invalid: \(error)")
                     Task {
                         _ = await coreManager.clearCredentials()
                     }
@@ -1067,7 +1042,6 @@ struct TenexMVPApp: App {
 
                 case .transientError(let error):
                     // Transient error - don't delete credentials, show login with warning
-                    print("[TENEX] Auto-login transient error: \(error)")
                     autoLoginError = "Could not auto-login: \(error)"
                 }
             }
@@ -1087,11 +1061,9 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
-                NavigationStack {
-                    ConversationsTabView()
-                        .environmentObject(coreManager)
-                }
-                .nowPlayingInset(coreManager: coreManager)
+                ConversationsTabView()
+                    .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
             }
 
             Tab("Reports", systemImage: "doc.richtext", value: 4) {

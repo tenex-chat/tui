@@ -23,27 +23,21 @@ actor DraftStore {
         let fileURL = draftsFileURL
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            print("[DraftStore] No existing drafts file found")
             return ([:], false)
         }
 
         do {
             let data = try Data(contentsOf: fileURL)
             let loadedDrafts = try decoder.decode([String: Draft].self, from: data)
-            print("[DraftStore] Loaded \(loadedDrafts.count) drafts")
             return (loadedDrafts, false)
         } catch {
-            print("[DraftStore] CRITICAL: Failed to load drafts: \(error)")
 
             // CRITICAL DATA SAFETY: Quarantine corrupted file to prevent data loss
             // Move it to a backup location so user can potentially recover it
             let backupURL = fileURL.deletingPathExtension().appendingPathExtension("corrupted-\(Date().timeIntervalSince1970).json")
             do {
                 try FileManager.default.moveItem(at: fileURL, to: backupURL)
-                print("[DraftStore] Quarantined corrupted drafts file to: \(backupURL.path)")
-                print("[DraftStore] Original data preserved for manual recovery")
             } catch {
-                print("[DraftStore] ERROR: Failed to quarantine corrupted file: \(error)")
             }
 
             return ([:], true)
@@ -61,7 +55,6 @@ actor DraftStore {
 
         let data = try encoder.encode(drafts)
         try data.write(to: draftsFileURL, options: .atomic)
-        print("[DraftStore] Saved \(drafts.count) drafts")
     }
 
     enum DraftStoreError: Error, LocalizedError {
@@ -468,8 +461,6 @@ final class DraftManager {
 
         // CRITICAL DATA SAFETY: If load failed, prevent any saves to avoid overwriting quarantined file
         if loadFailed {
-            print("[DraftManager] CRITICAL: Load failed - all saves are now BLOCKED to prevent data loss")
-            print("[DraftManager] Fix the corrupted file or restore from backup before proceeding")
             drafts = [:] // Start with empty drafts - do NOT overwrite quarantined file
             return
         }
@@ -484,7 +475,6 @@ final class DraftManager {
             // Store them under a special "legacy-{originalKey}" key for recovery
             if draft.projectId.isEmpty {
                 let legacyKey = "legacy-\(oldKey)"
-                print("[DraftManager] Preserving legacy draft with no projectId: \(oldKey) -> \(legacyKey)")
                 legacyDrafts[legacyKey] = draft
                 continue
             }
@@ -494,7 +484,6 @@ final class DraftManager {
 
             // If the key changed, migrate it
             if oldKey != correctKey {
-                print("[DraftManager] Migrating draft from '\(oldKey)' to '\(correctKey)'")
                 migratedDrafts[correctKey] = draft
             } else {
                 migratedDrafts[correctKey] = draft
@@ -506,9 +495,7 @@ final class DraftManager {
 
         // If we migrated any keys or found legacy drafts, save immediately to persist
         if drafts.keys.sorted() != loadedDrafts.keys.sorted() {
-            print("[DraftManager] Persisting migrated/legacy drafts")
             if !legacyDrafts.isEmpty {
-                print("[DraftManager] WARNING: Found \(legacyDrafts.count) legacy draft(s) without projectId. These are preserved under 'legacy-*' keys for manual recovery.")
             }
             scheduleSave()
         }
@@ -517,7 +504,6 @@ final class DraftManager {
     private func scheduleSave() {
         // CRITICAL DATA SAFETY: Block all saves if load failed
         if loadFailed {
-            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
             return
         }
 
@@ -550,7 +536,6 @@ final class DraftManager {
                 await MainActor.run {
                     self?.hasPendingSave = false
                     self?.lastSaveError = error
-                    print("[DraftManager] Save failed: \(error)")
                 }
             }
         }
@@ -569,7 +554,6 @@ final class DraftManager {
             } catch {
                 await MainActor.run {
                     self?.lastSaveError = error
-                    print("[DraftManager] Save failed: \(error)")
                 }
             }
         }
@@ -579,7 +563,6 @@ final class DraftManager {
     private func performSaveSync() async {
         // CRITICAL DATA SAFETY: Block all saves if load failed
         if loadFailed {
-            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
             lastSaveError = DraftStore.DraftStoreError.saveForbidden(reason: "Load failed - file quarantined")
             return
         }
@@ -592,7 +575,6 @@ final class DraftManager {
             lastSaveError = nil
         } catch {
             lastSaveError = error
-            print("[DraftManager] Save failed: \(error)")
         }
     }
 
@@ -601,7 +583,6 @@ final class DraftManager {
     private func performSaveSyncWithThrow() async throws {
         // CRITICAL DATA SAFETY: Block all saves if load failed
         if loadFailed {
-            print("[DraftManager] BLOCKED: Cannot save - load failed and file is quarantined")
             let error = DraftStore.DraftStoreError.saveForbidden(reason: "Load failed - file quarantined")
             lastSaveError = error
             throw error
@@ -615,7 +596,6 @@ final class DraftManager {
             lastSaveError = nil
         } catch {
             lastSaveError = error
-            print("[DraftManager] Save failed: \(error)")
             throw error
         }
     }

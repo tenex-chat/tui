@@ -61,29 +61,22 @@ final class DictationManager {
     }
 
     func stopRecording() async {
-        print("[DictationManager] stopRecording() called, current state: \(state)")
         guard case .recording(let partialText) = state else {
-            print("[DictationManager] stopRecording() - NOT in recording state, returning early")
             return
         }
 
         // Capture the partial text before stopping - transcriber may not produce a final result
         let capturedPartialText = partialText
-        print("[DictationManager] Captured partial text: '\(capturedPartialText)'")
 
         // Stop audio engine
-        print("[DictationManager] Stopping audio engine...")
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
 
         // Signal end of audio stream
-        print("[DictationManager] Finishing input stream...")
         inputBuilder?.finish()
 
         // Cancel the transcription task - the results stream doesn't complete on its own
-        print("[DictationManager] Cancelling transcription task...")
         transcriptionTask?.cancel()
-        print("[DictationManager] Transcription task cancelled. finalText='\(finalText)'")
         transcriptionTask = nil
 
         // Cleanup
@@ -94,16 +87,12 @@ final class DictationManager {
 
         // If finalText is empty but we had partial text, use that
         if finalText.isEmpty && !capturedPartialText.isEmpty {
-            print("[DictationManager] finalText was empty, using captured partial text")
             finalText = capturedPartialText
         }
 
-        print("[DictationManager] Final text after processing: '\(finalText)'")
 
         // Go directly to idle - let user edit in FinalTranscriptionView
-        print("[DictationManager] Setting state to .idle")
         state = .idle
-        print("[DictationManager] stopRecording() finished")
     }
 
     func cancelRecording() {
@@ -180,19 +169,15 @@ final class DictationManager {
         // Start listening for results
         transcriptionTask = Task { [weak self] in
             guard let self = self else {
-                print("[DictationManager] transcriptionTask - self is nil, returning")
                 return
             }
             var lastText = ""
-            print("[DictationManager] transcriptionTask started, waiting for results...")
             do {
                 for try await result in newTranscriber.results {
                     let text = String(result.text.characters)
                     lastText = text
-                    print("[DictationManager] Got result - isFinal: \(result.isFinal), text: '\(text)'")
                     await MainActor.run {
                         if result.isFinal {
-                            print("[DictationManager] Setting finalText from final result")
                             self.finalText = text
                         } else {
                             // Volatile/partial result
@@ -201,16 +186,12 @@ final class DictationManager {
                     }
                 }
                 // Stream ended - if no final result was produced, use the last text we saw
-                print("[DictationManager] Results stream ended. lastText='\(lastText)', finalText='\(await MainActor.run { self.finalText })'")
                 await MainActor.run {
                     if self.finalText.isEmpty && !lastText.isEmpty {
-                        print("[DictationManager] Setting finalText from lastText since no final result")
                         self.finalText = lastText
                     }
                 }
-                print("[DictationManager] transcriptionTask completing normally")
             } catch {
-                print("[DictationManager] transcriptionTask error: \(error)")
                 await MainActor.run {
                     self.error = error.localizedDescription
                     // Also capture last text on error
