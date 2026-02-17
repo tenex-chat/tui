@@ -1,57 +1,47 @@
 import SwiftUI
 
-/// Sheet for filtering conversations by project.
+/// Reusable projects content for filtering conversations by project.
 /// Row tap only toggles filter selection; project boot remains a dedicated button.
-struct ProjectsSheet: View {
+struct ProjectsContentView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @Binding var selectedProjectIds: Set<String>
+    var showDoneButton: Bool = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            List {
-                allProjectsRow
+        List {
+            allProjectsRow
 
-                if !coreManager.projects.isEmpty {
-                    Section("Projects") {
-                        ForEach(sortedProjects, id: \.id) { project in
-                            ProjectsSheetRow(
-                                project: project,
-                                isFiltered: selectedProjectIds.contains(project.id),
-                                isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
-                                onlineAgentCount: coreManager.onlineAgents[project.id]?.count ?? 0,
-                                onToggleFilter: { toggleProject(project.id) }
-                            )
-                        }
+            if !coreManager.projects.isEmpty {
+                Section("Projects") {
+                    ForEach(sortedProjects, id: \.id) { project in
+                        ProjectsSheetRow(
+                            project: project,
+                            isFiltered: selectedProjectIds.contains(project.id),
+                            isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
+                            onlineAgentCount: coreManager.onlineAgents[project.id]?.count ?? 0,
+                            onToggleFilter: { toggleProject(project.id) }
+                        )
                     }
                 }
             }
-            #if os(iOS)
-            .listStyle(.insetGrouped)
-            .navigationTitle("Projects")
-            .navigationBarTitleDisplayMode(.inline)
-            #else
-            .listStyle(.plain)
-            .navigationTitle("")
-            #endif
-            .toolbar {
-                #if os(macOS)
-                ToolbarItem(placement: .principal) {
-                    Text("Projects").fontWeight(.semibold)
-                }
-                #endif
+        }
+        #if os(iOS)
+        .listStyle(.insetGrouped)
+        .navigationTitle("Projects")
+        .navigationBarTitleDisplayMode(.inline)
+        #else
+        .listStyle(.inset)
+        .navigationTitle("Projects")
+        #endif
+        .toolbar {
+            if showDoneButton {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
                 }
             }
         }
-        #if os(iOS)
-        .presentationDetents([.medium, .large])
-        .presentationDragIndicator(.visible)
-        #else
-        .frame(minWidth: 500, minHeight: 600)
-        #endif
     }
 
     private var allProjectsRow: some View {
@@ -74,7 +64,7 @@ struct ProjectsSheet: View {
             }
             .padding(.vertical, 4)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .accessibilityLabel("Show all projects")
         .accessibilityHint("Clears project filters")
     }
@@ -94,6 +84,27 @@ struct ProjectsSheet: View {
         } else {
             selectedProjectIds.insert(id)
         }
+    }
+}
+
+/// Sheet wrapper for `ProjectsContentView`.
+struct ProjectsSheet: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @Binding var selectedProjectIds: Set<String>
+
+    var body: some View {
+        NavigationStack {
+            ProjectsContentView(
+                selectedProjectIds: $selectedProjectIds,
+                showDoneButton: true
+            )
+            .environmentObject(coreManager)
+        }
+        #if os(iOS)
+        .tenexModalPresentation(detents: [.medium, .large])
+        #else
+        .frame(minWidth: 500, minHeight: 600)
+        #endif
     }
 }
 
@@ -147,7 +158,7 @@ private struct ProjectsSheetRow: View {
                 }
                 .padding(.vertical, 6)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .accessibilityLabel("Filter by \(project.title)")
             .accessibilityValue(isFiltered ? "On" : "Off")
             .accessibilityHint("Double tap to \(isFiltered ? "remove from" : "add to") filter")

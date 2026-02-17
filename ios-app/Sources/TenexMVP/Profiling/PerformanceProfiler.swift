@@ -604,7 +604,7 @@ struct PerformanceOverlayView: View {
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
 
             // Expanded details
             if isExpanded {

@@ -402,7 +402,7 @@ private struct SelectableChoiceRow: View {
             .background(isSelected ? Color.askBrandBackground : Color.systemGray6)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
     }
 }
 

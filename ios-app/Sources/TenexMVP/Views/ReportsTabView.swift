@@ -5,18 +5,42 @@ import SwiftUI
 /// Main tab view for Reports - shows reports from all projects with search and filtering.
 /// Uses HSplitView on macOS and NavigationSplitView on iPad for master-detail layout,
 /// NavigationStack on iPhone for stack-based navigation.
+enum ReportsLayoutMode {
+    case adaptive
+    case shellList
+    case shellDetail
+}
+
 struct ReportsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
+    let layoutMode: ReportsLayoutMode
+    private let selectedReportBindingOverride: Binding<ReportInfo?>?
     @StateObject private var viewModel = ReportsViewModel()
-    @State private var selectedReport: ReportInfo?
+    @State private var selectedReportState: ReportInfo?
     @State private var showProjectFilter = false
+    @State private var hasConfiguredViewModel = false
 
     #if os(iOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
 
+    init(
+        layoutMode: ReportsLayoutMode = .adaptive,
+        selectedReport: Binding<ReportInfo?>? = nil
+    ) {
+        self.layoutMode = layoutMode
+        self.selectedReportBindingOverride = selectedReport
+    }
+
+    private var selectedReportBinding: Binding<ReportInfo?> {
+        selectedReportBindingOverride ?? $selectedReportState
+    }
+
     /// Determine if we should use split view layout (iPad/Mac)
     private var useSplitView: Bool {
+        if layoutMode == .shellList || layoutMode == .shellDetail {
+            return true
+        }
         #if os(macOS)
         return true
         #else
@@ -26,15 +50,28 @@ struct ReportsTabView: View {
 
     var body: some View {
         Group {
-            if useSplitView {
-                splitViewLayout
-            } else {
-                stackLayout
+            switch layoutMode {
+            case .shellList:
+                shellListLayout
+            case .shellDetail:
+                shellDetailLayout
+            case .adaptive:
+                if useSplitView {
+                    splitViewLayout
+                } else {
+                    stackLayout
+                }
             }
         }
-        .task {
-            viewModel.configure(with: coreManager)
-            await viewModel.loadReports()
+        .task(id: layoutMode == .shellDetail) {
+            guard layoutMode != .shellDetail else { return }
+            if !hasConfiguredViewModel {
+                viewModel.configure(with: coreManager)
+                hasConfiguredViewModel = true
+            }
+            if viewModel.filteredReports.isEmpty {
+                await viewModel.loadReports()
+            }
         }
         // Reports now update reactively via TenexEventHandler -> coreManager.reports -> viewModel
         // No need to observe coreManager.projects for report updates
@@ -65,8 +102,8 @@ struct ReportsTabView: View {
 
     @ViewBuilder
     private var reportDetailContent: some View {
-        if let report = selectedReport {
-            ReportsTabDetailView(report: report, project: viewModel.projectFor(report: report))
+        if let report = selectedReportBinding.wrappedValue {
+            ReportsTabDetailView(report: report, project: projectFor(report: report))
         } else {
             ContentUnavailableView(
                 "Select a Report",
@@ -83,9 +120,21 @@ struct ReportsTabView: View {
             reportsListView
                 .navigationTitle("Reports")
                 .navigationDestination(for: ReportInfo.self) { report in
-                    ReportsTabDetailView(report: report, project: viewModel.projectFor(report: report))
+                    ReportsTabDetailView(report: report, project: projectFor(report: report))
                 }
         }
+    }
+
+    private var shellListLayout: some View {
+        reportsListView
+            .navigationTitle("Reports")
+            .accessibilityIdentifier("section_list_column")
+    }
+
+    private var shellDetailLayout: some View {
+        reportDetailContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .accessibilityIdentifier("detail_column")
     }
 
     // MARK: - Reports List View
@@ -95,23 +144,27 @@ struct ReportsTabView: View {
             if viewModel.filteredReports.isEmpty {
                 emptyStateView
             } else {
-                List(viewModel.filteredReports, id: \.self, selection: useSplitView ? $selectedReport : nil) { report in
+                List(viewModel.filteredReports, id: \.self, selection: useSplitView ? selectedReportBinding : nil) { report in
                     if useSplitView {
                         ReportsTabRowView(
                             report: report,
-                            projectTitle: viewModel.projectFor(report: report)?.title
+                            projectTitle: projectFor(report: report)?.title
                         )
                         .tag(report)
                     } else {
                         NavigationLink(value: report) {
                             ReportsTabRowView(
                                 report: report,
-                                projectTitle: viewModel.projectFor(report: report)?.title
+                                projectTitle: projectFor(report: report)?.title
                             )
                         }
                     }
                 }
+                #if os(iOS)
                 .listStyle(.plain)
+                #else
+                .listStyle(.inset)
+                #endif
                 .refreshable {
                     await viewModel.refresh()
                 }
@@ -162,6 +215,13 @@ struct ReportsTabView: View {
         viewModel.selectedProjectIds.isEmpty
             ? "line.3.horizontal.decrease.circle"
             : "line.3.horizontal.decrease.circle.fill"
+    }
+
+    private func projectFor(report: ReportInfo) -> ProjectInfo? {
+        if let configured = viewModel.projectFor(report: report) {
+            return configured
+        }
+        return coreManager.projects.first { $0.id == report.projectId }
     }
 
     // MARK: - Empty State
@@ -379,6 +439,7 @@ struct ReportsTabDetailView: View {
                     referenceReportATag: reportATag
                 )
                 .environmentObject(coreManager)
+                .tenexModalPresentation(detents: [.large])
             }
         }
     }
@@ -537,7 +598,7 @@ private struct ReportsProjectFilterSheet: View {
                 }
             }
         }
-        .presentationDetents([.medium, .large])
+        .tenexModalPresentation(detents: [.medium, .large])
     }
 
     private func toggleProject(_ id: String) {

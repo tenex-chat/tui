@@ -150,6 +150,9 @@ class TenexCoreManager: ObservableObject {
         // Note: This creates a retain cycle that we break on logout
         hierarchyCache.setCoreManager(self)
 
+        // Warm draft storage at app startup so New Chat opens immediately.
+        _ = DraftManager.shared
+
         // Initialize asynchronously off the main thread
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let success = tenexCore.`init`()
@@ -1025,17 +1028,143 @@ struct TenexMVPApp: App {
 
 // MARK: - Main Tab View
 
+enum AppSection: String, CaseIterable, Identifiable {
+    case chats
+    case projects
+    case reports
+    case inbox
+    case search
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .chats: return "Chats"
+        case .projects: return "Projects"
+        case .reports: return "Reports"
+        case .inbox: return "Inbox"
+        case .search: return "Search"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .chats: return "bubble.left.and.bubble.right"
+        case .projects: return "folder"
+        case .reports: return "doc.richtext"
+        case .inbox: return "tray"
+        case .search: return "magnifyingglass"
+        }
+    }
+
+    var accessibilityRowID: String {
+        "section_row_\(rawValue)"
+    }
+}
+
 struct MainTabView: View {
     @Binding var userNpub: String
     @Binding var isLoggedIn: Bool
     @EnvironmentObject var coreManager: TenexCoreManager
 
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
     @State private var selectedTab = 0
+    @State private var showAISettings = false
+    @State private var showDiagnostics = false
+    @State private var showStats = false
+    @State private var runtimeText: String = "0m"
+
+    private var useMailShellLayout: Bool {
+        #if os(macOS)
+        true
+        #else
+        horizontalSizeClass == .regular
+        #endif
+    }
+
+    private func updateRuntime() async {
+        let totalMs = await coreManager.safeCore.getTodayRuntimeMs()
+        let totalSeconds = totalMs / 1000
+
+        if totalSeconds < 60 {
+            runtimeText = "\(totalSeconds)s"
+        } else if totalSeconds < 3600 {
+            runtimeText = "\(totalSeconds / 60)m"
+        } else {
+            let hours = totalSeconds / 3600
+            let minutes = (totalSeconds % 3600) / 60
+            runtimeText = minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+    }
 
     var body: some View {
+        Group {
+            if useMailShellLayout {
+                MainShellView(
+                    userNpub: $userNpub,
+                    isLoggedIn: $isLoggedIn,
+                    runtimeText: runtimeText,
+                    onShowSettings: { showAISettings = true },
+                    onShowDiagnostics: { showDiagnostics = true },
+                    onShowStats: { showStats = true }
+                )
+                .environmentObject(coreManager)
+                .nowPlayingInset(coreManager: coreManager)
+            } else {
+                compactTabView
+            }
+        }
+        .task {
+            await updateRuntime()
+        }
+        .onChange(of: coreManager.conversations) { _, _ in
+            Task { await updateRuntime() }
+        }
+        .sheet(isPresented: $showAISettings) {
+            AISettingsView()
+                .tenexModalPresentation(detents: [.large])
+                #if os(macOS)
+                .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
+                #endif
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            NavigationStack {
+                DiagnosticsView(coreManager: coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showDiagnostics = false }
+                        }
+                    }
+            }
+            .tenexModalPresentation(detents: [.large])
+        }
+        .sheet(isPresented: $showStats) {
+            NavigationStack {
+                StatsView(coreManager: coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showStats = false }
+                        }
+                    }
+            }
+            .tenexModalPresentation(detents: [.large])
+        }
+        .ignoresSafeArea(.keyboard)
+    }
+
+    private var compactTabView: some View {
         TabView(selection: $selectedTab) {
             Tab("Chats", systemImage: "bubble.left.and.bubble.right", value: 0) {
                 ConversationsTabView()
+                    .environmentObject(coreManager)
+                    .nowPlayingInset(coreManager: coreManager)
+            }
+
+            Tab("Projects", systemImage: "folder", value: 1) {
+                ProjectsTabView()
                     .environmentObject(coreManager)
                     .nowPlayingInset(coreManager: coreManager)
             }
@@ -1054,19 +1183,365 @@ struct MainTabView: View {
             .badge(coreManager.unansweredAskCount)
 
             Tab(value: 10, role: .search) {
-                NavigationStack {
-                    SearchView()
-                        .environmentObject(coreManager)
-                }
+                SearchView()
+                    .environmentObject(coreManager)
                 .nowPlayingInset(coreManager: coreManager)
             } label: {
                 Label("Search", systemImage: "magnifyingglass")
             }
         }
-        .tabViewStyle(.sidebarAdaptable)
         #if os(iOS)
         .tabBarMinimizeBehavior(.onScrollDown)
         #endif
-        .ignoresSafeArea(.keyboard)
+    }
+}
+
+struct MainShellView: View {
+    @Binding var userNpub: String
+    @Binding var isLoggedIn: Bool
+    let runtimeText: String
+    let onShowSettings: () -> Void
+    let onShowDiagnostics: () -> Void
+    let onShowStats: () -> Void
+
+    @EnvironmentObject private var coreManager: TenexCoreManager
+
+    @State private var selectedSection: AppSection? = .chats
+    @State private var selectedConversation: ConversationFullInfo?
+    @State private var selectedProjectId: String?
+    @State private var selectedReport: ReportInfo?
+    @State private var selectedInboxFilter: InboxFilter = .all
+    @State private var selectedInboxItemId: String?
+    @State private var activeInboxConversationId: String?
+    @State private var selectedSearchConversation: ConversationFullInfo?
+
+    private var currentSection: AppSection {
+        selectedSection ?? .chats
+    }
+
+    var body: some View {
+        NavigationSplitView {
+            VStack(spacing: 0) {
+                List(selection: $selectedSection) {
+                    ForEach(AppSection.allCases) { section in
+                        shellSidebarRow(for: section)
+                            .tag(Optional(section))
+                            .accessibilityIdentifier(section.accessibilityRowID)
+                    }
+                }
+                .listStyle(.sidebar)
+                .accessibilityIdentifier("app_sidebar")
+
+                Divider()
+                shellSidebarBottomBar
+            }
+            #if os(macOS)
+            .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
+            #endif
+        } content: {
+            sectionListColumn
+                .accessibilityIdentifier("section_list_column")
+                #if os(macOS)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 520)
+                #endif
+        } detail: {
+            sectionDetailColumn
+                .accessibilityIdentifier("detail_column")
+        }
+        .onChange(of: coreManager.projects.map(\.id)) { _, ids in
+            if let selectedProjectId, !ids.contains(selectedProjectId) {
+                self.selectedProjectId = nil
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func shellSidebarRow(for section: AppSection) -> some View {
+        HStack(spacing: 10) {
+            Label(section.title, systemImage: section.systemImage)
+
+            Spacer(minLength: 8)
+
+            if section == .inbox, coreManager.unansweredAskCount > 0 {
+                Text("\(coreManager.unansweredAskCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.askBrandBackground)
+                    .foregroundStyle(Color.askBrand)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+
+    private var shellSidebarBottomBar: some View {
+        VStack(spacing: 10) {
+            Button(action: onShowSettings) {
+                Label("Settings", systemImage: "gearshape")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                Menu {
+                    if !userNpub.isEmpty {
+                        Text(userNpub)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    Button(action: onShowDiagnostics) {
+                        Label("Diagnostics", systemImage: "gauge.with.needle")
+                    }
+
+                    Button(action: onShowStats) {
+                        Label("LLM Runtime", systemImage: "clock")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        Task {
+                            _ = await coreManager.clearCredentials()
+                            await MainActor.run {
+                                userNpub = ""
+                                isLoggedIn = false
+                            }
+                        }
+                    } label: {
+                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    Label("You", systemImage: "person.crop.circle")
+                }
+
+                Spacer(minLength: 0)
+
+                Button(action: onShowStats) {
+                    Text(runtimeText)
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                        .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    @ViewBuilder
+    private var sectionListColumn: some View {
+        switch currentSection {
+        case .chats:
+            ConversationsTabView(layoutMode: .shellList, selectedConversation: $selectedConversation)
+        case .projects:
+            ProjectsSectionListColumn(selectedProjectId: $selectedProjectId)
+        case .reports:
+            ReportsTabView(layoutMode: .shellList, selectedReport: $selectedReport)
+        case .inbox:
+            InboxView(
+                layoutMode: .shellList,
+                selectedFilter: $selectedInboxFilter,
+                selectedItemId: $selectedInboxItemId,
+                activeConversationId: $activeInboxConversationId
+            )
+        case .search:
+            SearchView(layoutMode: .shellList, selectedConversation: $selectedSearchConversation)
+        }
+    }
+
+    @ViewBuilder
+    private var sectionDetailColumn: some View {
+        switch currentSection {
+        case .chats:
+            ConversationsTabView(layoutMode: .shellDetail, selectedConversation: $selectedConversation)
+        case .projects:
+            ProjectsSectionDetailColumn(selectedProjectId: $selectedProjectId)
+        case .reports:
+            ReportsTabView(layoutMode: .shellDetail, selectedReport: $selectedReport)
+        case .inbox:
+            InboxView(
+                layoutMode: .shellDetail,
+                selectedFilter: $selectedInboxFilter,
+                selectedItemId: $selectedInboxItemId,
+                activeConversationId: $activeInboxConversationId
+            )
+        case .search:
+            SearchView(layoutMode: .shellDetail, selectedConversation: $selectedSearchConversation)
+        }
+    }
+}
+
+private struct ProjectsSectionListColumn: View {
+    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Binding var selectedProjectId: String?
+
+    private var sortedProjects: [ProjectInfo] {
+        coreManager.projects.sorted { a, b in
+            let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
+            let bOnline = coreManager.projectOnlineStatus[b.id] ?? false
+            if aOnline != bOnline { return aOnline }
+            return a.title.localizedCaseInsensitiveCompare(b.title) == .orderedAscending
+        }
+    }
+
+    var body: some View {
+        List(selection: $selectedProjectId) {
+            ForEach(sortedProjects, id: \.id) { project in
+                HStack(spacing: 10) {
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(deterministicColor(for: project.id).gradient)
+                        .frame(width: 28, height: 28)
+                        .overlay {
+                            Image(systemName: "folder.fill")
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                        }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(project.title)
+                            .font(.headline)
+                            .lineLimit(1)
+
+                        Text((coreManager.projectOnlineStatus[project.id] ?? false) ? "Online" : "Offline")
+                            .font(.caption)
+                            .foregroundStyle((coreManager.projectOnlineStatus[project.id] ?? false) ? Color.presenceOnline : .secondary)
+                    }
+
+                    Spacer()
+                }
+                .tag(Optional(project.id))
+            }
+        }
+        #if os(macOS)
+        .listStyle(.inset)
+        #else
+        .listStyle(.plain)
+        #endif
+        .navigationTitle("Projects")
+    }
+}
+
+private struct ProjectsSectionDetailColumn: View {
+    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Binding var selectedProjectId: String?
+
+    @State private var isBooting = false
+    @State private var showBootError = false
+    @State private var bootErrorMessage: String?
+
+    private var selectedProject: ProjectInfo? {
+        guard let selectedProjectId else { return nil }
+        return coreManager.projects.first { $0.id == selectedProjectId }
+    }
+
+    var body: some View {
+        Group {
+            if let project = selectedProject {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack(spacing: 12) {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(deterministicColor(for: project.id).gradient)
+                                .frame(width: 44, height: 44)
+                                .overlay {
+                                    Image(systemName: "folder.fill")
+                                        .foregroundStyle(.white)
+                                }
+
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(project.title)
+                                    .font(.title2.weight(.semibold))
+                                Text(project.id)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        let isOnline = coreManager.projectOnlineStatus[project.id] ?? false
+                        let onlineAgents = coreManager.onlineAgents[project.id]?.count ?? 0
+
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(isOnline ? Color.presenceOnline : Color.secondary)
+                                .frame(width: 10, height: 10)
+                            Text(isOnline ? "Online" : "Offline")
+                                .font(.headline)
+                            if isOnline {
+                                Text("• \(onlineAgents) agent\(onlineAgents == 1 ? "" : "s")")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+
+                        if !isOnline {
+                            Button {
+                                bootProject(project.id)
+                            } label: {
+                                if isBooting {
+                                    ProgressView()
+                                } else {
+                                    Label("Boot Project", systemImage: "power")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isBooting)
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                ContentUnavailableView(
+                    "Select a Project",
+                    systemImage: "folder",
+                    description: Text("Choose a project from the list")
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert("Boot Failed", isPresented: $showBootError) {
+            Button("OK") { bootErrorMessage = nil }
+        } message: {
+            if let bootErrorMessage {
+                Text(bootErrorMessage)
+            }
+        }
+    }
+
+    private func bootProject(_ projectId: String) {
+        isBooting = true
+        bootErrorMessage = nil
+
+        Task {
+            do {
+                try await coreManager.safeCore.bootProject(projectId: projectId)
+            } catch {
+                await MainActor.run {
+                    bootErrorMessage = error.localizedDescription
+                    showBootError = true
+                }
+            }
+            await MainActor.run {
+                isBooting = false
+            }
+        }
+    }
+}
+
+struct ProjectsTabView: View {
+    @EnvironmentObject var coreManager: TenexCoreManager
+    @State private var selectedProjectIds: Set<String> = []
+
+    var body: some View {
+        NavigationStack {
+            ProjectsContentView(selectedProjectIds: $selectedProjectIds)
+                .environmentObject(coreManager)
+        }
     }
 }

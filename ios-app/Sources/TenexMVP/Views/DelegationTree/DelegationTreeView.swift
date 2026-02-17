@@ -334,7 +334,7 @@ private struct DelegationDetailPanel: View {
                         .font(.title2)
                         .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)

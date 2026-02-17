@@ -178,10 +178,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a message to an existing conversation.
-    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
+    func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendMessage") {
             do {
-                return try core.sendMessage(conversationId: conversationId, projectId: projectId, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds)
+                return try core.sendMessage(conversationId: conversationId, projectId: projectId, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: skillIds)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -189,10 +189,10 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
     }
 
     /// Send a new conversation thread.
-    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String]) throws -> SendMessageResult {
+    func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendThread") {
             do {
-                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: [])
+                return try core.sendThread(projectId: projectId, title: title, content: content, agentPubkey: agentPubkey, nudgeIds: nudgeIds, skillIds: skillIds)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -272,6 +272,18 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("getNudges") {
             do {
                 return try core.getNudges()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Get all skills (kind:4202 events).
+    /// Returns skills sorted by created_at descending (most recent first).
+    func getSkills() throws -> [SkillInfo] {
+        try profiler.measureFFI("getSkills") {
+            do {
+                return try core.getSkills()
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

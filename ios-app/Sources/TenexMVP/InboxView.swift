@@ -116,13 +116,53 @@ private enum InboxDateFormatters {
 
 // MARK: - Inbox View
 
+enum InboxLayoutMode {
+    case adaptive
+    case shellList
+    case shellDetail
+}
+
 struct InboxView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
+    let layoutMode: InboxLayoutMode
+    private let selectedFilterBindingOverride: Binding<InboxFilter>?
+    private let selectedItemIdBindingOverride: Binding<String?>?
+    private let activeConversationIdBindingOverride: Binding<String?>?
 
-    @State private var selectedFilter: InboxFilter = .all
-    @State private var selectedItem: InboxItem?
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    #endif
+
+    @State private var selectedFilterState: InboxFilter = .all
+    @State private var selectedItemIdState: String?
+    @State private var presentedItem: InboxItem?
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
+    @State private var activeConversationIdState: String?
+
+    init(
+        layoutMode: InboxLayoutMode = .adaptive,
+        selectedFilter: Binding<InboxFilter>? = nil,
+        selectedItemId: Binding<String?>? = nil,
+        activeConversationId: Binding<String?>? = nil
+    ) {
+        self.layoutMode = layoutMode
+        self.selectedFilterBindingOverride = selectedFilter
+        self.selectedItemIdBindingOverride = selectedItemId
+        self.activeConversationIdBindingOverride = activeConversationId
+    }
+
+    private var selectedFilterBinding: Binding<InboxFilter> {
+        selectedFilterBindingOverride ?? $selectedFilterState
+    }
+
+    private var selectedItemIdBinding: Binding<String?> {
+        selectedItemIdBindingOverride ?? $selectedItemIdState
+    }
+
+    private var activeConversationIdBinding: Binding<String?> {
+        activeConversationIdBindingOverride ?? $activeConversationIdState
+    }
 
     // MARK: - 48-Hour Cap Constants & Time Invalidation
 
@@ -135,6 +175,17 @@ struct InboxView: View {
     /// Items crossing the 48h threshold will disappear on next tick.
     private static let refreshIntervalSeconds: TimeInterval = 60
 
+    private var useSplitView: Bool {
+        if layoutMode == .shellList || layoutMode == .shellDetail {
+            return true
+        }
+        #if os(macOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
+    }
+
     // MARK: - Computed Properties (Time-Aware)
 
     /// Items within the 48-hour window from centralized store.
@@ -146,7 +197,7 @@ struct InboxView: View {
 
     /// Items filtered by current tab selection (after 48h cap).
     private func filteredItems(now: UInt64) -> [InboxItem] {
-        itemsWithin48Hours(now: now).filter { $0.matches(filter: selectedFilter) }
+        itemsWithin48Hours(now: now).filter { $0.matches(filter: selectedFilterBinding.wrappedValue) }
     }
 
     /// Count of unread items for badge display (within 48h cap).
@@ -170,44 +221,160 @@ struct InboxView: View {
             let now = UInt64(context.date.timeIntervalSince1970)
             let items = filteredItems(now: now)
 
-            NavigationStack {
-                VStack(spacing: 0) {
-                    // Tab filter bar: All / Questions / Mentions
-                    filterTabBar(now: now)
-
-                    Divider()
-
-                    // Inbox list - uses centralized coreManager.inboxItems
-                    if items.isEmpty {
-                        emptyStateView
+            Group {
+                switch layoutMode {
+                case .shellList:
+                    shellListLayout(items: items, now: now)
+                case .shellDetail:
+                    shellDetailLayout(now: now)
+                case .adaptive:
+                    if useSplitView {
+                        splitLayout(items: items, now: now)
                     } else {
-                        inboxList(items: items)
+                        stackLayout(items: items, now: now)
                     }
                 }
-                .navigationTitle("Inbox")
-                .navigationBarTitleDisplayMode(.large)
-                .sheet(item: $selectedItem, onDismiss: {
-                    // Handle navigation after sheet dismisses deterministically
-                    if let pending = pendingNavigation {
-                        navigateToConversation = pending
-                        pendingNavigation = nil
+            }
+            .onChange(of: selectedFilterBinding.wrappedValue) { _, _ in
+                activeConversationIdBinding.wrappedValue = nil
+            }
+            .onChange(of: items.map(\.id)) { _, ids in
+                if let selectedItemId = selectedItemIdBinding.wrappedValue, !ids.contains(selectedItemId) {
+                    selectedItemIdBinding.wrappedValue = nil
+                    activeConversationIdBinding.wrappedValue = nil
+                }
+            }
+        }
+    }
+
+    // MARK: - Split Layout (macOS / iPad)
+
+    private func splitLayout(items: [InboxItem], now: UInt64) -> some View {
+        #if os(macOS)
+        return AnyView(
+            HSplitView {
+                splitSidebar(items: items, now: now)
+                    .frame(minWidth: 340, idealWidth: 420, maxWidth: 520, maxHeight: .infinity)
+
+                NavigationStack {
+                    splitDetailContent(now: now)
+                }
+                .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            }
+        )
+        #else
+        return AnyView(
+            NavigationSplitView {
+                splitSidebar(items: items, now: now)
+                    .navigationTitle("Inbox")
+            } detail: {
+                NavigationStack {
+                    splitDetailContent(now: now)
+                }
+            }
+        )
+        #endif
+    }
+
+    private func splitSidebar(items: [InboxItem], now: UInt64) -> some View {
+        VStack(spacing: 0) {
+            filterTabBar(now: now)
+
+            Divider()
+
+            if items.isEmpty {
+                emptyStateView
+            } else {
+                List(selection: selectedItemIdBinding) {
+                    ForEach(items, id: \.id) { item in
+                        InboxItemRow(item: item, showsChevron: false)
+                            .tag(item.id)
                     }
-                }) { item in
-                    InboxDetailView(item: item, onNavigateToConversation: { convId in
-                        // Store pending navigation, then dismiss sheet
-                        pendingNavigation = ConversationNavigationData(
-                            conversationId: convId
-                        )
-                        selectedItem = nil
-                    })
-                    .environmentObject(coreManager)
                 }
-                .navigationDestination(item: $navigateToConversation) { navData in
-                    InboxConversationView(
-                        conversationId: navData.conversationId
-                    )
-                    .environmentObject(coreManager)
+                .modifier(ShellInboxListStyle(isShellColumn: layoutMode == .shellList))
+                .onChange(of: selectedItemIdBinding.wrappedValue) { _, _ in
+                    activeConversationIdBinding.wrappedValue = nil
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func splitDetailContent(now: UInt64) -> some View {
+        if let conversationId = activeConversationIdBinding.wrappedValue {
+            InboxConversationView(conversationId: conversationId)
+                .environmentObject(coreManager)
+        } else if let item = selectedItem(now: now) {
+            InboxDetailView(
+                item: item,
+                onNavigateToConversation: { conversationId in
+                    activeConversationIdBinding.wrappedValue = conversationId
+                },
+                isEmbedded: true
+            )
+            .environmentObject(coreManager)
+        } else {
+            ContentUnavailableView(
+                "Select a Notification",
+                systemImage: "tray",
+                description: Text("Choose an inbox item from the list")
+            )
+        }
+    }
+
+    private func selectedItem(now: UInt64) -> InboxItem? {
+        guard let selectedItemId = selectedItemIdBinding.wrappedValue else { return nil }
+        return itemsWithin48Hours(now: now).first(where: { $0.id == selectedItemId })
+            ?? coreManager.inboxItems.first(where: { $0.id == selectedItemId })
+    }
+
+    private func shellListLayout(items: [InboxItem], now: UInt64) -> some View {
+        splitSidebar(items: items, now: now)
+            .navigationTitle("Inbox")
+            .accessibilityIdentifier("section_list_column")
+    }
+
+    private func shellDetailLayout(now: UInt64) -> some View {
+        NavigationStack {
+            splitDetailContent(now: now)
+        }
+        .accessibilityIdentifier("detail_column")
+    }
+
+    // MARK: - Stack Layout (iPhone)
+
+    private func stackLayout(items: [InboxItem], now: UInt64) -> some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                filterTabBar(now: now)
+
+                Divider()
+
+                if items.isEmpty {
+                    emptyStateView
+                } else {
+                    inboxList(items: items) { item in
+                        presentedItem = item
+                    }
+                }
+            }
+            .navigationTitle("Inbox")
+            .navigationBarTitleDisplayMode(.large)
+            .sheet(item: $presentedItem, onDismiss: {
+                if let pending = pendingNavigation {
+                    navigateToConversation = pending
+                    pendingNavigation = nil
+                }
+            }) { item in
+                InboxDetailView(item: item, onNavigateToConversation: { convId in
+                    pendingNavigation = ConversationNavigationData(conversationId: convId)
+                    presentedItem = nil
+                })
+                .environmentObject(coreManager)
+            }
+            .navigationDestination(item: $navigateToConversation) { navData in
+                InboxConversationView(conversationId: navData.conversationId)
+                    .environmentObject(coreManager)
             }
         }
     }
@@ -215,38 +382,22 @@ struct InboxView: View {
     // MARK: - Filter Tab Bar
 
     private func filterTabBar(now: UInt64) -> some View {
-        HStack(spacing: 0) {
-            ForEach(InboxFilter.allCases, id: \.self) { filter in
-                filterTab(for: filter, now: now)
-            }
-        }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color.systemBackground)
-    }
-
-    private func filterTab(for filter: InboxFilter, now: UInt64) -> some View {
-        let count = unreadCount(for: filter, now: now)
-
-        return Button(action: { selectedFilter = filter }) {
-            HStack(spacing: 4) {
-                Text(filter.rawValue)
-                    .font(.subheadline)
-                    .fontWeight(selectedFilter == filter ? .semibold : .regular)
-
-                if count > 0 {
-                    Text("(\(count))")
-                        .font(.caption)
-                        .foregroundStyle(Color.unreadIndicator)
+        VStack(spacing: 0) {
+            Picker("Inbox Filter", selection: selectedFilterBinding) {
+                ForEach(InboxFilter.allCases, id: \.self) { filter in
+                    let count = unreadCount(for: filter, now: now)
+                    if count > 0 {
+                        Text("\(filter.rawValue) (\(count))").tag(filter)
+                    } else {
+                        Text(filter.rawValue).tag(filter)
+                    }
                 }
             }
-            .padding(.horizontal, 16)
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
             .padding(.vertical, 8)
-            .background(selectedFilter == filter ? Color.agentBrand.opacity(0.15) : Color.clear)
-            .foregroundStyle(selectedFilter == filter ? Color.agentBrand : .primary)
-            .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .background(.bar)
     }
 
     // MARK: - Empty State
@@ -271,7 +422,7 @@ struct InboxView: View {
     }
 
     private var emptyStateMessage: String {
-        switch selectedFilter {
+        switch selectedFilterBinding.wrappedValue {
         case .all:
             return "No items waiting for your attention"
         case .questions:
@@ -283,13 +434,12 @@ struct InboxView: View {
 
     // MARK: - Inbox List
 
-    private func inboxList(items: [InboxItem]) -> some View {
+    private func inboxList(items: [InboxItem], onSelect: @escaping (InboxItem) -> Void) -> some View {
         List {
             ForEach(items, id: \.id) { item in
-                Button(action: { selectedItem = item }) {
+                Button(action: { onSelect(item) }) {
                     InboxItemRow(item: item)
                 }
-                .buttonStyle(.plain)
             }
         }
         .listStyle(.plain)
@@ -297,10 +447,28 @@ struct InboxView: View {
 
 }
 
+private struct ShellInboxListStyle: ViewModifier {
+    let isShellColumn: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if isShellColumn {
+            #if os(macOS)
+            content.listStyle(.inset)
+            #else
+            content.listStyle(.plain)
+            #endif
+        } else {
+            content.listStyle(.sidebar)
+        }
+    }
+}
+
 // MARK: - Inbox Item Row
 
 struct InboxItemRow: View {
     let item: InboxItem
+    var showsChevron: Bool = true
 
     var body: some View {
         HStack(spacing: 12) {
@@ -356,10 +524,11 @@ struct InboxItemRow: View {
                 }
             }
 
-            // Chevron for navigation
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
         .padding(.vertical, 8)
         .opacity(item.isUnread ? 1.0 : 0.7)
@@ -371,31 +540,22 @@ struct InboxItemRow: View {
 struct InboxDetailView: View {
     let item: InboxItem
     let onNavigateToConversation: (String) -> Void
+    var isEmbedded: Bool = false
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
+    @ViewBuilder
     var body: some View {
+        if isEmbedded {
+            detailContent
+        } else {
+            modalDetailContent
+        }
+    }
+
+    private var modalDetailContent: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    // Header with badges
-                    headerSection
-
-                    Divider()
-
-                    // Content
-                    contentSection
-
-                    // Related info with navigation
-                    if item.projectId != nil || item.conversationId != nil {
-                        Divider()
-                        relatedSection
-                    }
-
-                    Spacer()
-                }
-                .padding()
-            }
+            detailContent
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -403,6 +563,31 @@ struct InboxDetailView: View {
                 }
             }
         }
+        .tenexModalPresentation(detents: [.large])
+    }
+
+    private var detailContent: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Header with badges
+                headerSection
+
+                Divider()
+
+                // Content
+                contentSection
+
+                // Related info with navigation
+                if item.projectId != nil || item.conversationId != nil {
+                    Divider()
+                    relatedSection
+                }
+
+                Spacer()
+            }
+            .padding()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     // MARK: - Header Section
@@ -529,7 +714,7 @@ struct InboxDetailView: View {
                     .background(Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
             }
         }
     }

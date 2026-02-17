@@ -15,9 +15,6 @@ struct ConversationDetailView: View {
     @State private var showComposer = false
     @State private var isLatestReplyExpanded = false
     @State private var latestReplyContentHeight: CGFloat = 0
-    #if os(macOS)
-    @Environment(\.openWindow) private var openWindow
-    #endif
 
     /// Initialize the view with a conversation and core manager
     /// Note: coreManager is passed explicitly to support @StateObject initialization
@@ -36,6 +33,16 @@ struct ConversationDetailView: View {
                 ConversationDetailView(conversation: conv)
                     .environmentObject(coreManager)
             }
+            #if os(macOS)
+            .navigationDestination(isPresented: $showFullConversation) {
+                FullConversationSheet(
+                    conversation: conversation,
+                    messages: viewModel.messages,
+                    presentationStyle: .embedded
+                )
+                .environmentObject(coreManager)
+            }
+            #endif
             .task {
                 await initializeAndLoad()
             }
@@ -53,12 +60,10 @@ struct ConversationDetailView: View {
                                 }
                             }
                     }
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
+                    .tenexModalPresentation(detents: [.large])
                 } else {
                     DelegationPreviewSheet(delegation: delegation)
-                        .presentationDetents([.medium, .large])
-                        .presentationDragIndicator(.visible)
+                        .tenexModalPresentation(detents: [.medium, .large])
                 }
             }
             .sheet(isPresented: $showFullConversation) {
@@ -67,8 +72,7 @@ struct ConversationDetailView: View {
                     messages: viewModel.messages
                 )
                 .environmentObject(coreManager)
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
+                .tenexModalPresentation(detents: [.large])
             }
             #endif
     }
@@ -275,7 +279,7 @@ struct ConversationDetailView: View {
                             }
                             .foregroundStyle(Color.composerAction)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.borderless)
                         .padding(.top, 4)
                     }
                 }
@@ -296,11 +300,12 @@ struct ConversationDetailView: View {
                         }
                         .foregroundStyle(Color.composerAction)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .padding(.top, 8)
                 }
             }
 
+            #if os(iOS)
             // Reply button
             Button {
                 showComposer = true
@@ -318,14 +323,16 @@ struct ConversationDetailView: View {
                 .background(Color.agentBrand)
                 .clipShape(Capsule())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.borderless)
             .padding(.top, 4)
+            #endif
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 20)
         .overlay(alignment: .top) {
             Divider()
         }
+        #if os(iOS)
         .sheet(isPresented: $showComposer) {
             MessageComposerView(
                 project: project,
@@ -335,6 +342,7 @@ struct ConversationDetailView: View {
             )
             .environmentObject(coreManager)
         }
+        #endif
     }
 
     // MARK: - Streaming Section
@@ -426,11 +434,7 @@ struct ConversationDetailView: View {
 
     private var fullConversationButton: some View {
         Button(action: {
-            #if os(macOS)
-            openWindow(id: "full-conversation", value: conversation.id)
-            #else
             showFullConversation = true
-            #endif
         }) {
             Text("View Full Conversation")
                 .font(.headline)
@@ -440,7 +444,7 @@ struct ConversationDetailView: View {
                 .background(Color.agentBrand)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .padding(.horizontal, 20)
         .padding(.top, 20)
     }
@@ -689,8 +693,14 @@ struct DelegationPreviewSheet: View {
 
 /// Full conversation chat view sheet with Slack-style messages
 struct FullConversationSheet: View {
+    enum PresentationStyle {
+        case sheet
+        case embedded
+    }
+
     let conversation: ConversationFullInfo
     let messages: [MessageInfo]
+    let presentationStyle: PresentationStyle
     @EnvironmentObject var coreManager: TenexCoreManager
     @Environment(\.dismiss) private var dismiss
 
@@ -702,6 +712,20 @@ struct FullConversationSheet: View {
 
     private let bottomAnchorId = "full-conversation-bottom"
     private let bottomThreshold: CGFloat = 60
+
+    init(
+        conversation: ConversationFullInfo,
+        messages: [MessageInfo],
+        presentationStyle: PresentationStyle = .sheet
+    ) {
+        self.conversation = conversation
+        self.messages = messages
+        self.presentationStyle = presentationStyle
+    }
+
+    private var isEmbedded: Bool {
+        presentationStyle == .embedded
+    }
 
     /// Compute consecutive message flags for each message
     private var messagesWithConsecutive: [(message: MessageInfo, isConsecutive: Bool)] {
@@ -727,104 +751,139 @@ struct FullConversationSheet: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(messagesWithConsecutive, id: \.message.id) { item in
-                                SlackMessageRow(
-                                    message: item.message,
-                                    isConsecutive: item.isConsecutive,
-                                    conversationId: conversation.id,
-                                    projectId: conversation.extractedProjectId,
-                                    onDelegationTap: { delegationId in
-                                        selectedDelegation = delegationId
-                                    }
-                                )
-                                .environmentObject(coreManager)
-                                .id(item.message.id)
-                            }
-
-                            if let buffer = coreManager.streamingBuffers[conversation.id] {
-                                StreamingMessageRow(
-                                    buffer: buffer,
-                                    isConsecutive: messages.last?.authorNpub == buffer.agentPubkey
-                                )
-                                .environmentObject(coreManager)
-                                .id("streaming-row")
+        Group {
+            if isEmbedded {
+                conversationContent
+            } else {
+                NavigationStack {
+                    conversationContent
+                        .toolbar {
+                            ToolbarItem(placement: .topBarTrailing) {
+                                Button("Done") { dismiss() }
                             }
                         }
-                        .padding()
-                        .padding(.bottom, 80) // Space for compose button
+                }
+            }
+        }
+        .navigationTitle("Full Conversation")
+        .navigationBarTitleDisplayMode(.inline)
+        #if os(iOS)
+        .sheet(item: $selectedDelegation) { delegationId in
+            DelegationSheetFromId(delegationId: delegationId)
+                .environmentObject(coreManager)
+                .tenexModalPresentation(detents: [.large])
+        }
+        .sheet(isPresented: $showComposer) {
+            MessageComposerView(
+                project: project,
+                conversationId: conversation.id,
+                conversationTitle: conversation.title,
+                initialAgentPubkey: lastAgentPubkey
+            )
+            .environmentObject(coreManager)
+        }
+        #endif
+    }
 
-                        Color.clear
-                            .frame(height: 1)
-                            .id(bottomAnchorId)
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(
-                                        key: BottomAnchorOffsetKey.self,
-                                        value: geo.frame(in: .named("fullConversationScroll")).maxY
-                                    )
+    private var conversationContent: some View {
+        ZStack(alignment: .bottom) {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(messagesWithConsecutive, id: \.message.id) { item in
+                            SlackMessageRow(
+                                message: item.message,
+                                isConsecutive: item.isConsecutive,
+                                conversationId: conversation.id,
+                                projectId: conversation.extractedProjectId,
+                                onDelegationTap: { delegationId in
+                                    selectedDelegation = delegationId
                                 }
                             )
-                    }
-                    .coordinateSpace(name: "fullConversationScroll")
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollViewHeightKey.self,
-                                value: geo.size.height
+                            .environmentObject(coreManager)
+                            .id(item.message.id)
+                        }
+
+                        if let buffer = coreManager.streamingBuffers[conversation.id] {
+                            StreamingMessageRow(
+                                buffer: buffer,
+                                isConsecutive: messages.last?.authorNpub == buffer.agentPubkey
                             )
-                        }
-                    )
-                    .onAppear {
-                        // Scroll to the last message
-                        if let lastMessage = messages.last {
-                            proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                            .environmentObject(coreManager)
+                            .id("streaming-row")
                         }
                     }
-                    .onChange(of: messages.last?.id) { _ in
-                        guard let lastMessage = messages.last else { return }
-                        if isAtBottom {
-                            DispatchQueue.main.async {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo(lastMessage.id, anchor: .bottom)
-                                }
+                    .padding()
+                    .padding(.bottom, isEmbedded ? 12 : 80)
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomAnchorId)
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(
+                                    key: BottomAnchorOffsetKey.self,
+                                    value: geo.frame(in: .named("fullConversationScroll")).maxY
+                                )
                             }
-                        }
+                        )
+                }
+                .coordinateSpace(name: "fullConversationScroll")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: ScrollViewHeightKey.self,
+                            value: geo.size.height
+                        )
                     }
-                    .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _ in
-                        if isAtBottom {
-                            DispatchQueue.main.async {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo("streaming-row", anchor: .bottom)
-                                }
+                )
+                .onAppear {
+                    // Scroll to the last message
+                    if let lastMessage = messages.last {
+                        proxy.scrollTo(lastMessage.id, anchor: .bottom)
+                    }
+                }
+                .onChange(of: messages.last?.id) { _ in
+                    guard let lastMessage = messages.last else { return }
+                    if isAtBottom {
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo(lastMessage.id, anchor: .bottom)
                             }
-                        }
-                    }
-                    .onPreferenceChange(ScrollViewHeightKey.self) { height in
-                        scrollViewHeight = height
-                    }
-                    .onPreferenceChange(BottomAnchorOffsetKey.self) { bottomY in
-                        let distanceFromBottom = bottomY - scrollViewHeight
-                        isAtBottom = distanceFromBottom <= bottomThreshold
-                    }
-                    .task {
-                        // Load available agents for the project to determine last agent
-                        if let projectId = project?.id {
-                            availableAgents = coreManager.onlineAgents[projectId] ?? []
-                        }
-                    }
-                    .onReceive(coreManager.$onlineAgents) { cache in
-                        if let projectId = project?.id {
-                            availableAgents = cache[projectId] ?? []
                         }
                     }
                 }
+                .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _ in
+                    if isAtBottom {
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("streaming-row", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+                .onPreferenceChange(ScrollViewHeightKey.self) { height in
+                    scrollViewHeight = height
+                }
+                .onPreferenceChange(BottomAnchorOffsetKey.self) { bottomY in
+                    let distanceFromBottom = bottomY - scrollViewHeight
+                    isAtBottom = distanceFromBottom <= bottomThreshold
+                }
+                .task {
+                    // Load available agents for the project to determine last agent
+                    if let projectId = project?.id {
+                        availableAgents = coreManager.onlineAgents[projectId] ?? []
+                    }
+                }
+                .onReceive(coreManager.$onlineAgents) { cache in
+                    if let projectId = project?.id {
+                        availableAgents = cache[projectId] ?? []
+                    }
+                }
+            }
 
-                // Floating compose button
+            if !isEmbedded {
+                // Floating compose button (sheet mode)
                 Button {
                     showComposer = true
                 } label: {
@@ -840,35 +899,49 @@ struct FullConversationSheet: View {
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.borderless)
                 .padding(.bottom, 16)
             }
-            .navigationTitle("Full Conversation")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            #if os(iOS)
-            .sheet(item: $selectedDelegation) { delegationId in
-                DelegationSheetFromId(delegationId: delegationId)
-                    .environmentObject(coreManager)
-                    .presentationDetents([.large])
-                    .presentationDragIndicator(.visible)
-            }
-            #endif
-            .sheet(isPresented: $showComposer) {
-                MessageComposerView(
-                    project: project,
-                    conversationId: conversation.id,
-                    conversationTitle: conversation.title,
-                    initialAgentPubkey: lastAgentPubkey
-                )
-                .environmentObject(coreManager)
+        }
+        #if os(macOS)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if isEmbedded {
+                inlineComposer
             }
         }
+        #endif
     }
+
+    #if os(macOS)
+    private var inlineComposer: some View {
+        VStack(spacing: 0) {
+            Divider()
+
+            MessageComposerView(
+                project: project,
+                conversationId: conversation.id,
+                conversationTitle: conversation.title,
+                initialAgentPubkey: lastAgentPubkey,
+                displayStyle: .inline
+            )
+            .environmentObject(coreManager)
+            .frame(minHeight: 230, maxHeight: 340)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Color.systemBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            .padding(.bottom, 12)
+        }
+        .background(.ultraThinMaterial)
+    }
+    #endif
 }
 
 private struct ScrollViewHeightKey: PreferenceKey {
