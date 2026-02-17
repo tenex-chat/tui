@@ -75,9 +75,18 @@ struct ProjectSelectorSheet: View {
                 .contentMargins(.top, 0, for: .scrollContent)
             }
             .searchable(text: $searchText, prompt: "Search projects...")
+            #if os(iOS)
             .navigationTitle("Select Project")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Select Project").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         // Discard local changes
@@ -100,6 +109,12 @@ struct ProjectSelectorSheet: View {
                 localSelectedProject = selectedProject
             }
         }
+        #if os(iOS)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 480, idealWidth: 540, minHeight: 420, idealHeight: 520)
+        #endif
     }
 
     // MARK: - Subviews
@@ -122,7 +137,7 @@ struct ProjectSelectorSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .background(Color.systemGray6)
-        .foregroundStyle(.blue)
+        .foregroundStyle(Color.agentBrand)
     }
 
     private var emptyStateView: some View {
@@ -186,7 +201,7 @@ struct ProjectRowSelectView: View {
 
                         if isOnline {
                             Circle()
-                                .fill(.green)
+                                .fill(Color.presenceOnline)
                                 .frame(width: 8, height: 8)
                         }
                     }
@@ -227,7 +242,7 @@ struct ProjectRowSelectView: View {
             }
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(isSelected ? Color.blue : Color.clear, lineWidth: 2)
+                    .strokeBorder(isSelected ? Color.agentBrand : Color.clear, lineWidth: 2)
             )
     }
 

@@ -17,8 +17,8 @@ struct ProjectBadge: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(Color.purple.opacity(0.15))
-        .foregroundStyle(.purple)
+        .background(Color.projectBrandBackground)
+        .foregroundStyle(Color.projectBrand)
         .clipShape(Capsule())
     }
 }
@@ -41,23 +41,11 @@ struct StatusBadge: View {
     }
 
     private var backgroundColor: Color {
-        if isActive { return Color.green.opacity(0.15) }
-        switch status.lowercased() {
-        case "active", "in progress": return Color.green.opacity(0.15)
-        case "waiting", "blocked": return Color.orange.opacity(0.15)
-        case "completed", "done": return Color.systemGray5
-        default: return Color.blue.opacity(0.15)
-        }
+        Color.conversationStatusBackground(for: status, isActive: isActive)
     }
 
     private var textColor: Color {
-        if isActive { return .green }
-        switch status.lowercased() {
-        case "active", "in progress": return .green
-        case "waiting", "blocked": return .orange
-        case "completed", "done": return .secondary
-        default: return .blue
-        }
+        Color.conversationStatus(for: status, isActive: isActive)
     }
 
     var body: some View {
@@ -122,7 +110,7 @@ struct SharedMessageBubble: View {
                 MarkdownView(content: message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.accentColor : Color.systemGray6)
+                    .background(isUser ? Color.agentBrand : Color.systemGray6)
                     .foregroundStyle(isUser ? .white : .primary)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
@@ -131,7 +119,7 @@ struct SharedMessageBubble: View {
 
             if isUser && showAvatar {
                 Circle()
-                    .fill(Color.green.gradient)
+                    .fill(Color.messageUserAvatarColor.gradient)
                     .frame(width: 32, height: 32)
                     .overlay {
                         Image(systemName: "person.fill")
@@ -266,10 +254,10 @@ struct SharedConversationRow: View {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.skillBrand)
                             Text(activity)
                                 .font(.subheadline)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.skillBrand)
                                 .lineLimit(1)
                         }
                     } else if let summary = conversation.summary {

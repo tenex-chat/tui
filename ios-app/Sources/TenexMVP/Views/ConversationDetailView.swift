@@ -10,6 +10,7 @@ struct ConversationDetailView: View {
 
     @StateObject private var viewModel: ConversationDetailViewModel
     @State private var selectedDelegation: DelegationItem?
+    @State private var selectedDelegationConv: ConversationFullInfo?
     @State private var showFullConversation = false
     @State private var showComposer = false
     @State private var isLatestReplyExpanded = false
@@ -31,6 +32,10 @@ struct ConversationDetailView: View {
         contentView
             .navigationTitle(conversation.title)
             .navigationBarTitleDisplayMode(.inline)
+            .navigationDestination(item: $selectedDelegationConv) { conv in
+                ConversationDetailView(conversation: conv)
+                    .environmentObject(coreManager)
+            }
             .task {
                 await initializeAndLoad()
             }
@@ -100,7 +105,9 @@ struct ConversationDetailView: View {
                 fullConversationButton
             }
             .padding(.bottom, 20)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.systemBackground)
     }
 
@@ -266,7 +273,7 @@ struct ConversationDetailView: View {
                                 Image(systemName: "chevron.down")
                                     .font(.caption)
                             }
-                            .foregroundStyle(Color.accentColor)
+                            .foregroundStyle(Color.composerAction)
                         }
                         .buttonStyle(.plain)
                         .padding(.top, 4)
@@ -287,7 +294,7 @@ struct ConversationDetailView: View {
                             Image(systemName: "chevron.up")
                                 .font(.caption)
                         }
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.composerAction)
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 8)
@@ -308,7 +315,7 @@ struct ConversationDetailView: View {
                 .foregroundStyle(.white)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(Color.accentColor)
+                .background(Color.agentBrand)
                 .clipShape(Capsule())
             }
             .buttonStyle(.plain)
@@ -396,7 +403,7 @@ struct ConversationDetailView: View {
             ForEach(viewModel.delegations) { delegation in
                 DelegationRowView(delegation: delegation) {
                     #if os(macOS)
-                    openWindow(id: "conversation-summary", value: delegation.conversationId)
+                    selectedDelegationConv = viewModel.childConversation(for: delegation.conversationId)
                     #else
                     selectedDelegation = delegation
                     #endif
@@ -430,9 +437,10 @@ struct ConversationDetailView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
-                .background(Color.accentColor)
+                .background(Color.agentBrand)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
+        .buttonStyle(.plain)
         .padding(.horizontal, 20)
         .padding(.top, 20)
     }
@@ -486,7 +494,7 @@ struct TodoRowView: View {
                 if let skipReason = todo.skipReason, !skipReason.isEmpty {
                     Text("Skipped: \(skipReason)")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(Color.todoSkipped)
                         .italic()
                 }
             }
@@ -552,12 +560,12 @@ struct TodoCompletionPill: View {
                 .font(style == .large ? .caption : .caption2)
                 .fontWeight(style == .large ? .medium : .regular)
         }
-        .foregroundStyle(.green)
+        .foregroundStyle(Color.todoDone)
         .if(style == .large) { view in
             view
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
-                .background(Color.green.opacity(0.15))
+                .background(Color.todoDoneBackground)
                 .clipShape(Capsule())
         }
     }
@@ -691,9 +699,6 @@ struct FullConversationSheet: View {
     @State private var availableAgents: [OnlineAgentInfo] = []
     @State private var isAtBottom = true
     @State private var scrollViewHeight: CGFloat = 0
-    #if os(macOS)
-    @Environment(\.openWindow) private var openWindow
-    #endif
 
     private let bottomAnchorId = "full-conversation-bottom"
     private let bottomThreshold: CGFloat = 60
@@ -734,11 +739,7 @@ struct FullConversationSheet: View {
                                     conversationId: conversation.id,
                                     projectId: conversation.extractedProjectId,
                                     onDelegationTap: { delegationId in
-                                        #if os(macOS)
-                                        openWindow(id: "conversation-summary", value: delegationId)
-                                        #else
                                         selectedDelegation = delegationId
-                                        #endif
                                     }
                                 )
                                 .environmentObject(coreManager)
@@ -835,10 +836,11 @@ struct FullConversationSheet: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 12)
-                    .background(Color.accentColor)
+                    .background(Color.agentBrand)
                     .clipShape(Capsule())
                     .shadow(color: .black.opacity(0.15), radius: 8, x: 0, y: 4)
                 }
+                .buttonStyle(.plain)
                 .padding(.bottom, 16)
             }
             .navigationTitle("Full Conversation")

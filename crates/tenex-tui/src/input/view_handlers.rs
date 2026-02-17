@@ -57,10 +57,6 @@ fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&Ac
             let items = app.inbox_items();
             items.get(index).and_then(|item| item.thread_id.clone())
         }
-        HomeTab::Feed => {
-            let items = app.feed_items();
-            items.get(index).map(|item| item.thread_id.clone())
-        }
         HomeTab::ActiveWork => {
             // Use provided cache to avoid snapshot drift, or fetch fresh if not provided
             if let Some(cache) = active_work_cache {
@@ -196,8 +192,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 app.home_panel_focus = match app.home_panel_focus {
                     HomeTab::Conversations => HomeTab::Inbox,
                     HomeTab::Inbox => HomeTab::Reports,
-                    HomeTab::Reports => HomeTab::Feed,
-                    HomeTab::Feed => HomeTab::ActiveWork,
+                    HomeTab::Reports => HomeTab::ActiveWork,
                     HomeTab::ActiveWork => HomeTab::Stats,
                     HomeTab::Stats => HomeTab::Conversations,
                 };
@@ -208,8 +203,7 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Conversations => HomeTab::Stats,
                     HomeTab::Inbox => HomeTab::Conversations,
                     HomeTab::Reports => HomeTab::Inbox,
-                    HomeTab::Feed => HomeTab::Reports,
-                    HomeTab::ActiveWork => HomeTab::Feed,
+                    HomeTab::ActiveWork => HomeTab::Reports,
                     HomeTab::Stats => HomeTab::ActiveWork,
                 };
                 return Ok(());
@@ -285,7 +279,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
-                    HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                     HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
@@ -322,7 +315,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
-                    HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                     HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
@@ -460,22 +452,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                             app.view = View::Chat;
                         }
                     }
-                    HomeTab::Feed => {
-                        let items = app.feed_items();
-                        if let Some(item) = items.get(idx) {
-                            // Find the thread and open it
-                            let thread = app.data_store.borrow()
-                                .get_threads(&item.project_a_tag)
-                                .iter()
-                                .find(|t| t.id == item.thread_id)
-                                .cloned();
-
-                            if let Some(thread) = thread {
-                                let project_a_tag = item.project_a_tag.clone();
-                                app.open_thread_from_home(&thread, &project_a_tag);
-                            }
-                        }
-                    }
                     HomeTab::ActiveWork => {
                         // Open conversation from Active Work tab using cached operations
                         let (event_id, thread_id_opt, project_a_tag): (String, Option<String>, String) = active_work_cache.as_ref()
@@ -565,7 +541,6 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                 HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
-                HomeTab::Feed => app.feed_items().len().saturating_sub(1),
                 HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
                 HomeTab::Stats => 0, // Stats tab has no list selection
             };

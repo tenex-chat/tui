@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 
 use crate::constants::RELAY_URL;
 use crate::models::ProjectStatus;
-use crate::stats::{SharedEventFeed, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
+use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
 use crate::store::ingest_events;
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
@@ -373,7 +373,6 @@ pub struct NostrWorker {
     command_rx: Receiver<NostrCommand>,
     rt_handle: Option<tokio::runtime::Handle>,
     event_stats: SharedEventStats,
-    event_feed: SharedEventFeed,
     subscription_stats: SharedSubscriptionStats,
     negentropy_stats: SharedNegentropySyncStats,
     /// Pubkeys for which we've already requested kind:0 profiles
@@ -393,7 +392,6 @@ impl NostrWorker {
         data_tx: Sender<DataChange>,
         command_rx: Receiver<NostrCommand>,
         event_stats: SharedEventStats,
-        event_feed: SharedEventFeed,
         subscription_stats: SharedSubscriptionStats,
         negentropy_stats: SharedNegentropySyncStats,
     ) -> Self {
@@ -406,7 +404,6 @@ impl NostrWorker {
             command_rx,
             rt_handle: None,
             event_stats,
-            event_feed,
             subscription_stats,
             negentropy_stats,
             requested_profiles: Arc::new(RwLock::new(HashSet::new())),
@@ -790,7 +787,6 @@ impl NostrWorker {
             .expect("spawn_notification_handler called before runtime initialized")
             .clone();
         let event_stats = self.event_stats.clone();
-        let event_feed = self.event_feed.clone();
         let subscription_stats = self.subscription_stats.clone();
         let data_tx = self.data_tx.clone();
         let requested_profiles = self.requested_profiles.clone();
@@ -836,9 +832,6 @@ impl NostrWorker {
                                     // Log event reception
                                     let event_id_hex = event.id.to_hex();
                                     tlog!("EVT", "kind:{} id={}", event.kind.as_u16(), &event_id_hex);
-
-                                    // Record in live event feed for debugging
-                                    event_feed.push(event_id_hex, event.kind.as_u16());
 
                                     // Track per-subscription event count
                                     subscription_stats.record_event(&subscription_id.to_string());

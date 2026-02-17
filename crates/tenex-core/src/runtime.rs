@@ -12,7 +12,7 @@ use crate::config::CoreConfig;
 use crate::events::CoreEvent;
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::models::Message;
-use crate::stats::{SharedEventFeed, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
+use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::{AppDataStore, Database};
 
 #[derive(Clone)]
@@ -39,7 +39,6 @@ pub struct CoreRuntime {
     worker_handle: Option<JoinHandle<()>>,
     ndb_stream: SubscriptionStream,
     event_stats: SharedEventStats,
-    event_feed: SharedEventFeed,
     subscription_stats: SharedSubscriptionStats,
     negentropy_stats: SharedNegentropySyncStats,
 }
@@ -121,7 +120,6 @@ impl CoreRuntime {
         let (data_tx, data_rx) = mpsc::channel::<DataChange>();
 
         let event_stats = SharedEventStats::new();
-        let event_feed = SharedEventFeed::new(1000); // Keep last 1000 events
         let subscription_stats = SharedSubscriptionStats::new();
         let negentropy_stats = SharedNegentropySyncStats::new();
         let worker = NostrWorker::new(
@@ -129,7 +127,6 @@ impl CoreRuntime {
             data_tx,
             command_rx,
             event_stats.clone(),
-            event_feed.clone(),
             subscription_stats.clone(),
             negentropy_stats.clone(),
         );
@@ -155,7 +152,6 @@ impl CoreRuntime {
             worker_handle: Some(worker_handle),
             ndb_stream,
             event_stats,
-            event_feed,
             subscription_stats,
             negentropy_stats,
         })
@@ -179,10 +175,6 @@ impl CoreRuntime {
 
     pub fn event_stats(&self) -> SharedEventStats {
         self.event_stats.clone()
-    }
-
-    pub fn event_feed(&self) -> SharedEventFeed {
-        self.event_feed.clone()
     }
 
     pub fn subscription_stats(&self) -> SharedSubscriptionStats {

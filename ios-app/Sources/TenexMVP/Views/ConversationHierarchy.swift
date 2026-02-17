@@ -370,7 +370,7 @@ struct AgentAvatarView: View {
         .overlay {
             if isSelected {
                 Circle()
-                    .strokeBorder(Color.blue, lineWidth: 2)
+                    .strokeBorder(Color.agentBrand, lineWidth: 2)
             }
         }
         .onAppear {
@@ -636,14 +636,6 @@ enum ConversationFormatters {
     }
 }
 
-// MARK: - Status Color Helper
+// MARK: - ConversationInfo Conformances
 
-/// Get status color for a conversation status string
-func conversationStatusColor(for status: String) -> Color {
-    switch status {
-    case "active": return .green
-    case "waiting": return .orange
-    case "completed": return .gray
-    default: return .blue
-    }
-}
+extension ConversationInfo: Identifiable {}

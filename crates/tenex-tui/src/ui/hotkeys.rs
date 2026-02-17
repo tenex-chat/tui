@@ -122,7 +122,6 @@ pub enum HotkeyContext {
     HomeConversations,
     HomeInbox,
     HomeReports,
-    HomeFeed,
     HomeActiveWork,
     HomeStats,
     HomeSidebar,
@@ -228,7 +227,6 @@ impl HotkeyContext {
                         HomeTab::Conversations => HotkeyContext::HomeConversations,
                         HomeTab::Inbox => HotkeyContext::HomeInbox,
                         HomeTab::Reports => HotkeyContext::HomeReports,
-                        HomeTab::Feed => HotkeyContext::HomeFeed,
                         HomeTab::ActiveWork => HotkeyContext::HomeActiveWork,
                         HomeTab::Stats => HotkeyContext::HomeStats,
                     }
@@ -576,7 +574,7 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('f'),
         "Time Filter",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeFeed],
+        &[HotkeyContext::HomeConversations],
     ),
     HotkeyBinding::shift(
         HotkeyId::AgentBrowser,
@@ -620,14 +618,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Tab,
         "Next Tab",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
     ),
     HotkeyBinding::shift(
         HotkeyId::PrevHomeTab,
         KeyCode::BackTab,
         "Previous Tab",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
     ),
     HotkeyBinding::new(
         HotkeyId::SearchReports,
@@ -641,14 +639,14 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('S'),
         "Toggle Scheduled Events",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeActiveWork],
     ),
     HotkeyBinding::new(
         HotkeyId::FocusSidebar,
         KeyCode::Right,
         "Focus Sidebar",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeFeed, HotkeyContext::HomeActiveWork],
+        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork],
     ),
     HotkeyBinding::new(
         HotkeyId::UnfocusSidebar,

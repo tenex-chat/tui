@@ -33,7 +33,7 @@ struct DiagnosticsSubscriptionsTab: View {
                 Spacer()
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.title3)
-                    .foregroundColor(.blue)
+                    .foregroundColor(Color.agentBrand)
             }
 
             Text("\(subscriptions.count)")
@@ -124,7 +124,7 @@ struct SubscriptionRow: View {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("\(subscription.eventsReceived)")
                             .font(.headline)
-                            .foregroundColor(.blue)
+                            .foregroundColor(Color.agentBrand)
 
                         Image(systemName: "chevron.down")
                             .font(.caption)
@@ -181,10 +181,10 @@ struct KindChip: View {
         Text("kind:\(kind)")
             .font(.caption2)
             .fontWeight(.medium)
-            .foregroundColor(.blue)
+            .foregroundColor(Color.agentBrand)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.blue.opacity(0.1))
+            .background(Color.agentBrand.opacity(0.1))
             .clipShape(Capsule())
     }
 }

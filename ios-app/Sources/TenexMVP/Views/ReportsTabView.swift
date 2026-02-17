@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Reports Tab View
 
 /// Main tab view for Reports - shows reports from all projects with search and filtering.
-/// Uses NavigationSplitView on iPad/Mac for master-detail layout,
+/// Uses HSplitView on macOS and NavigationSplitView on iPad for master-detail layout,
 /// NavigationStack on iPhone for stack-based navigation.
 struct ReportsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
@@ -43,19 +43,36 @@ struct ReportsTabView: View {
     // MARK: - Split View Layout (iPad/Mac)
 
     private var splitViewLayout: some View {
+        #if os(macOS)
+        HSplitView {
+            reportsListView
+                .navigationTitle("Reports")
+                .frame(minWidth: 340, idealWidth: 440, maxWidth: 520, maxHeight: .infinity)
+
+            reportDetailContent
+                .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        #else
         NavigationSplitView {
             reportsListView
                 .navigationTitle("Reports")
         } detail: {
-            if let report = selectedReport {
-                ReportsTabDetailView(report: report, project: viewModel.projectFor(report: report))
-            } else {
-                ContentUnavailableView(
-                    "Select a Report",
-                    systemImage: "doc.richtext",
-                    description: Text("Choose a report from the list to view its contents")
-                )
-            }
+            reportDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var reportDetailContent: some View {
+        if let report = selectedReport {
+            ReportsTabDetailView(report: report, project: viewModel.projectFor(report: report))
+        } else {
+            ContentUnavailableView(
+                "Select a Report",
+                systemImage: "doc.richtext",
+                description: Text("Choose a report from the list to view its contents")
+            )
         }
     }
 
@@ -265,28 +282,12 @@ struct ReportsTabRowView: View {
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.15))
-                            .foregroundStyle(.blue)
+                            .background(Color.projectBrandBackground)
+                            .foregroundStyle(Color.projectBrand)
                             .clipShape(Capsule())
                     }
                 }
 
-                // Tags row
-                if !report.tags.isEmpty {
-                    FlowLayout(spacing: 4) {
-                        ForEach(report.tags, id: \.self) { tag in
-                            Text("#\(tag)")
-                                .font(.caption2)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.orange.opacity(0.15))
-                                .foregroundStyle(.orange)
-                                .clipShape(Capsule())
-                                .lineLimit(1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
             }
 
             Spacer()
@@ -354,7 +355,9 @@ struct ReportsTabDetailView: View {
                 MarkdownView(content: report.content)
             }
             .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .navigationTitle(report.title)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -391,8 +394,8 @@ struct ReportsTabDetailView: View {
                                 .font(.caption)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 4)
-                                .background(Color.orange.opacity(0.15))
-                                .foregroundStyle(.orange)
+                                .background(Color.skillBrandBackground)
+                                .foregroundStyle(Color.skillBrand)
                                 .clipShape(Capsule())
                         }
                     }
@@ -469,14 +472,14 @@ private struct ReportsProjectFilterSheet: View {
                 } label: {
                     HStack {
                         Image(systemName: "square.grid.2x2")
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.agentBrand)
                             .frame(width: 24)
                         Text("All Projects")
                             .foregroundStyle(.primary)
                         Spacer()
                         if selectedProjectIds.isEmpty {
                             Image(systemName: "checkmark")
-                                .foregroundStyle(.blue)
+                                .foregroundStyle(Color.agentBrand)
                         }
                     }
                 }
@@ -504,7 +507,7 @@ private struct ReportsProjectFilterSheet: View {
 
                             if projectOnlineStatus[project.id] == true {
                                 Circle()
-                                    .fill(.green)
+                                    .fill(Color.presenceOnline)
                                     .frame(width: 8, height: 8)
                             }
 
@@ -512,7 +515,7 @@ private struct ReportsProjectFilterSheet: View {
 
                             if selectedProjectIds.contains(project.id) {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(Color.agentBrand)
                             }
                         }
                     }

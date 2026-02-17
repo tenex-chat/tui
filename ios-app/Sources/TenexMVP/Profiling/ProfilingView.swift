@@ -101,7 +101,7 @@ struct ProfilingView: View {
                 VStack(spacing: 16) {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 60))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Color.presenceOnline)
                     Text("No memory leaks detected")
                         .font(.headline)
                     Text("All tracked objects properly deallocated")
@@ -199,7 +199,7 @@ struct ProfilingView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: icon)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(Color.agentBrand)
                 Text(title)
                     .font(.headline)
             }

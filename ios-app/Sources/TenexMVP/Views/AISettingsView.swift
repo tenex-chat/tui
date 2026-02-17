@@ -276,7 +276,7 @@ struct AISettingsView: View {
                             onDelete()
                         } label: {
                             Image(systemName: "trash")
-                                .foregroundStyle(.red)
+                                .foregroundStyle(Color.composerDestructive)
                         }
                         .buttonStyle(.borderless)
                     }
@@ -621,7 +621,7 @@ private struct VoiceSelectorSheet: View {
                             Spacer()
                             if selectedVoiceIds.contains(voice.voiceId) {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(Color.agentBrand)
                             }
                         }
                         .contentShape(Rectangle())
@@ -685,7 +685,7 @@ private struct ModelSelectorSheet: View {
                             Spacer()
                             if selectedModel == model.id {
                                 Image(systemName: "checkmark")
-                                    .foregroundStyle(.blue)
+                                    .foregroundStyle(Color.agentBrand)
                             }
                         }
                         .contentShape(Rectangle())

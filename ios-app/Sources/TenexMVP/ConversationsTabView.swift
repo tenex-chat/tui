@@ -180,9 +180,17 @@ struct ConversationsTabView: View {
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
     // Conversation reference feature state - uses .sheet(item:) pattern for safe state management
     @State private var conversationToReference: ConversationFullInfo?
-    #if os(macOS)
-    @Environment(\.openWindow) private var openWindow
+    #if os(iOS)
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     #endif
+
+    private var useSplitView: Bool {
+        #if os(macOS)
+        return true
+        #else
+        return horizontalSizeClass == .regular
+        #endif
+    }
 
     /// Rebuild the cached hierarchy from current filtered conversations
     private func rebuildHierarchy() {
@@ -240,234 +248,291 @@ struct ConversationsTabView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if cachedHierarchy.sortedRootConversations.isEmpty {
-                    ConversationsEmptyState(
-                        hasFilter: !selectedProjectIds.isEmpty,
-                        onClearFilter: { selectedProjectIds.removeAll() }
-                    )
-                } else {
-                    List {
-                        ForEach(cachedHierarchy.sortedRootConversations, id: \.id) { conversation in
-                            ConversationRowFull(
-                                conversation: conversation,
-                                projectTitle: projectTitle(for: conversation),
-                                isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
-                                onSelect: { selected in
-                                    #if os(macOS)
-                                    openWindow(id: "conversation-summary", value: selected.id)
-                                    #else
-                                    selectedConversation = selected
-                                    #endif
-                                }
-                            )
-                            .environmentObject(coreManager)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button(role: .destructive) {
-                                    // Archive action placeholder
-                                } label: {
-                                    Label("Archive", systemImage: "archivebox")
-                                }
-                            }
-                            .swipeActions(edge: .leading, allowsFullSwipe: false) {
-                                Button {
-                                    conversationToReference = conversation
-                                } label: {
-                                    Label("Reference", systemImage: "link")
-                                }
-                                .tint(.blue)
-                            }
-                        }
-                    }
-                    .listStyle(.plain)
-                    .refreshable {
-                        await coreManager.manualRefresh()
-                    }
-                }
+        Group {
+            if useSplitView {
+                splitViewLayout
+            } else {
+                stackLayout
             }
-            .navigationTitle("Conversations")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    HStack(spacing: 12) {
-                        Menu {
-                            Toggle(isOn: $showArchived) {
-                                Label("Show Archived", systemImage: "archivebox")
-                            }
-
-                            Toggle(isOn: Binding(
-                                get: { !hideScheduled },
-                                set: { hideScheduled = !$0 }
-                            )) {
-                                Label("Show Scheduled", systemImage: "calendar.badge.clock")
-                            }
-
-                            Toggle(isOn: $audioNotificationsEnabled) {
-                                Label("Audio Notifications", systemImage: "speaker.wave.2")
-                            }
-                            .onChange(of: audioNotificationsEnabled) { _, enabled in
-                                Task {
-                                    try? await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
-                                }
-                            }
-
-                            Divider()
-
-                            Button(action: { showAudioQueue = true }) {
-                                Label("Audio Queue", systemImage: "list.bullet")
-                            }
-
-                            Button(action: { showAISettings = true }) {
-                                Label("AI Settings", systemImage: "waveform")
-                            }
-
-                            Button(action: { showDiagnostics = true }) {
-                                Label("Diagnostics", systemImage: "gauge.with.needle")
-                            }
-                        } label: {
-                            Image(systemName: "person.circle")
-                                .font(.title3)
-                        }
-                        Button(action: { showStats = true }) {
-                            Text(runtimeText)
-                                .font(.subheadline)
-                                .fontWeight(.medium)
-                                .foregroundStyle(coreManager.hasActiveAgents ? .green : .secondary)
-                        }
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    HStack(spacing: 12) {
-                        Button(action: { showProjectPickerForNewConv = true }) {
-                            Image(systemName: "plus")
-                        }
-                        Button(action: { showFilterSheet = true }) {
-                            ZStack(alignment: .topTrailing) {
-                                Image(systemName: "folder")
-                                // Show badge when filtering is active
-                                if !selectedProjectIds.isEmpty {
-                                    Circle()
-                                        .fill(.blue)
-                                        .frame(width: 8, height: 8)
-                                        .offset(x: 2, y: -2)
-                                }
-                            }
-                        }
-                        .accessibilityLabel(selectedProjectIds.isEmpty ? "Filter by project" : "Filtering \(selectedProjectIds.count) project\(selectedProjectIds.count == 1 ? "" : "s")")
-                        .accessibilityHint("Opens project filter sheet")
-                    }
-                }
+        }
+        .task {
+            rebuildHierarchy()
+            await updateRuntime()
+            await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+            if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
+                audioNotificationsEnabled = settings.enabled
             }
-            .sheet(isPresented: $showFilterSheet) {
-                ProjectsSheet(selectedProjectIds: $selectedProjectIds)
-                    .environmentObject(coreManager)
-            }
-            #if os(iOS)
-            .sheet(item: $selectedConversation) { conversation in
-                NavigationStack {
-                    ConversationDetailView(conversation: conversation)
-                        .environmentObject(coreManager)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarTrailing) {
-                                Button("Done") {
-                                    selectedConversation = nil
-                                }
-                            }
-                        }
-                }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-            }
-            #endif
-            .sheet(isPresented: $showDiagnostics) {
-                NavigationStack {
-                    DiagnosticsView(coreManager: coreManager)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Done") { showDiagnostics = false }
-                            }
-                        }
-                }
-            }
-            .sheet(isPresented: $showAudioQueue) {
-                AudioQueueSheet()
-                    .environmentObject(coreManager)
-            }
-            .sheet(isPresented: $showAISettings) {
-                AISettingsView()
-                    #if os(macOS)
-                    .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
-                    #endif
-            }
-            .sheet(isPresented: $showStats) {
-                NavigationStack {
-                    StatsView(coreManager: coreManager)
-                        .toolbar {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button("Done") { showStats = false }
-                            }
-                        }
-                }
-            }
-            .sheet(isPresented: $showProjectPickerForNewConv) {
-                ProjectSelectorSheet(
-                    projects: coreManager.projects,
-                    projectOnlineStatus: coreManager.projectOnlineStatus,
-                    selectedProject: $projectForNewConversation,
-                    onDone: {
-                        if projectForNewConversation != nil {
-                            showProjectPickerForNewConv = false
-                            showNewConversation = true
-                        }
-                    }
-                )
-            }
-            .sheet(isPresented: $showNewConversation) {
-                if let project = projectForNewConversation {
-                    MessageComposerView(project: project)
-                        .environmentObject(coreManager)
-                }
-            }
-            .sheet(item: $conversationToReference) { conversation in
-                // Extract project from conversation's projectATag
-                let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
-                if let project = coreManager.projects.first(where: { $0.id == projectId }) {
-                    MessageComposerView(
-                        project: project,
-                        initialContent: ConversationFormatters.generateContextMessage(conversation: conversation),
-                        referenceConversationId: conversation.id
-                    )
-                    .environmentObject(coreManager)
-                }
-            }
-            .task {
-                rebuildHierarchy()
+        }
+        .onChange(of: coreManager.conversations) { _, _ in
+            rebuildHierarchy()
+            Task {
                 await updateRuntime()
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
-                if let settings = try? await coreManager.safeCore.getAiAudioSettings() {
-                    audioNotificationsEnabled = settings.enabled
+            }
+        }
+        .onChange(of: showArchived) { _, _ in
+            rebuildHierarchy()
+        }
+        .onChange(of: selectedProjectIds) { _, _ in
+            rebuildHierarchy()
+        }
+        .onChange(of: hideScheduled) { _, _ in
+            rebuildHierarchy()
+            // Preload cache for newly visible conversations when showing scheduled
+            Task {
+                await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+            }
+        }
+    }
+
+    // MARK: - Split View Layout (iPad/Mac)
+
+    private var splitViewLayout: some View {
+        #if os(macOS)
+        HSplitView {
+            conversationListContent
+                .navigationTitle("Conversations")
+                .frame(minWidth: 340, idealWidth: 440, maxWidth: 520, maxHeight: .infinity)
+
+            conversationDetailContent
+                .frame(minWidth: 600, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        #else
+        NavigationSplitView {
+            conversationListContent
+                .navigationTitle("Conversations")
+        } detail: {
+            conversationDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var conversationDetailContent: some View {
+        if let conversation = selectedConversation {
+            NavigationStack {
+                ConversationDetailView(conversation: conversation)
+                    .environmentObject(coreManager)
+            }
+            .id(conversation.id)
+        } else {
+            ContentUnavailableView(
+                "Select a Conversation",
+                systemImage: "bubble.left.and.bubble.right",
+                description: Text("Choose a conversation from the list")
+            )
+        }
+    }
+
+    // MARK: - Stack Layout (iPhone)
+
+    private var stackLayout: some View {
+        NavigationStack {
+            conversationListContent
+                .navigationTitle("Conversations")
+                .navigationBarTitleDisplayMode(.large)
+                .sheet(item: $selectedConversation) { conversation in
+                    NavigationStack {
+                        ConversationDetailView(conversation: conversation)
+                            .environmentObject(coreManager)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("Done") { selectedConversation = nil }
+                                }
+                            }
+                    }
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                }
+        }
+    }
+
+    // MARK: - Conversation List Content (shared between layouts)
+
+    private var conversationListContent: some View {
+        Group {
+            if cachedHierarchy.sortedRootConversations.isEmpty {
+                ConversationsEmptyState(
+                    hasFilter: !selectedProjectIds.isEmpty,
+                    onClearFilter: { selectedProjectIds.removeAll() }
+                )
+            } else {
+                List {
+                    ForEach(cachedHierarchy.sortedRootConversations, id: \.id) { conversation in
+                        ConversationRowFull(
+                            conversation: conversation,
+                            projectTitle: projectTitle(for: conversation),
+                            isHierarchicallyActive: cachedHierarchy.isHierarchicallyActive(conversation.id),
+                            onSelect: { selected in
+                                selectedConversation = selected
+                            }
+                        )
+                        .environmentObject(coreManager)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button(role: .destructive) {
+                                // Archive action placeholder
+                            } label: {
+                                Label("Archive", systemImage: "archivebox")
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+                            Button {
+                                conversationToReference = conversation
+                            } label: {
+                                Label("Reference", systemImage: "link")
+                            }
+                            .tint(Color.agentBrand)
+                        }
+                    }
+                }
+                .listStyle(.plain)
+                .refreshable {
+                    await coreManager.manualRefresh()
                 }
             }
-            .onChange(of: coreManager.conversations) { _, _ in
-                rebuildHierarchy()
-                Task {
-                    await updateRuntime()
-                    await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                ControlGroup {
+                    Menu {
+                        Toggle(isOn: $showArchived) {
+                            Label("Show Archived", systemImage: "archivebox")
+                        }
+
+                        Toggle(isOn: Binding(
+                            get: { !hideScheduled },
+                            set: { hideScheduled = !$0 }
+                        )) {
+                            Label("Show Scheduled", systemImage: "calendar.badge.clock")
+                        }
+
+                        Toggle(isOn: $audioNotificationsEnabled) {
+                            Label("Audio Notifications", systemImage: "speaker.wave.2")
+                        }
+                        .onChange(of: audioNotificationsEnabled) { _, enabled in
+                            Task {
+                                try? await coreManager.safeCore.setAudioNotificationsEnabled(enabled: enabled)
+                            }
+                        }
+
+                        Divider()
+
+                        Button(action: { showAudioQueue = true }) {
+                            Label("Audio Queue", systemImage: "list.bullet")
+                        }
+
+                        Button(action: { showAISettings = true }) {
+                            Label("AI Settings", systemImage: "waveform")
+                        }
+
+                        Button(action: { showDiagnostics = true }) {
+                            Label("Diagnostics", systemImage: "gauge.with.needle")
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person")
+                            Image(systemName: "chevron.down")
+                                .font(.caption2)
+                        }
+                    }
+
+                    Button(action: { showStats = true }) {
+                        Text(runtimeText)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)
+                    }
                 }
             }
-            .onChange(of: showArchived) { _, _ in
-                rebuildHierarchy()
-            }
-            .onChange(of: selectedProjectIds) { _, _ in
-                rebuildHierarchy()
-            }
-            .onChange(of: hideScheduled) { _, _ in
-                rebuildHierarchy()
-                // Preload cache for newly visible conversations when showing scheduled
-                Task {
-                    await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+
+            ToolbarItem(placement: .topBarTrailing) {
+                ControlGroup {
+                    Button(action: { showProjectPickerForNewConv = true }) {
+                        Image(systemName: "plus")
+                    }
+
+                    Button(action: { showFilterSheet = true }) {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "folder")
+                            // Show badge when filtering is active
+                            if !selectedProjectIds.isEmpty {
+                                Circle()
+                                    .fill(Color.unreadIndicator)
+                                    .frame(width: 8, height: 8)
+                                    .offset(x: 2, y: -2)
+                            }
+                        }
+                    }
+                    .accessibilityLabel(selectedProjectIds.isEmpty ? "Filter by project" : "Filtering \(selectedProjectIds.count) project\(selectedProjectIds.count == 1 ? "" : "s")")
+                    .accessibilityHint("Opens project filter sheet")
                 }
+            }
+        }
+        .controlSize(.small)
+        .sheet(isPresented: $showFilterSheet) {
+            ProjectsSheet(selectedProjectIds: $selectedProjectIds)
+                .environmentObject(coreManager)
+        }
+        .sheet(isPresented: $showDiagnostics) {
+            NavigationStack {
+                DiagnosticsView(coreManager: coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showDiagnostics = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showAudioQueue) {
+            AudioQueueSheet()
+                .environmentObject(coreManager)
+        }
+        .sheet(isPresented: $showAISettings) {
+            AISettingsView()
+                #if os(macOS)
+                .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
+                #endif
+        }
+        .sheet(isPresented: $showStats) {
+            NavigationStack {
+                StatsView(coreManager: coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Done") { showStats = false }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showProjectPickerForNewConv) {
+            ProjectSelectorSheet(
+                projects: coreManager.projects,
+                projectOnlineStatus: coreManager.projectOnlineStatus,
+                selectedProject: $projectForNewConversation,
+                onDone: {
+                    if projectForNewConversation != nil {
+                        showProjectPickerForNewConv = false
+                        showNewConversation = true
+                    }
+                }
+            )
+        }
+        .sheet(isPresented: $showNewConversation) {
+            if let project = projectForNewConversation {
+                MessageComposerView(project: project)
+                    .environmentObject(coreManager)
+            }
+        }
+        .sheet(item: $conversationToReference) { conversation in
+            // Extract project from conversation's projectATag
+            let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+            if let project = coreManager.projects.first(where: { $0.id == projectId }) {
+                MessageComposerView(
+                    project: project,
+                    initialContent: ConversationFormatters.generateContextMessage(conversation: conversation),
+                    referenceConversationId: conversation.id
+                )
+                .environmentObject(coreManager)
             }
         }
     }
@@ -493,6 +558,14 @@ private struct ConversationRowFull: View {
     let isHierarchicallyActive: Bool
     let onSelect: (ConversationFullInfo) -> Void
 
+    #if os(macOS)
+    @Environment(\.openWindow) private var openWindow
+    @State private var isHovered = false
+    #else
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @State private var showDelegationTree = false
+    #endif
+
     /// Whether this conversation is currently playing audio
     private var isPlayingAudio: Bool {
         player.playbackState != .idle && player.currentConversationId == conversation.id
@@ -513,16 +586,8 @@ private struct ConversationRowFull: View {
         cachedHierarchy?.pTaggedRecipientInfo
     }
 
-    /// Status color based on hierarchical activity (accounts for descendants)
     private var statusColor: Color {
-        // Show green if this conversation OR any descendant is active
-        if isHierarchicallyActive { return .green }
-        switch conversation.status?.lowercased() ?? "" {
-        case "active", "in progress": return .green
-        case "waiting", "blocked": return .orange
-        case "completed", "done": return .gray
-        default: return .blue
-        }
+        Color.conversationStatus(for: conversation.status, isActive: isHierarchicallyActive)
     }
 
     var body: some View {
@@ -550,7 +615,7 @@ private struct ConversationRowFull: View {
                     if isPlayingAudio {
                         Image(systemName: "speaker.wave.2.fill")
                             .font(.caption)
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(Color.agentBrand)
                             .symbolEffect(.variableColor.iterative, isActive: player.isPlaying)
                     }
 
@@ -568,10 +633,10 @@ private struct ConversationRowFull: View {
                         HStack(spacing: 4) {
                             Image(systemName: "bolt.fill")
                                 .font(.caption2)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.skillBrand)
                             Text(activity)
                                 .font(.subheadline)
-                                .foregroundStyle(.orange)
+                                .foregroundStyle(Color.skillBrand)
                                 .lineLimit(1)
                         }
                     // Show "Delegation active" if hierarchically active but not directly active
@@ -579,10 +644,10 @@ private struct ConversationRowFull: View {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.triangle.branch")
                                 .font(.caption2)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(Color.presenceOnline)
                             Text("Delegation active")
                                 .font(.subheadline)
-                                .foregroundStyle(.green)
+                                .foregroundStyle(Color.presenceOnline)
                                 .lineLimit(1)
                         }
                     } else if let summary = conversation.summary {
@@ -633,8 +698,8 @@ private struct ConversationRowFull: View {
                         .font(.caption2)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.purple.opacity(0.15))
-                        .foregroundStyle(.purple)
+                        .background(Color.projectBrandBackground)
+                        .foregroundStyle(Color.projectBrand)
                         .clipShape(Capsule())
                     }
 
@@ -655,10 +720,38 @@ private struct ConversationRowFull: View {
                             .font(.caption2)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.15))
-                            .foregroundStyle(.blue)
+                            .background(Color.messageBubbleUserBackground)
+                            .foregroundStyle(Color.agentBrand)
                             .clipShape(Capsule())
                     }
+
+                    // Delegation tree button (Mac/iPad only)
+                    #if os(macOS)
+                    if conversation.hasChildren {
+                        Button {
+                            openWindow(id: "delegation-tree", value: conversation.id)
+                        } label: {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .opacity(isHovered ? 1 : 0)
+                        .help("View delegation tree")
+                    }
+                    #else
+                    if conversation.hasChildren && horizontalSizeClass == .regular {
+                        Button {
+                            showDelegationTree = true
+                        } label: {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("View delegation tree")
+                    }
+                    #endif
                 }
             }
 
@@ -671,6 +764,23 @@ private struct ConversationRowFull: View {
         .onTapGesture {
             onSelect(conversation)
         }
+        #if os(macOS)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        #else
+        .fullScreenCover(isPresented: $showDelegationTree) {
+            NavigationStack {
+                DelegationTreeView(rootConversationId: conversation.id)
+                    .environmentObject(coreManager)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showDelegationTree = false }
+                        }
+                    }
+            }
+        }
+        #endif
         // PERFORMANCE: Removed per-row .task that called loadDelegationAgentInfos()
         // Hierarchy data is now preloaded in batch by ConversationsTabView
     }
@@ -709,129 +819,6 @@ private struct ConversationsEmptyState: View {
     }
 }
 
-// MARK: - Messages Sheet View (for viewing conversation details)
-
-private struct MessagesSheetView: View {
-    let conversation: ConversationInfo
-    @EnvironmentObject var coreManager: TenexCoreManager
-    @State private var messages: [MessageInfo] = []
-    @State private var isLoading = false
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if isLoading {
-                        ProgressView()
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                    } else if messages.isEmpty {
-                        VStack(spacing: 12) {
-                            Image(systemName: "bubble.left")
-                                .font(.system(size: 40))
-                                .foregroundStyle(.secondary)
-                            Text("No messages yet")
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.top, 60)
-                    } else {
-                        ForEach(messages, id: \.id) { message in
-                            MessageBubbleView(message: message)
-                        }
-                    }
-                }
-                .padding()
-            }
-            .navigationTitle(conversation.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
-            .task {
-                await loadMessages()
-            }
-            .onReceive(coreManager.$messagesByConversation) { cache in
-                if let updated = cache[conversation.id] {
-                    messages = updated
-                }
-            }
-        }
-    }
-
-    private func loadMessages() async {
-        isLoading = true
-        await coreManager.ensureMessagesLoaded(conversationId: conversation.id)
-        messages = coreManager.messagesByConversation[conversation.id] ?? []
-        isLoading = false
-    }
-}
-
-// MARK: - Message Bubble View
-
-private struct MessageBubbleView: View {
-    let message: MessageInfo
-
-    private var isUser: Bool {
-        message.role == "user"
-    }
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            if isUser { Spacer(minLength: 50) }
-
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                // Author header
-                HStack(spacing: 6) {
-                    if !isUser {
-                        Circle()
-                            .fill(Color.blue.gradient)
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Image(systemName: "sparkle")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white)
-                            }
-                    }
-
-                    Text(message.author)
-                        .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundStyle(.secondary)
-
-                    Text(ConversationFormatters.formatRelativeTime(message.createdAt))
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
-
-                    if isUser {
-                        Circle()
-                            .fill(Color.green.gradient)
-                            .frame(width: 24, height: 24)
-                            .overlay {
-                                Image(systemName: "person.fill")
-                                    .font(.caption2)
-                                    .foregroundStyle(.white)
-                            }
-                    }
-                }
-
-                // Message content
-                Text(message.content)
-                    .font(.body)
-                    .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-            }
-
-            if !isUser { Spacer(minLength: 50) }
-        }
-    }
-}
-
-// Note: ConversationInfo Identifiable conformance is in ConversationsView.swift
 
 #Preview {
     ConversationsTabView()

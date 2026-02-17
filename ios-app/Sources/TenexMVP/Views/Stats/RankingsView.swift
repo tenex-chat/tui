@@ -73,7 +73,7 @@ struct CostByProjectTable: View {
                                 Text(String(format: "$%.2f", project.cost))
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                    .foregroundColor(.green)
+                                    .foregroundColor(Color.statCost)
                                     .frame(width: 80, alignment: .trailing)
                             }
                             .padding(.horizontal, 12)
@@ -153,7 +153,7 @@ struct TopConversationsTable: View {
                                 Text(StatsSnapshot.formatRuntime(conversation.runtimeMs))
                                     .font(.subheadline)
                                     .fontWeight(.medium)
-                                    .foregroundColor(.blue)
+                                    .foregroundColor(Color.statRuntime)
                                     .frame(width: 90, alignment: .trailing)
                             }
                             .padding(.horizontal, 12)

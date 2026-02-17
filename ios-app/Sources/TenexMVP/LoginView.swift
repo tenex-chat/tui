@@ -21,7 +21,7 @@ struct LoginView: View {
                 VStack(spacing: 8) {
                     Image(systemName: "key.fill")
                         .font(.system(size: 60))
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.agentBrand)
 
                     Text("Login to TENEX")
                         .font(.largeTitle)
@@ -37,14 +37,14 @@ struct LoginView: View {
                 if let autoError = autoLoginError {
                     HStack {
                         Image(systemName: "info.circle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.healthWarning)
                         Text(autoError)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(Color.healthWarning)
                             .font(.footnote)
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 8)
-                    .background(Color.orange.opacity(0.1))
+                    .background(Color.healthWarning.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(.horizontal)
                 }
@@ -69,14 +69,14 @@ struct LoginView: View {
                 if let error = errorMessage {
                     HStack {
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.healthError)
                         Text(error)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(Color.healthError)
                             .font(.footnote)
                     }
                     .padding(.horizontal)
                     .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.1))
+                    .background(Color.healthError.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .padding(.horizontal)
                 }
@@ -86,11 +86,11 @@ struct LoginView: View {
                     VStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 40))
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.healthGood)
 
                         Text("Login Successful!")
                             .font(.headline)
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.healthGood)
 
                         Text("Your npub:")
                             .font(.caption)
@@ -106,19 +106,19 @@ struct LoginView: View {
                         if let warning = credentialSaveWarning {
                             HStack {
                                 Image(systemName: "exclamationmark.triangle.fill")
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.healthWarning)
                                 Text(warning)
-                                    .foregroundStyle(.orange)
+                                    .foregroundStyle(Color.healthWarning)
                                     .font(.caption2)
                             }
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Color.orange.opacity(0.1))
+                            .background(Color.healthWarning.opacity(0.1))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
                     }
                     .padding()
-                    .background(Color.green.opacity(0.1))
+                    .background(Color.healthGood.opacity(0.1))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .padding(.horizontal)
                 }

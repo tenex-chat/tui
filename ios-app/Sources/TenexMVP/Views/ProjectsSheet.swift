@@ -1,10 +1,7 @@
 import SwiftUI
 
-/// Unified Projects Sheet that combines filtering and project management.
-/// Each row has a dual-zone design:
-/// - Left toggle: filter on/off for conversations
-/// - Center tap: main action (boot if offline, open project details if online)
-/// - Right: boot icon (offline) or chevron (online)
+/// Sheet for filtering conversations by project.
+/// Row tap only toggles filter selection; project boot remains a dedicated button.
 struct ProjectsSheet: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     @Binding var selectedProjectIds: Set<String>
@@ -13,89 +10,75 @@ struct ProjectsSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                // "All Projects" toggle
                 allProjectsRow
 
                 if !coreManager.projects.isEmpty {
-                    Section {
+                    Section("Projects") {
                         ForEach(sortedProjects, id: \.id) { project in
                             ProjectsSheetRow(
                                 project: project,
                                 isFiltered: selectedProjectIds.contains(project.id),
+                                isOnline: coreManager.projectOnlineStatus[project.id] ?? false,
+                                onlineAgentCount: coreManager.onlineAgents[project.id]?.count ?? 0,
                                 onToggleFilter: { toggleProject(project.id) }
                             )
                         }
-                    } header: {
-                        Text("Projects")
                     }
                 }
             }
             #if os(iOS)
             .listStyle(.insetGrouped)
-            #else
-            .listStyle(.plain)
-            #endif
             .navigationTitle("Projects")
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .listStyle(.plain)
+            .navigationTitle("")
+            #endif
             .toolbar {
+                #if os(macOS)
+                ToolbarItem(placement: .principal) {
+                    Text("Projects").fontWeight(.semibold)
+                }
+                #endif
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
         }
+        #if os(iOS)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
+        #else
+        .frame(minWidth: 500, minHeight: 600)
+        #endif
     }
-
-    // MARK: - All Projects Row
 
     private var allProjectsRow: some View {
         Button(action: { selectedProjectIds.removeAll() }) {
             HStack(spacing: 12) {
-                // Icon
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.blue.gradient)
-                    .frame(width: 44, height: 44)
-                    .overlay {
-                        Image(systemName: "square.grid.2x2.fill")
-                            .foregroundStyle(.white)
-                            .font(.title3)
-                    }
+                Image(systemName: selectedProjectIds.isEmpty ? "checkmark.circle.fill" : "circle")
+                    .font(.title3)
+                    .foregroundStyle(selectedProjectIds.isEmpty ? Color.agentBrand : .secondary)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("All Projects")
                         .font(.headline)
                         .foregroundStyle(.primary)
-
                     Text("\(coreManager.projects.count) projects")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
 
                 Spacer()
-
-                // Checkmark when showing all (no filter active)
-                if selectedProjectIds.isEmpty {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.title2)
-                        .foregroundStyle(.blue)
-                } else {
-                    Image(systemName: "circle")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                }
             }
             .padding(.vertical, 4)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Show all projects")
+        .accessibilityHint("Clears project filters")
     }
 
-    // MARK: - Helpers
-
-    /// Projects sorted with online first, then alphabetical
     private var sortedProjects: [ProjectInfo] {
         coreManager.projects.sorted { a, b in
             let aOnline = coreManager.projectOnlineStatus[a.id] ?? false
@@ -114,45 +97,78 @@ struct ProjectsSheet: View {
     }
 }
 
-// MARK: - Project Row with Dual-Zone Design
-
-/// A row with dual-zone interaction:
-/// - Toggle on left: filter conversations by this project
-/// - Tap center/right: boot (if offline) or view project (if online)
 private struct ProjectsSheetRow: View {
     @EnvironmentObject var coreManager: TenexCoreManager
+
     let project: ProjectInfo
     let isFiltered: Bool
+    let isOnline: Bool
+    let onlineAgentCount: Int
     let onToggleFilter: () -> Void
 
     @State private var isBooting = false
     @State private var showBootError = false
     @State private var bootError: String?
-    @State private var showProjectDetail = false
-
-    /// Reactive online status from TenexCoreManager
-    private var isOnline: Bool {
-        coreManager.projectOnlineStatus[project.id] ?? false
-    }
-
-    /// Count of online agents for this project
-    private var onlineAgentCount: Int {
-        coreManager.onlineAgents[project.id]?.count ?? 0
-    }
 
     var body: some View {
-        HStack(spacing: 0) {
-            // Left zone: Filter toggle
-            filterToggleZone
+        HStack(spacing: 12) {
+            Button(action: onToggleFilter) {
+                HStack(spacing: 12) {
+                    Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isFiltered ? Color.agentBrand : .secondary)
 
-            Divider()
-                .frame(height: 40)
-                .padding(.horizontal, 8)
+                    projectIconView
 
-            // Center/Right zone: Project info + action
-            mainActionZone
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(project.title)
+                            .font(.headline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+
+                        HStack(spacing: 6) {
+                            Text(isOnline ? "Online" : "Offline")
+                                .font(.caption)
+                                .foregroundStyle(isOnline ? Color.presenceOnline : .secondary)
+
+                            if isOnline {
+                                Text("•")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+
+                                Text("\(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s")")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+                }
+                .padding(.vertical, 6)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Filter by \(project.title)")
+            .accessibilityValue(isFiltered ? "On" : "Off")
+            .accessibilityHint("Double tap to \(isFiltered ? "remove from" : "add to") filter")
+
+            if !isOnline {
+                Button(action: bootProject) {
+                    if isBooting {
+                        ProgressView()
+                            .scaleEffect(0.8)
+                    } else {
+                        Image(systemName: "power")
+                            .font(.body)
+                            .foregroundStyle(Color.agentBrand)
+                    }
+                }
+                .buttonStyle(.borderless)
+                .disabled(isBooting)
+                .accessibilityLabel("Boot \(project.title)")
+                .accessibilityHint("Starts this project")
+            }
         }
-        .padding(.vertical, 4)
         .alert("Boot Failed", isPresented: $showBootError) {
             Button("OK") { bootError = nil }
         } message: {
@@ -160,137 +176,17 @@ private struct ProjectsSheetRow: View {
                 Text(error)
             }
         }
-        .sheet(isPresented: $showProjectDetail) {
-            ProjectDetailSheet(project: project)
-        }
-    }
-
-    // MARK: - Left Zone: Filter Toggle
-
-    private var filterToggleZone: some View {
-        Button(action: onToggleFilter) {
-            HStack(spacing: 8) {
-                Image(systemName: isFiltered ? "checkmark.circle.fill" : "circle")
-                    .font(.title2)
-                    .foregroundStyle(isFiltered ? .blue : .secondary)
-
-                Text("Filter")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .buttonStyle(.plain)
-        .frame(width: 70)
-        .accessibilityLabel("Filter by \(project.title)")
-        .accessibilityValue(isFiltered ? "On" : "Off")
-        .accessibilityHint("Double tap to \(isFiltered ? "remove from" : "add to") conversation filter")
-    }
-
-    // MARK: - Center/Right Zone: Main Action
-
-    private var mainActionZone: some View {
-        Button(action: performMainAction) {
-            HStack(spacing: 12) {
-                // Project icon with online indicator
-                projectIconView
-
-                // Project info
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 6) {
-                        Text(project.title)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-
-                        // Status badge
-                        statusBadge
-                    }
-
-                    // Agent count or description
-                    if isOnline && onlineAgentCount > 0 {
-                        Text("\(onlineAgentCount) agent\(onlineAgentCount == 1 ? "" : "s") online")
-                            .font(.caption)
-                            .foregroundStyle(.green)
-                    } else if let description = project.description {
-                        Text(description)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                // Right action indicator
-                actionIndicator
-            }
-        }
-        .buttonStyle(.plain)
-        .disabled(isBooting)
     }
 
     private var projectIconView: some View {
-        ZStack(alignment: .bottomTrailing) {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(projectColor.gradient)
-                .frame(width: 44, height: 44)
-                .overlay {
-                    Image(systemName: "folder.fill")
-                        .foregroundStyle(.white)
-                        .font(.title3)
-                }
-
-            // Online/Offline indicator dot
-            Circle()
-                .fill(isOnline ? Color.green : Color.gray)
-                .frame(width: 12, height: 12)
-                .overlay {
-                    Circle()
-                        .stroke(Color.systemBackground, lineWidth: 2)
-                }
-                .offset(x: 2, y: 2)
-        }
-    }
-
-    private var statusBadge: some View {
-        Text(isOnline ? "Online" : "Offline")
-            .font(.caption2)
-            .fontWeight(.medium)
-            .foregroundStyle(isOnline ? Color.green : Color.gray)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(
-                Capsule()
-                    .fill(isOnline ? Color.green.opacity(0.15) : Color.gray.opacity(0.15))
-            )
-    }
-
-    @ViewBuilder
-    private var actionIndicator: some View {
-        if isBooting {
-            ProgressView()
-                .scaleEffect(0.8)
-        } else if isOnline {
-            // Online: chevron to view details
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        } else {
-            // Offline: boot button
-            Image(systemName: "power")
-                .font(.body)
-                .foregroundStyle(.blue)
-        }
-    }
-
-    // MARK: - Actions
-
-    private func performMainAction() {
-        if isOnline {
-            showProjectDetail = true
-        } else {
-            bootProject()
-        }
+        RoundedRectangle(cornerRadius: 8)
+            .fill(projectColor.gradient)
+            .frame(width: 36, height: 36)
+            .overlay {
+                Image(systemName: "folder.fill")
+                    .foregroundStyle(.white)
+                    .font(.body)
+            }
     }
 
     private func bootProject() {
@@ -300,7 +196,6 @@ private struct ProjectsSheetRow: View {
         Task {
             do {
                 try await coreManager.safeCore.bootProject(projectId: project.id)
-                // UI updates reactively when kind:24010 status event arrives
             } catch {
                 await MainActor.run {
                     bootError = error.localizedDescription
@@ -313,13 +208,10 @@ private struct ProjectsSheetRow: View {
         }
     }
 
-    /// Deterministic color using shared utility (stable across app launches)
     private var projectColor: Color {
         deterministicColor(for: project.id)
     }
 }
-
-// MARK: - Preview
 
 #Preview {
     ProjectsSheet(selectedProjectIds: .constant([]))

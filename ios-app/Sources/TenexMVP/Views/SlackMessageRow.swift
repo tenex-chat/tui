@@ -162,7 +162,7 @@ struct SlackMessageRow: View {
                             Image(systemName: "chevron.down")
                                 .font(.caption)
                         }
-                        .foregroundStyle(Color.accentColor)
+                        .foregroundStyle(Color.composerAction)
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 4)
@@ -183,7 +183,7 @@ struct SlackMessageRow: View {
                         Image(systemName: "chevron.up")
                             .font(.caption)
                     }
-                    .foregroundStyle(Color.accentColor)
+                    .foregroundStyle(Color.composerAction)
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 8)

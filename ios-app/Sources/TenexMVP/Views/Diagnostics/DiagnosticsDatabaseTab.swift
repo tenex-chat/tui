@@ -131,7 +131,7 @@ struct EventKindRow: View {
                             .fill(Color.systemGray5)
 
                         RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.blue)
+                            .fill(Color.agentBrand)
                             .frame(width: geometry.size.width * percentage)
                     }
                 }

@@ -237,13 +237,13 @@ struct InboxView: View {
                 if count > 0 {
                     Text("(\(count))")
                         .font(.caption)
-                        .foregroundStyle(.red)
+                        .foregroundStyle(Color.unreadIndicator)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(selectedFilter == filter ? Color.blue.opacity(0.15) : Color.clear)
-            .foregroundStyle(selectedFilter == filter ? .blue : .primary)
+            .background(selectedFilter == filter ? Color.agentBrand.opacity(0.15) : Color.clear)
+            .foregroundStyle(selectedFilter == filter ? Color.agentBrand : .primary)
             .clipShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -306,7 +306,7 @@ struct InboxItemRow: View {
         HStack(spacing: 12) {
             // Unread indicator dot
             Circle()
-                .fill(item.isUnread ? Color.blue : Color.clear)
+                .fill(item.isUnread ? Color.unreadIndicator : Color.clear)
                 .frame(width: 10, height: 10)
 
             // Event type icon (using domain extension)
@@ -435,8 +435,8 @@ struct InboxDetailView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .background(item.isUnread ? Color.orange.opacity(0.15) : Color.green.opacity(0.15))
-                .foregroundStyle(item.isUnread ? .orange : .green)
+                .background(item.isUnread ? Color.askBrandBackground : Color.presenceOnlineBackground)
+                .foregroundStyle(item.isUnread ? Color.askBrand : Color.presenceOnline)
                 .clipShape(Capsule())
 
                 Spacer()
@@ -501,7 +501,7 @@ struct InboxDetailView: View {
             if let projectId = item.projectId {
                 HStack {
                     Image(systemName: "folder.fill")
-                        .foregroundStyle(.blue)
+                        .foregroundStyle(Color.agentBrand)
                     Text("Project: \(projectId)")
                     Spacer()
                     Image(systemName: "chevron.right")
@@ -519,7 +519,7 @@ struct InboxDetailView: View {
                 }) {
                     HStack {
                         Image(systemName: "bubble.left.and.bubble.right.fill")
-                            .foregroundStyle(.green)
+                            .foregroundStyle(Color.presenceOnline)
                         Text("View Conversation")
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -630,7 +630,7 @@ struct InboxMessageBubble: View {
                 HStack(spacing: 6) {
                     if !isUser {
                         Circle()
-                            .fill(Color.blue.gradient)
+                            .fill(Color.agentBrand.gradient)
                             .frame(width: 24, height: 24)
                             .overlay {
                                 Image(systemName: "sparkle")
@@ -650,7 +650,7 @@ struct InboxMessageBubble: View {
 
                     if isUser {
                         Circle()
-                            .fill(Color.green.gradient)
+                            .fill(Color.messageUserAvatarColor.gradient)
                             .frame(width: 24, height: 24)
                             .overlay {
                                 Image(systemName: "person.fill")
@@ -664,7 +664,7 @@ struct InboxMessageBubble: View {
                 Text(message.content)
                     .font(.body)
                     .padding(12)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color.systemGray6)
+                    .background(isUser ? Color.messageBubbleUserBackground : Color.systemGray6)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
             }
 
