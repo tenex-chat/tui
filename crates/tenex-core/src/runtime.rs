@@ -25,8 +25,11 @@ impl CoreHandle {
         Self { command_tx }
     }
 
-    pub fn send(&self, command: NostrCommand) -> Result<(), mpsc::SendError<NostrCommand>> {
-        self.command_tx.send(command)
+    pub fn send(
+        &self,
+        command: NostrCommand,
+    ) -> Result<(), Box<mpsc::SendError<NostrCommand>>> {
+        self.command_tx.send(command).map_err(Box::new)
     }
 }
 

@@ -90,10 +90,11 @@ async fn main() -> Result<()> {
                     Ok(RelayPoolNotification::Event { .. }) => {
                         event_path_count += 1;
                     }
-                    Ok(RelayPoolNotification::Message { message, .. }) => {
-                        if let RelayMessage::Event { .. } = &message {
-                            message_path_count += 1;
-                        }
+                    Ok(RelayPoolNotification::Message {
+                        message: RelayMessage::Event { .. },
+                        ..
+                    }) => {
+                        message_path_count += 1;
                     }
                     _ => {}
                 }
@@ -181,10 +182,11 @@ async fn main() -> Result<()> {
                     Ok(RelayPoolNotification::Event { .. }) => {
                         sync_event_count += 1;
                     }
-                    Ok(RelayPoolNotification::Message { message, .. }) => {
-                        if let RelayMessage::Event { .. } = &message {
-                            sync_message_count += 1;
-                        }
+                    Ok(RelayPoolNotification::Message {
+                        message: RelayMessage::Event { .. },
+                        ..
+                    }) => {
+                        sync_message_count += 1;
                     }
                     _ => {}
                 }

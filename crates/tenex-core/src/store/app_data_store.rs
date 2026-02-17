@@ -9,7 +9,7 @@ use crate::store::content_store::ContentStore;
 use crate::store::inbox_store::InboxStore;
 use crate::store::operations_store::OperationsStore;
 use crate::store::reports_store::ReportsStore;
-use crate::store::statistics_store::StatisticsStore;
+use crate::store::statistics_store::{MessagesByDayCounts, StatisticsStore};
 use crate::store::trust_store::TrustStore;
 use crate::store::{RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
@@ -462,11 +462,10 @@ impl AppDataStore {
 
                 // Update delegation relationship (this conversation's parent)
                 if let Some(ref parent_id) = message.delegation_tag {
-                    if parent_id != thread_id {
-                        if self.runtime_hierarchy.set_parent(thread_id, parent_id) {
+                    if parent_id != thread_id
+                        && self.runtime_hierarchy.set_parent(thread_id, parent_id) {
                             relationships_changed = true;
                         }
-                    }
                 }
             }
 
@@ -662,14 +661,14 @@ impl AppDataStore {
     /// Returns two vectors:
     /// - First: messages from the current user (day_start_timestamp, count) tuples
     /// - Second: all messages from anyone a-tagging our projects (day_start_timestamp, count) tuples
-    /// Both vectors cover the same time window (num_days).
+    ///
+    ///   Both vectors cover the same time window (num_days).
     ///
     /// Uses pre-aggregated counters for O(num_days) performance instead of O(total_messages).
     /// Data is queried directly from nostrdb using the `.authors()` filter for user messages
     /// and a-tag filters for project messages (no double-counting from agent_chatter).
     // ===== Statistics Methods (delegated to StatisticsStore) =====
-
-    pub fn get_messages_by_day(&self, num_days: usize) -> (Vec<(u64, u64)>, Vec<(u64, u64)>) {
+    pub fn get_messages_by_day(&self, num_days: usize) -> MessagesByDayCounts {
         self.statistics.get_messages_by_day(num_days)
     }
 
@@ -1232,11 +1231,7 @@ impl AppDataStore {
                     // Try string first, then id bytes (same pattern as e-tag handling)
                     let pk = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        Some(hex::encode(id_bytes))
-                    } else {
-                        None
-                    };
+                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
                     if pk.as_deref() == Some(user_pubkey) {
                         return true;
                     }
@@ -1351,11 +1346,7 @@ impl AppDataStore {
                     // Try string first, then id bytes
                     let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else if let Some(id_bytes) = tag.get(1).and_then(|t| t.variant().id()) {
-                        Some(hex::encode(id_bytes))
-                    } else {
-                        None
-                    };
+                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
                     if let Some(id) = event_id {
                         ids.push(id);
                     }
@@ -1901,7 +1892,7 @@ impl AppDataStore {
             .map(|note| {
                 let event_id = hex::encode(note.id());
                 let content = note.content().to_string();
-                let kind = note.kind() as u32;
+                let kind = note.kind();
 
                 // Find thread_id: look for e-tag with "root" marker, or use the event itself
                 let thread_id = Self::extract_thread_id_from_note(note);
@@ -1935,7 +1926,7 @@ impl AppDataStore {
 
         let pubkey = hex::encode(note.pubkey());
         let author_name = self.get_profile_name(&pubkey);
-        let created_at = note.created_at() as u64;
+        let created_at = note.created_at();
         let project_a_tag = Self::extract_project_a_tag(&note);
 
         Some((author_name, created_at, project_a_tag))
@@ -3036,7 +3027,7 @@ mod tests {
 
             // Create messages that reference both projects (using two a-tags)
             for i in 0..2 {
-                let event = EventBuilder::new(Kind::TextNote, &format!("both projects {}", i))
+                let event = EventBuilder::new(Kind::TextNote, format!("both projects {}", i))
                     .tag(Tag::custom(
                         TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                         vec![a_tag1.clone()],
@@ -3112,7 +3103,7 @@ mod tests {
 
             // Newer messages that a-tag both projects
             for i in 0..5 {
-                let event = EventBuilder::new(Kind::TextNote, &format!("both projects {}", i))
+                let event = EventBuilder::new(Kind::TextNote, format!("both projects {}", i))
                     .tag(Tag::custom(
                         TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::A)),
                         vec![a_tag1.clone()],
@@ -3251,7 +3242,7 @@ mod tests {
             store.operations.agent_tracking.process_24133_event(
                 "conv1",
                 "event1",
-                &[agent_pubkey.clone()],
+                std::slice::from_ref(&agent_pubkey),
                 1000,
                 "31933:user:project",
                 None,
@@ -3816,7 +3807,7 @@ mod tests {
             store
                 .messages_by_thread
                 .entry("thread1".to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(msg);
         }
 
@@ -3872,7 +3863,7 @@ mod tests {
             Some(&300_u64)
         );
         assert_eq!(
-            result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            result.get(&(base_timestamp + seconds_per_hour)),
             Some(&200_u64)
         );
         assert_eq!(result.get(&(base_timestamp)), Some(&100_u64));
@@ -3886,7 +3877,7 @@ mod tests {
         );
 
         // Test 4: Window starting at 11:00 should only see hours <= 11:00
-        let earlier_current = base_timestamp + (1 * seconds_per_hour);
+        let earlier_current = base_timestamp + seconds_per_hour;
         let result = store.get_tokens_by_hour_from(earlier_current, 2);
         assert_eq!(
             result.len(),
@@ -3894,7 +3885,7 @@ mod tests {
             "Window from 11:00 looking back 2 hours should return 2 entries"
         );
         assert_eq!(
-            result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            result.get(&(base_timestamp + seconds_per_hour)),
             Some(&200_u64),
             "Hour 11:00 should have 200 tokens"
         );
@@ -3933,7 +3924,7 @@ mod tests {
         store
             .messages_by_thread
             .entry("thread1".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg_23);
 
         // Add message at 00:00 current day
@@ -3942,7 +3933,7 @@ mod tests {
         store
             .messages_by_thread
             .entry("thread1".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg_00);
 
         // Add message at 01:00 current day
@@ -3951,7 +3942,7 @@ mod tests {
         store
             .messages_by_thread
             .entry("thread1".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg_01);
 
         // Add message at 02:00 current day
@@ -3960,7 +3951,7 @@ mod tests {
         store
             .messages_by_thread
             .entry("thread1".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg_02);
 
         store
@@ -4076,7 +4067,7 @@ mod tests {
         store
             .messages_by_thread
             .entry("thread1".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(msg);
 
         // Hour 1: 2 messages
@@ -4092,7 +4083,7 @@ mod tests {
             store
                 .messages_by_thread
                 .entry("thread1".to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(msg);
         }
 
@@ -4109,7 +4100,7 @@ mod tests {
             store
                 .messages_by_thread
                 .entry("thread1".to_string())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(msg);
         }
 
@@ -4135,7 +4126,7 @@ mod tests {
             "Hour 12:00 should have 3 messages"
         );
         assert_eq!(
-            message_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            message_result.get(&(base_timestamp + seconds_per_hour)),
             Some(&2_u64),
             "Hour 11:00 should have 2 messages"
         );
@@ -4160,7 +4151,7 @@ mod tests {
             "Hour 12:00 should have 999 tokens (3*333)"
         );
         assert_eq!(
-            token_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            token_result.get(&(base_timestamp + seconds_per_hour)),
             Some(&1000_u64),
             "Hour 11:00 should have 1000 tokens (2*500)"
         );

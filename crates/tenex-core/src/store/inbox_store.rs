@@ -7,6 +7,12 @@ pub struct InboxStore {
     read_ids: HashSet<String>,
 }
 
+impl Default for InboxStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InboxStore {
     pub fn new() -> Self {
         Self {

@@ -917,7 +917,7 @@ mod tests {
         // Runtime should drop to ~1 second (only agent2's contribution)
         let runtime_after = state.unconfirmed_runtime_secs();
         assert!(
-            runtime_after >= 1 && runtime_after < 2,
+            (1..2).contains(&runtime_after),
             "Expected runtime between 1-2 after resetting one agent, got {}",
             runtime_after
         );
@@ -960,7 +960,7 @@ mod tests {
         // Total should drop to ~100 (confirmed only)
         let total_after = state.total_runtime_secs();
         assert!(
-            total_after >= 100 && total_after <= 101,
+            (100..=101).contains(&total_after),
             "Expected total ~100 after reset, got {}",
             total_after
         );
@@ -1013,7 +1013,7 @@ mod tests {
         // Check unconfirmed before removal (should be ~1 second since last reset)
         let unconfirmed_before_removal = state.unconfirmed_runtime_secs();
         assert!(
-            unconfirmed_before_removal >= 1 && unconfirmed_before_removal < 2,
+            (1..2).contains(&unconfirmed_before_removal),
             "Expected unconfirmed ~1 before removal, got {}",
             unconfirmed_before_removal
         );

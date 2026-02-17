@@ -42,7 +42,7 @@ pub fn text_contains_term(text: &str, term: &str) -> bool {
         let matches = term_chars.iter().enumerate().all(|(i, tc)| {
             text_chars
                 .get(start_idx + i)
-                .map_or(false, |c| c.eq_ignore_ascii_case(tc))
+                .is_some_and(|c| c.eq_ignore_ascii_case(tc))
         });
         if matches {
             return true;

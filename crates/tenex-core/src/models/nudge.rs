@@ -51,9 +51,9 @@ impl Nudge {
                 if let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) {
                     // Handle supersedes tag specially - nostrdb stores 64-char hex strings as Id variant
                     if tag_name == "supersedes" {
-                        supersedes = tag.get(1).and_then(|t| match t.variant() {
-                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
+                        supersedes = tag.get(1).map(|t| match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => s.to_string(),
+                            nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
                         });
                         continue;
                     }
@@ -140,7 +140,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -182,7 +182,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -224,7 +224,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -269,14 +269,14 @@ mod tests {
 
         let expected_event_id = event.id.to_hex();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
 
         let txn = Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
-        assert!(results.len() >= 1, "Should find at least one event");
+        assert!(!results.is_empty(), "Should find at least one event");
 
         // Find our specific event by ID
         let mut found_note = None;
@@ -307,7 +307,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -375,7 +375,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -419,7 +419,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([1]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);
@@ -452,7 +452,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
 
         let filter = Filter::new().kinds([4201]).build();
         wait_for_event_processing(&db.ndb, filter.clone(), 5000);

@@ -281,18 +281,13 @@ impl RuntimeHierarchy {
         let mut ancestors = Vec::new();
         let mut current = conversation_id;
 
-        loop {
-            match self.parents.get(current) {
-                Some(parent_id) => {
-                    // Cycle detection
-                    if ancestors.contains(parent_id) {
-                        break;
-                    }
-                    ancestors.push(parent_id.clone());
-                    current = parent_id;
-                }
-                None => break,
+        while let Some(parent_id) = self.parents.get(current) {
+            // Cycle detection
+            if ancestors.contains(parent_id) {
+                break;
             }
+            ancestors.push(parent_id.clone());
+            current = parent_id;
         }
 
         ancestors

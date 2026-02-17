@@ -149,7 +149,7 @@ pub fn wait_for_event_processing(ndb: &Ndb, filter: nostrdb::Filter, max_wait_ms
 
     loop {
         if let Ok(txn) = nostrdb::Transaction::new(ndb) {
-            if let Ok(results) = ndb.query(&txn, &[filter.clone()], 1) {
+            if let Ok(results) = ndb.query(&txn, std::slice::from_ref(&filter), 1) {
                 if !results.is_empty() {
                     return true;
                 }
@@ -188,7 +188,7 @@ mod tests {
             .sign_with_keys(&keys)
             .unwrap();
 
-        let ingested = ingest_events(&db.ndb, &[event.clone()], None).unwrap();
+        let ingested = ingest_events(&db.ndb, std::slice::from_ref(&event), None).unwrap();
         assert_eq!(ingested, 1);
 
         // Wait for async processing

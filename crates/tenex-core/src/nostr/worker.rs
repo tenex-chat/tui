@@ -1202,14 +1202,14 @@ impl NostrWorker {
 
                                                 match subscribe_project_if_new(&client, &ndb, &a_tag, &subscribed_projects, &subscription_stats).await {
                                                     Ok(true) => {
-                                                        let project_name = d_tag.split(':').last().unwrap_or(d_tag);
+                                                        let project_name = d_tag.split(':').next_back().unwrap_or(d_tag);
                                                         tlog!("CONN", "New project discovered: {}, subscribed to messages", project_name);
                                                     }
                                                     Ok(false) => {
                                                         // Already subscribed - no action needed
                                                     }
                                                     Err(e) => {
-                                                        let project_name = d_tag.split(':').last().unwrap_or(d_tag);
+                                                        let project_name = d_tag.split(':').next_back().unwrap_or(d_tag);
                                                         tlog!("ERROR", "Failed to subscribe to project {}: {}", project_name, e);
                                                     }
                                                 }
@@ -1251,11 +1251,12 @@ impl NostrWorker {
     fn handle_incoming_event(ndb: &Ndb, event: Event, relay_url: &str) -> Result<()> {
         // Ingest the event into nostrdb with relay metadata
         // UI gets notified via nostrdb SubscriptionStream when events are ready
-        ingest_events(ndb, &[event.clone()], Some(relay_url))?;
+        ingest_events(ndb, std::slice::from_ref(&event), Some(relay_url))?;
 
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_publish_thread(
         &self,
         project_a_tag: String,
@@ -1347,7 +1348,7 @@ impl NostrWorker {
         let event_id = signed_event.id.to_hex();
 
         // Ingest locally into nostrdb so it appears immediately
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
         // UI gets notified via nostrdb SubscriptionStream when data is ready
 
         // Send to relay with timeout (don't block forever on degraded connections)
@@ -1368,6 +1369,7 @@ impl NostrWorker {
         Ok(event_id)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_publish_message(
         &self,
         thread_id: String,
@@ -1452,7 +1454,7 @@ impl NostrWorker {
         tlog!("SEND", "Signed in {:?}", sign_start.elapsed());
 
         // Ingest locally into nostrdb - UI gets notified via SubscriptionStream
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
         tlog!("SEND", "Ingested locally, now sending to relay...");
 
         // Send to relay with timeout (don't block forever on degraded connections)
@@ -1595,7 +1597,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(
@@ -1677,7 +1679,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(
@@ -1694,6 +1696,7 @@ impl NostrWorker {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn handle_create_agent_definition(
         &self,
         name: String,
@@ -1757,7 +1760,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(
@@ -2029,6 +2032,7 @@ impl NostrWorker {
     }
 
     /// Create a new nudge (kind:4201)
+    #[allow(clippy::too_many_arguments)]
     async fn handle_create_nudge(
         &self,
         title: String,
@@ -2105,7 +2109,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(
@@ -2125,6 +2129,7 @@ impl NostrWorker {
     /// Update an existing nudge (create new event with updated content)
     /// Since kind:4201 is not a replaceable event, we create a new event
     /// and add a reference to the original
+    #[allow(clippy::too_many_arguments)]
     async fn handle_update_nudge(
         &self,
         original_id: String,
@@ -2207,7 +2212,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(
@@ -2254,7 +2259,7 @@ impl NostrWorker {
         let signed_event = event.sign_with_keys(keys)?;
 
         // Ingest locally into nostrdb
-        ingest_events(&self.ndb, &[signed_event.clone()], None)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
 
         // Send to relay with timeout
         match tokio::time::timeout(

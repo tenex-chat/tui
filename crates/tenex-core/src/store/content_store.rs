@@ -13,6 +13,12 @@ pub struct ContentStore {
     pub lessons: HashMap<String, Lesson>,
 }
 
+impl Default for ContentStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ContentStore {
     pub fn new() -> Self {
         Self {

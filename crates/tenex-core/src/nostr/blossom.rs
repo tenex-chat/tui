@@ -116,7 +116,7 @@ impl<'a> std::io::Write for Base64Encoder<'a> {
             self.flush_buffer();
         }
         // Add padding
-        while self.output.len() % 4 != 0 {
+        while !self.output.len().is_multiple_of(4) {
             self.output.push(b'=');
         }
         Ok(())

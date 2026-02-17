@@ -401,11 +401,9 @@ mod tests {
         assert!(voice.is_some());
 
         // Verify it's one of the sorted voices
-        let sorted_voices = vec![
-            "voice1".to_string(),
+        let sorted_voices = ["voice1".to_string(),
             "voice2".to_string(),
-            "voice3".to_string(),
-        ];
+            "voice3".to_string()];
         assert!(sorted_voices.contains(voice.as_ref().unwrap()));
 
         // Run 100 times to verify stability
