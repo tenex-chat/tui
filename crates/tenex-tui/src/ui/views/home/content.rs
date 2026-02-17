@@ -8,7 +8,7 @@ use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, List, ListItem, ListState, Padding, Paragraph, Row, Table},
+    widgets::{Cell, List, ListItem, ListState, Paragraph, Row, Table},
     Frame,
 };
 use unicode_width::UnicodeWidthStr;
