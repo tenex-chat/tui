@@ -1,9 +1,9 @@
+use anyhow::Result;
 /// Test to see if negentropy sync causes event flooding
 use nostr_sdk::prelude::*;
 use nostrdb::{Config, Ndb};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 const RELAY_URL: &str = "wss://relay.tenex.tech";
 const TEST_PUBKEY: &str = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
@@ -41,18 +41,15 @@ async fn main() -> Result<()> {
     // Create subscriptions (same as main app)
     println!("Creating subscriptions:");
 
-    let project_filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .author(pubkey);
+    let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
     client.subscribe(project_filter.clone(), None).await?;
     println!("  ✓ Projects (kind:31933)");
 
-    let global_filter = Filter::new()
-        .kinds(vec![
-            Kind::Custom(4199),
-            Kind::Custom(4200),
-            Kind::Custom(4201),
-        ]);
+    let global_filter = Filter::new().kinds(vec![
+        Kind::Custom(4199),
+        Kind::Custom(4200),
+        Kind::Custom(4201),
+    ]);
     client.subscribe(global_filter.clone(), None).await?;
     println!("  ✓ Global definitions (kinds:4199,4200,4201)\n");
 
@@ -132,7 +129,10 @@ async fn main() -> Result<()> {
     }
 
     let sync_duration = sync_start.elapsed();
-    println!("\n✓ Negentropy sync completed in {:.2}s\n", sync_duration.as_secs_f64());
+    println!(
+        "\n✓ Negentropy sync completed in {:.2}s\n",
+        sync_duration.as_secs_f64()
+    );
 
     // Now listen for events that come through the notification stream
     println!("Phase 3: Listening for 30 seconds to capture sync events...\n");
@@ -176,7 +176,10 @@ async fn main() -> Result<()> {
     }
 
     if event_path_count + message_path_count > 5 {
-        println!("  ... ({} more events)", (event_path_count + message_path_count) - 5);
+        println!(
+            "  ... ({} more events)",
+            (event_path_count + message_path_count) - 5
+        );
     }
 
     let phase3_duration = phase3_start.elapsed();
@@ -186,28 +189,57 @@ async fn main() -> Result<()> {
     println!("║                      FINAL RESULTS                             ║");
     println!("╠════════════════════════════════════════════════════════════════╣");
     println!("║ Phase 1 (no sync):                                             ║");
-    println!("║   Event path:      {:>8}                                     ║", phase1_event);
-    println!("║   Message path:    {:>8}                                     ║", phase1_message);
-    println!("║   Unique IDs:      {:>8}                                     ║", phase1_unique);
+    println!(
+        "║   Event path:      {:>8}                                     ║",
+        phase1_event
+    );
+    println!(
+        "║   Message path:    {:>8}                                     ║",
+        phase1_message
+    );
+    println!(
+        "║   Unique IDs:      {:>8}                                     ║",
+        phase1_unique
+    );
     println!("║                                                                ║");
     println!("║ Phase 2 (negentropy sync):                                     ║");
-    println!("║   Duration:        {:>7.2}s                                  ║", sync_duration.as_secs_f64());
+    println!(
+        "║   Duration:        {:>7.2}s                                  ║",
+        sync_duration.as_secs_f64()
+    );
     println!("║                                                                ║");
     println!("║ Phase 3 (after sync):                                          ║");
-    println!("║   Event path:      {:>8}                                     ║", event_path_count);
-    println!("║   Message path:    {:>8}                                     ║", message_path_count);
-    println!("║   Total:           {:>8}                                     ║", event_path_count + message_path_count);
-    println!("║   Unique IDs:      {:>8}                                     ║", phase3_unique);
+    println!(
+        "║   Event path:      {:>8}                                     ║",
+        event_path_count
+    );
+    println!(
+        "║   Message path:    {:>8}                                     ║",
+        message_path_count
+    );
+    println!(
+        "║   Total:           {:>8}                                     ║",
+        event_path_count + message_path_count
+    );
+    println!(
+        "║   Unique IDs:      {:>8}                                     ║",
+        phase3_unique
+    );
     println!("║                                                                ║");
 
     if phase3_unique > 0 {
         let dup_factor = (event_path_count + message_path_count) as f64 / phase3_unique as f64;
-        println!("║   Duplication:     {:>7.2}x                                  ║", dup_factor);
+        println!(
+            "║   Duplication:     {:>7.2}x                                  ║",
+            dup_factor
+        );
         println!("║                                                                ║");
         println!("║ CONCLUSION:                                                    ║");
         if message_path_count > event_path_count * 10 {
-            println!("║   ⚠️  Events mostly via Message path ({} vs {})             ║",
-                message_path_count, event_path_count);
+            println!(
+                "║   ⚠️  Events mostly via Message path ({} vs {})             ║",
+                message_path_count, event_path_count
+            );
             println!("║   This suggests negentropy events bypass Event path        ║");
         } else if event_path_count > 0 {
             println!("║   ✓ Events properly routed via Event path                  ║");

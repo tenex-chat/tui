@@ -1,5 +1,10 @@
 use crate::events::PendingBackendApproval;
-use crate::models::{AgentChatter, AgentDefinition, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Lesson, MCPTool, Message, Nudge, OperationsStatus, Project, ProjectAgent, ProjectStatus, Report, Thread};
+use crate::models::{
+    AgentChatter, AskEvent, ConversationMetadata, InboxEventType, InboxItem, Message, Project,
+    ProjectAgent, ProjectStatus, Thread,
+};
+#[cfg(test)]
+use crate::models::{AgentDefinition, Lesson, MCPTool, Nudge, OperationsStatus, Report};
 use crate::store::content_store::ContentStore;
 use crate::store::inbox_store::InboxStore;
 use crate::store::operations_store::OperationsStore;
@@ -24,10 +29,10 @@ pub struct AppDataStore {
 
     // Core app data
     pub projects: Vec<Project>,
-    pub project_statuses: HashMap<String, ProjectStatus>,  // keyed by project a_tag
-    pub threads_by_project: HashMap<String, Vec<Thread>>,  // keyed by project a_tag
+    pub project_statuses: HashMap<String, ProjectStatus>, // keyed by project a_tag
+    pub threads_by_project: HashMap<String, Vec<Thread>>, // keyed by project a_tag
     pub messages_by_thread: HashMap<String, Vec<Message>>, // keyed by thread_id
-    pub profiles: HashMap<String, String>,                  // pubkey -> display name
+    pub profiles: HashMap<String, String>,                // pubkey -> display name
 
     // Inbox - events that p-tag the current user
     pub inbox: InboxStore,
@@ -83,12 +88,18 @@ impl AppDataStore {
         // Rebuild message counts if user changed (ensures historical counts are accurate)
         if pubkey_changed {
             let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-            self.statistics.rebuild_messages_by_day_counts(&self.ndb, &self.user_pubkey, &project_a_tags);
+            self.statistics.rebuild_messages_by_day_counts(
+                &self.ndb,
+                &self.user_pubkey,
+                &project_a_tags,
+            );
         }
         // Rebuild LLM activity hourly aggregates (always, not user-dependent)
-        self.statistics.rebuild_llm_activity_by_hour(&self.messages_by_thread);
+        self.statistics
+            .rebuild_llm_activity_by_hour(&self.messages_by_thread);
         // Rebuild runtime-by-day aggregates (always, not user-dependent)
-        self.statistics.rebuild_runtime_by_day_counts(&self.messages_by_thread);
+        self.statistics
+            .rebuild_runtime_by_day_counts(&self.messages_by_thread);
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -122,7 +133,8 @@ impl AppDataStore {
 
         // First, build a set of ask event IDs that the user has already replied to
         // by checking e-tags on user's messages (not just reply_to field, but all e-tags)
-        let mut answered_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut answered_ask_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         for messages in self.messages_by_thread.values() {
             for message in messages {
                 if message.pubkey == user_pubkey {
@@ -268,10 +280,17 @@ impl AppDataStore {
         }
 
         // Rebuild pre-aggregated statistics
-        let project_a_tags_for_stats: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-        self.statistics.rebuild_messages_by_day_counts(&self.ndb, &self.user_pubkey, &project_a_tags_for_stats);
-        self.statistics.rebuild_llm_activity_by_hour(&self.messages_by_thread);
-        self.statistics.rebuild_runtime_by_day_counts(&self.messages_by_thread);
+        let project_a_tags_for_stats: Vec<String> =
+            self.projects.iter().map(|p| p.a_tag()).collect();
+        self.statistics.rebuild_messages_by_day_counts(
+            &self.ndb,
+            &self.user_pubkey,
+            &project_a_tags_for_stats,
+        );
+        self.statistics
+            .rebuild_llm_activity_by_hour(&self.messages_by_thread);
+        self.statistics
+            .rebuild_runtime_by_day_counts(&self.messages_by_thread);
 
         // Apply metadata (kind:513) to threads - may further update last_activity
         self.apply_existing_metadata();
@@ -319,7 +338,8 @@ impl AppDataStore {
                     self.runtime_hierarchy.set_parent(&thread.id, parent_id);
                 }
                 // Initialize individual last_activity from thread
-                self.runtime_hierarchy.set_individual_last_activity(&thread.id, thread.last_activity);
+                self.runtime_hierarchy
+                    .set_individual_last_activity(&thread.id, thread.last_activity);
             }
         }
 
@@ -350,7 +370,8 @@ impl AppDataStore {
         for (thread_id, messages) in &self.messages_by_thread {
             let runtime_ms = Self::calculate_runtime_from_messages(messages);
             if runtime_ms > 0 {
-                self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
+                self.runtime_hierarchy
+                    .set_individual_runtime(thread_id, runtime_ms);
             }
         }
 
@@ -363,14 +384,17 @@ impl AppDataStore {
     /// Called after runtime hierarchy relationships are fully established.
     fn rebuild_all_effective_last_activity(&mut self) {
         // Collect all thread IDs first to avoid borrow issues
-        let thread_ids: Vec<String> = self.threads_by_project
+        let thread_ids: Vec<String> = self
+            .threads_by_project
             .values()
             .flat_map(|threads| threads.iter().map(|t| t.id.clone()))
             .collect();
 
         // Update each thread's effective_last_activity
         for thread_id in thread_ids {
-            let effective = self.runtime_hierarchy.get_effective_last_activity(&thread_id);
+            let effective = self
+                .runtime_hierarchy
+                .get_effective_last_activity(&thread_id);
             for threads in self.threads_by_project.values_mut() {
                 if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
                     thread.effective_last_activity = effective;
@@ -404,7 +428,7 @@ impl AppDataStore {
                     .filter_map(|(_, value)| value.parse::<u64>().ok())
             })
             .sum::<u64>()
-            // Values are already in milliseconds from llm-runtime tags
+        // Values are already in milliseconds from llm-runtime tags
     }
 
     /// Update runtime hierarchy for a thread after messages change
@@ -416,7 +440,11 @@ impl AppDataStore {
         if let Some(messages) = self.messages_by_thread.get(thread_id) {
             // Update conversation creation time if not already set
             // (Use the earliest message timestamp as the creation time)
-            if self.runtime_hierarchy.get_conversation_created_at(thread_id).is_none() {
+            if self
+                .runtime_hierarchy
+                .get_conversation_created_at(thread_id)
+                .is_none()
+            {
                 if let Some(earliest_created_at) = messages.iter().map(|m| m.created_at).min() {
                     self.runtime_hierarchy
                         .set_conversation_created_at(thread_id, earliest_created_at);
@@ -444,7 +472,8 @@ impl AppDataStore {
 
             // Recalculate this conversation's individual runtime
             let runtime_ms = Self::calculate_runtime_from_messages(messages);
-            self.runtime_hierarchy.set_individual_runtime(thread_id, runtime_ms);
+            self.runtime_hierarchy
+                .set_individual_runtime(thread_id, runtime_ms);
         }
 
         relationships_changed
@@ -489,7 +518,8 @@ impl AppDataStore {
     /// Get the effective last_activity for a conversation (own + all descendants).
     /// Used for hierarchical sorting in the Conversations tab.
     pub fn get_effective_last_activity(&self, thread_id: &str) -> u64 {
-        self.runtime_hierarchy.get_effective_last_activity(thread_id)
+        self.runtime_hierarchy
+            .get_effective_last_activity(thread_id)
     }
 
     /// Update effective_last_activity on a thread and propagate up the ancestor chain.
@@ -498,7 +528,8 @@ impl AppDataStore {
         // First, update the individual last_activity in RuntimeHierarchy
         // (get it from the actual thread)
         if let Some(last_activity) = self.get_thread_last_activity(thread_id) {
-            self.runtime_hierarchy.set_individual_last_activity(thread_id, last_activity);
+            self.runtime_hierarchy
+                .set_individual_last_activity(thread_id, last_activity);
         }
 
         // Now update this thread's effective_last_activity
@@ -523,7 +554,9 @@ impl AppDataStore {
 
     /// Update effective_last_activity on a specific thread
     fn update_thread_effective_last_activity(&mut self, thread_id: &str) {
-        let effective = self.runtime_hierarchy.get_effective_last_activity(thread_id);
+        let effective = self
+            .runtime_hierarchy
+            .get_effective_last_activity(thread_id);
 
         for threads in self.threads_by_project.values_mut() {
             if let Some(thread) = threads.iter_mut().find(|t| t.id == thread_id) {
@@ -544,7 +577,8 @@ impl AppDataStore {
     /// Get top N conversations by total runtime (including descendants).
     /// Returns (conversation_id, total_runtime_ms) tuples.
     pub fn get_top_conversations_by_runtime(&self, limit: usize) -> Vec<(String, u64)> {
-        self.runtime_hierarchy.get_top_conversations_by_runtime(limit)
+        self.runtime_hierarchy
+            .get_top_conversations_by_runtime(limit)
     }
 
     /// Helper: iterate over all (message, cost_usd) pairs across all threads.
@@ -643,24 +677,38 @@ impl AppDataStore {
         self.statistics.get_tokens_by_hour(num_hours)
     }
 
-    pub fn get_tokens_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
-        self.statistics.get_tokens_by_hour_from(current_hour_start, num_hours)
+    pub fn get_tokens_by_hour_from(
+        &self,
+        current_hour_start: u64,
+        num_hours: usize,
+    ) -> HashMap<u64, u64> {
+        self.statistics
+            .get_tokens_by_hour_from(current_hour_start, num_hours)
     }
 
     pub fn get_message_count_by_hour(&self, num_hours: usize) -> HashMap<u64, u64> {
         self.statistics.get_message_count_by_hour(num_hours)
     }
 
-    pub fn get_message_count_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
-        self.statistics.get_message_count_by_hour_from(current_hour_start, num_hours)
+    pub fn get_message_count_by_hour_from(
+        &self,
+        current_hour_start: u64,
+        num_hours: usize,
+    ) -> HashMap<u64, u64> {
+        self.statistics
+            .get_message_count_by_hour_from(current_hour_start, num_hours)
     }
 
     #[cfg(test)]
     fn rebuild_messages_by_day_counts_with_batch_size(&mut self, batch_size: i32) {
         let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-        self.statistics.rebuild_messages_by_day_counts_with_batch_size(
-            &self.ndb, &self.user_pubkey, &project_a_tags, batch_size,
-        );
+        self.statistics
+            .rebuild_messages_by_day_counts_with_batch_size(
+                &self.ndb,
+                &self.user_pubkey,
+                &project_a_tags,
+                batch_size,
+            );
     }
 
     /// Apply all existing kind:513 metadata events to threads (called during rebuild)
@@ -670,7 +718,8 @@ impl AppDataStore {
         // Step 1: Collect all thread IDs across all projects and fetch their metadata
         // This avoids the global 1000-event limit that caused metadata to be missing
         // for older conversations when there are many projects/threads
-        let all_thread_ids: HashSet<String> = self.threads_by_project
+        let all_thread_ids: HashSet<String> = self
+            .threads_by_project
             .values()
             .flat_map(|threads| threads.iter().map(|t| t.id.clone()))
             .collect();
@@ -680,7 +729,8 @@ impl AppDataStore {
         }
 
         // Fetch metadata for all threads at once (still project-scoped by thread IDs)
-        let Ok(metadata_map) = crate::store::get_metadata_for_threads(&self.ndb, &all_thread_ids) else {
+        let Ok(metadata_map) = crate::store::get_metadata_for_threads(&self.ndb, &all_thread_ids)
+        else {
             return;
         };
 
@@ -707,7 +757,8 @@ impl AppDataStore {
         // and rebuild effective_last_activity
         for threads in self.threads_by_project.values() {
             for thread in threads {
-                self.runtime_hierarchy.set_individual_last_activity(&thread.id, thread.last_activity);
+                self.runtime_hierarchy
+                    .set_individual_last_activity(&thread.id, thread.last_activity);
             }
         }
 
@@ -724,23 +775,54 @@ impl AppDataStore {
     /// Returns an optional CoreEvent for kinds that need special handling (24010)
     pub fn handle_event(&mut self, kind: u32, note: &Note) -> Option<crate::events::CoreEvent> {
         match kind {
-            31933 => { self.handle_project_event(note); None }
-            1 => { self.handle_text_event(note); None }
-            0 => { self.handle_profile_event(note); None }
+            31933 => {
+                self.handle_project_event(note);
+                None
+            }
+            1 => {
+                self.handle_text_event(note);
+                None
+            }
+            0 => {
+                self.handle_profile_event(note);
+                None
+            }
             24010 => self.handle_status_event(note),
-            513 => { self.handle_metadata_event(note); None }
-            4129 => { self.handle_lesson_event(note); None }
-            4199 => { self.content.handle_agent_definition_event(note); None }
-            4200 => { self.content.handle_mcp_tool_event(note); None }
-            4201 => { self.content.handle_nudge_event(note); None }
-            4202 => { self.content.handle_skill_event(note); None }
-            24133 => { self.operations.handle_operations_status_event(note); None }
+            513 => {
+                self.handle_metadata_event(note);
+                None
+            }
+            4129 => {
+                self.handle_lesson_event(note);
+                None
+            }
+            4199 => {
+                self.content.handle_agent_definition_event(note);
+                None
+            }
+            4200 => {
+                self.content.handle_mcp_tool_event(note);
+                None
+            }
+            4201 => {
+                self.content.handle_nudge_event(note);
+                None
+            }
+            4202 => {
+                self.content.handle_skill_event(note);
+                None
+            }
+            24133 => {
+                self.operations.handle_operations_status_event(note);
+                None
+            }
             30023 => {
                 let known_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
-                self.reports.handle_report_event(note, &known_a_tags)
+                self.reports
+                    .handle_report_event(note, &known_a_tags)
                     .map(crate::events::CoreEvent::ReportUpsert)
             }
-            _ => None
+            _ => None,
         }
     }
 
@@ -847,14 +929,16 @@ impl AppDataStore {
 
             if self.trust.is_approved(&backend_pubkey) {
                 if should_update {
-                    self.project_statuses.insert(status.project_coordinate.clone(), status);
+                    self.project_statuses
+                        .insert(status.project_coordinate.clone(), status);
                 }
                 return;
             }
 
             // Unknown backend - queue for approval
             let project_coord = status.project_coordinate.clone();
-            self.trust.queue_or_update_pending(&backend_pubkey, &project_coord, status);
+            self.trust
+                .queue_or_update_pending(&backend_pubkey, &project_coord, status);
         }
     }
 
@@ -884,15 +968,22 @@ impl AppDataStore {
                     .unwrap_or(0);
                 status.last_seen_at = now;
                 let event = crate::events::CoreEvent::ProjectStatus(status.clone());
-                self.project_statuses.insert(status.project_coordinate.clone(), status);
+                self.project_statuses
+                    .insert(status.project_coordinate.clone(), status);
                 return Some(event);
             }
             return None;
         }
 
         // Unknown backend - check if already pending
-        let already_pending = self.trust.has_pending_approval(&backend_pubkey, &status.project_coordinate);
-        self.trust.queue_or_update_pending(&backend_pubkey, &status.project_coordinate, status.clone());
+        let already_pending = self
+            .trust
+            .has_pending_approval(&backend_pubkey, &status.project_coordinate);
+        self.trust.queue_or_update_pending(
+            &backend_pubkey,
+            &status.project_coordinate,
+            status.clone(),
+        );
 
         if already_pending {
             None
@@ -946,7 +1037,8 @@ impl AppDataStore {
                             reconciled_thread.last_activity = max_message_time;
                             reconciled_thread.effective_last_activity = max_message_time;
                             // Update runtime hierarchy with reconciled timestamp
-                            self.runtime_hierarchy.set_individual_last_activity(&thread_id, max_message_time);
+                            self.runtime_hierarchy
+                                .set_individual_last_activity(&thread_id, max_message_time);
                             was_reconciled = true;
                         }
                     }
@@ -958,7 +1050,9 @@ impl AppDataStore {
                 // Check if thread already exists (avoid duplicates)
                 if !threads.iter().any(|t| t.id == thread_id) {
                     // Insert in sorted position by effective_last_activity (most recent first)
-                    let insert_pos = threads.partition_point(|t| t.effective_last_activity > reconciled_thread.effective_last_activity);
+                    let insert_pos = threads.partition_point(|t| {
+                        t.effective_last_activity > reconciled_thread.effective_last_activity
+                    });
                     threads.insert(insert_pos, reconciled_thread);
                 }
 
@@ -990,7 +1084,9 @@ impl AppDataStore {
 
                     // Re-sort threads by effective_last_activity
                     for threads in self.threads_by_project.values_mut() {
-                        threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                        threads.sort_by(|a, b| {
+                            b.effective_last_activity.cmp(&a.effective_last_activity)
+                        });
                     }
                 }
             }
@@ -1052,7 +1148,10 @@ impl AppDataStore {
             self.check_and_add_inbox_item(note, &thread_id, &message);
 
             // Add to existing messages list, maintaining sort order by created_at
-            let messages = self.messages_by_thread.entry(thread_id.clone()).or_default();
+            let messages = self
+                .messages_by_thread
+                .entry(thread_id.clone())
+                .or_default();
 
             // Check if message already exists (avoid duplicates)
             if !messages.iter().any(|m| m.id == message_id) {
@@ -1071,14 +1170,23 @@ impl AppDataStore {
                 // This ensures unconfirmed runtime only tracks time since the last kind:1 confirmation
                 // The recency guard prevents stale/backfilled messages from resetting active timers
                 if has_llm_runtime {
-                    self.operations.agent_tracking
-                        .reset_unconfirmed_timer(&thread_id, &message_pubkey, message_created_at);
+                    self.operations.agent_tracking.reset_unconfirmed_timer(
+                        &thread_id,
+                        &message_pubkey,
+                        message_created_at,
+                    );
                 }
 
                 // Update pre-aggregated statistics (O(1) per message)
-                self.statistics.increment_message_day_count(message_created_at, &message_pubkey, self.user_pubkey.as_deref());
-                self.statistics.increment_llm_activity_hour(message_created_at, &message_llm_metadata);
-                self.statistics.increment_runtime_day_count(message_created_at, &message_llm_metadata);
+                self.statistics.increment_message_day_count(
+                    message_created_at,
+                    &message_pubkey,
+                    self.user_pubkey.as_deref(),
+                );
+                self.statistics
+                    .increment_llm_activity_hour(message_created_at, &message_llm_metadata);
+                self.statistics
+                    .increment_runtime_day_count(message_created_at, &message_llm_metadata);
 
                 // Update runtime hierarchy after inserting message
                 // (captures q-tags and delegation tags, then recalculates runtime from messages)
@@ -1106,7 +1214,9 @@ impl AppDataStore {
 
                     // Re-sort threads by effective_last_activity (most recent first)
                     for threads in self.threads_by_project.values_mut() {
-                        threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                        threads.sort_by(|a, b| {
+                            b.effective_last_activity.cmp(&a.effective_last_activity)
+                        });
                     }
                 }
             }
@@ -1205,7 +1315,8 @@ impl AppDataStore {
 
                 // Re-sort threads by effective_last_activity (most recent first)
                 for threads in self.threads_by_project.values_mut() {
-                    threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
+                    threads
+                        .sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
                 }
             }
         } else {
@@ -1310,7 +1421,8 @@ impl AppDataStore {
 
     /// Get online agents for a project (from ProjectStatus if online)
     pub fn get_online_agents(&self, a_tag: &str) -> Option<&[ProjectAgent]> {
-        self.project_statuses.get(a_tag)
+        self.project_statuses
+            .get(a_tag)
             .filter(|s| s.is_online())
             .map(|s| s.agents.as_slice())
     }
@@ -1320,7 +1432,8 @@ impl AppDataStore {
     }
 
     pub fn get_threads(&self, project_a_tag: &str) -> &[Thread] {
-        self.threads_by_project.get(project_a_tag)
+        self.threads_by_project
+            .get(project_a_tag)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -1332,13 +1445,15 @@ impl AppDataStore {
 
     /// Get count of known thread roots for a project
     pub fn get_thread_root_count(&self, project_a_tag: &str) -> usize {
-        self.thread_root_index.get(project_a_tag)
+        self.thread_root_index
+            .get(project_a_tag)
             .map(|s| s.len())
             .unwrap_or(0)
     }
 
     pub fn get_messages(&self, thread_id: &str) -> &[Message] {
-        self.messages_by_thread.get(thread_id)
+        self.messages_by_thread
+            .get(thread_id)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -1408,9 +1523,10 @@ impl AppDataStore {
     /// Returns true if metadata was found and applied, false otherwise.
     pub fn load_metadata_for_thread(&mut self, thread_id: &str) -> bool {
         // First check if thread exists
-        let thread_exists = self.threads_by_project.values().any(|threads| {
-            threads.iter().any(|t| t.id == thread_id)
-        });
+        let thread_exists = self
+            .threads_by_project
+            .values()
+            .any(|threads| threads.iter().any(|t| t.id == thread_id));
 
         if !thread_exists {
             return false;
@@ -1437,7 +1553,8 @@ impl AppDataStore {
                 if metadata.created_at > thread.last_activity {
                     thread.last_activity = metadata.created_at;
                     // Update runtime hierarchy - propagation will happen after the loop
-                    self.runtime_hierarchy.set_individual_last_activity(thread_id, metadata.created_at);
+                    self.runtime_hierarchy
+                        .set_individual_last_activity(thread_id, metadata.created_at);
                     needs_hierarchy_propagation = true;
                 }
                 metadata_applied = true;
@@ -1484,14 +1601,16 @@ impl AppDataStore {
         note = "Use get_recent_threads_for_projects instead to avoid pre-filter truncation"
     )]
     pub fn get_all_recent_threads(&self, limit: usize) -> Vec<(Thread, String)> {
-        let mut all_threads: Vec<(Thread, String)> = self.threads_by_project
+        let mut all_threads: Vec<(Thread, String)> = self
+            .threads_by_project
             .iter()
-            .flat_map(|(a_tag, threads)| {
-                threads.iter().map(|t| (t.clone(), a_tag.clone()))
-            })
+            .flat_map(|(a_tag, threads)| threads.iter().map(|t| (t.clone(), a_tag.clone())))
             .collect();
 
-        all_threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
+        all_threads.sort_by(|a, b| {
+            b.0.effective_last_activity
+                .cmp(&a.0.effective_last_activity)
+        });
         all_threads.truncate(limit);
         all_threads
     }
@@ -1513,26 +1632,26 @@ impl AppDataStore {
         time_cutoff: Option<u64>,
         limit: Option<usize>,
     ) -> Vec<(Thread, String)> {
-        let mut threads: Vec<(Thread, String)> = self.threads_by_project
+        let mut threads: Vec<(Thread, String)> = self
+            .threads_by_project
             .iter()
             // Filter by visible projects FIRST (before any collection)
             .filter(|(a_tag, _)| visible_projects.contains(a_tag.as_str()))
-            .flat_map(|(a_tag, threads)| {
-                threads.iter().map(|t| (t.clone(), a_tag.clone()))
-            })
+            .flat_map(|(a_tag, threads)| threads.iter().map(|t| (t.clone(), a_tag.clone())))
             // Apply time filter using effective_last_activity if specified
-            .filter(|(thread, _)| {
-                match time_cutoff {
-                    Some(cutoff) => thread.effective_last_activity >= cutoff,
-                    None => true,
-                }
+            .filter(|(thread, _)| match time_cutoff {
+                Some(cutoff) => thread.effective_last_activity >= cutoff,
+                None => true,
             })
             .collect();
 
         // Sort by effective_last_activity descending (most recent first)
         // This enables hierarchical sorting where parent conversations reflect
         // the most recent activity in their entire delegation tree.
-        threads.sort_by(|a, b| b.0.effective_last_activity.cmp(&a.0.effective_last_activity));
+        threads.sort_by(|a, b| {
+            b.0.effective_last_activity
+                .cmp(&a.0.effective_last_activity)
+        });
 
         // Apply optional limit AFTER sorting
         if let Some(max) = limit {
@@ -1636,7 +1755,9 @@ impl AppDataStore {
         }
 
         // Insert sorted by created_at (most recent first)
-        let pos = self.agent_chatter.partition_point(|i| i.created_at() > item.created_at());
+        let pos = self
+            .agent_chatter
+            .partition_point(|i| i.created_at() > item.created_at());
         self.agent_chatter.insert(pos, item);
 
         // Limit to 100 items
@@ -1696,7 +1817,10 @@ impl AppDataStore {
     /// Get unanswered ask event for a thread (derived at check time).
     /// Looks at messages in the thread, finds any with q-tags pointing to ask events,
     /// and returns the first one that the current user hasn't replied to.
-    pub fn get_unanswered_ask_for_thread(&self, thread_id: &str) -> Option<(String, AskEvent, String)> {
+    pub fn get_unanswered_ask_for_thread(
+        &self,
+        thread_id: &str,
+    ) -> Option<(String, AskEvent, String)> {
         let user_pubkey = self.user_pubkey.as_ref()?;
         let messages = self.messages_by_thread.get(thread_id)?;
 
@@ -1729,7 +1853,11 @@ impl AppDataStore {
         if let Some(thread) = self.get_thread_by_id(thread_id) {
             if thread.pubkey != *user_pubkey && !user_replied_to.contains(thread_id) {
                 if let Some(ref ask_event) = thread.ask_event {
-                    return Some((thread_id.to_string(), ask_event.clone(), thread.pubkey.clone()));
+                    return Some((
+                        thread_id.to_string(),
+                        ask_event.clone(),
+                        thread.pubkey.clone(),
+                    ));
                 }
             }
         }
@@ -1742,8 +1870,15 @@ impl AppDataStore {
     /// Search content using nostrdb's fulltext search.
     /// Returns (event_id, thread_id, content, kind) for matching events.
     /// thread_id is extracted from e-tags (root marker) or is the event itself if it's a thread root.
-    pub fn text_search(&self, query: &str, limit: i32) -> Vec<(String, Option<String>, String, u32)> {
-        eprintln!("[text_search] Starting search for query='{}', limit={}", query, limit);
+    pub fn text_search(
+        &self,
+        query: &str,
+        limit: i32,
+    ) -> Vec<(String, Option<String>, String, u32)> {
+        eprintln!(
+            "[text_search] Starting search for query='{}', limit={}",
+            query, limit
+        );
 
         let Ok(txn) = Transaction::new(&self.ndb) else {
             eprintln!("[text_search] Failed to create transaction");
@@ -1879,7 +2014,12 @@ impl AppDataStore {
                     query = %terms[0],
                     "NostrDB text_search returned empty results, falling back to in-memory search"
                 );
-                return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+                return self.search_user_messages_in_memory(
+                    user_pubkey,
+                    terms,
+                    project_a_tag,
+                    limit,
+                );
             }
             Err(e) => {
                 // Log the DB error and fall back to in-memory search
@@ -1888,7 +2028,12 @@ impl AppDataStore {
                     error = %e,
                     "NostrDB text_search failed, falling back to in-memory search"
                 );
-                return self.search_user_messages_in_memory(user_pubkey, terms, project_a_tag, limit);
+                return self.search_user_messages_in_memory(
+                    user_pubkey,
+                    terms,
+                    project_a_tag,
+                    limit,
+                );
             }
         };
 
@@ -1912,9 +2057,7 @@ impl AppDataStore {
 
             // Post-filter: verify ALL terms match with our ASCII case-insensitive logic
             // (NostrDB search may use different matching semantics, and we need multi-term AND)
-            let all_match = terms
-                .iter()
-                .all(|term| text_contains_term(&content, term));
+            let all_match = terms.iter().all(|term| text_contains_term(&content, term));
             if !all_match {
                 continue;
             }
@@ -2044,7 +2187,8 @@ impl AppDataStore {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             status.last_seen_at = now;
-            self.project_statuses.insert(status.project_coordinate.clone(), status);
+            self.project_statuses
+                .insert(status.project_coordinate.clone(), status);
         }
     }
 
@@ -2066,7 +2210,8 @@ impl AppDataStore {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             status.last_seen_at = now;
-            self.project_statuses.insert(status.project_coordinate.clone(), status);
+            self.project_statuses
+                .insert(status.project_coordinate.clone(), status);
             approved_pubkeys.insert(approval.backend_pubkey);
         }
 
@@ -2086,7 +2231,13 @@ mod tests {
     use tempfile::tempdir;
 
     /// Helper to create a test message with minimal required fields
-    fn make_test_message(id: &str, pubkey: &str, thread_id: &str, content: &str, created_at: u64) -> Message {
+    fn make_test_message(
+        id: &str,
+        pubkey: &str,
+        thread_id: &str,
+        content: &str,
+        created_at: u64,
+    ) -> Message {
         Message {
             id: id.to_string(),
             content: content.to_string(),
@@ -2132,7 +2283,8 @@ mod tests {
             1000,
         );
 
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry(thread_id.to_string())
             .or_default()
             .push(message);
@@ -2140,16 +2292,18 @@ mod tests {
         // Search for a term that exists in the message
         // NostrDB's text_search will return empty (no indexed content),
         // so this should fall back to in-memory search
-        let results = store.search_user_messages(
-            user_pubkey,
-            "rust",
-            None,
-            10,
-        );
+        let results = store.search_user_messages(user_pubkey, "rust", None, 10);
 
         // Verify the in-memory fallback found our message
-        assert_eq!(results.len(), 1, "Expected 1 result from in-memory fallback");
-        assert_eq!(results[0].0, "msg1", "Expected to find the message we added");
+        assert_eq!(
+            results.len(),
+            1,
+            "Expected 1 result from in-memory fallback"
+        );
+        assert_eq!(
+            results[0].0, "msg1",
+            "Expected to find the message we added"
+        );
         assert!(
             results[0].1.contains("rust programming"),
             "Content should match the message we added"
@@ -2178,23 +2332,19 @@ mod tests {
             "msg2",
             user_pubkey,
             thread_id,
-            "Error occurred while processing request",  // has "error" but NOT "timeout"
-            900, // older
+            "Error occurred while processing request", // has "error" but NOT "timeout"
+            900,                                       // older
         );
 
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry(thread_id.to_string())
             .or_default()
             .extend(vec![message1, message2]);
 
         // Search for messages containing both "error" AND "timeout"
         // Only msg1 should match (msg2 has error but not timeout)
-        let results = store.search_user_messages(
-            user_pubkey,
-            "error+timeout",
-            None,
-            10,
-        );
+        let results = store.search_user_messages(user_pubkey, "error+timeout", None, 10);
 
         assert_eq!(results.len(), 1, "Expected 1 result matching both terms");
         assert_eq!(results[0].0, "msg1", "Only msg1 has both error and timeout");
@@ -2219,19 +2369,15 @@ mod tests {
                 &format!("Message number {}", i),
                 1000 + i as u64,
             );
-            store.messages_by_thread
+            store
+                .messages_by_thread
                 .entry(thread_id.to_string())
                 .or_default()
                 .push(message);
         }
 
         // Empty query should return all messages
-        let results = store.search_user_messages(
-            user_pubkey,
-            "",
-            None,
-            10,
-        );
+        let results = store.search_user_messages(user_pubkey, "", None, 10);
 
         assert_eq!(results.len(), 3, "Empty query should return all 3 messages");
     }
@@ -2262,7 +2408,9 @@ mod tests {
             last_seen_at: 0,
         };
 
-        store.project_statuses.insert(status.project_coordinate.clone(), status);
+        store
+            .project_statuses
+            .insert(status.project_coordinate.clone(), status);
 
         let name = store.get_profile_name(pubkey);
         assert_eq!(name, slug);
@@ -2528,7 +2676,9 @@ mod tests {
 
         // Verify initial state: 3 agents
         assert_eq!(store.operations.active_agent_count(), 3);
-        let agents1 = store.operations.get_active_agents_for_conversation("conversation_xyz");
+        let agents1 = store
+            .operations
+            .get_active_agents_for_conversation("conversation_xyz");
         assert_eq!(agents1.len(), 3);
         assert!(agents1.contains(&"agent_alpha".to_string()));
         assert!(agents1.contains(&"agent_beta".to_string()));
@@ -2552,17 +2702,39 @@ mod tests {
 
         // Verify replacement: now only 2 agents (delta, epsilon)
         assert_eq!(store.operations.active_agent_count(), 2);
-        let agents2 = store.operations.get_active_agents_for_conversation("conversation_xyz");
-        assert_eq!(agents2.len(), 2, "Expected 2 agents after replacement, got {}", agents2.len());
+        let agents2 = store
+            .operations
+            .get_active_agents_for_conversation("conversation_xyz");
+        assert_eq!(
+            agents2.len(),
+            2,
+            "Expected 2 agents after replacement, got {}",
+            agents2.len()
+        );
 
         // CRITICAL: Original agents should be GONE
-        assert!(!agents2.contains(&"agent_alpha".to_string()), "agent_alpha should have been replaced");
-        assert!(!agents2.contains(&"agent_beta".to_string()), "agent_beta should have been replaced");
-        assert!(!agents2.contains(&"agent_gamma".to_string()), "agent_gamma should have been replaced");
+        assert!(
+            !agents2.contains(&"agent_alpha".to_string()),
+            "agent_alpha should have been replaced"
+        );
+        assert!(
+            !agents2.contains(&"agent_beta".to_string()),
+            "agent_beta should have been replaced"
+        );
+        assert!(
+            !agents2.contains(&"agent_gamma".to_string()),
+            "agent_gamma should have been replaced"
+        );
 
         // CRITICAL: New agents should be present
-        assert!(agents2.contains(&"agent_delta".to_string()), "agent_delta should be active");
-        assert!(agents2.contains(&"agent_epsilon".to_string()), "agent_epsilon should be active");
+        assert!(
+            agents2.contains(&"agent_delta".to_string()),
+            "agent_delta should be active"
+        );
+        assert!(
+            agents2.contains(&"agent_epsilon".to_string()),
+            "agent_epsilon should be active"
+        );
 
         // PHASE 3: Verify other conversations are NOT affected
         // Add agents to a different conversation
@@ -2580,13 +2752,17 @@ mod tests {
         store.handle_status_event_json(json3);
 
         // conversation_xyz should still have delta, epsilon
-        let agents_xyz = store.operations.get_active_agents_for_conversation("conversation_xyz");
+        let agents_xyz = store
+            .operations
+            .get_active_agents_for_conversation("conversation_xyz");
         assert_eq!(agents_xyz.len(), 2);
         assert!(agents_xyz.contains(&"agent_delta".to_string()));
         assert!(agents_xyz.contains(&"agent_epsilon".to_string()));
 
         // conversation_other should have omega
-        let agents_other = store.operations.get_active_agents_for_conversation("conversation_other");
+        let agents_other = store
+            .operations
+            .get_active_agents_for_conversation("conversation_other");
         assert_eq!(agents_other.len(), 1);
         assert!(agents_other.contains(&"agent_omega".to_string()));
 
@@ -2600,12 +2776,17 @@ mod tests {
 
     mod pagination_tests {
         use super::*;
-        use crate::store::events::{ingest_events, wait_for_event_processing};
         use crate::models::project::Project;
+        use crate::store::events::{ingest_events, wait_for_event_processing};
         use nostr_sdk::prelude::*;
 
         /// Helper to create a kind:1 event with specific timestamp and a-tag
-        fn make_kind1_event(keys: &Keys, content: &str, created_at: u64, a_tag: Option<&str>) -> Event {
+        fn make_kind1_event(
+            keys: &Keys,
+            content: &str,
+            created_at: u64,
+            a_tag: Option<&str>,
+        ) -> Event {
             let mut builder = EventBuilder::new(Kind::TextNote, content);
 
             if let Some(a) = a_tag {
@@ -2616,7 +2797,8 @@ mod tests {
             }
 
             // Use custom_created_at to set specific timestamp
-            builder.custom_created_at(Timestamp::from(created_at))
+            builder
+                .custom_created_at(Timestamp::from(created_at))
                 .sign_with_keys(keys)
                 .unwrap()
         }
@@ -2653,7 +2835,12 @@ mod tests {
             for i in 0..25 {
                 let day_offset = i / 10; // 10 msgs on day 0, 10 on day 1, 5 on day 2
                 let timestamp = base_time + (day_offset as u64 * 86400) + (i as u64 * 60); // 1 min apart
-                events.push(make_kind1_event(&keys, &format!("msg {}", i), timestamp, None));
+                events.push(make_kind1_event(
+                    &keys,
+                    &format!("msg {}", i),
+                    timestamp,
+                    None,
+                ));
             }
 
             // Ingest all events
@@ -2675,7 +2862,12 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(5); // Force 5+ pagination pages
 
             // Verify EXACT count - must count all 25 messages
-            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(u, _)| *u)
+                .sum();
             assert_eq!(
                 total_user, 25,
                 "Pagination must count EXACTLY 25 user messages, got {}. Pagination data loss detected!",
@@ -2724,7 +2916,12 @@ mod tests {
             store.rebuild_messages_by_day_counts_with_batch_size(20);
 
             // Verify ALL same-second events are counted
-            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(u, _)| *u)
+                .sum();
             assert_eq!(
                 total_user, 15,
                 "Should count all 15 same-second events, got {}. Same-second event loss bug!",
@@ -2782,7 +2979,12 @@ mod tests {
 
             // KNOWN LIMITATION: We can only guarantee at least batch_size events are captured
             // The warning "Potential same-second overflow detected" should be logged
-            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(u, _)| *u)
+                .sum();
             assert!(
                 total_user >= 5,
                 "Must capture at least batch_size (5) same-second events, got {}. \
@@ -2816,10 +3018,20 @@ mod tests {
             let base_time: u64 = 86400 * 100;
 
             for i in 0..3 {
-                events.push(make_kind1_event(&keys, &format!("proj1 only {}", i), base_time + i as u64, Some(&a_tag1)));
+                events.push(make_kind1_event(
+                    &keys,
+                    &format!("proj1 only {}", i),
+                    base_time + i as u64,
+                    Some(&a_tag1),
+                ));
             }
             for i in 0..3 {
-                events.push(make_kind1_event(&keys, &format!("proj2 only {}", i), base_time + 100 + i as u64, Some(&a_tag2)));
+                events.push(make_kind1_event(
+                    &keys,
+                    &format!("proj2 only {}", i),
+                    base_time + 100 + i as u64,
+                    Some(&a_tag2),
+                ));
             }
 
             // Create messages that reference both projects (using two a-tags)
@@ -2850,12 +3062,21 @@ mod tests {
             // Use small batch_size to force pagination
             let mut store = AppDataStore::new(db.ndb.clone());
             store.user_pubkey = Some(user_pubkey.clone());
-            store.projects.push(make_test_project("proj1", "Project 1", &user_pubkey));
-            store.projects.push(make_test_project("proj2", "Project 2", &user_pubkey));
+            store
+                .projects
+                .push(make_test_project("proj1", "Project 1", &user_pubkey));
+            store
+                .projects
+                .push(make_test_project("proj2", "Project 2", &user_pubkey));
             store.rebuild_messages_by_day_counts_with_batch_size(3); // Force multi-page pagination
 
             // Verify EXACT deduplication: 3 + 3 + 2 = 8 unique messages
-            let total_all: u64 = store.statistics.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            let total_all: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(_, a)| *a)
+                .sum();
             assert_eq!(
                 total_all, 8,
                 "Must count EXACTLY 8 unique project messages (not 10 with double-counting), got {}. \
@@ -2925,12 +3146,21 @@ mod tests {
             // Use VERY small batch_size (2) to force the duplicate-page-continuation scenario
             let mut store = AppDataStore::new(db.ndb.clone());
             store.user_pubkey = Some(user_pubkey.clone());
-            store.projects.push(make_test_project("proj1", "Project 1", &user_pubkey));
-            store.projects.push(make_test_project("proj2", "Project 2", &user_pubkey));
+            store
+                .projects
+                .push(make_test_project("proj1", "Project 1", &user_pubkey));
+            store
+                .projects
+                .push(make_test_project("proj2", "Project 2", &user_pubkey));
             store.rebuild_messages_by_day_counts_with_batch_size(2);
 
             // Verify EXACT count: 5 dual-tagged + 5 proj2-only = 10 unique messages
-            let total_all: u64 = store.statistics.messages_by_day_counts.values().map(|(_, a)| *a).sum();
+            let total_all: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(_, a)| *a)
+                .sum();
             assert_eq!(
                 total_all, 10,
                 "Must count EXACTLY 10 messages including older proj2-only ones, got {}. \
@@ -2985,7 +3215,12 @@ mod tests {
             // Due to nostrdb's lack of deterministic secondary ordering, we cannot guarantee
             // all 10 events are counted when >batch_size events share a timestamp.
             // This test verifies the warning is triggered (checked via logs) and we get at least 5.
-            let total_user: u64 = store.statistics.messages_by_day_counts.values().map(|(u, _)| *u).sum();
+            let total_user: u64 = store
+                .statistics
+                .messages_by_day_counts
+                .values()
+                .map(|(u, _)| *u)
+                .sum();
             assert!(
                 total_user >= 5,
                 "Should count at least batch_size (5) same-second events, got {}. \
@@ -3002,8 +3237,8 @@ mod tests {
         /// trigger unconfirmed timer resets via reset_unconfirmed_timer
         #[test]
         fn test_kind1_message_resets_unconfirmed_timer() {
-            use std::time::Duration;
             use std::thread;
+            use std::time::Duration;
 
             let dir = tempdir().unwrap();
             let db = Database::new(dir.path()).unwrap();
@@ -3034,7 +3269,10 @@ mod tests {
 
             // Simulate a kind:1 message with llm-runtime tag arriving
             // (call reset_unconfirmed_timer directly as handle_message_event would)
-            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1100);
+            store
+                .operations
+                .agent_tracking
+                .reset_unconfirmed_timer("conv1", &agent_pubkey, 1100);
 
             // Verify that unconfirmed runtime was reset (should be near 0)
             let runtime_after_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
@@ -3047,7 +3285,8 @@ mod tests {
             // Wait again to accumulate more unconfirmed runtime
             thread::sleep(Duration::from_millis(1100));
 
-            let runtime_before_non_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_before_non_reset =
+                store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_before_non_reset >= 1,
                 "Expected unconfirmed runtime >= 1 second before testing no reset, got {}",
@@ -3058,7 +3297,8 @@ mod tests {
             // Runtime should continue accumulating
 
             // Verify that unconfirmed runtime was NOT reset (should still be >= 1)
-            let runtime_after_non_reset = store.operations.agent_tracking.unconfirmed_runtime_secs();
+            let runtime_after_non_reset =
+                store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_non_reset >= 1,
                 "Expected unconfirmed runtime >= 1 second when no reset happens, got {}",
@@ -3070,7 +3310,10 @@ mod tests {
             let runtime_before_stale = store.operations.agent_tracking.unconfirmed_runtime_secs();
 
             // Try to reset with a stale timestamp (older than last reset at 1100)
-            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1050);
+            store
+                .operations
+                .agent_tracking
+                .reset_unconfirmed_timer("conv1", &agent_pubkey, 1050);
 
             // Runtime should NOT have been reset (blocked by recency guard)
             let runtime_after_stale = store.operations.agent_tracking.unconfirmed_runtime_secs();
@@ -3082,7 +3325,10 @@ mod tests {
             );
 
             // Reset with a newer timestamp should work
-            store.operations.agent_tracking.reset_unconfirmed_timer("conv1", &agent_pubkey, 1200);
+            store
+                .operations
+                .agent_tracking
+                .reset_unconfirmed_timer("conv1", &agent_pubkey, 1200);
             let runtime_after_newer = store.operations.agent_tracking.unconfirmed_runtime_secs();
             assert!(
                 runtime_after_newer < 1,
@@ -3136,7 +3382,10 @@ mod tests {
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
         // Only the post-cutoff message should be counted: 50 milliseconds
-        assert_eq!(runtime_ms, 50, "Only post-cutoff messages should be counted");
+        assert_eq!(
+            runtime_ms, 50,
+            "Only post-cutoff messages should be counted"
+        );
     }
 
     #[test]
@@ -3162,8 +3411,8 @@ mod tests {
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400;
 
         let messages = vec![
-            make_message_with_runtime("msg1", "pubkey1", "thread1", post_cutoff, 5000),   // 5 seconds = 5000ms
-            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 10000),  // 10 seconds = 10000ms
+            make_message_with_runtime("msg1", "pubkey1", "thread1", post_cutoff, 5000), // 5 seconds = 5000ms
+            make_message_with_runtime("msg2", "pubkey1", "thread1", post_cutoff, 10000), // 10 seconds = 10000ms
             make_message_with_runtime("msg3", "pubkey1", "thread1", post_cutoff, 120000), // 2 minutes = 120000ms
         ];
 
@@ -3189,7 +3438,10 @@ mod tests {
         let messages = vec![message];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
-        assert_eq!(runtime_ms, 0, "Messages without runtime metadata should return 0");
+        assert_eq!(
+            runtime_ms, 0,
+            "Messages without runtime metadata should return 0"
+        );
     }
 
     #[test]
@@ -3203,16 +3455,19 @@ mod tests {
 
         let messages = vec![
             make_message_with_runtime("msg1", "pubkey1", "thread1", pre_cutoff_1, 1000000), // Excluded
-            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff_2, 500000),  // Excluded
-            make_message_with_runtime("msg3", "pubkey1", "thread1", at_cutoff, 10),      // Included (10ms)
-            make_message_with_runtime("msg4", "pubkey1", "thread1", post_cutoff_1, 20),  // Included (20ms)
-            make_message_with_runtime("msg5", "pubkey1", "thread1", post_cutoff_2, 30),  // Included (30ms)
+            make_message_with_runtime("msg2", "pubkey1", "thread1", pre_cutoff_2, 500000), // Excluded
+            make_message_with_runtime("msg3", "pubkey1", "thread1", at_cutoff, 10), // Included (10ms)
+            make_message_with_runtime("msg4", "pubkey1", "thread1", post_cutoff_1, 20), // Included (20ms)
+            make_message_with_runtime("msg5", "pubkey1", "thread1", post_cutoff_2, 30), // Included (30ms)
         ];
 
         let runtime_ms = AppDataStore::calculate_runtime_from_messages(&messages);
 
         // Only msg3, msg4, msg5 should be counted: (10 + 20 + 30) = 60 milliseconds
-        assert_eq!(runtime_ms, 60, "Should only count messages at or after cutoff");
+        assert_eq!(
+            runtime_ms, 60,
+            "Should only count messages at or after cutoff"
+        );
     }
 
     #[test]
@@ -3234,8 +3489,12 @@ mod tests {
             make_message_with_runtime("msg2", "pubkey1", "thread1", today_start + 120, 2000),
         ];
 
-        store.messages_by_thread.insert("thread1".to_string(), messages);
-        store.statistics.rebuild_runtime_by_day_counts(&store.messages_by_thread);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), messages);
+        store
+            .statistics
+            .rebuild_runtime_by_day_counts(&store.messages_by_thread);
 
         assert_eq!(store.get_today_unique_runtime(), 2000);
 
@@ -3267,8 +3526,12 @@ mod tests {
         ];
 
         // Add messages to store
-        store.messages_by_thread.insert("thread1".to_string(), thread1_messages);
-        store.messages_by_thread.insert("thread2".to_string(), thread2_messages);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), thread1_messages);
+        store
+            .messages_by_thread
+            .insert("thread2".to_string(), thread2_messages);
 
         // Update runtime hierarchy (simulating what happens in handle_message_event)
         store.update_runtime_hierarchy_for_thread_id("thread1");
@@ -3277,16 +3540,25 @@ mod tests {
         // Verify thread1 runtime is calculated but filtered out in stats
         let thread1_individual = store.runtime_hierarchy.get_individual_runtime("thread1");
         // calculate_runtime_from_messages filters at message level, so thread1 should have 0
-        assert_eq!(thread1_individual, 0, "Thread1 should have 0 runtime (pre-cutoff messages filtered)");
+        assert_eq!(
+            thread1_individual, 0,
+            "Thread1 should have 0 runtime (pre-cutoff messages filtered)"
+        );
 
         // Verify thread2 runtime is calculated correctly
         let thread2_individual = store.runtime_hierarchy.get_individual_runtime("thread2");
         // (50 + 75) milliseconds = 125 milliseconds
-        assert_eq!(thread2_individual, 125, "Thread2 should have correct runtime in milliseconds");
+        assert_eq!(
+            thread2_individual, 125,
+            "Thread2 should have correct runtime in milliseconds"
+        );
 
         // Verify total unique runtime only includes thread2
         let total = store.runtime_hierarchy.get_total_unique_runtime();
-        assert_eq!(total, 125, "Total should only include post-cutoff conversations");
+        assert_eq!(
+            total, 125,
+            "Total should only include post-cutoff conversations"
+        );
 
         // Verify top conversations includes only thread2
         let top = store.runtime_hierarchy.get_top_conversations_by_runtime(10);
@@ -3306,17 +3578,26 @@ mod tests {
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 1;
 
         // Parent conversation: created before cutoff, with q-tag pointing to child
-        let mut parent_msg = make_message_with_runtime("msg1", "pubkey1", "parent", pre_cutoff, 100000);
+        let mut parent_msg =
+            make_message_with_runtime("msg1", "pubkey1", "parent", pre_cutoff, 100000);
         parent_msg.q_tags.push("child".to_string());
         let parent_messages = vec![parent_msg];
 
         // Child conversation: created after cutoff
-        let child_messages = vec![
-            make_message_with_runtime("msg2", "pubkey1", "child", post_cutoff, 50),
-        ];
+        let child_messages = vec![make_message_with_runtime(
+            "msg2",
+            "pubkey1",
+            "child",
+            post_cutoff,
+            50,
+        )];
 
-        store.messages_by_thread.insert("parent".to_string(), parent_messages);
-        store.messages_by_thread.insert("child".to_string(), child_messages);
+        store
+            .messages_by_thread
+            .insert("parent".to_string(), parent_messages);
+        store
+            .messages_by_thread
+            .insert("child".to_string(), child_messages);
 
         // Update runtime hierarchy
         store.update_runtime_hierarchy_for_thread_id("parent");
@@ -3338,7 +3619,10 @@ mod tests {
         let top = store.runtime_hierarchy.get_top_conversations_by_runtime(10);
         assert_eq!(top.len(), 1);
         assert_eq!(top[0].0, "parent");
-        assert_eq!(top[0].1, 50, "Parent's filtered total should only include child");
+        assert_eq!(
+            top[0].1, 50,
+            "Parent's filtered total should only include child"
+        );
     }
 
     /// Test UTC day/hour boundary bucketing works correctly for LLM activity.
@@ -3361,7 +3645,10 @@ mod tests {
         let day2_start = (day2_timestamp / seconds_per_day) * seconds_per_day;
 
         // Verify different day boundaries
-        assert_ne!(day1_start, day2_start, "Timestamps should be in different UTC days");
+        assert_ne!(
+            day1_start, day2_start,
+            "Timestamps should be in different UTC days"
+        );
 
         // Create messages with LLM metadata on different days
         let mut msg1 = make_test_message("msg1", "pubkey1", "thread1", "test", day1_timestamp);
@@ -3370,19 +3657,35 @@ mod tests {
         let mut msg2 = make_test_message("msg2", "pubkey1", "thread1", "test", day2_timestamp);
         msg2.llm_metadata = vec![("total-tokens".to_string(), "200".to_string())];
 
-        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2]);
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), vec![msg1, msg2]);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Verify both buckets exist with correct values
-        assert_eq!(store.statistics.llm_activity_by_hour.len(), 2, "Should have 2 separate hour buckets");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.len(),
+            2,
+            "Should have 2 separate hour buckets"
+        );
 
         // Day 1: hour 23
         let key1 = (day1_start, 23_u8);
-        assert_eq!(store.statistics.llm_activity_by_hour.get(&key1), Some(&(100, 1)), "Day 1 hour 23 should have 100 tokens, 1 message");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.get(&key1),
+            Some(&(100, 1)),
+            "Day 1 hour 23 should have 100 tokens, 1 message"
+        );
 
         // Day 2: hour 1
         let key2 = (day2_start, 1_u8);
-        assert_eq!(store.statistics.llm_activity_by_hour.get(&key2), Some(&(200, 1)), "Day 2 hour 1 should have 200 tokens, 1 message");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.get(&key2),
+            Some(&(200, 1)),
+            "Day 2 hour 1 should have 200 tokens, 1 message"
+        );
     }
 
     /// Test that only LLM messages (those with llm_metadata) are counted in activity tracking.
@@ -3399,18 +3702,29 @@ mod tests {
         let user_msg = make_test_message("msg1", "pubkey1", "thread1", "user message", timestamp);
 
         // Message WITH llm_metadata (LLM response)
-        let mut llm_msg = make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
+        let mut llm_msg =
+            make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
         llm_msg.llm_metadata = vec![("total-tokens".to_string(), "150".to_string())];
 
         // Message WITH empty llm_metadata (should NOT be counted)
-        let mut empty_metadata_msg = make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
+        let mut empty_metadata_msg =
+            make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
         empty_metadata_msg.llm_metadata = vec![];
 
-        store.messages_by_thread.insert("thread1".to_string(), vec![user_msg, llm_msg, empty_metadata_msg]);
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store.messages_by_thread.insert(
+            "thread1".to_string(),
+            vec![user_msg, llm_msg, empty_metadata_msg],
+        );
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Should only have 1 bucket for the LLM message
-        assert_eq!(store.statistics.llm_activity_by_hour.len(), 1, "Should only count LLM messages");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.len(),
+            1,
+            "Should only count LLM messages"
+        );
 
         // Verify the bucket contains only the LLM message data
         let seconds_per_day: u64 = 86400;
@@ -3420,7 +3734,11 @@ mod tests {
         let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
         let key = (day_start, hour_of_day);
 
-        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(150, 1)), "Should only have 1 LLM message with 150 tokens");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.get(&key),
+            Some(&(150, 1)),
+            "Should only have 1 LLM message with 150 tokens"
+        );
     }
 
     /// Test that token counts are correctly parsed and aggregated from llm_metadata.
@@ -3445,8 +3763,12 @@ mod tests {
         let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test", timestamp);
         msg3.llm_metadata = vec![("total-tokens".to_string(), "invalid".to_string())];
 
-        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         let seconds_per_day: u64 = 86400;
         let seconds_per_hour: u64 = 3600;
@@ -3456,7 +3778,11 @@ mod tests {
         let key = (day_start, hour_of_day);
 
         // All 3 messages counted, but only msg1 has valid tokens (500 + 0 + 0 = 500)
-        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(500, 3)), "Should have 500 total tokens and 3 messages");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.get(&key),
+            Some(&(500, 3)),
+            "Should have 500 total tokens and 3 messages"
+        );
     }
 
     /// Test window slicing logic in get_tokens_by_hour and get_message_count_by_hour.
@@ -3483,20 +3809,27 @@ mod tests {
                 "pubkey1",
                 "thread1",
                 "test",
-                timestamp
+                timestamp,
             );
             msg.llm_metadata = vec![("total-tokens".to_string(), format!("{}", (i + 1) * 100))];
 
-            store.messages_by_thread
+            store
+                .messages_by_thread
                 .entry("thread1".to_string())
                 .or_insert_with(Vec::new)
                 .push(msg);
         }
 
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Verify all 5 buckets were created
-        assert_eq!(store.statistics.llm_activity_by_hour.len(), 5, "Should have 5 hour buckets");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.len(),
+            5,
+            "Should have 5 hour buckets"
+        );
 
         // NOW TEST ACTUAL WINDOW SLICING using the testable _from variant
         // Set "now" to be at 14:00:00 (the last hour with data)
@@ -3507,30 +3840,74 @@ mod tests {
         assert_eq!(result.len(), 3, "Window of 3 hours should return 3 entries");
 
         // Verify each hour in the window
-        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64), "Hour 14:00 should have 500 tokens");
-        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64), "Hour 13:00 should have 400 tokens");
-        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64), "Hour 12:00 should have 300 tokens");
+        assert_eq!(
+            result.get(&(base_timestamp + 4 * seconds_per_hour)),
+            Some(&500_u64),
+            "Hour 14:00 should have 500 tokens"
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 3 * seconds_per_hour)),
+            Some(&400_u64),
+            "Hour 13:00 should have 400 tokens"
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&300_u64),
+            "Hour 12:00 should have 300 tokens"
+        );
 
         // Test 2: Window of 5 hours should return all 5 hours
         let result = store.get_tokens_by_hour_from(current_hour_start, 5);
         assert_eq!(result.len(), 5, "Window of 5 hours should return 5 entries");
-        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64));
-        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64));
-        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64));
-        assert_eq!(result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&200_u64));
+        assert_eq!(
+            result.get(&(base_timestamp + 4 * seconds_per_hour)),
+            Some(&500_u64)
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 3 * seconds_per_hour)),
+            Some(&400_u64)
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&300_u64)
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&200_u64)
+        );
         assert_eq!(result.get(&(base_timestamp)), Some(&100_u64));
 
         // Test 3: Window extending beyond available data should only return available hours
         let result = store.get_tokens_by_hour_from(current_hour_start, 10);
-        assert_eq!(result.len(), 5, "Window of 10 hours should return only 5 entries (available data)");
+        assert_eq!(
+            result.len(),
+            5,
+            "Window of 10 hours should return only 5 entries (available data)"
+        );
 
         // Test 4: Window starting at 11:00 should only see hours <= 11:00
         let earlier_current = base_timestamp + (1 * seconds_per_hour);
         let result = store.get_tokens_by_hour_from(earlier_current, 2);
-        assert_eq!(result.len(), 2, "Window from 11:00 looking back 2 hours should return 2 entries");
-        assert_eq!(result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&200_u64), "Hour 11:00 should have 200 tokens");
-        assert_eq!(result.get(&base_timestamp), Some(&100_u64), "Hour 10:00 should have 100 tokens");
-        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), None, "Hour 12:00 should NOT be in window");
+        assert_eq!(
+            result.len(),
+            2,
+            "Window from 11:00 looking back 2 hours should return 2 entries"
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&200_u64),
+            "Hour 11:00 should have 200 tokens"
+        );
+        assert_eq!(
+            result.get(&base_timestamp),
+            Some(&100_u64),
+            "Hour 10:00 should have 100 tokens"
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            None,
+            "Hour 12:00 should NOT be in window"
+        );
 
         // Test 5: Verify day boundary handling by adding messages that cross midnight
         // Current base_timestamp is 2024-01-15 10:00:00 UTC
@@ -3553,7 +3930,8 @@ mod tests {
         // Add message at 23:00 prior day
         let mut msg_23 = make_test_message("msg_23", "pubkey1", "thread1", "test", prior_day_23);
         msg_23.llm_metadata = vec![("total-tokens".to_string(), "600".to_string())];
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg_23);
@@ -3561,7 +3939,8 @@ mod tests {
         // Add message at 00:00 current day
         let mut msg_00 = make_test_message("msg_00", "pubkey1", "thread1", "test", current_day_00);
         msg_00.llm_metadata = vec![("total-tokens".to_string(), "700".to_string())];
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg_00);
@@ -3569,7 +3948,8 @@ mod tests {
         // Add message at 01:00 current day
         let mut msg_01 = make_test_message("msg_01", "pubkey1", "thread1", "test", current_day_01);
         msg_01.llm_metadata = vec![("total-tokens".to_string(), "800".to_string())];
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg_01);
@@ -3577,25 +3957,48 @@ mod tests {
         // Add message at 02:00 current day
         let mut msg_02 = make_test_message("msg_02", "pubkey1", "thread1", "test", current_day_02);
         msg_02.llm_metadata = vec![("total-tokens".to_string(), "900".to_string())];
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg_02);
 
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Window from 02:00 current day looking back 4 hours should cross midnight
         // Should see: 02:00, 01:00, 00:00, 23:00 (prior day)
         let result = store.get_tokens_by_hour_from(current_day_02, 4);
 
         // Verify all four hours are present
-        assert_eq!(result.len(), 4, "Window from 02:00 looking back 4 hours should return 4 entries spanning midnight");
+        assert_eq!(
+            result.len(),
+            4,
+            "Window from 02:00 looking back 4 hours should return 4 entries spanning midnight"
+        );
 
         // Verify each hour has the correct token count
-        assert_eq!(result.get(&current_day_02), Some(&900_u64), "Current day 02:00 should have 900 tokens");
-        assert_eq!(result.get(&current_day_01), Some(&800_u64), "Current day 01:00 should have 800 tokens");
-        assert_eq!(result.get(&current_day_00), Some(&700_u64), "Current day 00:00 should have 700 tokens");
-        assert_eq!(result.get(&prior_day_23), Some(&600_u64), "Prior day 23:00 should have 600 tokens");
+        assert_eq!(
+            result.get(&current_day_02),
+            Some(&900_u64),
+            "Current day 02:00 should have 900 tokens"
+        );
+        assert_eq!(
+            result.get(&current_day_01),
+            Some(&800_u64),
+            "Current day 01:00 should have 800 tokens"
+        );
+        assert_eq!(
+            result.get(&current_day_00),
+            Some(&700_u64),
+            "Current day 00:00 should have 700 tokens"
+        );
+        assert_eq!(
+            result.get(&prior_day_23),
+            Some(&600_u64),
+            "Prior day 23:00 should have 600 tokens"
+        );
 
         // Verify proper day_start bucketing: 23:00 should be on prior day, others on current day
         let prior_day_start = day_start - seconds_per_day;
@@ -3607,12 +4010,24 @@ mod tests {
         let day_start_02 = (current_day_02 / seconds_per_day) * seconds_per_day;
 
         // Verify 23:00 is on prior day
-        assert_eq!(day_start_23, prior_day_start, "23:00 should be bucketed to prior day");
+        assert_eq!(
+            day_start_23, prior_day_start,
+            "23:00 should be bucketed to prior day"
+        );
 
         // Verify 00:00, 01:00, 02:00 are all on current day
-        assert_eq!(day_start_00, day_start, "00:00 should be bucketed to current day");
-        assert_eq!(day_start_01, day_start, "01:00 should be bucketed to current day");
-        assert_eq!(day_start_02, day_start, "02:00 should be bucketed to current day");
+        assert_eq!(
+            day_start_00, day_start,
+            "00:00 should be bucketed to current day"
+        );
+        assert_eq!(
+            day_start_01, day_start,
+            "01:00 should be bucketed to current day"
+        );
+        assert_eq!(
+            day_start_02, day_start,
+            "02:00 should be bucketed to current day"
+        );
     }
 
     /// Test that get_tokens_by_hour and get_message_count_by_hour return empty results
@@ -3626,8 +4041,16 @@ mod tests {
         let tokens_result = store.get_tokens_by_hour(0);
         let messages_result = store.get_message_count_by_hour(0);
 
-        assert_eq!(tokens_result.len(), 0, "get_tokens_by_hour(0) should return empty");
-        assert_eq!(messages_result.len(), 0, "get_message_count_by_hour(0) should return empty");
+        assert_eq!(
+            tokens_result.len(),
+            0,
+            "get_tokens_by_hour(0) should return empty"
+        );
+        assert_eq!(
+            messages_result.len(),
+            0,
+            "get_message_count_by_hour(0) should return empty"
+        );
     }
 
     /// Test that get_message_count_by_hour correctly returns message counts (not token counts)
@@ -3650,7 +4073,8 @@ mod tests {
         // Hour 0: 1 message
         let mut msg = make_test_message("msg0", "pubkey1", "thread1", "test", base_timestamp);
         msg.llm_metadata = vec![("total-tokens".to_string(), "1000".to_string())];
-        store.messages_by_thread
+        store
+            .messages_by_thread
             .entry("thread1".to_string())
             .or_insert_with(Vec::new)
             .push(msg);
@@ -3662,10 +4086,11 @@ mod tests {
                 "pubkey1",
                 "thread1",
                 "test",
-                base_timestamp + seconds_per_hour
+                base_timestamp + seconds_per_hour,
             );
             msg.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
-            store.messages_by_thread
+            store
+                .messages_by_thread
                 .entry("thread1".to_string())
                 .or_insert_with(Vec::new)
                 .push(msg);
@@ -3678,37 +4103,72 @@ mod tests {
                 "pubkey1",
                 "thread1",
                 "test",
-                base_timestamp + 2 * seconds_per_hour
+                base_timestamp + 2 * seconds_per_hour,
             );
             msg.llm_metadata = vec![("total-tokens".to_string(), "333".to_string())];
-            store.messages_by_thread
+            store
+                .messages_by_thread
                 .entry("thread1".to_string())
                 .or_insert_with(Vec::new)
                 .push(msg);
         }
 
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Test using the _from variant with a fixed "now" at hour 2 (12:00)
         let current_hour_start = base_timestamp + 2 * seconds_per_hour;
 
         // Get message counts for all 3 hours
         let message_result = store.get_message_count_by_hour_from(current_hour_start, 3);
-        assert_eq!(message_result.len(), 3, "Should have 3 hours of message count data");
+        assert_eq!(
+            message_result.len(),
+            3,
+            "Should have 3 hours of message count data"
+        );
 
         // Verify MESSAGE COUNTS (not token counts)
-        assert_eq!(message_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&3_u64), "Hour 12:00 should have 3 messages");
-        assert_eq!(message_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&2_u64), "Hour 11:00 should have 2 messages");
-        assert_eq!(message_result.get(&base_timestamp), Some(&1_u64), "Hour 10:00 should have 1 message");
+        assert_eq!(
+            message_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&3_u64),
+            "Hour 12:00 should have 3 messages"
+        );
+        assert_eq!(
+            message_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&2_u64),
+            "Hour 11:00 should have 2 messages"
+        );
+        assert_eq!(
+            message_result.get(&base_timestamp),
+            Some(&1_u64),
+            "Hour 10:00 should have 1 message"
+        );
 
         // Get token counts for comparison
         let token_result = store.get_tokens_by_hour_from(current_hour_start, 3);
-        assert_eq!(token_result.len(), 3, "Should have 3 hours of token count data");
+        assert_eq!(
+            token_result.len(),
+            3,
+            "Should have 3 hours of token count data"
+        );
 
         // Verify TOKEN COUNTS are different from message counts
-        assert_eq!(token_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&999_u64), "Hour 12:00 should have 999 tokens (3*333)");
-        assert_eq!(token_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&1000_u64), "Hour 11:00 should have 1000 tokens (2*500)");
-        assert_eq!(token_result.get(&base_timestamp), Some(&1000_u64), "Hour 10:00 should have 1000 tokens");
+        assert_eq!(
+            token_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&999_u64),
+            "Hour 12:00 should have 999 tokens (3*333)"
+        );
+        assert_eq!(
+            token_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&1000_u64),
+            "Hour 11:00 should have 1000 tokens (2*500)"
+        );
+        assert_eq!(
+            token_result.get(&base_timestamp),
+            Some(&1000_u64),
+            "Hour 10:00 should have 1000 tokens"
+        );
 
         // Critical assertion: Verify we're not swapping tokens and messages
         assert_ne!(
@@ -3738,11 +4198,19 @@ mod tests {
         let mut msg3 = make_test_message("msg3", "pubkey1", "thread1", "test3", timestamp + 120);
         msg3.llm_metadata = vec![("total-tokens".to_string(), "300".to_string())];
 
-        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
-        store.statistics.rebuild_llm_activity_by_hour(&store.messages_by_thread);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store
+            .statistics
+            .rebuild_llm_activity_by_hour(&store.messages_by_thread);
 
         // Should only have 1 bucket since all messages are in the same hour
-        assert_eq!(store.statistics.llm_activity_by_hour.len(), 1, "All messages should be in same hour bucket");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.len(),
+            1,
+            "All messages should be in same hour bucket"
+        );
 
         let seconds_per_day: u64 = 86400;
         let seconds_per_hour: u64 = 3600;
@@ -3752,7 +4220,11 @@ mod tests {
         let key = (day_start, hour_of_day);
 
         // Total tokens: 100 + 200 + 300 = 600, Total messages: 3
-        assert_eq!(store.statistics.llm_activity_by_hour.get(&key), Some(&(600, 3)), "Should aggregate all tokens and count all messages");
+        assert_eq!(
+            store.statistics.llm_activity_by_hour.get(&key),
+            Some(&(600, 3)),
+            "Should aggregate all tokens and count all messages"
+        );
     }
 
     // ===== get_total_cost_since Tests =====
@@ -3790,11 +4262,16 @@ mod tests {
 
         // Add a message with cost at timestamp 1000
         let msg = make_test_message_with_cost("msg1", "pubkey1", "thread1", 1000, 0.50);
-        store.messages_by_thread.insert("thread1".to_string(), vec![msg]);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), vec![msg]);
 
         // Query with a future timestamp (greater than message timestamp)
         let result = store.get_total_cost_since(2000);
-        assert_eq!(result, 0.0, "Future timestamp should return 0.0 (no matching messages)");
+        assert_eq!(
+            result, 0.0,
+            "Future timestamp should return 0.0 (no matching messages)"
+        );
     }
 
     /// Test get_total_cost_since boundary case: message exactly at cutoff is included
@@ -3809,7 +4286,8 @@ mod tests {
         // Message exactly at cutoff (should be included: created_at >= since_timestamp_secs)
         let msg_at_cutoff = make_test_message_with_cost("msg1", "pubkey1", "thread1", cutoff, 0.25);
         // Message before cutoff (should NOT be included)
-        let msg_before = make_test_message_with_cost("msg2", "pubkey1", "thread1", cutoff - 1, 0.75);
+        let msg_before =
+            make_test_message_with_cost("msg2", "pubkey1", "thread1", cutoff - 1, 0.75);
         // Message after cutoff (should be included)
         let msg_after = make_test_message_with_cost("msg3", "pubkey1", "thread1", cutoff + 1, 1.00);
 
@@ -3840,7 +4318,9 @@ mod tests {
         let msg2 = make_test_message_with_cost("msg2", "pubkey1", "thread1", 1000, 0.20);
         let msg3 = make_test_message_with_cost("msg3", "pubkey1", "thread1", 10000, 0.30);
 
-        store.messages_by_thread.insert("thread1".to_string(), vec![msg1, msg2, msg3]);
+        store
+            .messages_by_thread
+            .insert("thread1".to_string(), vec![msg1, msg2, msg3]);
 
         let result = store.get_total_cost_since(0);
         // Expected: 0.10 + 0.20 + 0.30 = 0.60
@@ -3864,19 +4344,25 @@ mod tests {
 
         // Message within window (should be included)
         let msg_within = make_test_message_with_cost(
-            "msg1", "pubkey1", "thread1",
+            "msg1",
+            "pubkey1",
+            "thread1",
             now - (7 * seconds_per_day), // 7 days ago
             1.00,
         );
         // Message exactly at boundary (should be included)
         let msg_boundary = make_test_message_with_cost(
-            "msg2", "pubkey1", "thread1",
+            "msg2",
+            "pubkey1",
+            "thread1",
             window_start, // exactly at COST_WINDOW_DAYS boundary
             2.00,
         );
         // Message outside window (should NOT be included)
         let msg_outside = make_test_message_with_cost(
-            "msg3", "pubkey1", "thread1",
+            "msg3",
+            "pubkey1",
+            "thread1",
             window_start - 1, // COST_WINDOW_DAYS + 1 second ago
             5.00,
         );
@@ -3997,7 +4483,12 @@ mod tests {
         }
     }
 
-    fn make_test_operations_status(event_id: &str, project: &str, agents: Vec<&str>, created_at: u64) -> OperationsStatus {
+    fn make_test_operations_status(
+        event_id: &str,
+        project: &str,
+        agents: Vec<&str>,
+        created_at: u64,
+    ) -> OperationsStatus {
         OperationsStatus {
             nostr_event_id: format!("nostr-{}", event_id),
             event_id: event_id.to_string(),
@@ -4044,9 +4535,18 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
-        store.content.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
-        store.content.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
+        store.content.agent_definitions.insert(
+            "a1".to_string(),
+            make_test_agent_def("a1", "Older Agent", 100),
+        );
+        store.content.agent_definitions.insert(
+            "a2".to_string(),
+            make_test_agent_def("a2", "Newer Agent", 200),
+        );
+        store.content.agent_definitions.insert(
+            "a3".to_string(),
+            make_test_agent_def("a3", "Middle Agent", 150),
+        );
 
         let defs = store.content.get_agent_definitions();
         assert_eq!(defs.len(), 3);
@@ -4061,10 +4561,16 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
+        store.content.agent_definitions.insert(
+            "a1".to_string(),
+            make_test_agent_def("a1", "Agent One", 100),
+        );
 
         assert!(store.content.get_agent_definition("a1").is_some());
-        assert_eq!(store.content.get_agent_definition("a1").unwrap().name, "Agent One");
+        assert_eq!(
+            store.content.get_agent_definition("a1").unwrap().name,
+            "Agent One"
+        );
         assert!(store.content.get_agent_definition("nonexistent").is_none());
     }
 
@@ -4074,8 +4580,14 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
-        store.content.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
+        store
+            .content
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
+        store
+            .content
+            .mcp_tools
+            .insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
 
         let tools = store.content.get_mcp_tools();
         assert_eq!(tools.len(), 2);
@@ -4089,7 +4601,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
+        store
+            .content
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
 
         assert!(store.content.get_mcp_tool("t1").is_some());
         assert!(store.content.get_mcp_tool("missing").is_none());
@@ -4101,8 +4616,14 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
-        store.content.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
+        store
+            .content
+            .nudges
+            .insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
+        store
+            .content
+            .nudges
+            .insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
 
         let nudges = store.content.get_nudges();
         assert_eq!(nudges.len(), 2);
@@ -4116,7 +4637,10 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
+        store
+            .content
+            .lessons
+            .insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
 
         assert!(store.content.get_lesson("l1").is_some());
         assert_eq!(store.content.get_lesson("l1").unwrap().title, "Lesson One");
@@ -4129,10 +4653,22 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
-        store.content.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
-        store.content.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
-        store.content.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
+        store
+            .content
+            .agent_definitions
+            .insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store
+            .content
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
+        store
+            .content
+            .nudges
+            .insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store
+            .content
+            .lessons
+            .insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
 
         store.clear();
 
@@ -4226,21 +4762,24 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.trust.pending_backend_approvals.push(PendingBackendApproval {
-            backend_pubkey: "pk1".to_string(),
-            project_a_tag: "proj1".to_string(),
-            first_seen: 100,
-            status: ProjectStatus {
-                project_coordinate: "proj1".to_string(),
-                agents: vec![],
-                branches: vec![],
-                all_models: vec![],
-                all_tools: vec![],
-                created_at: 100,
+        store
+            .trust
+            .pending_backend_approvals
+            .push(PendingBackendApproval {
                 backend_pubkey: "pk1".to_string(),
-                last_seen_at: 100,
-            },
-        });
+                project_a_tag: "proj1".to_string(),
+                first_seen: 100,
+                status: ProjectStatus {
+                    project_coordinate: "proj1".to_string(),
+                    agents: vec![],
+                    branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    created_at: 100,
+                    backend_pubkey: "pk1".to_string(),
+                    last_seen_at: 100,
+                },
+            });
 
         store.add_blocked_backend("pk1");
 
@@ -4254,21 +4793,24 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.trust.pending_backend_approvals.push(PendingBackendApproval {
-            backend_pubkey: "pk1".to_string(),
-            project_a_tag: "31933:pk:proj1".to_string(),
-            first_seen: 100,
-            status: ProjectStatus {
-                project_coordinate: "31933:pk:proj1".to_string(),
-                agents: vec![],
-                branches: vec![],
-                all_models: vec![],
-                all_tools: vec![],
-                created_at: 100,
+        store
+            .trust
+            .pending_backend_approvals
+            .push(PendingBackendApproval {
                 backend_pubkey: "pk1".to_string(),
-                last_seen_at: 100,
-            },
-        });
+                project_a_tag: "31933:pk:proj1".to_string(),
+                first_seen: 100,
+                status: ProjectStatus {
+                    project_coordinate: "31933:pk:proj1".to_string(),
+                    agents: vec![],
+                    branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    created_at: 100,
+                    backend_pubkey: "pk1".to_string(),
+                    last_seen_at: 100,
+                },
+            });
 
         store.add_approved_backend("pk1");
 
@@ -4285,21 +4827,24 @@ mod tests {
 
         store.trust.approved_backends.insert("pk1".to_string());
         store.trust.blocked_backends.insert("pk2".to_string());
-        store.trust.pending_backend_approvals.push(PendingBackendApproval {
-            backend_pubkey: "pk3".to_string(),
-            project_a_tag: "proj".to_string(),
-            first_seen: 100,
-            status: ProjectStatus {
-                project_coordinate: "proj".to_string(),
-                agents: vec![],
-                branches: vec![],
-                all_models: vec![],
-                all_tools: vec![],
-                created_at: 100,
+        store
+            .trust
+            .pending_backend_approvals
+            .push(PendingBackendApproval {
                 backend_pubkey: "pk3".to_string(),
-                last_seen_at: 100,
-            },
-        });
+                project_a_tag: "proj".to_string(),
+                first_seen: 100,
+                status: ProjectStatus {
+                    project_coordinate: "proj".to_string(),
+                    agents: vec![],
+                    branches: vec![],
+                    all_models: vec![],
+                    all_tools: vec![],
+                    created_at: 100,
+                    backend_pubkey: "pk3".to_string(),
+                    last_seen_at: 100,
+                },
+            });
 
         store.clear();
 
@@ -4328,9 +4873,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.reports.add_report(make_test_report("slug-a", "proj1", 100));
-        store.reports.add_report(make_test_report("slug-b", "proj1", 300));
-        store.reports.add_report(make_test_report("slug-c", "proj1", 200));
+        store
+            .reports
+            .add_report(make_test_report("slug-a", "proj1", 100));
+        store
+            .reports
+            .add_report(make_test_report("slug-b", "proj1", 300));
+        store
+            .reports
+            .add_report(make_test_report("slug-c", "proj1", 200));
 
         let reports = store.reports.get_reports();
         assert_eq!(reports.len(), 3);
@@ -4345,9 +4896,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.reports.add_report(make_test_report("slug-a", "proj1", 100));
-        store.reports.add_report(make_test_report("slug-b", "proj2", 200));
-        store.reports.add_report(make_test_report("slug-c", "proj1", 300));
+        store
+            .reports
+            .add_report(make_test_report("slug-a", "proj1", 100));
+        store
+            .reports
+            .add_report(make_test_report("slug-b", "proj2", 200));
+        store
+            .reports
+            .add_report(make_test_report("slug-c", "proj1", 300));
 
         let proj1_reports = store.reports.get_reports_by_project("proj1");
         assert_eq!(proj1_reports.len(), 2);
@@ -4404,12 +4961,17 @@ mod tests {
         assert_eq!(versions[1].id, "v1-id");
 
         // Previous version
-        let prev = store.reports.get_previous_report_version("my-report", "v2-id");
+        let prev = store
+            .reports
+            .get_previous_report_version("my-report", "v2-id");
         assert!(prev.is_some());
         assert_eq!(prev.unwrap().id, "v1-id");
 
         // No previous for oldest
-        assert!(store.reports.get_previous_report_version("my-report", "v1-id").is_none());
+        assert!(store
+            .reports
+            .get_previous_report_version("my-report", "v1-id")
+            .is_none());
     }
 
     #[test]
@@ -4419,7 +4981,12 @@ mod tests {
         let mut store = AppDataStore::new(db.ndb.clone());
 
         let thread = make_test_thread("t1", "pk1", 100);
-        store.reports.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
+        store
+            .reports
+            .document_threads
+            .entry("doc-atag".to_string())
+            .or_default()
+            .push(thread);
 
         let threads = store.reports.get_document_threads("doc-atag");
         assert_eq!(threads.len(), 1);
@@ -4434,8 +5001,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.reports.add_report(make_test_report("slug", "proj1", 100));
-        store.reports.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
+        store
+            .reports
+            .add_report(make_test_report("slug", "proj1", 100));
+        store
+            .reports
+            .document_threads
+            .entry("doc".to_string())
+            .or_default()
+            .push(make_test_thread("t1", "pk1", 100));
 
         store.clear();
 
@@ -4451,9 +5025,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.inbox.add_item(make_test_inbox_item("i3", InboxEventType::Mention, 300));
-        store.inbox.add_item(make_test_inbox_item("i2", InboxEventType::Ask, 200));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i3", InboxEventType::Mention, 300));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i2", InboxEventType::Ask, 200));
 
         let items = store.inbox.get_items();
         assert_eq!(items.len(), 3);
@@ -4468,8 +5048,12 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 200)); // same id
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 200)); // same id
 
         assert_eq!(store.inbox.get_items().len(), 1);
     }
@@ -4480,7 +5064,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         assert!(!store.inbox.get_items()[0].is_read);
 
         store.inbox.mark_read("i1");
@@ -4497,7 +5083,9 @@ mod tests {
         store.inbox.mark_read("i1");
 
         // Adding item with same id should be marked as read
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         assert!(store.inbox.get_items()[0].is_read);
     }
 
@@ -4507,7 +5095,9 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
         store.clear();
 
         assert!(store.inbox.get_items().is_empty());
@@ -4700,10 +5290,19 @@ mod tests {
         let today_start = (now / 86400) * 86400;
 
         // Insert data for today and yesterday
-        store.statistics.messages_by_day_counts.insert(today_start, (5, 10));
-        store.statistics.messages_by_day_counts.insert(today_start - 86400, (3, 7));
+        store
+            .statistics
+            .messages_by_day_counts
+            .insert(today_start, (5, 10));
+        store
+            .statistics
+            .messages_by_day_counts
+            .insert(today_start - 86400, (3, 7));
         // Insert data for 10 days ago (should not appear in 3-day window)
-        store.statistics.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
+        store
+            .statistics
+            .messages_by_day_counts
+            .insert(today_start - 86400 * 10, (1, 2));
 
         let (user, all) = store.get_messages_by_day(3);
         assert_eq!(user.len(), 2); // today + yesterday
@@ -4721,7 +5320,10 @@ mod tests {
         let day_start = (reference_hour_start / 86400) * 86400;
 
         // Insert tokens for hour 0 of day 100
-        store.statistics.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+        store
+            .statistics
+            .llm_activity_by_hour
+            .insert((day_start, 0), (500, 10));
 
         let tokens = store.get_tokens_by_hour_from(reference_hour_start, 24);
         assert_eq!(tokens.get(&reference_hour_start), Some(&500));
@@ -4736,7 +5338,10 @@ mod tests {
         let reference_hour_start: u64 = 86400 * 100;
         let day_start = (reference_hour_start / 86400) * 86400;
 
-        store.statistics.llm_activity_by_hour.insert((day_start, 0), (500, 10));
+        store
+            .statistics
+            .llm_activity_by_hour
+            .insert((day_start, 0), (500, 10));
 
         let counts = store.get_message_count_by_hour_from(reference_hour_start, 24);
         assert_eq!(counts.get(&reference_hour_start), Some(&10));
@@ -4786,9 +5391,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.threads_by_project.entry("proj1".to_string()).or_default()
+        store
+            .threads_by_project
+            .entry("proj1".to_string())
+            .or_default()
             .push(make_test_thread("t1", "pk1", 100));
-        store.threads_by_project.entry("proj2".to_string()).or_default()
+        store
+            .threads_by_project
+            .entry("proj2".to_string())
+            .or_default()
             .push(make_test_thread("t2", "pk1", 200));
 
         // Should find thread in project1
@@ -4820,15 +5431,30 @@ mod tests {
             mcp_tool_ids: vec![],
             created_at: 0,
         });
-        store.threads_by_project.entry("proj1".to_string()).or_default()
+        store
+            .threads_by_project
+            .entry("proj1".to_string())
+            .or_default()
             .push(make_test_thread("t1", "pk1", 100));
-        store.messages_by_thread.entry("t1".to_string()).or_default()
+        store
+            .messages_by_thread
+            .entry("t1".to_string())
+            .or_default()
             .push(make_test_message("m1", "pk1", "t1", "hello", 100));
-        store.content.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
-        store.inbox.add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
-        store.operations.operations_by_event.insert("ev1".to_string(),
-            make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
-        store.reports.add_report(make_test_report("slug", "proj1", 100));
+        store
+            .content
+            .agent_definitions
+            .insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store
+            .inbox
+            .add_item(make_test_inbox_item("i1", InboxEventType::Ask, 100));
+        store.operations.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
+        );
+        store
+            .reports
+            .add_report(make_test_report("slug", "proj1", 100));
         store.trust.approved_backends.insert("pk1".to_string());
         store.user_pubkey = Some("user1".to_string());
 
@@ -4851,9 +5477,15 @@ mod tests {
         let db = Database::new(dir.path()).unwrap();
         let mut store = AppDataStore::new(db.ndb.clone());
 
-        store.threads_by_project.entry("proj1".to_string()).or_default()
+        store
+            .threads_by_project
+            .entry("proj1".to_string())
+            .or_default()
             .push(make_test_thread("t1", "pk1", 100));
-        store.threads_by_project.entry("proj1".to_string()).or_default()
+        store
+            .threads_by_project
+            .entry("proj1".to_string())
+            .or_default()
             .push(make_test_thread("t2", "pk1", 200));
 
         let threads = store.get_threads("proj1");

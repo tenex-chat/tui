@@ -21,7 +21,7 @@
 /// assert_eq!(normalize_slug("  test  "), "test");
 /// assert_eq!(normalize_slug("foo--bar"), "foo-bar");
 /// assert_eq!(normalize_slug("-test-"), "test");
-/// assert_eq!(normalize_slug("Hello World!"), "hello-world-");
+/// assert_eq!(normalize_slug("Hello World!"), "hello-world");
 /// ```
 pub fn normalize_slug(input: &str) -> String {
     let normalized: String = input
@@ -92,7 +92,7 @@ pub enum SlugValidation {
 /// assert_eq!(validate_slug("  test  "), SlugValidation::Valid("test".to_string()));
 /// assert_eq!(validate_slug(""), SlugValidation::Empty);
 /// assert_eq!(validate_slug("   "), SlugValidation::Empty);
-/// assert_eq!(validate_slug("---"), SlugValidation::Empty);
+/// assert_eq!(validate_slug("---"), SlugValidation::OnlyDashes);
 /// ```
 pub fn validate_slug(input: &str) -> SlugValidation {
     let normalized = normalize_slug(input);
@@ -126,7 +126,10 @@ mod tests {
         assert_eq!(normalize_slug("foo--bar"), "foo-bar");
         assert_eq!(normalize_slug("-test-"), "test");
         assert_eq!(normalize_slug("Hello World!"), "hello-world");
-        assert_eq!(normalize_slug("Test  Multiple   Spaces"), "test-multiple-spaces");
+        assert_eq!(
+            normalize_slug("Test  Multiple   Spaces"),
+            "test-multiple-spaces"
+        );
         assert_eq!(normalize_slug("CamelCase"), "camelcase");
         assert_eq!(normalize_slug("with_underscores"), "with-underscores");
         assert_eq!(normalize_slug("123-numeric"), "123-numeric");

@@ -153,7 +153,8 @@ impl AgentTrackingState {
 
     /// Get the total runtime (confirmed + unconfirmed) in seconds.
     pub fn total_runtime_secs(&self) -> u64 {
-        self.confirmed_runtime_secs.saturating_add(self.unconfirmed_runtime_secs())
+        self.confirmed_runtime_secs
+            .saturating_add(self.unconfirmed_runtime_secs())
     }
 
     /// Get confirmed runtime in seconds.
@@ -211,23 +212,25 @@ impl AgentTrackingState {
         }
 
         // Update last event key for this conversation
-        self.last_event_key.insert(conversation_id.to_string(), new_key);
+        self.last_event_key
+            .insert(conversation_id.to_string(), new_key);
 
         // Build set of current agents for efficient lookup
-        let current_agents: HashSet<&str> =
-            agent_pubkeys.iter().map(|s| s.as_str()).collect();
+        let current_agents: HashSet<&str> = agent_pubkeys.iter().map(|s| s.as_str()).collect();
 
         // Remove stopped agents using retain() to avoid unnecessary allocations
         // Keeps agents that either:
         // 1. Are on a different conversation, OR
         // 2. Are still in the current_agents set
         self.active_agents.retain(|key, _| {
-            key.conversation_id != conversation_id || current_agents.contains(key.agent_pubkey.as_str())
+            key.conversation_id != conversation_id
+                || current_agents.contains(key.agent_pubkey.as_str())
         });
 
         // Also clean up last_reset_created_at for removed agents
         self.last_reset_created_at.retain(|key, _| {
-            key.conversation_id != conversation_id || current_agents.contains(key.agent_pubkey.as_str())
+            key.conversation_id != conversation_id
+                || current_agents.contains(key.agent_pubkey.as_str())
         });
 
         // Add new agents using entry().or_insert_with() for idempotency
@@ -383,14 +386,7 @@ mod tests {
         assert_eq!(state.active_agent_count(), 1);
 
         // Remove all agents with empty p-tags
-        state.process_24133_event(
-            "conv1",
-            "event2",
-            &[],
-            1001,
-            "31933:user:project",
-            None,
-        );
+        state.process_24133_event("conv1", "event2", &[], 1001, "31933:user:project", None);
         assert_eq!(state.active_agent_count(), 0);
         assert!(!state.has_active_agents());
     }
@@ -596,7 +592,7 @@ mod tests {
         // First event at t=1000
         let processed1 = state.process_24133_event(
             "conv1",
-            "event_aaa",  // Lexicographically smaller
+            "event_aaa", // Lexicographically smaller
             &["agent1".to_string()],
             1000,
             "31933:user:project",
@@ -608,7 +604,7 @@ mod tests {
         // Same timestamp but different (larger) event_id should be accepted
         let processed2 = state.process_24133_event(
             "conv1",
-            "event_bbb",  // Lexicographically larger, so newer
+            "event_bbb", // Lexicographically larger, so newer
             &["agent2".to_string()],
             1000, // Same timestamp
             "31933:user:project",
@@ -640,7 +636,7 @@ mod tests {
         // Same timestamp AND same event_id should be rejected (duplicate)
         let processed2 = state.process_24133_event(
             "conv1",
-            "event1",  // Same event_id
+            "event1", // Same event_id
             &["agent2".to_string()],
             1000, // Same timestamp
             "31933:user:project",
@@ -681,7 +677,7 @@ mod tests {
         state.process_24133_event(
             "conv1",
             "event3",
-            &["agent1".to_string()],  // agent2 removed
+            &["agent1".to_string()], // agent2 removed
             1001,
             "31933:user:project",
             None,
@@ -733,7 +729,11 @@ mod tests {
         state.process_24133_event(
             "conv1",
             "event1",
-            &["agent1".to_string(), "agent2".to_string(), "agent3".to_string()],
+            &[
+                "agent1".to_string(),
+                "agent2".to_string(),
+                "agent3".to_string(),
+            ],
             1000,
             "31933:user:project",
             None,
@@ -775,14 +775,22 @@ mod tests {
 
         // Should have ~1 second of unconfirmed runtime
         let runtime_before = state.unconfirmed_runtime_secs();
-        assert!(runtime_before >= 1, "Expected runtime >= 1, got {}", runtime_before);
+        assert!(
+            runtime_before >= 1,
+            "Expected runtime >= 1, got {}",
+            runtime_before
+        );
 
         // Reset the timer (simulating a kind:1 message with llm-runtime tag)
         state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Immediately after reset, unconfirmed runtime should be near 0
         let runtime_after = state.unconfirmed_runtime_secs();
-        assert!(runtime_after < 1, "Expected runtime < 1 after reset, got {}", runtime_after);
+        assert!(
+            runtime_after < 1,
+            "Expected runtime < 1 after reset, got {}",
+            runtime_after
+        );
 
         // Agent should still be active
         assert_eq!(state.active_agent_count(), 1);
@@ -813,7 +821,11 @@ mod tests {
 
         // Should have accumulated ~1 second since reset
         let runtime = state.unconfirmed_runtime_secs();
-        assert!(runtime >= 1, "Expected runtime >= 1 after reset and wait, got {}", runtime);
+        assert!(
+            runtime >= 1,
+            "Expected runtime >= 1 after reset and wait, got {}",
+            runtime
+        );
     }
 
     #[test]
@@ -839,7 +851,10 @@ mod tests {
 
         // Runtime should be unchanged (noop)
         let runtime_after = state.unconfirmed_runtime_secs();
-        assert_eq!(runtime_before, runtime_after, "Runtime should be unchanged for inactive agent");
+        assert_eq!(
+            runtime_before, runtime_after,
+            "Runtime should be unchanged for inactive agent"
+        );
     }
 
     #[test]
@@ -865,7 +880,10 @@ mod tests {
 
         // Runtime should be unchanged (noop)
         let runtime_after = state.unconfirmed_runtime_secs();
-        assert_eq!(runtime_before, runtime_after, "Runtime should be unchanged for non-active agent");
+        assert_eq!(
+            runtime_before, runtime_after,
+            "Runtime should be unchanged for non-active agent"
+        );
     }
 
     #[test]
@@ -887,15 +905,22 @@ mod tests {
 
         // Both agents contribute, so runtime should be ~2 seconds
         let runtime_before = state.unconfirmed_runtime_secs();
-        assert!(runtime_before >= 2, "Expected runtime >= 2, got {}", runtime_before);
+        assert!(
+            runtime_before >= 2,
+            "Expected runtime >= 2, got {}",
+            runtime_before
+        );
 
         // Reset only agent1's timer
         state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Runtime should drop to ~1 second (only agent2's contribution)
         let runtime_after = state.unconfirmed_runtime_secs();
-        assert!(runtime_after >= 1 && runtime_after < 2,
-                "Expected runtime between 1-2 after resetting one agent, got {}", runtime_after);
+        assert!(
+            runtime_after >= 1 && runtime_after < 2,
+            "Expected runtime between 1-2 after resetting one agent, got {}",
+            runtime_after
+        );
 
         // Both agents should still be active
         assert_eq!(state.active_agent_count(), 2);
@@ -923,15 +948,22 @@ mod tests {
 
         // Total should be confirmed + unconfirmed (~101)
         let total_before = state.total_runtime_secs();
-        assert!(total_before >= 101, "Expected total >= 101, got {}", total_before);
+        assert!(
+            total_before >= 101,
+            "Expected total >= 101, got {}",
+            total_before
+        );
 
         // Reset unconfirmed timer
         state.reset_unconfirmed_timer("conv1", "agent1", 1001);
 
         // Total should drop to ~100 (confirmed only)
         let total_after = state.total_runtime_secs();
-        assert!(total_after >= 100 && total_after <= 101,
-                "Expected total ~100 after reset, got {}", total_after);
+        assert!(
+            total_after >= 100 && total_after <= 101,
+            "Expected total ~100 after reset, got {}",
+            total_after
+        );
 
         // Confirmed runtime should be unchanged
         assert_eq!(state.confirmed_runtime_secs(), 100);
@@ -980,8 +1012,11 @@ mod tests {
 
         // Check unconfirmed before removal (should be ~1 second since last reset)
         let unconfirmed_before_removal = state.unconfirmed_runtime_secs();
-        assert!(unconfirmed_before_removal >= 1 && unconfirmed_before_removal < 2,
-                "Expected unconfirmed ~1 before removal, got {}", unconfirmed_before_removal);
+        assert!(
+            unconfirmed_before_removal >= 1 && unconfirmed_before_removal < 2,
+            "Expected unconfirmed ~1 before removal, got {}",
+            unconfirmed_before_removal
+        );
 
         // 24133 removes agent (stops clock by removing agent from active_agents map)
         state.process_24133_event(
@@ -996,8 +1031,11 @@ mod tests {
         // After removal, unconfirmed goes to 0 because agent is no longer in active_agents
         // This is correct behavior: the unconfirmed time before removal should have been
         // captured by a final kind:1 message with llm-runtime tag
-        assert_eq!(state.unconfirmed_runtime_secs(), 0,
-                "Expected unconfirmed = 0 after agent removal");
+        assert_eq!(
+            state.unconfirmed_runtime_secs(),
+            0,
+            "Expected unconfirmed = 0 after agent removal"
+        );
 
         // Agent should no longer be active
         assert_eq!(state.active_agent_count(), 0);
@@ -1023,32 +1061,52 @@ mod tests {
         // Wait to accumulate runtime
         thread::sleep(Duration::from_millis(1100));
         let runtime_before = state.unconfirmed_runtime_secs();
-        assert!(runtime_before >= 1, "Expected runtime >= 1, got {}", runtime_before);
+        assert!(
+            runtime_before >= 1,
+            "Expected runtime >= 1, got {}",
+            runtime_before
+        );
 
         // Reset with a current message (timestamp 1100)
         state.reset_unconfirmed_timer("conv1", "agent1", 1100);
 
         // Should reset successfully
         let runtime_after_current = state.unconfirmed_runtime_secs();
-        assert!(runtime_after_current < 1, "Expected runtime < 1 after current reset, got {}", runtime_after_current);
+        assert!(
+            runtime_after_current < 1,
+            "Expected runtime < 1 after current reset, got {}",
+            runtime_after_current
+        );
 
         // Wait again to accumulate more runtime
         thread::sleep(Duration::from_millis(1100));
         let runtime_before_stale = state.unconfirmed_runtime_secs();
-        assert!(runtime_before_stale >= 1, "Expected runtime >= 1 before stale reset, got {}", runtime_before_stale);
+        assert!(
+            runtime_before_stale >= 1,
+            "Expected runtime >= 1 before stale reset, got {}",
+            runtime_before_stale
+        );
 
         // Try to reset with a stale message (timestamp 1050, older than last reset at 1100)
         state.reset_unconfirmed_timer("conv1", "agent1", 1050);
 
         // Should NOT reset - runtime should remain unchanged (recency guard blocks it)
         let runtime_after_stale = state.unconfirmed_runtime_secs();
-        assert!(runtime_after_stale >= 1, "Expected runtime >= 1 after stale reset (should be blocked), got {}", runtime_after_stale);
+        assert!(
+            runtime_after_stale >= 1,
+            "Expected runtime >= 1 after stale reset (should be blocked), got {}",
+            runtime_after_stale
+        );
 
         // Reset with a newer message (timestamp 1200)
         state.reset_unconfirmed_timer("conv1", "agent1", 1200);
 
         // Should reset successfully
         let runtime_after_newer = state.unconfirmed_runtime_secs();
-        assert!(runtime_after_newer < 1, "Expected runtime < 1 after newer reset, got {}", runtime_after_newer);
+        assert!(
+            runtime_after_newer < 1,
+            "Expected runtime < 1 after newer reset, got {}",
+            runtime_after_newer
+        );
     }
 }

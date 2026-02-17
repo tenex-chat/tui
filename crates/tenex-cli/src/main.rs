@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
-use tenex_cli::cli::{is_daemon_running, run_daemon, send_command, socket_path, CliCommand, CliConfig};
+use tenex_cli::cli::{
+    is_daemon_running, run_daemon, send_command, socket_path, CliCommand, CliConfig,
+};
 use tenex_core::config::CoreConfig;
 use tenex_core::slug::{validate_slug, SlugValidation};
 
@@ -217,7 +219,10 @@ fn main() {
     let cli = Cli::parse();
 
     // Determine data directory
-    let data_dir = cli.data_dir.clone().unwrap_or_else(CoreConfig::default_data_dir);
+    let data_dir = cli
+        .data_dir
+        .clone()
+        .unwrap_or_else(CoreConfig::default_data_dir);
 
     // Load config from data_dir/config.json if exists
     let config = load_config(&data_dir);
@@ -234,34 +239,55 @@ fn main() {
     // Convert subcommand to CliCommand
     let command = match cli.command {
         Some(Commands::ListProjects) => CliCommand::ListProjects,
-        Some(Commands::ListThreads { project_slug, wait }) => CliCommand::ListThreads { project_slug, wait_for_project: wait },
-        Some(Commands::ListAgents { project_slug, wait }) => CliCommand::ListAgents { project_slug, wait_for_project: wait },
+        Some(Commands::ListThreads { project_slug, wait }) => CliCommand::ListThreads {
+            project_slug,
+            wait_for_project: wait,
+        },
+        Some(Commands::ListAgents { project_slug, wait }) => CliCommand::ListAgents {
+            project_slug,
+            wait_for_project: wait,
+        },
         Some(Commands::ListMessages { thread_id }) => CliCommand::ListMessages { thread_id },
         Some(Commands::GetState) => CliCommand::GetState,
-        Some(Commands::SendMessage { project_slug, thread_id, recipient_slug, wait, wait_for_project, skill, nudge, message }) => {
-            CliCommand::SendMessage {
-                project_slug,
-                thread_id,
-                recipient_slug,
-                content: message.join(" "),
-                wait_secs: wait,
-                wait_for_project,
-                skill_ids: validate_skill_ids(skill),
-                nudge_ids: validate_nudge_ids(nudge),
-            }
+        Some(Commands::SendMessage {
+            project_slug,
+            thread_id,
+            recipient_slug,
+            wait,
+            wait_for_project,
+            skill,
+            nudge,
+            message,
+        }) => CliCommand::SendMessage {
+            project_slug,
+            thread_id,
+            recipient_slug,
+            content: message.join(" "),
+            wait_secs: wait,
+            wait_for_project,
+            skill_ids: validate_skill_ids(skill),
+            nudge_ids: validate_nudge_ids(nudge),
+        },
+        Some(Commands::CreateThread {
+            project_slug,
+            recipient_slug,
+            wait,
+            wait_for_project,
+            skill,
+            nudge,
+            message,
+        }) => CliCommand::CreateThread {
+            project_slug,
+            recipient_slug,
+            content: message.join(" "),
+            wait_secs: wait,
+            wait_for_project,
+            skill_ids: validate_skill_ids(skill),
+            nudge_ids: validate_nudge_ids(nudge),
+        },
+        Some(Commands::BootProject { project_slug, wait }) => {
+            CliCommand::BootProject { project_slug, wait }
         }
-        Some(Commands::CreateThread { project_slug, recipient_slug, wait, wait_for_project, skill, nudge, message }) => {
-            CliCommand::CreateThread {
-                project_slug,
-                recipient_slug,
-                content: message.join(" "),
-                wait_secs: wait,
-                wait_for_project,
-                skill_ids: validate_skill_ids(skill),
-                nudge_ids: validate_nudge_ids(nudge),
-            }
-        }
-        Some(Commands::BootProject { project_slug, wait }) => CliCommand::BootProject { project_slug, wait },
         Some(Commands::Status { running }) => {
             if running {
                 // Quick check without auto-starting daemon
@@ -295,8 +321,17 @@ fn main() {
         Some(Commands::ListMCPTools) => CliCommand::ListMCPTools,
         Some(Commands::ListSkills) => CliCommand::ListSkills,
         Some(Commands::ListNudges) => CliCommand::ListNudges,
-        Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject { project_slug, wait_for_project: wait },
-        Some(Commands::SaveProject { slug, name, description, agent, mcp_tool_ids }) => {
+        Some(Commands::ShowProject { project_slug, wait }) => CliCommand::ShowProject {
+            project_slug,
+            wait_for_project: wait,
+        },
+        Some(Commands::SaveProject {
+            slug,
+            name,
+            description,
+            agent,
+            mcp_tool_ids,
+        }) => {
             // Validate and normalize name
             let name_trimmed = name.trim();
             if name_trimmed.is_empty() {
@@ -316,7 +351,10 @@ fn main() {
                     }
                     SlugValidation::OnlyDashes => {
                         eprintln!("Error: Slug must contain at least one alphanumeric character");
-                        eprintln!("Hint: Slugs are normalized to lowercase with dashes. Got: '{}'", user_slug);
+                        eprintln!(
+                            "Hint: Slugs are normalized to lowercase with dashes. Got: '{}'",
+                            user_slug
+                        );
                         std::process::exit(1);
                     }
                 }
@@ -341,11 +379,18 @@ fn main() {
                         std::process::exit(1);
                     }
                     if trimmed.len() != 64 {
-                        eprintln!("Error: MCP event ID must be 64 hex characters (got {} characters): {}", trimmed.len(), trimmed);
+                        eprintln!(
+                            "Error: MCP event ID must be 64 hex characters (got {} characters): {}",
+                            trimmed.len(),
+                            trimmed
+                        );
                         std::process::exit(1);
                     }
                     if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-                        eprintln!("Error: MCP event ID must contain only hex characters: {}", trimmed);
+                        eprintln!(
+                            "Error: MCP event ID must contain only hex characters: {}",
+                            trimmed
+                        );
                         std::process::exit(1);
                     }
                     trimmed
@@ -365,16 +410,21 @@ fn main() {
                 mcp_tool_ids: validated_mcp_tool_ids,
             }
         }
-        Some(Commands::SetAgentSettings { project_slug, agent_slug, model, tool, wait_for_project, wait }) => {
-            CliCommand::SetAgentSettings {
-                project_slug,
-                agent_slug,
-                model,
-                tools: tool,
-                wait_for_project,
-                wait,
-            }
-        }
+        Some(Commands::SetAgentSettings {
+            project_slug,
+            agent_slug,
+            model,
+            tool,
+            wait_for_project,
+            wait,
+        }) => CliCommand::SetAgentSettings {
+            project_slug,
+            agent_slug,
+            model,
+            tools: tool,
+            wait_for_project,
+            wait,
+        },
         None => {
             // No command - show help
             eprintln!("No command specified. Use --help for usage.");
@@ -430,11 +480,18 @@ fn validate_skill_ids(skill_ids: Vec<String>) -> Vec<String> {
 
         // Validate 64-character hex format
         if trimmed.len() != 64 {
-            eprintln!("Error: Skill event ID must be 64 hex characters (got {} characters): {}", trimmed.len(), trimmed);
+            eprintln!(
+                "Error: Skill event ID must be 64 hex characters (got {} characters): {}",
+                trimmed.len(),
+                trimmed
+            );
             std::process::exit(1);
         }
         if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-            eprintln!("Error: Skill event ID must contain only hex characters: {}", trimmed);
+            eprintln!(
+                "Error: Skill event ID must contain only hex characters: {}",
+                trimmed
+            );
             std::process::exit(1);
         }
 
@@ -472,11 +529,18 @@ fn validate_nudge_ids(nudge_ids: Vec<String>) -> Vec<String> {
 
         // Validate 64-character hex format
         if trimmed.len() != 64 {
-            eprintln!("Error: Nudge event ID must be 64 hex characters (got {} characters): {}", trimmed.len(), trimmed);
+            eprintln!(
+                "Error: Nudge event ID must be 64 hex characters (got {} characters): {}",
+                trimmed.len(),
+                trimmed
+            );
             std::process::exit(1);
         }
         if !trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
-            eprintln!("Error: Nudge event ID must contain only hex characters: {}", trimmed);
+            eprintln!(
+                "Error: Nudge event ID must contain only hex characters: {}",
+                trimmed
+            );
             std::process::exit(1);
         }
 

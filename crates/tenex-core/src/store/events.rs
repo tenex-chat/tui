@@ -1,6 +1,6 @@
 use anyhow::Result;
-use nostrdb::{IngestMetadata, Ndb, Transaction};
 use nostr_sdk::prelude::*;
+use nostrdb::{IngestMetadata, Ndb, Transaction};
 use serde_json::json;
 
 /// Ingest events into nostrdb from nostr-sdk Events

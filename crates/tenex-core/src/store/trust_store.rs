@@ -35,9 +35,9 @@ impl TrustStore {
     }
 
     pub fn has_pending_approval(&self, backend_pubkey: &str, project_a_tag: &str) -> bool {
-        self.pending_backend_approvals.iter().any(|p| {
-            p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag
-        })
+        self.pending_backend_approvals
+            .iter()
+            .any(|p| p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag)
     }
 
     pub fn has_pending_approvals(&self) -> bool {
@@ -58,13 +58,15 @@ impl TrustStore {
         self.approved_backends.insert(pubkey.to_string());
 
         // Extract pending statuses for this backend
-        let pending_statuses: Vec<ProjectStatus> = self.pending_backend_approvals
+        let pending_statuses: Vec<ProjectStatus> = self
+            .pending_backend_approvals
             .iter()
             .filter(|p| p.backend_pubkey == pubkey)
             .map(|p| p.status.clone())
             .collect();
 
-        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
+        self.pending_backend_approvals
+            .retain(|p| p.backend_pubkey != pubkey);
 
         pending_statuses
     }
@@ -73,7 +75,8 @@ impl TrustStore {
     pub fn add_blocked(&mut self, pubkey: &str) {
         self.approved_backends.remove(pubkey);
         self.blocked_backends.insert(pubkey.to_string());
-        self.pending_backend_approvals.retain(|p| p.backend_pubkey != pubkey);
+        self.pending_backend_approvals
+            .retain(|p| p.backend_pubkey != pubkey);
     }
 
     pub fn drain_pending(&mut self) -> Vec<PendingBackendApproval> {
@@ -81,10 +84,17 @@ impl TrustStore {
     }
 
     /// Queue a new pending approval or update an existing one with a newer status.
-    pub fn queue_or_update_pending(&mut self, backend_pubkey: &str, project_a_tag: &str, status: ProjectStatus) {
-        if let Some(existing) = self.pending_backend_approvals.iter_mut().find(|p| {
-            p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag
-        }) {
+    pub fn queue_or_update_pending(
+        &mut self,
+        backend_pubkey: &str,
+        project_a_tag: &str,
+        status: ProjectStatus,
+    ) {
+        if let Some(existing) = self
+            .pending_backend_approvals
+            .iter_mut()
+            .find(|p| p.backend_pubkey == backend_pubkey && p.project_a_tag == project_a_tag)
+        {
             if status.created_at >= existing.status.created_at {
                 existing.status = status;
             }

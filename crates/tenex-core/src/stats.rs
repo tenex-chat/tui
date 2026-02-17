@@ -224,7 +224,10 @@ fn extract_a_tag(note: &nostrdb::Note) -> Option<String> {
     for tag in tags.iter() {
         if tag.count() >= 2 {
             if let Some("a") = tag.get(0).and_then(|t| t.variant().str()) {
-                return tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                return tag
+                    .get(1)
+                    .and_then(|t| t.variant().str())
+                    .map(|s| s.to_string());
             }
         }
     }
@@ -462,7 +465,11 @@ impl NegentropySyncStats {
             kind_label: kind_label.to_string(),
             events_received: 0,
             status,
-            error: if is_unsupported { None } else { Some(error.to_string()) },
+            error: if is_unsupported {
+                None
+            } else {
+                Some(error.to_string())
+            },
             completed_at: Instant::now(),
         });
 
@@ -526,11 +533,15 @@ impl SharedNegentropySyncStats {
     }
 
     pub fn record_success(&self, kind_label: &str, events_received: u64) {
-        self.inner.write().record_success(kind_label, events_received);
+        self.inner
+            .write()
+            .record_success(kind_label, events_received);
     }
 
     pub fn record_failure(&self, kind_label: &str, error: &str, is_unsupported: bool) {
-        self.inner.write().record_failure(kind_label, error, is_unsupported);
+        self.inner
+            .write()
+            .record_failure(kind_label, error, is_unsupported);
     }
 
     pub fn record_cycle_complete(&self) {
@@ -575,8 +586,8 @@ pub fn query_project_thread_stats(
     ndb: &nostrdb::Ndb,
     project_a_tags: &[String],
 ) -> Vec<ProjectThreadDebugInfo> {
-    use nostrdb::{Filter, Transaction};
     use crate::models::Thread;
+    use nostrdb::{Filter, Transaction};
 
     let mut results = Vec::new();
 
@@ -589,10 +600,7 @@ pub fn query_project_thread_stats(
         let project_name = a_tag.split(':').nth(2).unwrap_or(a_tag).to_string();
 
         // Query all kind:1 with this a-tag
-        let filter = Filter::new()
-            .kinds([1])
-            .tags([a_tag.as_str()], 'a')
-            .build();
+        let filter = Filter::new().kinds([1]).tags([a_tag.as_str()], 'a').build();
 
         let mut info = ProjectThreadDebugInfo {
             a_tag: a_tag.clone(),
@@ -607,9 +615,10 @@ pub fn query_project_thread_stats(
             for r in query_results.iter() {
                 if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
                     // Check if this note has e-tags
-                    let has_e_tag = note.tags().iter().any(|tag| {
-                        tag.get(0).and_then(|t| t.variant().str()) == Some("e")
-                    });
+                    let has_e_tag = note
+                        .tags()
+                        .iter()
+                        .any(|tag| tag.get(0).and_then(|t| t.variant().str()) == Some("e"));
 
                     if has_e_tag {
                         info.messages_count += 1;

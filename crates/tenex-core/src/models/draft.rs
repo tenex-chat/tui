@@ -31,7 +31,10 @@ impl SendState {
 
     /// Check if this state indicates the message is in flight (not yet confirmed)
     pub fn is_pending(&self) -> bool {
-        matches!(self, SendState::PendingSend | SendState::SentAwaitingConfirmation)
+        matches!(
+            self,
+            SendState::PendingSend | SendState::SentAwaitingConfirmation
+        )
     }
 
     /// Check if this draft is safe to clean up (after grace period)
@@ -64,7 +67,11 @@ fn derive_name(text: &str) -> String {
         .trim()
         .to_string();
 
-    if name.is_empty() { "Untitled".to_string() } else { name }
+    if name.is_empty() {
+        "Untitled".to_string()
+    } else {
+        name
+    }
 }
 
 /// Generate a unique draft ID using UUID v4
@@ -198,7 +205,11 @@ impl NamedDraft {
 
     /// Get a preview of the draft content (first 100 chars)
     pub fn preview(&self) -> String {
-        self.text.chars().take(100).collect::<String>().replace('\n', " ")
+        self.text
+            .chars()
+            .take(100)
+            .collect::<String>()
+            .replace('\n', " ")
     }
 }
 
@@ -243,23 +254,31 @@ impl NamedDraftStorage {
     pub fn new(data_dir: &str) -> Self {
         let path = PathBuf::from(data_dir).join("named_drafts.json");
         let (drafts, last_error) = Self::load_from_file(&path);
-        Self { path, drafts, last_error }
+        Self {
+            path,
+            drafts,
+            last_error,
+        }
     }
 
     /// Load drafts from file, returning (drafts, optional_error)
     fn load_from_file(path: &PathBuf) -> (Vec<NamedDraft>, Option<DraftStorageError>) {
         match fs::read_to_string(path) {
-            Ok(contents) => {
-                match serde_json::from_str(&contents) {
-                    Ok(drafts) => (drafts, None),
-                    Err(e) => (Vec::new(), Some(DraftStorageError::ParseError(e.to_string()))),
-                }
-            }
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(drafts) => (drafts, None),
+                Err(e) => (
+                    Vec::new(),
+                    Some(DraftStorageError::ParseError(e.to_string())),
+                ),
+            },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // File doesn't exist yet - that's fine, not an error
                 (Vec::new(), None)
             }
-            Err(e) => (Vec::new(), Some(DraftStorageError::ReadError(e.to_string()))),
+            Err(e) => (
+                Vec::new(),
+                Some(DraftStorageError::ReadError(e.to_string())),
+            ),
         }
     }
 
@@ -273,8 +292,7 @@ impl NamedDraftStorage {
         let temp_path = self.path.with_extension("json.tmp");
 
         // Write to temp file
-        fs::write(&temp_path, &json)
-            .map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
+        fs::write(&temp_path, &json).map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
 
         // Fsync to ensure data is on disk before rename
         if let Ok(file) = fs::File::open(&temp_path) {
@@ -313,7 +331,8 @@ impl NamedDraftStorage {
 
     /// Get all drafts for a project, sorted by last_modified (newest first)
     pub fn get_for_project(&self, project_a_tag: &str) -> Vec<&NamedDraft> {
-        let mut drafts: Vec<_> = self.drafts
+        let mut drafts: Vec<_> = self
+            .drafts
             .iter()
             .filter(|d| d.project_a_tag == project_a_tag)
             .collect();
@@ -337,7 +356,9 @@ impl NamedDraftStorage {
     /// Rollback: on write failure, re-inserts draft to maintain consistency (at end, order is not critical).
     pub fn delete(&mut self, id: &str) -> Result<(), DraftStorageError> {
         // Find and remove the draft (snapshot for rollback)
-        let removed_draft = self.drafts.iter()
+        let removed_draft = self
+            .drafts
+            .iter()
             .position(|d| d.id == id)
             .map(|idx| self.drafts.remove(idx));
 
@@ -612,9 +633,13 @@ impl DraftStorage {
                     }
                 }
                 // All backups failed - start fresh but report the error
-                (DraftStorageData::default(), Some(DraftStorageError::ParseError(
-                    "Primary file and all backups corrupted - starting fresh".to_string()
-                )), false)
+                (
+                    DraftStorageData::default(),
+                    Some(DraftStorageError::ParseError(
+                        "Primary file and all backups corrupted - starting fresh".to_string(),
+                    )),
+                    false,
+                )
             }
             (data, err) => (data, err, false),
         }
@@ -630,26 +655,36 @@ impl DraftStorage {
                 }
                 // Fall back to old format (just drafts HashMap)
                 match serde_json::from_str::<HashMap<String, ChatDraft>>(&contents) {
-                    Ok(drafts) => (DraftStorageData {
-                        drafts,
-                        versioned_drafts: HashMap::new(),
-                        pending_publishes: HashMap::new()
-                    }, None),
-                    Err(e) => (DraftStorageData::default(), Some(DraftStorageError::ParseError(e.to_string()))),
+                    Ok(drafts) => (
+                        DraftStorageData {
+                            drafts,
+                            versioned_drafts: HashMap::new(),
+                            pending_publishes: HashMap::new(),
+                        },
+                        None,
+                    ),
+                    Err(e) => (
+                        DraftStorageData::default(),
+                        Some(DraftStorageError::ParseError(e.to_string())),
+                    ),
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 // File doesn't exist yet - that's fine, not an error
                 (DraftStorageData::default(), None)
             }
-            Err(e) => (DraftStorageData::default(), Some(DraftStorageError::ReadError(e.to_string()))),
+            Err(e) => (
+                DraftStorageData::default(),
+                Some(DraftStorageError::ReadError(e.to_string())),
+            ),
         }
     }
 
     /// Get the path for a backup file (e.g., drafts.json.bak1, drafts.json.bak2)
     fn backup_path(primary_path: &PathBuf, index: usize) -> PathBuf {
         let mut backup = primary_path.clone();
-        let filename = backup.file_name()
+        let filename = backup
+            .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or("drafts.json");
         backup.set_file_name(format!("{}.bak{}", filename, index));
@@ -674,8 +709,9 @@ impl DraftStorage {
         // Copy current file to backup 1 (if it exists)
         if self.path.exists() {
             let backup1 = Self::backup_path(&self.path, 1);
-            fs::copy(&self.path, &backup1)
-                .map_err(|e| DraftStorageError::WriteError(format!("Failed to create backup: {}", e)))?;
+            fs::copy(&self.path, &backup1).map_err(|e| {
+                DraftStorageError::WriteError(format!("Failed to create backup: {}", e))
+            })?;
         }
 
         Ok(())
@@ -699,8 +735,7 @@ impl DraftStorage {
 
         // Write to temp file first, then rename (atomic on most filesystems)
         let temp_path = self.path.with_extension("json.tmp");
-        fs::write(&temp_path, &json)
-            .map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
+        fs::write(&temp_path, &json).map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
 
         // Fsync to ensure data is on disk before rename
         if let Ok(file) = fs::File::open(&temp_path) {
@@ -764,7 +799,11 @@ impl DraftStorage {
 
     /// Create a pending publish snapshot and return its unique ID
     /// Call this BEFORE sending to relay - this captures exactly what was sent
-    pub fn create_publish_snapshot(&mut self, conversation_id: &str, content: String) -> Result<String, DraftStorageError> {
+    pub fn create_publish_snapshot(
+        &mut self,
+        conversation_id: &str,
+        content: String,
+    ) -> Result<String, DraftStorageError> {
         let snapshot = PendingPublishSnapshot::new(conversation_id.to_string(), content);
         let publish_id = snapshot.publish_id.clone();
         self.pending_publishes.insert(publish_id.clone(), snapshot);
@@ -786,7 +825,8 @@ impl DraftStorage {
             if let Err(e) = self.save_to_file() {
                 // ROLLBACK: Reinsert the snapshot since disk write failed
                 // This maintains consistency between memory and disk state
-                self.pending_publishes.insert(publish_id.to_string(), removed_snapshot);
+                self.pending_publishes
+                    .insert(publish_id.to_string(), removed_snapshot);
                 self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
                 return Err(e);
             }
@@ -798,7 +838,11 @@ impl DraftStorage {
     /// Mark a pending publish as confirmed (called AFTER relay confirms the message)
     /// Only marks the specific snapshot that matches the publish_id - doesn't affect current draft.
     /// Returns true if the snapshot was found and marked.
-    pub fn mark_publish_confirmed(&mut self, publish_id: &str, event_id: Option<String>) -> Result<bool, DraftStorageError> {
+    pub fn mark_publish_confirmed(
+        &mut self,
+        publish_id: &str,
+        event_id: Option<String>,
+    ) -> Result<bool, DraftStorageError> {
         if let Some(snapshot) = self.pending_publishes.get_mut(publish_id) {
             snapshot.published_at = Some(now_secs());
             snapshot.published_event_id = event_id;
@@ -814,10 +858,7 @@ impl DraftStorage {
     /// Get all unpublished drafts (for recovery on startup)
     /// Returns drafts that have non-trivial content
     pub fn get_unpublished_drafts(&self) -> Vec<&ChatDraft> {
-        self.drafts
-            .values()
-            .filter(|d| !d.is_empty())
-            .collect()
+        self.drafts.values().filter(|d| !d.is_empty()).collect()
     }
 
     /// Get all pending (unconfirmed) publish snapshots
@@ -840,7 +881,8 @@ impl DraftStorage {
     /// Returns the number of snapshots cleaned up
     pub fn cleanup_confirmed_publishes(&mut self) -> Result<usize, DraftStorageError> {
         let now = now_secs();
-        let to_remove: Vec<String> = self.pending_publishes
+        let to_remove: Vec<String> = self
+            .pending_publishes
             .iter()
             .filter_map(|(id, snapshot)| {
                 if let Some(published_at) = snapshot.published_at {
@@ -951,7 +993,11 @@ impl DraftStorage {
     }
 
     /// Load a specific versioned draft
-    pub fn load_versioned(&self, conversation_id: &str, message_sequence: u32) -> Option<ChatDraft> {
+    pub fn load_versioned(
+        &self,
+        conversation_id: &str,
+        message_sequence: u32,
+    ) -> Option<ChatDraft> {
         let key = format!("{}:seq{}", conversation_id, message_sequence);
         self.versioned_drafts.get(&key).cloned()
     }
@@ -973,7 +1019,8 @@ impl DraftStorage {
 
     /// Get the current message sequence for a conversation
     pub fn get_current_sequence(&self, conversation_id: &str) -> u32 {
-        self.drafts.get(conversation_id)
+        self.drafts
+            .get(conversation_id)
             .map(|d| d.message_sequence)
             .unwrap_or(0)
     }
@@ -984,7 +1031,10 @@ impl DraftStorage {
 
     /// Transition draft to PendingSend state (called when user hits send)
     /// NEVER deletes the draft - only changes state
-    pub fn mark_draft_pending_send(&mut self, conversation_id: &str) -> Result<(), DraftStorageError> {
+    pub fn mark_draft_pending_send(
+        &mut self,
+        conversation_id: &str,
+    ) -> Result<(), DraftStorageError> {
         if let Some(draft) = self.drafts.get_mut(conversation_id) {
             // Save versioned snapshot first (for recovery if send fails)
             let versioned_key = draft.versioned_key();
@@ -1000,7 +1050,10 @@ impl DraftStorage {
     }
 
     /// Transition draft to SentAwaitingConfirmation state
-    pub fn mark_draft_sent_awaiting(&mut self, conversation_id: &str) -> Result<(), DraftStorageError> {
+    pub fn mark_draft_sent_awaiting(
+        &mut self,
+        conversation_id: &str,
+    ) -> Result<(), DraftStorageError> {
         if let Some(draft) = self.drafts.get_mut(conversation_id) {
             draft.mark_sent_awaiting_confirmation();
             if let Err(e) = self.save_to_file() {
@@ -1013,7 +1066,11 @@ impl DraftStorage {
 
     /// Transition draft to Confirmed state (called after relay confirms)
     /// STILL doesn't delete - that happens in archive/cleanup
-    pub fn mark_draft_confirmed(&mut self, conversation_id: &str, event_id: Option<String>) -> Result<(), DraftStorageError> {
+    pub fn mark_draft_confirmed(
+        &mut self,
+        conversation_id: &str,
+        event_id: Option<String>,
+    ) -> Result<(), DraftStorageError> {
         if let Some(draft) = self.drafts.get_mut(conversation_id) {
             draft.mark_confirmed(event_id);
             if let Err(e) = self.save_to_file() {
@@ -1031,7 +1088,8 @@ impl DraftStorage {
     /// Get backup path for archive file (similar to main drafts backups)
     fn archive_backup_path(archive_path: &PathBuf, index: usize) -> PathBuf {
         let mut backup = archive_path.clone();
-        let filename = backup.file_name()
+        let filename = backup
+            .file_name()
             .and_then(|f| f.to_str())
             .unwrap_or("drafts_archive.json");
         backup.set_file_name(format!("{}.bak{}", filename, index));
@@ -1056,8 +1114,9 @@ impl DraftStorage {
         // Copy current archive file to backup 1 (if it exists)
         if self.archive_path.exists() {
             let backup1 = Self::archive_backup_path(&self.archive_path, 1);
-            fs::copy(&self.archive_path, &backup1)
-                .map_err(|e| DraftStorageError::WriteError(format!("Failed to create archive backup: {}", e)))?;
+            fs::copy(&self.archive_path, &backup1).map_err(|e| {
+                DraftStorageError::WriteError(format!("Failed to create archive backup: {}", e))
+            })?;
         }
 
         Ok(())
@@ -1076,8 +1135,7 @@ impl DraftStorage {
         // Atomic write: temp file + fsync + rename
         let temp_path = self.archive_path.with_extension("json.tmp");
 
-        fs::write(&temp_path, &json)
-            .map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
+        fs::write(&temp_path, &json).map_err(|e| DraftStorageError::WriteError(e.to_string()))?;
 
         // Fsync to ensure data is on disk before rename
         if let Ok(file) = fs::File::open(&temp_path) {
@@ -1097,14 +1155,16 @@ impl DraftStorage {
         let grace_period = PUBLISHED_DRAFT_GRACE_PERIOD_SECS;
 
         // Find drafts safe to archive
-        let to_archive: Vec<(String, ChatDraft)> = self.drafts
+        let to_archive: Vec<(String, ChatDraft)> = self
+            .drafts
             .iter()
             .filter(|(_, d)| d.is_safe_to_cleanup(grace_period))
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
         // Also check versioned drafts
-        let versioned_to_archive: Vec<(String, ChatDraft)> = self.versioned_drafts
+        let versioned_to_archive: Vec<(String, ChatDraft)> = self
+            .versioned_drafts
             .iter()
             .filter(|(_, d)| d.is_safe_to_cleanup(grace_period))
             .map(|(k, v)| (k.clone(), v.clone()))
@@ -1165,7 +1225,9 @@ impl DraftStorage {
 
     /// Get all archived drafts (for recovery/search)
     pub fn get_archived_drafts(&self) -> Vec<ChatDraft> {
-        Self::load_archive(&self.archive_path).into_values().collect()
+        Self::load_archive(&self.archive_path)
+            .into_values()
+            .collect()
     }
 
     // =========================================================================
@@ -1175,7 +1237,10 @@ impl DraftStorage {
     /// Get or create a draft for a new conversation in a project
     /// If a draft already exists for this project's new conversation slot, returns it
     /// Otherwise creates a new one with a fresh session ID
-    pub fn get_or_create_project_draft(&mut self, project_a_tag: &str) -> Result<ChatDraft, DraftStorageError> {
+    pub fn get_or_create_project_draft(
+        &mut self,
+        project_a_tag: &str,
+    ) -> Result<ChatDraft, DraftStorageError> {
         let draft_key = format!("{}:new", project_a_tag);
 
         if let Some(existing) = self.drafts.get(&draft_key) {
@@ -1209,7 +1274,8 @@ impl DraftStorage {
             let versioned_key = draft.versioned_key();
 
             // Archive the original for safety
-            self.versioned_drafts.insert(versioned_key.clone(), draft.clone());
+            self.versioned_drafts
+                .insert(versioned_key.clone(), draft.clone());
 
             // Migrate to new conversation
             draft.migrate_to_conversation(new_conversation_id.to_string());
@@ -1218,7 +1284,8 @@ impl DraftStorage {
             if let Err(e) = self.save_to_file() {
                 // ROLLBACK: Restore original state
                 self.drafts.remove(new_conversation_id);
-                self.drafts.insert(old_draft_key.to_string(), original_draft);
+                self.drafts
+                    .insert(old_draft_key.to_string(), original_draft);
                 self.versioned_drafts.remove(&versioned_key);
                 self.last_error = Some(DraftStorageError::WriteError(e.to_string()));
                 return Err(e);
@@ -1254,7 +1321,11 @@ mod tests {
     use tempfile::TempDir;
 
     /// Helper to create a test ChatDraft with agent selection
-    fn create_draft_with_agent(conversation_id: &str, text: &str, agent_pubkey: Option<&str>) -> ChatDraft {
+    fn create_draft_with_agent(
+        conversation_id: &str,
+        text: &str,
+        agent_pubkey: Option<&str>,
+    ) -> ChatDraft {
         ChatDraft {
             conversation_id: conversation_id.to_string(),
             session_id: None,
@@ -1291,7 +1362,10 @@ mod tests {
         let loaded = storage.load("conv-123").expect("Should find draft");
 
         // Verify agent is preserved
-        assert_eq!(loaded.selected_agent_pubkey, Some("agent-pubkey-abc".to_string()));
+        assert_eq!(
+            loaded.selected_agent_pubkey,
+            Some("agent-pubkey-abc".to_string())
+        );
         assert_eq!(loaded.text, "Hello world");
     }
 
@@ -1310,7 +1384,10 @@ mod tests {
 
         // Verify agent still present
         let loaded = storage.load("conv-456").expect("Should find draft");
-        assert_eq!(loaded.selected_agent_pubkey, Some("selected-agent".to_string()));
+        assert_eq!(
+            loaded.selected_agent_pubkey,
+            Some("selected-agent".to_string())
+        );
         assert_eq!(loaded.text, "Updated text");
     }
 
@@ -1328,7 +1405,10 @@ mod tests {
 
         // Verify the temp file doesn't exist (was renamed)
         let temp_path = temp_dir.path().join("named_drafts.json.tmp");
-        assert!(!temp_path.exists(), "Temp file should not exist after atomic write");
+        assert!(
+            !temp_path.exists(),
+            "Temp file should not exist after atomic write"
+        );
 
         // Verify main file exists and is valid
         let main_path = temp_dir.path().join("named_drafts.json");
@@ -1376,12 +1456,20 @@ mod tests {
         storage.save(draft).expect("Save should succeed");
 
         // Archive should work since the timestamp is old enough (24h+ ago)
-        let archived = storage.archive_old_confirmed_drafts().expect("Archive should succeed");
+        let archived = storage
+            .archive_old_confirmed_drafts()
+            .expect("Archive should succeed");
         // The draft should be archived since confirmed_at is very old
-        assert_eq!(archived, 1, "Draft should be archived since it's past grace period");
+        assert_eq!(
+            archived, 1,
+            "Draft should be archived since it's past grace period"
+        );
 
         // Verify the draft is no longer in main storage
-        assert!(storage.load("archive-test").is_none(), "Draft should be moved to archive");
+        assert!(
+            storage.load("archive-test").is_none(),
+            "Draft should be moved to archive"
+        );
 
         // Verify the archive file exists
         let archive_path = temp_dir.path().join("drafts_archive.json");
@@ -1401,7 +1489,9 @@ mod tests {
         storage.save(draft).expect("Save should succeed");
 
         // Normal delete should work
-        storage.delete("delete-test").expect("Delete should succeed");
+        storage
+            .delete("delete-test")
+            .expect("Delete should succeed");
 
         // Verify it's gone
         assert!(storage.load("delete-test").is_none());
@@ -1416,12 +1506,18 @@ mod tests {
         storage.save(draft).expect("Save should succeed");
 
         // Clear content
-        storage.clear_draft_content("clear-test").expect("Clear should succeed");
+        storage
+            .clear_draft_content("clear-test")
+            .expect("Clear should succeed");
 
         // Load and verify
         let loaded = storage.load("clear-test").expect("Should find draft");
         assert!(loaded.text.is_empty(), "Text should be cleared");
-        assert_eq!(loaded.selected_agent_pubkey, Some("my-agent".to_string()), "Agent should be preserved");
+        assert_eq!(
+            loaded.selected_agent_pubkey,
+            Some("my-agent".to_string()),
+            "Agent should be preserved"
+        );
         assert_eq!(loaded.message_sequence, 1, "Sequence should be incremented");
     }
 
@@ -1439,14 +1535,20 @@ mod tests {
         storage.save(draft).expect("Save should succeed");
 
         // Migrate to real conversation
-        storage.migrate_draft_to_conversation(&old_key, "real-conv-id")
+        storage
+            .migrate_draft_to_conversation(&old_key, "real-conv-id")
             .expect("Migrate should succeed");
 
         // Verify old key is gone
-        assert!(storage.load(&old_key).is_none(), "Old draft should be removed");
+        assert!(
+            storage.load(&old_key).is_none(),
+            "Old draft should be removed"
+        );
 
         // Verify new key exists
-        let migrated = storage.load("real-conv-id").expect("Should find migrated draft");
+        let migrated = storage
+            .load("real-conv-id")
+            .expect("Should find migrated draft");
         assert_eq!(migrated.conversation_id, "real-conv-id");
         // Note: migrate_to_conversation clears text for next message, but agent should persist
         // Actually looking at the code, it clears everything for the new message draft
@@ -1470,7 +1572,7 @@ mod tests {
 
         // Check that backup files exist
         let bak1 = temp_dir.path().join("drafts.json.bak1");
-        let bak2 = temp_dir.path().join("drafts.json.bak2");
+        let _bak2 = temp_dir.path().join("drafts.json.bak2");
 
         // After 5 saves, we should have at least bak1
         // Note: first save doesn't create backup since file didn't exist
@@ -1492,7 +1594,10 @@ mod tests {
 
         let loaded = storage.load("empty-draft").expect("Should find draft");
         assert!(loaded.text.is_empty());
-        assert_eq!(loaded.selected_agent_pubkey, Some("agent-for-empty".to_string()));
+        assert_eq!(
+            loaded.selected_agent_pubkey,
+            Some("agent-for-empty".to_string())
+        );
     }
 
     #[test]
@@ -1504,12 +1609,17 @@ mod tests {
         storage.save(draft).expect("Save should succeed");
 
         // Clear content (which creates a versioned snapshot)
-        storage.clear_draft_content("version-test").expect("Clear should succeed");
+        storage
+            .clear_draft_content("version-test")
+            .expect("Clear should succeed");
 
         // Verify versioned draft was created
         let versioned = storage.get_versioned_drafts_for_conversation("version-test");
         assert_eq!(versioned.len(), 1, "Should have one versioned draft");
-        assert_eq!(versioned[0].text, "Message 1", "Versioned draft should have original text");
+        assert_eq!(
+            versioned[0].text, "Message 1",
+            "Versioned draft should have original text"
+        );
     }
 
     #[test]
@@ -1533,7 +1643,9 @@ mod tests {
         // If backup existed, recovered_from_backup would be true
         // Since this is first corruption, there might not be a backup yet
         // The important thing is that the storage doesn't panic and is usable
-        assert!(storage.last_error().is_none() || storage.recovered_from_backup,
-            "Should either have no error (recovered from backup) or report error");
+        assert!(
+            storage.last_error().is_none() || storage.recovered_from_backup,
+            "Should either have no error (recovered from backup) or report error"
+        );
     }
 }

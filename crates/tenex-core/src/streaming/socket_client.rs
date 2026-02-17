@@ -7,7 +7,10 @@ use tokio::sync::mpsc;
 use super::LocalStreamChunk;
 
 fn debug_log(msg: &str) {
-    if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("TENEX_DEBUG")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         eprintln!("[SOCKET] {}", msg);
     }
 }
@@ -55,10 +58,7 @@ impl SocketStreamClient {
                     // Check if the process is still running (signal 0 = just check existence)
                     let is_running = unsafe { libc::kill(info.pid as i32, 0) } == 0;
                     if is_running && info.pid != std::process::id() {
-                        debug_log(&format!(
-                            "Socket locked by another TUI (PID {})",
-                            info.pid
-                        ));
+                        debug_log(&format!("Socket locked by another TUI (PID {})", info.pid));
                         return true;
                     }
                 }
@@ -93,13 +93,19 @@ impl SocketStreamClient {
     /// Try to connect to the socket, returns None if socket doesn't exist
     pub async fn connect(&self) -> Option<UnixStream> {
         if !self.socket_path.exists() {
-            debug_log(&format!("Streaming socket not found at {:?}", self.socket_path));
+            debug_log(&format!(
+                "Streaming socket not found at {:?}",
+                self.socket_path
+            ));
             return None;
         }
 
         match UnixStream::connect(&self.socket_path).await {
             Ok(stream) => {
-                debug_log(&format!("Connected to streaming socket at {:?}", self.socket_path));
+                debug_log(&format!(
+                    "Connected to streaming socket at {:?}",
+                    self.socket_path
+                ));
                 Some(stream)
             }
             Err(e) => {

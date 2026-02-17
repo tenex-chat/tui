@@ -75,7 +75,11 @@ fn spawn_daemon(data_dir: &Path, config: Option<&CliConfig>) -> Result<()> {
 }
 
 /// Send a command to the daemon and return the response
-fn send_command_raw(command: &CliCommand, data_dir: &Path, config: Option<&CliConfig>) -> Result<Response> {
+fn send_command_raw(
+    command: &CliCommand,
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+) -> Result<Response> {
     let request = match command.to_request(1) {
         Some(r) => r,
         None => anyhow::bail!("Command cannot be sent to daemon"),
@@ -98,14 +102,22 @@ fn send_command_raw(command: &CliCommand, data_dir: &Path, config: Option<&CliCo
 }
 
 /// Get project info if online, None otherwise
-fn get_booted_project(project_slug: &str, data_dir: &Path, config: Option<&CliConfig>) -> Result<Option<serde_json::Value>> {
+fn get_booted_project(
+    project_slug: &str,
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+) -> Result<Option<serde_json::Value>> {
     let response = send_command_raw(&CliCommand::ListProjects, data_dir, config)?;
 
     if let Some(result) = response.result {
         if let Some(projects) = result.as_array() {
             for project in projects {
                 if project.get("slug").and_then(|s| s.as_str()) == Some(project_slug) {
-                    if project.get("booted").and_then(|b| b.as_bool()).unwrap_or(false) {
+                    if project
+                        .get("booted")
+                        .and_then(|b| b.as_bool())
+                        .unwrap_or(false)
+                    {
                         return Ok(Some(project.clone()));
                     }
                     return Ok(None);
@@ -117,9 +129,15 @@ fn get_booted_project(project_slug: &str, data_dir: &Path, config: Option<&CliCo
 }
 
 /// Get messages from a thread, returns Vec of message objects
-fn get_thread_messages(thread_id: &str, data_dir: &Path, config: Option<&CliConfig>) -> Result<Vec<serde_json::Value>> {
+fn get_thread_messages(
+    thread_id: &str,
+    data_dir: &Path,
+    config: Option<&CliConfig>,
+) -> Result<Vec<serde_json::Value>> {
     let response = send_command_raw(
-        &CliCommand::ListMessages { thread_id: thread_id.to_string() },
+        &CliCommand::ListMessages {
+            thread_id: thread_id.to_string(),
+        },
         data_dir,
         config,
     )?;
@@ -179,9 +197,18 @@ fn wait_for_reply(
 }
 
 /// Send a command to the daemon and print the response
-pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: Option<CliConfig>) -> Result<()> {
+pub fn send_command(
+    command: CliCommand,
+    pretty: bool,
+    data_dir: &Path,
+    config: Option<CliConfig>,
+) -> Result<()> {
     // Handle boot-project --wait specially
-    if let CliCommand::BootProject { ref project_slug, wait: true } = command {
+    if let CliCommand::BootProject {
+        ref project_slug,
+        wait: true,
+    } = command
+    {
         let response = send_command_raw(&command, data_dir, config.as_ref())?;
 
         if let Some(error) = response.error {
@@ -209,7 +236,11 @@ pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: 
     }
 
     // Handle create-thread with --wait
-    if let CliCommand::CreateThread { wait_secs: Some(wait_secs), .. } = command {
+    if let CliCommand::CreateThread {
+        wait_secs: Some(wait_secs),
+        ..
+    } = command
+    {
         let response = send_command_raw(&command, data_dir, config.as_ref())?;
 
         if let Some(error) = response.error {
@@ -227,7 +258,14 @@ pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: 
 
             // Extract thread_id for waiting
             if let Some(thread_id) = result.get("thread_id").and_then(|t| t.as_str()) {
-                wait_for_reply(thread_id, thread_id, wait_secs, data_dir, config.as_ref(), pretty)?;
+                wait_for_reply(
+                    thread_id,
+                    thread_id,
+                    wait_secs,
+                    data_dir,
+                    config.as_ref(),
+                    pretty,
+                )?;
             } else {
                 eprintln!("Warning: Could not get thread_id, cannot wait for reply");
             }
@@ -237,7 +275,12 @@ pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: 
     }
 
     // Handle send-message with --wait
-    if let CliCommand::SendMessage { ref thread_id, wait_secs: Some(wait_secs), .. } = command {
+    if let CliCommand::SendMessage {
+        ref thread_id,
+        wait_secs: Some(wait_secs),
+        ..
+    } = command
+    {
         let thread_id_for_wait = thread_id.clone();
         let response = send_command_raw(&command, data_dir, config.as_ref())?;
 
@@ -255,8 +298,18 @@ pub fn send_command(command: CliCommand, pretty: bool, data_dir: &Path, config: 
             }
 
             // Extract message_id for waiting
-            let our_message_id = result.get("message_id").and_then(|m| m.as_str()).unwrap_or("");
-            wait_for_reply(&thread_id_for_wait, our_message_id, wait_secs, data_dir, config.as_ref(), pretty)?;
+            let our_message_id = result
+                .get("message_id")
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+            wait_for_reply(
+                &thread_id_for_wait,
+                our_message_id,
+                wait_secs,
+                data_dir,
+                config.as_ref(),
+                pretty,
+            )?;
         }
 
         return Ok(());

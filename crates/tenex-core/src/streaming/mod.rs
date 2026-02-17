@@ -1,5 +1,5 @@
-mod types;
 mod socket_client;
+mod types;
 
-pub use types::LocalStreamChunk;
 pub use socket_client::SocketStreamClient;
+pub use types::LocalStreamChunk;

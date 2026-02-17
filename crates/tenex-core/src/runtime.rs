@@ -10,8 +10,8 @@ use nostrdb::{FilterBuilder, Ndb, NoteKey, SubscriptionStream, Transaction};
 
 use crate::config::CoreConfig;
 use crate::events::CoreEvent;
-use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::models::Message;
+use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
 use crate::store::{AppDataStore, Database};
 

@@ -38,7 +38,8 @@ impl ElevenLabsClient {
     pub async fn get_voices(&self) -> Result<Vec<Voice>> {
         let url = format!("{}/voices", ELEVENLABS_API_BASE);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("xi-api-key", &self.api_key)
             .send()
@@ -73,7 +74,8 @@ impl ElevenLabsClient {
             }
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("xi-api-key", &self.api_key)
             .header("Content-Type", "application/json")
@@ -122,7 +124,10 @@ mod tests {
         let voices = client.get_voices().await.unwrap();
         let voice_id = &voices[0].voice_id;
 
-        let audio = client.text_to_speech("Hello, this is a test.", voice_id).await.unwrap();
+        let audio = client
+            .text_to_speech("Hello, this is a test.", voice_id)
+            .await
+            .unwrap();
         assert!(!audio.is_empty());
     }
 }

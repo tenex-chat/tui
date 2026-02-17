@@ -1,3 +1,4 @@
+use anyhow::Result;
 /// Comprehensive diagnostic for negentropy database issue
 ///
 /// This program tests:
@@ -8,7 +9,6 @@ use nostr_sdk::prelude::*;
 use nostrdb::{Config, Filter as NdbFilter, Ndb, Transaction};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 const RELAY_URL: &str = "wss://relay.tenex.tech";
 const TEST_PUBKEY: &str = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
@@ -59,9 +59,7 @@ async fn main() -> Result<()> {
     println!("✓ Connected\n");
 
     // Test filter: kind:31933 (projects) authored by user
-    let filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .author(pubkey);
+    let filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
 
     println!("═══════════════════════════════════════════════════════════════");
     println!("PHASE 1: Regular subscription (should download and save)");
@@ -112,7 +110,10 @@ async fn main() -> Result<()> {
     println!("\nEvents in nostrdb AFTER subscription: {}", after_count);
 
     if after_count > before_count {
-        println!("✅ nostrdb received {} new events from subscription", after_count - before_count);
+        println!(
+            "✅ nostrdb received {} new events from subscription",
+            after_count - before_count
+        );
     } else {
         println!("⚠️  nostrdb didn't gain any events (might be no new data)");
     }
@@ -122,7 +123,10 @@ async fn main() -> Result<()> {
     println!("═══════════════════════════════════════════════════════════════\n");
 
     let db_count_before_sync = count_events_in_ndb(&ndb, 31933);
-    println!("Events in nostrdb BEFORE negentropy: {}", db_count_before_sync);
+    println!(
+        "Events in nostrdb BEFORE negentropy: {}",
+        db_count_before_sync
+    );
 
     println!("\nRunning negentropy sync...");
     let sync_start = Instant::now();
@@ -140,12 +144,20 @@ async fn main() -> Result<()> {
                 println!("❌ PROBLEM DETECTED:");
                 println!("   Database had {} events", db_count_before_sync);
                 println!("   But negentropy downloaded {} events", downloaded);
-                println!("   This suggests NdbDatabase isn't telling nostr-sdk about local events!\n");
+                println!(
+                    "   This suggests NdbDatabase isn't telling nostr-sdk about local events!\n"
+                );
             } else if db_count_before_sync > 0 && downloaded == 0 {
-                println!("✅ GOOD: Negentropy saw the {} events in the database", db_count_before_sync);
+                println!(
+                    "✅ GOOD: Negentropy saw the {} events in the database",
+                    db_count_before_sync
+                );
                 println!("   No re-download happened.\n");
             } else if db_count_before_sync == 0 {
-                println!("ℹ️  Database was empty, so downloading {} is expected.\n", downloaded);
+                println!(
+                    "ℹ️  Database was empty, so downloading {} is expected.\n",
+                    downloaded
+                );
             }
         }
         Err(e) => {

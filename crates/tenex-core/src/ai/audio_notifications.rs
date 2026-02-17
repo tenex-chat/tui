@@ -141,8 +141,7 @@ impl AudioNotificationManager {
         let temp_file_path = self.data_dir.join(&temp_filename);
 
         // Write to temp file first
-        fs::write(&temp_file_path, &audio_bytes)
-            .context("Failed to write temporary audio file")?;
+        fs::write(&temp_file_path, &audio_bytes).context("Failed to write temporary audio file")?;
 
         // Atomic rename (overwrites if exists, though UUID collision is virtually impossible)
         fs::rename(&temp_file_path, &audio_file_path)
@@ -174,18 +173,17 @@ impl AudioNotificationManager {
         let metadata_path = self.data_dir.join(format!("{}.json", notification.id));
         let json = serde_json::to_string_pretty(notification)
             .context("Failed to serialize notification metadata")?;
-        fs::write(metadata_path, json)
-            .context("Failed to write notification metadata")?;
+        fs::write(metadata_path, json).context("Failed to write notification metadata")?;
         Ok(())
     }
 
     /// Get a notification by ID
     pub fn get_notification(&self, id: &str) -> Result<AudioNotification> {
         let metadata_path = self.data_dir.join(format!("{}.json", id));
-        let json = fs::read_to_string(metadata_path)
-            .context("Failed to read notification metadata")?;
-        let notification: AudioNotification = serde_json::from_str(&json)
-            .context("Failed to parse notification metadata")?;
+        let json =
+            fs::read_to_string(metadata_path).context("Failed to read notification metadata")?;
+        let notification: AudioNotification =
+            serde_json::from_str(&json).context("Failed to parse notification metadata")?;
         Ok(notification)
     }
 
@@ -302,14 +300,17 @@ fn strip_residual_markdown(text: &str) -> String {
 
     // Remove markdown header markers at line starts
     let lines: Vec<&str> = cleaned.lines().collect();
-    let stripped_lines: Vec<String> = lines.iter().map(|line| {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with('#') {
-            trimmed.trim_start_matches('#').trim_start().to_string()
-        } else {
-            line.to_string()
-        }
-    }).collect();
+    let stripped_lines: Vec<String> = lines
+        .iter()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                trimmed.trim_start_matches('#').trim_start().to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
     cleaned = stripped_lines.join(" ");
 
     // Collapse whitespace
@@ -322,7 +323,11 @@ mod tests {
 
     #[test]
     fn test_voice_selection_deterministic() {
-        let voices = vec!["voice1".to_string(), "voice2".to_string(), "voice3".to_string()];
+        let voices = vec![
+            "voice1".to_string(),
+            "voice2".to_string(),
+            "voice3".to_string(),
+        ];
         let pubkey = "test_pubkey_123";
 
         let voice1 = AudioNotificationManager::select_voice_for_agent(pubkey, &voices);
@@ -334,7 +339,11 @@ mod tests {
 
     #[test]
     fn test_voice_selection_different_agents() {
-        let voices = vec!["voice1".to_string(), "voice2".to_string(), "voice3".to_string()];
+        let voices = vec![
+            "voice1".to_string(),
+            "voice2".to_string(),
+            "voice3".to_string(),
+        ];
 
         let voice1 = AudioNotificationManager::select_voice_for_agent("agent1", &voices);
         let voice2 = AudioNotificationManager::select_voice_for_agent("agent2", &voices);
@@ -347,9 +356,21 @@ mod tests {
     #[test]
     fn test_voice_selection_order_independent() {
         // Test that voice selection is independent of list order
-        let voices_order1 = vec!["voice_a".to_string(), "voice_b".to_string(), "voice_c".to_string()];
-        let voices_order2 = vec!["voice_c".to_string(), "voice_a".to_string(), "voice_b".to_string()];
-        let voices_order3 = vec!["voice_b".to_string(), "voice_c".to_string(), "voice_a".to_string()];
+        let voices_order1 = vec![
+            "voice_a".to_string(),
+            "voice_b".to_string(),
+            "voice_c".to_string(),
+        ];
+        let voices_order2 = vec![
+            "voice_c".to_string(),
+            "voice_a".to_string(),
+            "voice_b".to_string(),
+        ];
+        let voices_order3 = vec![
+            "voice_b".to_string(),
+            "voice_c".to_string(),
+            "voice_a".to_string(),
+        ];
 
         let pubkey = "test_agent_xyz";
 
@@ -366,7 +387,11 @@ mod tests {
     #[test]
     fn test_voice_selection_stable_hash() {
         // Verify SHA-256 produces expected output for known inputs
-        let voices = vec!["voice1".to_string(), "voice2".to_string(), "voice3".to_string()];
+        let voices = vec![
+            "voice1".to_string(),
+            "voice2".to_string(),
+            "voice3".to_string(),
+        ];
         let pubkey = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqx5";
 
         let voice = AudioNotificationManager::select_voice_for_agent(pubkey, &voices);
@@ -376,7 +401,11 @@ mod tests {
         assert!(voice.is_some());
 
         // Verify it's one of the sorted voices
-        let sorted_voices = vec!["voice1".to_string(), "voice2".to_string(), "voice3".to_string()];
+        let sorted_voices = vec![
+            "voice1".to_string(),
+            "voice2".to_string(),
+            "voice3".to_string(),
+        ];
         assert!(sorted_voices.contains(voice.as_ref().unwrap()));
 
         // Run 100 times to verify stability

@@ -40,7 +40,7 @@ impl MCPTool {
             if tag.count() >= 2 {
                 if let (Some(tag_name), Some(value)) = (
                     tag.get(0).and_then(|t| t.variant().str()),
-                    tag.get(1).and_then(|t| t.variant().str())
+                    tag.get(1).and_then(|t| t.variant().str()),
                 ) {
                     match tag_name {
                         "d" => d_tag = Some(value.to_string()),
@@ -76,7 +76,8 @@ impl MCPTool {
         if char_count <= max_chars {
             self.description.clone()
         } else {
-            let truncated: String = self.description
+            let truncated: String = self
+                .description
                 .chars()
                 .take(max_chars.saturating_sub(3))
                 .collect();

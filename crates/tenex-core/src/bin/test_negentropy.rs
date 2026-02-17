@@ -66,9 +66,7 @@ async fn test_client_without_database() -> Result<()> {
 
     // Use a small, well-defined filter for testing
     let pubkey = PublicKey::parse(TEST_PUBKEY)?;
-    let filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .author(pubkey);
+    let filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
 
     println!("Filter: kind=31933, author={}", &TEST_PUBKEY[..16]);
     println!();
@@ -95,13 +93,23 @@ async fn test_client_without_database() -> Result<()> {
 
                 if i > 1 {
                     if count > 0 && count == first_count {
-                        println!("  ⚠️  ISSUE: Sync #{} received same {} events as sync #1!", i, count);
+                        println!(
+                            "  ⚠️  ISSUE: Sync #{} received same {} events as sync #1!",
+                            i, count
+                        );
                         println!("      The client has NO memory of previous syncs.");
                     } else if count == 0 && first_count > 0 {
-                        println!("  ✅ SUCCESS: Sync #{} received 0 events (proper delta)!", i);
+                        println!(
+                            "  ✅ SUCCESS: Sync #{} received 0 events (proper delta)!",
+                            i
+                        );
                     } else if count > 0 && count < first_count {
-                        println!("  ℹ️  Sync #{} received {} events ({:.0}% of first)",
-                                i, count, (count as f64 / first_count as f64) * 100.0);
+                        println!(
+                            "  ℹ️  Sync #{} received {} events ({:.0}% of first)",
+                            i,
+                            count,
+                            (count as f64 / first_count as f64) * 100.0
+                        );
                     }
                 }
             }
@@ -153,9 +161,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
         println!("  ✓ Connected to relay");
 
         let pubkey = PublicKey::parse(TEST_PUBKEY)?;
-        let filter = Filter::new()
-            .kind(Kind::Custom(31933))
-            .author(pubkey);
+        let filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
 
         let opts = SyncOptions::default();
         match client.sync(filter.clone(), &opts).await {
@@ -195,9 +201,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
 
         // Check what's in nostrdb
         let ndb_event_count = {
-            let filter_ndb = nostrdb::FilterBuilder::new()
-                .kinds([31933])
-                .build();
+            let filter_ndb = nostrdb::FilterBuilder::new().kinds([31933]).build();
             let txn = nostrdb::Transaction::new(&ndb)?;
             let results = ndb.query(&txn, &[filter_ndb], 100)?;
             results.len()
@@ -206,7 +210,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
 
         // Create NEW client (simulates app restart)
         let keys = Keys::generate();
-        let client = Client::new(keys);  // ← This is the problem!
+        let client = Client::new(keys); // ← This is the problem!
 
         client.add_relay(RELAY_URL).await?;
         client.connect().await;
@@ -214,9 +218,7 @@ async fn test_nostrdb_persistence() -> Result<()> {
         println!("  ✓ Connected with fresh client");
 
         let pubkey = PublicKey::parse(TEST_PUBKEY)?;
-        let filter = Filter::new()
-            .kind(Kind::Custom(31933))
-            .author(pubkey);
+        let filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
 
         let opts = SyncOptions::default();
         match client.sync(filter.clone(), &opts).await {
@@ -226,8 +228,13 @@ async fn test_nostrdb_persistence() -> Result<()> {
 
                 if session1_count > 0 && session2_count == session1_count {
                     println!();
-                    println!("  ⚠️  FINDING: Both sessions received {} events!", session1_count);
-                    println!("     Even though nostrdb has events, the NEW client doesn't see them.");
+                    println!(
+                        "  ⚠️  FINDING: Both sessions received {} events!",
+                        session1_count
+                    );
+                    println!(
+                        "     Even though nostrdb has events, the NEW client doesn't see them."
+                    );
                     println!("     nostr-sdk's Client has its own internal state that is empty.");
                 } else if session2_count == 0 {
                     println!("  ✅ Sync returned 0 events (unexpected but good!)");

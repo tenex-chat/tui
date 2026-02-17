@@ -42,7 +42,10 @@ fn main() -> Result<()> {
     let thread_filter = Filter::new().kinds([1]).build();
     let thread_results = ndb.query(&txn, &[thread_filter], 20)?;
 
-    println!("Found {} kind:1 events (showing first 20)\n", thread_results.len());
+    println!(
+        "Found {} kind:1 events (showing first 20)\n",
+        thread_results.len()
+    );
 
     for (idx, result) in thread_results.iter().take(20).enumerate() {
         let note = ndb.get_note_by_key(&txn, result.note_key)?;
@@ -66,7 +69,10 @@ fn main() -> Result<()> {
         if has_a_tag && !has_e_tag {
             println!("Thread {}: {}", idx + 1, &note_id[..16]);
             println!("  Title from tags: {:?}", title);
-            println!("  Content preview: {}", &note.content()[..50.min(note.content().len())]);
+            println!(
+                "  Content preview: {}",
+                &note.content()[..50.min(note.content().len())]
+            );
             println!();
         }
     }

@@ -1,17 +1,30 @@
 use std::time::Duration;
 use tenex_core::ffi::TenexCore;
-use tenex_core::ffi::{EventCallback, DataChangeType};
+use tenex_core::ffi::{DataChangeType, EventCallback};
 
 struct DebugCallback;
 
 impl EventCallback for DebugCallback {
     fn on_data_changed(&self, change_type: DataChangeType) {
         match change_type {
-            DataChangeType::ProjectStatusChanged { project_id, is_online, .. } => {
-                eprintln!("[RECEIVED] ProjectStatusChanged: {} online={}", project_id, is_online);
+            DataChangeType::ProjectStatusChanged {
+                project_id,
+                is_online,
+                ..
+            } => {
+                eprintln!(
+                    "[RECEIVED] ProjectStatusChanged: {} online={}",
+                    project_id, is_online
+                );
             }
-            DataChangeType::PendingBackendApproval { backend_pubkey, project_a_tag } => {
-                eprintln!("[RECEIVED] PendingBackendApproval: {} for {}", backend_pubkey, project_a_tag);
+            DataChangeType::PendingBackendApproval {
+                backend_pubkey,
+                project_a_tag,
+            } => {
+                eprintln!(
+                    "[RECEIVED] PendingBackendApproval: {} for {}",
+                    backend_pubkey, project_a_tag
+                );
             }
             _ => {}
         }
@@ -87,8 +100,11 @@ fn main() {
                     } else {
                         eprintln!("    ✓ {} online agents:", agents.len());
                         for agent in &agents {
-                            eprintln!("      - {} ({})", agent.name,
-                                if agent.is_pm { "PM" } else { "agent" });
+                            eprintln!(
+                                "      - {} ({})",
+                                agent.name,
+                                if agent.is_pm { "PM" } else { "agent" }
+                            );
                         }
                     }
                 }

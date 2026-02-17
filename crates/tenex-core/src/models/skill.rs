@@ -40,11 +40,9 @@ impl Skill {
                 if let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) {
                     // Handle e-tags for file references (NIP-94 kind:1063)
                     if tag_name == "e" {
-                        if let Some(event_id) = tag.get(1).and_then(|t| {
-                            match t.variant() {
-                                nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                                nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
-                            }
+                        if let Some(event_id) = tag.get(1).and_then(|t| match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
                         }) {
                             file_ids.push(event_id);
                         }
@@ -91,7 +89,10 @@ impl Skill {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;

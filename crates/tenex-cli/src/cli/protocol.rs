@@ -54,9 +54,15 @@ pub enum CliCommand {
     /// List all projects
     ListProjects,
     /// List threads for a project
-    ListThreads { project_slug: String, wait_for_project: bool },
+    ListThreads {
+        project_slug: String,
+        wait_for_project: bool,
+    },
     /// List agents for a project
-    ListAgents { project_slug: String, wait_for_project: bool },
+    ListAgents {
+        project_slug: String,
+        wait_for_project: bool,
+    },
     /// List messages in a thread
     ListMessages { thread_id: String },
     /// Get full state dump
@@ -97,7 +103,10 @@ pub enum CliCommand {
     /// List all nudges (kind:4201)
     ListNudges,
     /// Show detailed project information (kind:24010)
-    ShowProject { project_slug: String, wait_for_project: bool },
+    ShowProject {
+        project_slug: String,
+        wait_for_project: bool,
+    },
     /// Save a project - create new or update existing (kind:31933)
     SaveProject {
         slug: Option<String>,
@@ -123,17 +132,35 @@ impl CliCommand {
         let (method, params) = match self {
             CliCommand::Daemon => return None, // Not sent to daemon
             CliCommand::ListProjects => ("list_projects", serde_json::json!({})),
-            CliCommand::ListThreads { project_slug, wait_for_project } => {
-                ("list_threads", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
-            }
-            CliCommand::ListAgents { project_slug, wait_for_project } => {
-                ("list_agents", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
-            }
-            CliCommand::ListMessages { thread_id } => {
-                ("list_messages", serde_json::json!({ "thread_id": thread_id }))
-            }
+            CliCommand::ListThreads {
+                project_slug,
+                wait_for_project,
+            } => (
+                "list_threads",
+                serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }),
+            ),
+            CliCommand::ListAgents {
+                project_slug,
+                wait_for_project,
+            } => (
+                "list_agents",
+                serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }),
+            ),
+            CliCommand::ListMessages { thread_id } => (
+                "list_messages",
+                serde_json::json!({ "thread_id": thread_id }),
+            ),
             CliCommand::GetState => ("get_state", serde_json::json!({})),
-            CliCommand::SendMessage { project_slug, thread_id, recipient_slug, content, wait_for_project, skill_ids, nudge_ids, .. } => (
+            CliCommand::SendMessage {
+                project_slug,
+                thread_id,
+                recipient_slug,
+                content,
+                wait_for_project,
+                skill_ids,
+                nudge_ids,
+                ..
+            } => (
                 "send_message",
                 serde_json::json!({
                     "project_slug": project_slug,
@@ -145,7 +172,15 @@ impl CliCommand {
                     "nudge_ids": nudge_ids
                 }),
             ),
-            CliCommand::CreateThread { project_slug, recipient_slug, content, wait_for_project, skill_ids, nudge_ids, .. } => (
+            CliCommand::CreateThread {
+                project_slug,
+                recipient_slug,
+                content,
+                wait_for_project,
+                skill_ids,
+                nudge_ids,
+                ..
+            } => (
                 "create_thread",
                 serde_json::json!({
                     "project_slug": project_slug,
@@ -156,19 +191,30 @@ impl CliCommand {
                     "nudge_ids": nudge_ids
                 }),
             ),
-            CliCommand::BootProject { project_slug, .. } => {
-                ("boot_project", serde_json::json!({ "project_slug": project_slug }))
-            }
+            CliCommand::BootProject { project_slug, .. } => (
+                "boot_project",
+                serde_json::json!({ "project_slug": project_slug }),
+            ),
             CliCommand::Status => ("status", serde_json::json!({})),
             CliCommand::Shutdown => ("shutdown", serde_json::json!({})),
             CliCommand::ListAgentDefinitions => ("list_agent_definitions", serde_json::json!({})),
             CliCommand::ListMCPTools => ("list_mcp_tools", serde_json::json!({})),
             CliCommand::ListSkills => ("list_skills", serde_json::json!({})),
             CliCommand::ListNudges => ("list_nudges", serde_json::json!({})),
-            CliCommand::ShowProject { project_slug, wait_for_project } => {
-                ("show_project", serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }))
-            }
-            CliCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids } => (
+            CliCommand::ShowProject {
+                project_slug,
+                wait_for_project,
+            } => (
+                "show_project",
+                serde_json::json!({ "project_slug": project_slug, "wait_for_project": wait_for_project }),
+            ),
+            CliCommand::SaveProject {
+                slug,
+                name,
+                description,
+                agent_ids,
+                mcp_tool_ids,
+            } => (
                 "save_project",
                 serde_json::json!({
                     "slug": slug,
@@ -179,7 +225,14 @@ impl CliCommand {
                     "client": "tenex-cli"
                 }),
             ),
-            CliCommand::SetAgentSettings { project_slug, agent_slug, model, tools, wait_for_project, wait } => (
+            CliCommand::SetAgentSettings {
+                project_slug,
+                agent_slug,
+                model,
+                tools,
+                wait_for_project,
+                wait,
+            } => (
                 "set_agent_settings",
                 serde_json::json!({
                     "project_slug": project_slug,

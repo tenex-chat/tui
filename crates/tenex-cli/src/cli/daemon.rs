@@ -69,7 +69,9 @@ pub async fn run_daemon(
     // Initialize core runtime
     let mut core_runtime = CoreRuntime::new(CoreConfig::new(&data_dir))?;
     let core_handle = core_runtime.handle();
-    let data_rx = core_runtime.take_data_rx().expect("data_rx should be available");
+    let data_rx = core_runtime
+        .take_data_rx()
+        .expect("data_rx should be available");
 
     // Initialize preferences for credential storage and trusted backends
     let prefs = PreferencesStorage::new(data_dir.to_str().unwrap_or("tenex_data"));
@@ -119,7 +121,11 @@ pub async fn run_daemon(
     {
         let approved = prefs.approved_backend_pubkeys().clone();
         let blocked = prefs.blocked_backend_pubkeys().clone();
-        shared_data_store.lock().unwrap().trust.set_trusted_backends(approved, blocked);
+        shared_data_store
+            .lock()
+            .unwrap()
+            .trust
+            .set_trusted_backends(approved, blocked);
     }
 
     // Try to auto-login: config credentials take priority over stored credentials
@@ -163,14 +169,15 @@ pub async fn run_daemon(
         // Update the shared data store with status events
         loop {
             match daemon_rx.try_recv() {
-                Ok(data_change) => {
-                    match &data_change {
-                        DataChange::ProjectStatus { json } => {
-                            shared_data_store.lock().unwrap().handle_status_event_json(json);
-                        }
-                        _ => {}
+                Ok(data_change) => match &data_change {
+                    DataChange::ProjectStatus { json } => {
+                        shared_data_store
+                            .lock()
+                            .unwrap()
+                            .handle_status_event_json(json);
                     }
-                }
+                    _ => {}
+                },
                 Err(broadcast::error::TryRecvError::Empty) => break,
                 Err(broadcast::error::TryRecvError::Lagged(_)) => continue, // Skip lagged messages
                 Err(broadcast::error::TryRecvError::Closed) => break,
@@ -421,9 +428,8 @@ fn handle_request(
                         "booted": online_agents.is_some(),
                     });
                     if let Some(agents) = online_agents {
-                        obj["participants"] = serde_json::json!(
-                            agents.iter().map(agent_to_json).collect::<Vec<_>>()
-                        );
+                        obj["participants"] =
+                            serde_json::json!(agents.iter().map(agent_to_json).collect::<Vec<_>>());
                     }
                     obj
                 })
@@ -433,7 +439,9 @@ fn handle_request(
 
         "list_threads" => {
             let project_slug = request.params["project_slug"].as_str().unwrap_or("");
-            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let wait_for_project = request.params["wait_for_project"]
+                .as_bool()
+                .unwrap_or(false);
 
             // If wait_for_project is true, wait for the 24010 event first
             if wait_for_project {
@@ -475,7 +483,9 @@ fn handle_request(
 
         "list_agents" => {
             let project_slug = request.params["project_slug"].as_str().unwrap_or("");
-            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let wait_for_project = request.params["wait_for_project"]
+                .as_bool()
+                .unwrap_or(false);
 
             // If wait_for_project is true, wait for the 24010 event first
             if wait_for_project {
@@ -574,7 +584,9 @@ fn handle_request(
                 .as_str()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
-            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let wait_for_project = request.params["wait_for_project"]
+                .as_bool()
+                .unwrap_or(false);
 
             // Validate skill_ids parameter with comprehensive checks
             let skill_ids = match validate_skill_ids_param(&request.params["skill_ids"]) {
@@ -638,17 +650,23 @@ fn handle_request(
                             // Wait for the event ID (with timeout)
                             match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                                 Ok(message_id) => (
-                                    Response::success(id, serde_json::json!({
-                                        "status": "sent",
-                                        "message_id": message_id
-                                    })),
+                                    Response::success(
+                                        id,
+                                        serde_json::json!({
+                                            "status": "sent",
+                                            "message_id": message_id
+                                        }),
+                                    ),
                                     false,
                                 ),
                                 Err(_) => (
-                                    Response::success(id, serde_json::json!({
-                                        "status": "sent",
-                                        "message_id": null
-                                    })),
+                                    Response::success(
+                                        id,
+                                        serde_json::json!({
+                                            "status": "sent",
+                                            "message_id": null
+                                        }),
+                                    ),
                                     false,
                                 ),
                             }
@@ -698,7 +716,9 @@ fn handle_request(
                 .as_str()
                 .map(|s| s.trim())
                 .filter(|s| !s.is_empty());
-            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let wait_for_project = request.params["wait_for_project"]
+                .as_bool()
+                .unwrap_or(false);
 
             // Validate skill_ids parameter with comprehensive checks
             let skill_ids = match validate_skill_ids_param(&request.params["skill_ids"]) {
@@ -770,17 +790,23 @@ fn handle_request(
                             // Wait for the event ID (with timeout)
                             match response_rx.recv_timeout(std::time::Duration::from_secs(5)) {
                                 Ok(thread_id) => (
-                                    Response::success(id, serde_json::json!({
-                                        "status": "created",
-                                        "thread_id": thread_id
-                                    })),
+                                    Response::success(
+                                        id,
+                                        serde_json::json!({
+                                            "status": "created",
+                                            "thread_id": thread_id
+                                        }),
+                                    ),
                                     false,
                                 ),
                                 Err(_) => (
-                                    Response::success(id, serde_json::json!({
-                                        "status": "created",
-                                        "thread_id": null
-                                    })),
+                                    Response::success(
+                                        id,
+                                        serde_json::json!({
+                                            "status": "created",
+                                            "thread_id": null
+                                        }),
+                                    ),
                                     false,
                                 ),
                             }
@@ -869,18 +895,16 @@ fn handle_request(
             }
         }
 
-        "status" => {
-            (
-                Response::success(
-                    id,
-                    serde_json::json!({
-                        "status": "running",
-                        "logged_in": logged_in,
-                    }),
-                ),
-                false,
-            )
-        }
+        "status" => (
+            Response::success(
+                id,
+                serde_json::json!({
+                    "status": "running",
+                    "logged_in": logged_in,
+                }),
+            ),
+            false,
+        ),
 
         "shutdown" => (
             Response::success(id, serde_json::json!({"status": "shutting_down"})),
@@ -890,7 +914,8 @@ fn handle_request(
         "list_agent_definitions" => {
             let store = data_store.lock().unwrap();
             let agent_defs: Vec<_> = store
-                .content.get_agent_definitions()
+                .content
+                .get_agent_definitions()
                 .iter()
                 .map(|ad| {
                     serde_json::json!({
@@ -917,7 +942,8 @@ fn handle_request(
         "list_mcp_tools" => {
             let store = data_store.lock().unwrap();
             let mcp_tools: Vec<_> = store
-                .content.get_mcp_tools()
+                .content
+                .get_mcp_tools()
                 .iter()
                 .map(|tool| {
                     serde_json::json!({
@@ -941,7 +967,8 @@ fn handle_request(
         "list_skills" => {
             let store = data_store.lock().unwrap();
             let skills: Vec<_> = store
-                .content.get_skills()
+                .content
+                .get_skills()
                 .iter()
                 .map(|skill| {
                     serde_json::json!({
@@ -962,7 +989,8 @@ fn handle_request(
         "list_nudges" => {
             let store = data_store.lock().unwrap();
             let nudges: Vec<_> = store
-                .content.get_nudges()
+                .content
+                .get_nudges()
                 .iter()
                 .map(|nudge| {
                     serde_json::json!({
@@ -985,7 +1013,9 @@ fn handle_request(
 
         "show_project" => {
             let project_slug = request.params["project_slug"].as_str().unwrap_or("");
-            let wait_for_project = request.params["wait_for_project"].as_bool().unwrap_or(false);
+            let wait_for_project = request.params["wait_for_project"]
+                .as_bool()
+                .unwrap_or(false);
 
             // If wait_for_project is true, wait for the 24010 event first
             if wait_for_project {
@@ -1101,7 +1131,11 @@ fn handle_request(
             let name = params.name.trim();
             if name.is_empty() {
                 return (
-                    Response::error(id, "INVALID_PARAMS", "name is required and cannot be empty or whitespace-only"),
+                    Response::error(
+                        id,
+                        "INVALID_PARAMS",
+                        "name is required and cannot be empty or whitespace-only",
+                    ),
                     false,
                 );
             }
@@ -1190,19 +1224,26 @@ fn handle_request(
                 wait: bool,
             }
 
-            let params: SetAgentSettingsParams = match serde_json::from_value(request.params.clone()) {
-                Ok(p) => p,
-                Err(_) => {
-                    return (
-                        Response::error(id, "INVALID_PARAMS", "Invalid set_agent_settings params"),
-                        false,
-                    );
-                }
-            };
+            let params: SetAgentSettingsParams =
+                match serde_json::from_value(request.params.clone()) {
+                    Ok(p) => p,
+                    Err(_) => {
+                        return (
+                            Response::error(
+                                id,
+                                "INVALID_PARAMS",
+                                "Invalid set_agent_settings params",
+                            ),
+                            false,
+                        );
+                    }
+                };
 
             // If wait_for_project is true, wait for the 24010 event first
             if params.wait_for_project {
-                if let Err(err_response) = wait_for_project_status(data_store, &params.project_slug, id) {
+                if let Err(err_response) =
+                    wait_for_project_status(data_store, &params.project_slug, id)
+                {
                     return err_response;
                 }
             }
@@ -1212,7 +1253,9 @@ fn handle_request(
 
             // Get the current status timestamp for wait comparison
             let current_timestamp = store
-                .get_project_status(&find_project_a_tag_by_slug(&store, &params.project_slug).unwrap_or_default())
+                .get_project_status(
+                    &find_project_a_tag_by_slug(&store, &params.project_slug).unwrap_or_default(),
+                )
                 .map(|s| s.created_at)
                 .unwrap_or(0);
             drop(store);
@@ -1234,10 +1277,13 @@ fn handle_request(
                                 loop {
                                     if start.elapsed() > timeout {
                                         return (
-                                            Response::success(id, serde_json::json!({
-                                                "status": "sent",
-                                                "warning": "Timeout waiting for confirmation - settings may still be applied"
-                                            })),
+                                            Response::success(
+                                                id,
+                                                serde_json::json!({
+                                                    "status": "sent",
+                                                    "warning": "Timeout waiting for confirmation - settings may still be applied"
+                                                }),
+                                            ),
                                             false,
                                         );
                                     }
@@ -1245,20 +1291,25 @@ fn handle_request(
                                     std::thread::sleep(std::time::Duration::from_millis(500));
 
                                     let store = data_store.lock().unwrap();
-                                    if let Some(status) = store.get_project_status(&result.project_a_tag) {
+                                    if let Some(status) =
+                                        store.get_project_status(&result.project_a_tag)
+                                    {
                                         if status.created_at > current_timestamp {
                                             // New status received - check if settings were applied
                                             let agent_updated = status.agents.iter().any(|a| {
-                                                a.pubkey == result.agent_pubkey &&
-                                                a.model.as_deref() == Some(&params.model)
+                                                a.pubkey == result.agent_pubkey
+                                                    && a.model.as_deref() == Some(&params.model)
                                             });
 
                                             return (
-                                                Response::success(id, serde_json::json!({
-                                                    "status": "confirmed",
-                                                    "agent_updated": agent_updated,
-                                                    "new_timestamp": status.created_at
-                                                })),
+                                                Response::success(
+                                                    id,
+                                                    serde_json::json!({
+                                                        "status": "confirmed",
+                                                        "agent_updated": agent_updated,
+                                                        "new_timestamp": status.created_at
+                                                    }),
+                                                ),
                                                 false,
                                             );
                                         }
@@ -1266,10 +1317,13 @@ fn handle_request(
                                 }
                             } else {
                                 (
-                                    Response::success(id, serde_json::json!({
-                                        "status": "sent",
-                                        "message": "Agent settings update sent. Use --wait to confirm application."
-                                    })),
+                                    Response::success(
+                                        id,
+                                        serde_json::json!({
+                                            "status": "sent",
+                                            "message": "Agent settings update sent. Use --wait to confirm application."
+                                        }),
+                                    ),
                                     false,
                                 )
                             }
@@ -1345,7 +1399,11 @@ fn resolve_author_name(store: &AppDataStore, pubkey: &str) -> Option<String> {
 
     // Fall back to profile name - but only if it's a real name (not truncated pubkey)
     let profile_name = store.get_profile_name(pubkey);
-    if profile_name.len() > 16 || !profile_name.chars().all(|c| c.is_ascii_hexdigit() || c == '.') {
+    if profile_name.len() > 16
+        || !profile_name
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c == '.')
+    {
         Some(profile_name)
     } else {
         None
@@ -1423,8 +1481,8 @@ fn find_agent_in_project(
     agent_name: &str,
 ) -> Result<AgentLookupResult, AgentLookupError> {
     // Find the project by slug to get its a_tag
-    let project_a_tag = find_project_a_tag_by_slug(store, project_slug)
-        .ok_or(AgentLookupError::ProjectNotFound)?;
+    let project_a_tag =
+        find_project_a_tag_by_slug(store, project_slug).ok_or(AgentLookupError::ProjectNotFound)?;
 
     // Look through the online agents from ProjectStatus
     let agents = store

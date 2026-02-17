@@ -74,7 +74,10 @@ pub fn has_tag(note: &Note, tag_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;
@@ -100,7 +103,10 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).expect("Failed to create transaction");
         let results = db.ndb.query(&txn, &[filter], 10).expect("Query failed");
-        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).expect("Failed to get note");
+        let note = db
+            .ndb
+            .get_note_by_key(&txn, results[0].note_key)
+            .expect("Failed to get note");
 
         assert_eq!(extract_tag_str(&note, "title"), Some("My Title"));
         assert_eq!(extract_tag_str(&note, "nonexistent"), None);
@@ -135,7 +141,10 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).expect("Failed to create transaction");
         let results = db.ndb.query(&txn, &[filter], 10).expect("Query failed");
-        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).expect("Failed to get note");
+        let note = db
+            .ndb
+            .get_note_by_key(&txn, results[0].note_key)
+            .expect("Failed to get note");
 
         let hashtags = extract_all_tag_values(&note, "t");
         assert_eq!(hashtags.len(), 3);
@@ -165,7 +174,10 @@ mod tests {
 
         let txn = Transaction::new(&db.ndb).expect("Failed to create transaction");
         let results = db.ndb.query(&txn, &[filter], 10).expect("Query failed");
-        let note = db.ndb.get_note_by_key(&txn, results[0].note_key).expect("Failed to get note");
+        let note = db
+            .ndb
+            .get_note_by_key(&txn, results[0].note_key)
+            .expect("Failed to get note");
 
         assert!(has_tag(&note, "reasoning"));
         assert!(!has_tag(&note, "nonexistent"));

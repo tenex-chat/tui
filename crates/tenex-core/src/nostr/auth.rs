@@ -4,7 +4,11 @@ use nostr_sdk::prelude::*;
 
 use crate::models::PreferencesStorage;
 
-pub fn login_with_nsec(nsec: &str, password: Option<&str>, prefs: &mut PreferencesStorage) -> Result<Keys> {
+pub fn login_with_nsec(
+    nsec: &str,
+    password: Option<&str>,
+    prefs: &mut PreferencesStorage,
+) -> Result<Keys> {
     let secret_key = SecretKey::parse(nsec)?;
     let keys = Keys::new(secret_key);
 

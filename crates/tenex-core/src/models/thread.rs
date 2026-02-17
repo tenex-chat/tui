@@ -1,7 +1,7 @@
 use nostrdb::Note;
 
-use crate::constants::DEFAULT_THREAD_TITLE;
 use super::message::{AskEvent, Message};
+use crate::constants::DEFAULT_THREAD_TITLE;
 
 #[derive(Debug, Clone)]
 pub struct Thread {
@@ -67,7 +67,10 @@ impl Thread {
                     }
                 }
                 Some("title") => {
-                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("e") => {
                     // Thread must NOT have e-tags (messages have e-tags)
@@ -85,11 +88,9 @@ impl Thread {
                     // Parent tag format: ["parent", "<parent-conversation-id>"]
                     // (Note: "delegation" is legacy - nostrdb has issues with NIP-26 collision)
                     // nostrdb stores 64-char hex strings as Id variant, so we need to handle both
-                    parent_conversation_id = tag.get(1).and_then(|t| {
-                        match t.variant() {
-                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
-                        }
+                    parent_conversation_id = tag.get(1).and_then(|t| match t.variant() {
+                        nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                        nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
                     });
                 }
                 Some("p") => {
@@ -138,7 +139,10 @@ impl Thread {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;
@@ -174,7 +178,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let thread = Thread::from_note(&note);
 
-        assert!(thread.is_some(), "Should parse kind:1 with a-tag and no e-tag as thread");
+        assert!(
+            thread.is_some(),
+            "Should parse kind:1 with a-tag and no e-tag as thread"
+        );
         let thread = thread.unwrap();
         assert_eq!(thread.title, "Test Thread");
         assert_eq!(thread.content, "Thread content");
@@ -210,7 +217,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let thread = Thread::from_note(&note);
-        assert!(thread.is_none(), "Should reject kind:1 with e-tag (it's a message, not thread)");
+        assert!(
+            thread.is_none(),
+            "Should reject kind:1 with e-tag (it's a message, not thread)"
+        );
     }
 
     #[test]
@@ -309,10 +319,16 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let thread = Thread::from_note(&note);
 
-        assert!(thread.is_some(), "Should parse kind:1 with delegation tag as thread");
+        assert!(
+            thread.is_some(),
+            "Should parse kind:1 with delegation tag as thread"
+        );
         let thread = thread.unwrap();
         assert_eq!(thread.title, "Child Thread");
-        assert_eq!(thread.parent_conversation_id, Some(parent_id.to_string()),
-            "Delegation tag should be parsed into parent_conversation_id");
+        assert_eq!(
+            thread.parent_conversation_id,
+            Some(parent_id.to_string()),
+            "Delegation tag should be parsed into parent_conversation_id"
+        );
     }
 }

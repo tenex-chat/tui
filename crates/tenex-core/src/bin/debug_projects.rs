@@ -50,13 +50,22 @@ fn main() -> Result<()> {
             if !agent_ids.is_empty() {
                 projects_with_agents += 1;
                 if projects_with_agents <= 10 {
-                    println!("  {}. {} - {} agent(s): {:?}", project_count, name, agent_ids.len(), agent_ids);
+                    println!(
+                        "  {}. {} - {} agent(s): {:?}",
+                        project_count,
+                        name,
+                        agent_ids.len(),
+                        agent_ids
+                    );
                 }
             }
         }
     }
 
-    println!("\n  Total: {} projects, {} with agent tags", project_count, projects_with_agents);
+    println!(
+        "\n  Total: {} projects, {} with agent tags",
+        project_count, projects_with_agents
+    );
 
     if results.len() > 5 {
         println!("  ... and {} more", results.len() - 5);
@@ -66,7 +75,10 @@ fn main() -> Result<()> {
     if results.is_empty() {
         println!("⚠️  No projects found! The fix won't help if nostrdb is empty.");
     } else {
-        println!("✅ Projects loaded successfully! The app should now show {} projects.", results.len());
+        println!(
+            "✅ Projects loaded successfully! The app should now show {} projects.",
+            results.len()
+        );
     }
 
     Ok(())
