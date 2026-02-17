@@ -1248,6 +1248,7 @@ struct MainShellView: View {
             sectionDetailColumn
                 .accessibilityIdentifier("detail_column")
         }
+        .navigationSplitViewStyle(.balanced)
         .onChange(of: coreManager.projects.map(\.id)) { _, ids in
             if let selectedProjectId, !ids.contains(selectedProjectId) {
                 self.selectedProjectId = nil

@@ -187,7 +187,7 @@ struct SearchView: View {
                         Button {
                             Task { await loadAndSelectConversation(id: group.id) }
                         } label: {
-                            ConversationGroupHeader(group: group)
+                            ConversationGroupHeader(group: group, showsChevron: !useSplitView)
                         }
                         .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 2, trailing: 16))
 
@@ -313,6 +313,7 @@ struct SearchView: View {
 
 struct ConversationGroupHeader: View {
     let group: ConversationSearchGroup
+    var showsChevron: Bool = true
 
     var body: some View {
         HStack(spacing: 12) {
@@ -348,10 +349,11 @@ struct ConversationGroupHeader: View {
                 .foregroundStyle(Color.askBrand)
                 .clipShape(Capsule())
 
-            // Navigation chevron
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+            if showsChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
         }
     }
 }
