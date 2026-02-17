@@ -11,6 +11,7 @@ use crate::models::Message;
 use crate::nostr::NostrCommand;
 use crate::ui;
 use crate::ui::hotkeys::{resolve_hotkey, HotkeyContext, HotkeyId};
+use crate::ui::state::TabContentType;
 use crate::ui::views::chat::{group_messages, DisplayItem};
 use crate::ui::views::home::get_hierarchical_threads;
 use crate::ui::{App, HomeTab, InputMode, ModalState, View};
@@ -450,9 +451,13 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Reports => {
                         let reports = app.reports();
                         if let Some(report) = reports.get(idx) {
-                            app.modal_state = ModalState::ReportViewer(
-                                ui::modal::ReportViewerState::new(report.clone()),
-                            );
+                            // Open report as a tab instead of modal
+                            let slug = report.slug.clone();
+                            let a_tag = report.a_tag();
+                            let title = report.title.clone();
+                            let author_pubkey = report.author.clone();
+                            app.tabs.open_report(slug, a_tag, title, author_pubkey);
+                            app.view = View::Chat;
                         }
                     }
                     HomeTab::Feed => {
@@ -1012,6 +1017,23 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
 // =============================================================================
 
 pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bool> {
+    // Check active tab content type and dispatch to appropriate handler
+    let content_type = app.tabs.active_tab()
+        .map(|t| t.content_type.clone())
+        .unwrap_or(TabContentType::Conversation);
+
+    match content_type {
+        TabContentType::TTSControl => {
+            return handle_tts_control_key(app, key);
+        }
+        TabContentType::Report { .. } => {
+            return handle_report_tab_key(app, key);
+        }
+        TabContentType::Conversation => {
+            // Continue with normal conversation handling below
+        }
+    }
+
     let code = key.code;
     let modifiers = key.modifiers;
     let has_shift = modifiers.contains(KeyModifiers::SHIFT);
@@ -1043,13 +1065,17 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                             app.push_delegation(&thread_id);
                         }
                         SidebarSelection::Report(a_tag) => {
-                            use crate::ui::components::ReportCoordinate;
-                            if let Some(coord) = ReportCoordinate::parse(&a_tag) {
-                                let report = app.data_store.borrow().reports.get_report(&coord.slug).cloned();
-                                if let Some(report) = report {
-                                    use crate::ui::modal::{ModalState, ReportViewerState};
-                                    app.modal_state = ModalState::ReportViewer(ReportViewerState::new(report));
-                                }
+                            // Use a_tag-based lookup to avoid slug collisions across different authors
+                            let report = app.data_store.borrow().reports.get_report_by_a_tag(&a_tag).cloned();
+                            if let Some(report) = report {
+                                // Open report as a tab instead of modal
+                                app.tabs.open_report(
+                                    report.slug.clone(),
+                                    report.a_tag(),
+                                    report.title.clone(),
+                                    report.author.clone(),
+                                );
+                                // Stay in Chat view - the tab is now active
                             }
                         }
                     }
@@ -1568,4 +1594,215 @@ pub(super) fn handle_editing_mode(
     }
 
     Ok(())
+}
+
+// =============================================================================
+// TTS CONTROL TAB
+// =============================================================================
+
+/// Handle keyboard input for the TTS Control tab.
+fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let code = key.code;
+
+    match code {
+        // Close tab with q or Escape
+        KeyCode::Char('q') | KeyCode::Esc => {
+            // Stop audio playback when closing TTS tab to avoid orphaned audio
+            app.audio_player.stop();
+
+            let (_, prev_view) = app.tabs.close_current();
+            match prev_view {
+                Some(crate::ui::state::ViewLocation::Home) | None => {
+                    app.view = View::Home;
+                }
+                Some(crate::ui::state::ViewLocation::Tab(_)) => {
+                    // Stay in Chat view with the previous tab
+                }
+            }
+            return Ok(true);
+        }
+        // Navigate queue with j/k or arrow keys
+        KeyCode::Char('j') | KeyCode::Down => {
+            if let Some(tts_state) = app.tabs.tts_state_mut() {
+                tts_state.next();
+            }
+            return Ok(true);
+        }
+        KeyCode::Char('k') | KeyCode::Up => {
+            if let Some(tts_state) = app.tabs.tts_state_mut() {
+                tts_state.prev();
+            }
+            return Ok(true);
+        }
+        // Pause/resume with Space
+        KeyCode::Char(' ') => {
+            if let Some(tts_state) = app.tabs.tts_state_mut() {
+                tts_state.toggle_pause();
+            }
+            // Also toggle audio player pause state
+            if app.audio_player.is_playing() {
+                app.audio_player.pause();
+            } else {
+                app.audio_player.resume();
+            }
+            return Ok(true);
+        }
+        // Open source conversation with Enter
+        KeyCode::Enter => {
+            // Get both conversation_id and message_id from the selected TTS item
+            let (conversation_id, message_id) = app.tabs.tts_state()
+                .and_then(|s| s.queue.get(s.selected_index))
+                .map(|item| (item.conversation_id.clone(), item.message_id.clone()))
+                .unwrap_or((None, None));
+
+            if let Some(conv_id) = conversation_id {
+                // Open the conversation in a new tab
+                let data_store = app.data_store.borrow();
+                if let Some(thread) = data_store.get_thread_by_id(&conv_id) {
+                    let thread_title = thread.title.clone();
+                    let project_a_tag = data_store.find_project_for_thread(&conv_id)
+                        .unwrap_or_default();
+                    drop(data_store);
+
+                    // CRITICAL: Clear selected_thread BEFORE open_thread changes active_index.
+                    // This prevents save_chat_draft() in switch_to_tab from using a stale
+                    // thread as the draft key while reading metadata from the new destination
+                    // tab (which open_thread has already switched to). TTS tabs have no draft
+                    // to save, so clearing selected_thread makes save_chat_draft a no-op.
+                    app.set_selected_thread(None);
+
+                    let tab_idx = app.tabs.open_thread(conv_id, thread_title, project_a_tag);
+
+                    // CRITICAL: Use switch_to_tab to properly sync App state
+                    // (selected_thread, selected_project, drafts, view state)
+                    // Without this, app.messages() reads stale conversation.selected_thread
+                    app.switch_to_tab(tab_idx);
+
+                    // If we have a message_id, scroll to that message
+                    if let Some(msg_id) = message_id {
+                        let messages = app.messages();
+                        if let Some((msg_idx, _)) = messages.iter().enumerate()
+                            .find(|(_, m)| m.id == msg_id)
+                        {
+                            app.set_selected_message_index(msg_idx);
+                            // CRITICAL: Switch to Normal mode so auto-scroll will work
+                            // (auto-scroll only runs in Normal mode, but switch_to_tab
+                            // sets InputMode::Editing which prevents scroll-to-selection)
+                            app.input_mode = InputMode::Normal;
+                        }
+                    }
+                }
+            }
+            return Ok(true);
+        }
+        // Clear completed items with 'c'
+        KeyCode::Char('c') => {
+            if let Some(tts_state) = app.tabs.tts_state_mut() {
+                tts_state.clear_completed();
+            }
+            return Ok(true);
+        }
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+// =============================================================================
+// REPORT TAB
+// =============================================================================
+
+/// Handle keyboard input for the Report tab.
+fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
+    let code = key.code;
+
+    // Get current focus state
+    let focus = app.tabs.active_tab()
+        .and_then(|t| t.report_state.as_ref())
+        .map(|s| s.focus)
+        .unwrap_or(crate::ui::state::ReportTabFocus::Content);
+
+    match code {
+        // Close tab with q or Escape
+        KeyCode::Char('q') | KeyCode::Esc => {
+            let (_, prev_view) = app.tabs.close_current();
+            match prev_view {
+                Some(crate::ui::state::ViewLocation::Home) | None => {
+                    app.view = View::Home;
+                }
+                Some(crate::ui::state::ViewLocation::Tab(_)) => {
+                    // Stay in Chat view with the previous tab
+                }
+            }
+            return Ok(true);
+        }
+        // Toggle focus between content and chat with Tab
+        KeyCode::Tab => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.toggle_focus();
+                }
+            }
+            return Ok(true);
+        }
+        // Content-focused navigation
+        KeyCode::Char('j') | KeyCode::Down if focus == crate::ui::state::ReportTabFocus::Content => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.content_scroll += 1;
+                }
+            }
+            return Ok(true);
+        }
+        KeyCode::Char('k') | KeyCode::Up if focus == crate::ui::state::ReportTabFocus::Content => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.content_scroll = state.content_scroll.saturating_sub(1);
+                }
+            }
+            return Ok(true);
+        }
+        // Toggle diff view with 'd'
+        KeyCode::Char('d') if focus == crate::ui::state::ReportTabFocus::Content => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.show_diff = !state.show_diff;
+                }
+            }
+            return Ok(true);
+        }
+        // Chat input handling when chat is focused
+        KeyCode::Char(c) if focus == crate::ui::state::ReportTabFocus::Chat => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.chat_editor.insert_char(c);
+                }
+            }
+            return Ok(true);
+        }
+        KeyCode::Backspace if focus == crate::ui::state::ReportTabFocus::Chat => {
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    state.chat_editor.delete_char_before();
+                }
+            }
+            return Ok(true);
+        }
+        KeyCode::Enter if focus == crate::ui::state::ReportTabFocus::Chat => {
+            // TODO: Send message to report author
+            // For now, just clear the input
+            if let Some(tab) = app.tabs.active_tab_mut() {
+                if let Some(ref mut state) = tab.report_state {
+                    if !state.chat_editor.text.is_empty() {
+                        state.chat_editor.text.clear();
+                    }
+                }
+            }
+            app.set_warning_status("Chat with report author coming soon!");
+            return Ok(true);
+        }
+        _ => {}
+    }
+
+    Ok(false)
 }

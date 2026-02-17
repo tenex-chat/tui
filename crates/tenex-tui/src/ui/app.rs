@@ -7,9 +7,9 @@ use crate::ui::modal::{CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::selector::SelectorState;
-use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer, NavigationStackEntry, OpenTab, TabManager, ViewLocation};
+use crate::ui::state::{ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer, NavigationStackEntry, OpenTab, ReportTabFocus, ReportTabState, TabContentType, TabManager, TTSControlState, TTSQueueItem, TTSQueueItemStatus, ViewLocation};
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
-use crate::ui::audio_player::AudioPlayer;
+use crate::ui::audio_player::{AudioPlayer, AudioPlaybackState};
 use nostr_sdk::Keys;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -516,6 +516,29 @@ impl App {
     pub fn tick(&mut self) {
         self.animation_clock.tick();
         self.notification_manager.tick();
+        self.tick_tts_playback();
+    }
+
+    /// Update TTS queue state based on audio player state.
+    /// When playback completes, mark current item as Completed and clear playing_index.
+    fn tick_tts_playback(&mut self) {
+        // Check if audio player finished playing
+        let audio_state = self.audio_player.state();
+
+        if let Some(tts_state) = self.tabs.tts_state_mut() {
+            if let Some(playing_idx) = tts_state.playing_index {
+                // Audio finished playing - mark item as completed
+                if audio_state == AudioPlaybackState::Stopped {
+                    if let Some(item) = tts_state.queue.get_mut(playing_idx) {
+                        if item.status == TTSQueueItemStatus::Playing {
+                            item.status = TTSQueueItemStatus::Completed;
+                            // Clear playing_index since playback is done
+                            tts_state.playing_index = None;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Get spinner character based on frame counter
@@ -1890,6 +1913,11 @@ impl App {
             return;
         }
 
+        // Check if we're closing a TTS tab - if so, stop audio playback
+        if self.tabs.active_tab().map(|t| t.is_tts_control()).unwrap_or(false) {
+            self.audio_player.stop();
+        }
+
         // Close and get both the removed tab and the previous view location
         let (removed_tab, previous_view) = self.tabs.close_current();
 
@@ -2083,6 +2111,13 @@ impl App {
     /// Close tab at specific index (for tab modal)
     pub fn close_tab_at(&mut self, index: usize) {
         let was_active = index == self.tabs.active_index();
+
+        // Check if we're closing a TTS tab - if so, stop audio playback
+        // (similar to close_current_tab behavior)
+        if self.tabs.tabs().get(index).map(|t| t.is_tts_control()).unwrap_or(false) {
+            self.audio_player.stop();
+        }
+
         let (removed_tab, new_active) = self.tabs.close_at(index);
 
         // Save draft from the removed tab's editor (before it's lost)
@@ -4164,8 +4199,8 @@ impl App {
 
                 // Parse a_tag using shared helper
                 if let Some(coord) = ReportCoordinate::parse(a_tag) {
-                    // Look up the report to get its title
-                    let title = store.reports.get_report(&coord.slug)
+                    // Look up the report to get its title (use a_tag to avoid slug collisions)
+                    let title = store.reports.get_report_by_a_tag(a_tag)
                         .map(|r| r.title.clone())
                         .unwrap_or_else(|| coord.slug.clone());
 

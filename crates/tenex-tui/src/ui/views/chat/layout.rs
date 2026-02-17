@@ -5,9 +5,11 @@ use crate::ui::components::{
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::layout;
 use crate::ui::modal::ChatActionsState;
+use crate::ui::state::TabContentType;
 use crate::ui::theme;
 use crate::ui::todo::aggregate_todo_state;
 use crate::ui::text_editor::TextEditor;
+use crate::ui::views::{render_tts_control, render_report_tab};
 use crate::ui::{App, ModalState};
 use ratatui::{
     layout::{Constraint, Layout, Rect},
@@ -23,6 +25,25 @@ pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
     f.render_widget(bg_block, area);
+
+    // Check active tab content type and dispatch to appropriate renderer
+    let content_type = app.tabs.active_tab()
+        .map(|t| t.content_type.clone())
+        .unwrap_or(TabContentType::Conversation);
+
+    match content_type {
+        TabContentType::TTSControl => {
+            render_tts_tab_layout(f, app, area);
+            return;
+        }
+        TabContentType::Report { .. } => {
+            render_report_tab_layout(f, app, area);
+            return;
+        }
+        TabContentType::Conversation => {
+            // Continue with normal conversation rendering below
+        }
+    }
 
     // Create top-level layout: header + content
     let main_chunks = Layout::vertical([
@@ -844,4 +865,56 @@ fn render_chat_search_bar(f: &mut Frame, app: &App, area: Rect) {
 
     let search_text = Paragraph::new(line);
     f.render_widget(search_text, inner);
+}
+
+// =============================================================================
+// TTS TAB LAYOUT
+// =============================================================================
+
+/// Render the TTS control tab with shared chrome (tab bar, statusbar)
+fn render_tts_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
+    // Layout: Tab bar | Content | Statusbar
+    let chunks = Layout::vertical([
+        Constraint::Length(layout::TAB_BAR_HEIGHT),
+        Constraint::Min(0),
+        Constraint::Length(layout::STATUSBAR_HEIGHT),
+    ])
+    .split(area);
+
+    // Render tab bar
+    render_tab_bar(f, app, chunks[0]);
+
+    // Render TTS control content
+    render_tts_control(f, app, chunks[1]);
+
+    // Render statusbar
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let audio_playing = app.audio_player.is_playing();
+    render_statusbar(f, chunks[2], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
+}
+
+// =============================================================================
+// REPORT TAB LAYOUT
+// =============================================================================
+
+/// Render the report tab with shared chrome (tab bar, statusbar)
+fn render_report_tab_layout(f: &mut Frame, app: &mut App, area: Rect) {
+    // Layout: Tab bar | Content | Statusbar
+    let chunks = Layout::vertical([
+        Constraint::Length(layout::TAB_BAR_HEIGHT),
+        Constraint::Min(0),
+        Constraint::Length(layout::STATUSBAR_HEIGHT),
+    ])
+    .split(area);
+
+    // Render tab bar
+    render_tab_bar(f, app, chunks[0]);
+
+    // Render report tab content
+    render_report_tab(f, app, chunks[1]);
+
+    // Render statusbar
+    let (cumulative_runtime_ms, has_active_agents, active_agent_count) = app.data_store.borrow_mut().get_statusbar_runtime_ms();
+    let audio_playing = app.audio_player.is_playing();
+    render_statusbar(f, chunks[2], app.current_notification(), cumulative_runtime_ms, has_active_agents, active_agent_count, app.wave_offset(), audio_playing);
 }
