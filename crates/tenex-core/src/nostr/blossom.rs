@@ -3,9 +3,9 @@
 //! Blossom is a protocol for storing blobs on Nostr.
 //! See: https://github.com/hzrd149/blossom
 
-use nostr_sdk::{Keys, Kind, TagKind, EventBuilder, Tag, Timestamp};
+use nostr_sdk::{EventBuilder, Keys, Kind, Tag, TagKind, Timestamp};
 use reqwest::Client;
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::time::{SystemTime, UNIX_EPOCH};
 

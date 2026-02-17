@@ -120,11 +120,17 @@ impl Message {
                 }
                 Some("tool") => {
                     // Tool tag format: ["tool", "tool_name", ...]
-                    tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    tool_name = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("tool-args") => {
                     // Tool args tag format: ["tool-args", "json_string"]
-                    tool_args = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    tool_args = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("q") => {
                     // Q-tags point to delegated conversation IDs
@@ -161,7 +167,8 @@ impl Message {
                         let marker_at_2 = tag.get(2).and_then(|t| t.variant().str());
 
                         // Determine effective marker, checking both positions for "skill"
-                        let marker = if marker_at_3 == Some("skill") || marker_at_2 == Some("skill") {
+                        let marker = if marker_at_3 == Some("skill") || marker_at_2 == Some("skill")
+                        {
                             Some("skill")
                         } else {
                             // For other markers, use standard NIP-10 position (index 3)
@@ -197,16 +204,17 @@ impl Message {
                 Some("delegation") | Some("parent") => {
                     // Parent tag format: ["parent", "<parent-conversation-id>"]
                     // (Note: "delegation" is legacy - nostrdb stores hex as Id variant)
-                    delegation_tag = tag.get(1).and_then(|t| {
-                        match t.variant() {
-                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
-                        }
+                    delegation_tag = tag.get(1).and_then(|t| match t.variant() {
+                        nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                        nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
                     });
                 }
                 Some("branch") => {
                     // Branch tag format: ["branch", "<branch-name>"]
-                    branch = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    branch = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 _ => {}
             }
@@ -294,10 +302,16 @@ impl Message {
                     }
                 }
                 Some("tool") => {
-                    tool_name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    tool_name = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("tool-args") => {
-                    tool_args = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    tool_args = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("q") => {
                     if let Some(conv_id) = tag.get(1).and_then(|t| t.variant().str()) {
@@ -307,7 +321,10 @@ impl Message {
                     }
                 }
                 Some("branch") => {
-                    branch = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    branch = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 _ => {}
             }
@@ -405,12 +422,23 @@ impl Message {
 
             match tag_name {
                 Some("title") => {
-                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("question") => {
                     // ["question", title, question, ...suggestions]
-                    let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
-                    let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+                    let q_title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .unwrap_or("")
+                        .to_string();
+                    let q_text = tag
+                        .get(2)
+                        .and_then(|t| t.variant().str())
+                        .unwrap_or("")
+                        .to_string();
 
                     let tag_count = tag.count();
                     let mut suggestions = Vec::new();
@@ -428,8 +456,16 @@ impl Message {
                 }
                 Some("multiselect") => {
                     // ["multiselect", title, question, ...options]
-                    let q_title = tag.get(1).and_then(|t| t.variant().str()).unwrap_or("").to_string();
-                    let q_text = tag.get(2).and_then(|t| t.variant().str()).unwrap_or("").to_string();
+                    let q_title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .unwrap_or("")
+                        .to_string();
+                    let q_text = tag
+                        .get(2)
+                        .and_then(|t| t.variant().str())
+                        .unwrap_or("")
+                        .to_string();
 
                     let tag_count = tag.count();
                     let mut options = Vec::new();
@@ -459,13 +495,15 @@ impl Message {
             })
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;
@@ -497,7 +535,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
-        assert!(message.is_some(), "Should parse kind:1 with e-tag root marker");
+        assert!(
+            message.is_some(),
+            "Should parse kind:1 with e-tag root marker"
+        );
         let message = message.unwrap();
         assert_eq!(message.thread_id, thread_id);
         assert_eq!(message.content, "Message content");
@@ -536,7 +577,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
-        assert!(message.is_some(), "Should parse kind:1 with root and reply markers");
+        assert!(
+            message.is_some(),
+            "Should parse kind:1 with root and reply markers"
+        );
         let message = message.unwrap();
         assert_eq!(message.thread_id, thread_id);
         assert_eq!(message.reply_to, Some(parent_id));
@@ -575,7 +619,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
-        assert!(message.is_some(), "Should parse backwards-compatible format");
+        assert!(
+            message.is_some(),
+            "Should parse backwards-compatible format"
+        );
         let message = message.unwrap();
         assert_eq!(message.thread_id, thread_id);
         assert_eq!(message.reply_to, Some(parent_id));
@@ -607,7 +654,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
 
         let message = Message::from_note(&note);
-        assert!(message.is_none(), "Should reject kind:1 without e-tag (it's a thread, not message)");
+        assert!(
+            message.is_none(),
+            "Should reject kind:1 without e-tag (it's a thread, not message)"
+        );
     }
 
     #[test]
@@ -713,7 +763,9 @@ mod tests {
     fn test_extract_image_urls_multiple() {
         let msg = Message {
             id: "test".to_string(),
-            content: "![first](https://example.com/1.png) some text ![second](https://example.com/2.jpg)".to_string(),
+            content:
+                "![first](https://example.com/1.png) some text ![second](https://example.com/2.jpg)"
+                    .to_string(),
             pubkey: "pubkey".to_string(),
             thread_id: "thread".to_string(),
             created_at: 0,
@@ -730,7 +782,10 @@ mod tests {
             branch: None,
         };
         let urls = msg.extract_image_urls();
-        assert_eq!(urls, vec!["https://example.com/1.png", "https://example.com/2.jpg"]);
+        assert_eq!(
+            urls,
+            vec!["https://example.com/1.png", "https://example.com/2.jpg"]
+        );
     }
 
     #[test]
@@ -794,7 +849,13 @@ mod tests {
             ))
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("question")),
-                vec!["Q1", "Which option do you prefer?", "Option A", "Option B", "Option C"],
+                vec![
+                    "Q1",
+                    "Which option do you prefer?",
+                    "Option A",
+                    "Option B",
+                    "Option C",
+                ],
             ))
             .sign_with_keys(&keys)
             .unwrap();
@@ -818,7 +879,11 @@ mod tests {
         assert_eq!(ask.questions.len(), 1);
 
         match &ask.questions[0] {
-            AskQuestion::SingleSelect { title, question, suggestions } => {
+            AskQuestion::SingleSelect {
+                title,
+                question,
+                suggestions,
+            } => {
                 assert_eq!(title, "Q1");
                 assert_eq!(question, "Which option do you prefer?");
                 assert_eq!(suggestions, &vec!["Option A", "Option B", "Option C"]);
@@ -840,7 +905,13 @@ mod tests {
             ))
             .tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("multiselect")),
-                vec!["Features", "Select all that apply", "Dark mode", "Notifications", "Analytics"],
+                vec![
+                    "Features",
+                    "Select all that apply",
+                    "Dark mode",
+                    "Notifications",
+                    "Analytics",
+                ],
             ))
             .sign_with_keys(&keys)
             .unwrap();
@@ -863,7 +934,11 @@ mod tests {
         assert_eq!(ask.questions.len(), 1);
 
         match &ask.questions[0] {
-            AskQuestion::MultiSelect { title, question, options } => {
+            AskQuestion::MultiSelect {
+                title,
+                question,
+                options,
+            } => {
                 assert_eq!(title, "Features");
                 assert_eq!(question, "Select all that apply");
                 assert_eq!(options, &vec!["Dark mode", "Notifications", "Analytics"]);
@@ -911,7 +986,11 @@ mod tests {
         assert_eq!(ask.questions.len(), 2);
 
         match &ask.questions[0] {
-            AskQuestion::SingleSelect { title, question, suggestions } => {
+            AskQuestion::SingleSelect {
+                title,
+                question,
+                suggestions,
+            } => {
                 assert_eq!(title, "Q1");
                 assert_eq!(question, "What is your name?");
                 assert!(suggestions.is_empty());
@@ -920,7 +999,11 @@ mod tests {
         }
 
         match &ask.questions[1] {
-            AskQuestion::MultiSelect { title, question, options } => {
+            AskQuestion::MultiSelect {
+                title,
+                question,
+                options,
+            } => {
                 assert_eq!(title, "Q2");
                 assert_eq!(question, "Select your interests");
                 assert_eq!(options, &vec!["Music", "Sports", "Art"]);

@@ -35,16 +35,28 @@ impl ConversationMetadata {
                     }
                 }
                 Some("title") => {
-                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("status-label") => {
-                    status_label = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    status_label = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("status-current-activity") => {
-                    status_current_activity = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    status_current_activity = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("summary") => {
-                    summary = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    summary = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 _ => {}
             }
@@ -66,7 +78,10 @@ impl ConversationMetadata {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;
@@ -148,7 +163,10 @@ mod tests {
         assert!(metadata.is_some(), "Should parse kind:513 metadata event");
         let metadata = metadata.unwrap();
         assert_eq!(metadata.thread_id, thread_id);
-        assert_eq!(metadata.status_current_activity, Some("Writing integration tests...".to_string()));
+        assert_eq!(
+            metadata.status_current_activity,
+            Some("Writing integration tests...".to_string())
+        );
     }
 
     #[test]
@@ -195,7 +213,10 @@ mod tests {
         assert_eq!(metadata.thread_id, thread_id);
         assert_eq!(metadata.title, Some("Complex Task".to_string()));
         assert_eq!(metadata.status_label, Some("In Progress".to_string()));
-        assert_eq!(metadata.status_current_activity, Some("Refactoring data models".to_string()));
+        assert_eq!(
+            metadata.status_current_activity,
+            Some("Refactoring data models".to_string())
+        );
     }
 
     #[test]

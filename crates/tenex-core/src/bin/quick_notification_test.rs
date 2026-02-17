@@ -1,8 +1,8 @@
+use anyhow::Result;
 /// Quick test to see which notification path events come through
 use nostr_sdk::prelude::*;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 const RELAY_URL: &str = "wss://relay.tenex.tech";
 const TEST_PUBKEY: &str = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
@@ -111,14 +111,29 @@ async fn main() -> Result<()> {
     println!("\n╔════════════════════════════════════════════════════════════════╗");
     println!("║                         RESULTS                                ║");
     println!("╠════════════════════════════════════════════════════════════════╣");
-    println!("║ Duration:              {:>8.1}s                             ║", elapsed.as_secs_f64());
-    println!("║ Event path:            {:>8} events                        ║", event_count);
-    println!("║ Message path:          {:>8} events                        ║", message_count);
-    println!("║ Total:                 {:>8} events                        ║", event_count + message_count);
+    println!(
+        "║ Duration:              {:>8.1}s                             ║",
+        elapsed.as_secs_f64()
+    );
+    println!(
+        "║ Event path:            {:>8} events                        ║",
+        event_count
+    );
+    println!(
+        "║ Message path:          {:>8} events                        ║",
+        message_count
+    );
+    println!(
+        "║ Total:                 {:>8} events                        ║",
+        event_count + message_count
+    );
     println!("║                                                                ║");
     println!("║ Events by kind:                                                ║");
     for (kind, count) in kind_counts.iter() {
-        println!("║   kind:{:<5}            {:>8} events                        ║", kind, count);
+        println!(
+            "║   kind:{:<5}            {:>8} events                        ║",
+            kind, count
+        );
     }
     println!("╚════════════════════════════════════════════════════════════════╝\n");
 

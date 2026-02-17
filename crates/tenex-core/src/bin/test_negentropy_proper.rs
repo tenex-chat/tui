@@ -154,7 +154,10 @@ async fn main() -> Result<()> {
         println!("   No re-downloading on restart.\n");
     } else {
         let pct = (second_count as f64 / first_count as f64) * 100.0;
-        println!("❌ FAILURE: Downloaded {} events ({:.0}% of first sync)", second_count, pct);
+        println!(
+            "❌ FAILURE: Downloaded {} events ({:.0}% of first sync)",
+            second_count, pct
+        );
         println!("   The Client is NOT properly tracking local events.");
         println!("   This means NdbDatabase integration is not working.\n");
     }

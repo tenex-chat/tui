@@ -6,9 +6,7 @@ fn main() -> Result<()> {
     let ndb = Ndb::new("tenex_data", &Config::new())?;
 
     println!("Querying for kind 4201 (nudges)...");
-    let filter = FilterBuilder::new()
-        .kinds([4201])
-        .build();
+    let filter = FilterBuilder::new().kinds([4201]).build();
 
     let txn = Transaction::new(&ndb)?;
     let results = ndb.query(&txn, &[filter], 100)?;

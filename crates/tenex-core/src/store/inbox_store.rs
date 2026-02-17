@@ -45,7 +45,9 @@ impl InboxStore {
         // Deduplicate by id
         if !self.items.iter().any(|i| i.id == item.id) {
             // Insert sorted by created_at (most recent first)
-            let pos = self.items.partition_point(|i| i.created_at > item.created_at);
+            let pos = self
+                .items
+                .partition_point(|i| i.created_at > item.created_at);
             self.items.insert(pos, item);
         }
     }

@@ -274,7 +274,10 @@ pub async fn run_server(
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
-    eprintln!("OpenAI Responses API server listening on http://{}", bind_addr);
+    eprintln!(
+        "OpenAI Responses API server listening on http://{}",
+        bind_addr
+    );
     eprintln!("Endpoint: http://{}/:project_dtag/responses", bind_addr);
 
     axum::serve(listener, app).await?;
@@ -318,24 +321,31 @@ async fn responses_handler(
 
     // Extract the user message content from the input
     let user_content = extract_user_content(&request.input).map_err(|e| {
-        openai_error_response(StatusCode::BAD_REQUEST, OpenAIError::bad_request(e.to_string()))
+        openai_error_response(
+            StatusCode::BAD_REQUEST,
+            OpenAIError::bad_request(e.to_string()),
+        )
     })?;
 
     // Construct the project a-tag coordinate (format: kind:pubkey:identifier)
-    let project_a_tag = resolve_project_coordinate(&state, &project_dtag).await.map_err(|e| {
-        openai_error_response(
-            StatusCode::NOT_FOUND,
-            OpenAIError::not_found(format!("Project not found: {}", e)),
-        )
-    })?;
+    let project_a_tag = resolve_project_coordinate(&state, &project_dtag)
+        .await
+        .map_err(|e| {
+            openai_error_response(
+                StatusCode::NOT_FOUND,
+                OpenAIError::not_found(format!("Project not found: {}", e)),
+            )
+        })?;
 
     // Get the PM agent pubkey from the project status
-    let agent_pubkey = get_pm_agent_pubkey(&state, &project_a_tag).await.map_err(|e| {
-        openai_error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            OpenAIError::server_error(format!("Agent not available: {}", e)),
-        )
-    })?;
+    let agent_pubkey = get_pm_agent_pubkey(&state, &project_a_tag)
+        .await
+        .map_err(|e| {
+            openai_error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                OpenAIError::server_error(format!("Agent not available: {}", e)),
+            )
+        })?;
 
     // Create a title from the user message (first 50 chars, safely handling UTF-8)
     let title: String = if user_content.chars().count() > 50 {
@@ -452,12 +462,16 @@ async fn responses_handler(
             request.previous_response_id,
             request.metadata,
         );
-        Ok(Sse::new(stream).keep_alive(KeepAlive::default()).into_response())
+        Ok(Sse::new(stream)
+            .keep_alive(KeepAlive::default())
+            .into_response())
     } else {
         // Non-streaming: collect all chunks and return complete response
         Err(openai_error_response(
             StatusCode::NOT_IMPLEMENTED,
-            OpenAIError::bad_request("Non-streaming mode not yet implemented. Please use stream=true"),
+            OpenAIError::bad_request(
+                "Non-streaming mode not yet implemented. Please use stream=true",
+            ),
         ))
     }
 }
@@ -779,7 +793,8 @@ fn create_responses_sse_stream(
 /// which doesn't receive project discovery events in the HTTP server context.
 async fn resolve_project_coordinate(state: &HTTPServerState, project_dtag: &str) -> Result<String> {
     let store = state.data_store.lock().unwrap();
-    store.find_project_a_tag_by_dtag_from_ndb(project_dtag)
+    store
+        .find_project_a_tag_by_dtag_from_ndb(project_dtag)
         .ok_or_else(|| anyhow::anyhow!("Project with dtag '{}' not found", project_dtag))
 }
 
@@ -880,9 +895,18 @@ mod tests {
 
     #[test]
     fn test_openai_error_types() {
-        assert_eq!(OpenAIError::bad_request("x").error.error_type, "invalid_request_error");
-        assert_eq!(OpenAIError::not_found("x").error.error_type, "not_found_error");
-        assert_eq!(OpenAIError::server_error("x").error.error_type, "server_error");
+        assert_eq!(
+            OpenAIError::bad_request("x").error.error_type,
+            "invalid_request_error"
+        );
+        assert_eq!(
+            OpenAIError::not_found("x").error.error_type,
+            "not_found_error"
+        );
+        assert_eq!(
+            OpenAIError::server_error("x").error.error_type,
+            "server_error"
+        );
         assert_eq!(OpenAIError::timeout("x").error.error_type, "timeout_error");
     }
 
@@ -941,12 +965,10 @@ mod tests {
 
     #[test]
     fn test_extract_user_content_no_user_message() {
-        let input = ResponseInput::Messages(vec![
-            InputMessage {
-                role: "system".to_string(),
-                content: InputMessageContent::Text("You are helpful".to_string()),
-            },
-        ]);
+        let input = ResponseInput::Messages(vec![InputMessage {
+            role: "system".to_string(),
+            content: InputMessageContent::Text("You are helpful".to_string()),
+        }]);
         let result = extract_user_content(&input);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("No user message"));

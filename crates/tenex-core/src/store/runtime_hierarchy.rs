@@ -147,7 +147,8 @@ impl RuntimeHierarchy {
         visited.insert(conversation_id.to_string());
 
         // Start with this conversation's individual last_activity
-        let mut max_activity = self.individual_last_activity
+        let mut max_activity = self
+            .individual_last_activity
             .get(conversation_id)
             .copied()
             .unwrap_or(0);
@@ -155,7 +156,8 @@ impl RuntimeHierarchy {
         // Check all children recursively for their effective last_activity
         if let Some(children) = self.children.get(conversation_id) {
             for child_id in children {
-                let child_activity = self.get_effective_last_activity_with_visited(child_id, visited);
+                let child_activity =
+                    self.get_effective_last_activity_with_visited(child_id, visited);
                 if child_activity > max_activity {
                     max_activity = child_activity;
                 }
@@ -442,7 +444,8 @@ impl RuntimeHierarchy {
         let seconds_per_day: u64 = 86400;
         let today_start = (now / seconds_per_day) * seconds_per_day;
         // Use saturating_sub to prevent underflow
-        let time_window_cutoff = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
+        let time_window_cutoff =
+            today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
 
         // Group runtimes by day
         let mut by_day: std::collections::HashMap<u64, u64> = std::collections::HashMap::new();
@@ -725,8 +728,14 @@ mod tests {
         assert_eq!(hierarchy.get_total_runtime("parent1"), 80_000); // 10k + 30k + 40k
         assert_eq!(hierarchy.get_total_runtime("parent2"), 20_000); // just itself
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 2);
-        assert!(hierarchy.get_children("parent1").unwrap().contains("child1"));
-        assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
+        assert!(hierarchy
+            .get_children("parent1")
+            .unwrap()
+            .contains("child1"));
+        assert!(hierarchy
+            .get_children("parent1")
+            .unwrap()
+            .contains("child2"));
 
         // Re-parent child1 to parent2
         hierarchy.set_parent("child1", "parent2");
@@ -735,14 +744,23 @@ mod tests {
         assert_eq!(hierarchy.get_total_runtime("parent1"), 50_000); // 10k + 40k (child2 only)
         assert!(hierarchy.has_children("parent1")); // still has children
         assert_eq!(hierarchy.get_children("parent1").unwrap().len(), 1);
-        assert!(hierarchy.get_children("parent1").unwrap().contains("child2"));
-        assert!(!hierarchy.get_children("parent1").unwrap().contains("child1")); // child1 gone
+        assert!(hierarchy
+            .get_children("parent1")
+            .unwrap()
+            .contains("child2"));
+        assert!(!hierarchy
+            .get_children("parent1")
+            .unwrap()
+            .contains("child1")); // child1 gone
 
         // Verify: parent2 gained child1
         assert_eq!(hierarchy.get_total_runtime("parent2"), 50_000); // 20k + 30k
         assert!(hierarchy.has_children("parent2"));
         assert_eq!(hierarchy.get_children("parent2").unwrap().len(), 1);
-        assert!(hierarchy.get_children("parent2").unwrap().contains("child1"));
+        assert!(hierarchy
+            .get_children("parent2")
+            .unwrap()
+            .contains("child1"));
 
         // Verify child1 now points to parent2
         assert_eq!(hierarchy.get_parent("child1"), Some(&"parent2".to_string()));
@@ -1287,11 +1305,17 @@ mod tests {
         // Should not infinite loop and should return the max of all values in cycle
         // conv1's effective = max(100, 200) = 200
         let effective = hierarchy.get_effective_last_activity("conv1");
-        assert_eq!(effective, 200, "cycle detection should still return max value");
+        assert_eq!(
+            effective, 200,
+            "cycle detection should still return max value"
+        );
 
         // conv2's effective = max(200, 100) = 200
         let effective2 = hierarchy.get_effective_last_activity("conv2");
-        assert_eq!(effective2, 200, "cycle detection should still return max value from conv2");
+        assert_eq!(
+            effective2, 200,
+            "cycle detection should still return max value from conv2"
+        );
     }
 
     #[test]
@@ -1331,7 +1355,7 @@ mod tests {
         // Test that get_total_runtime_filtered excludes conversations created before cutoff
         let mut hierarchy = RuntimeHierarchy::new();
 
-        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 86400;  // 1 day before
+        let pre_cutoff = RUNTIME_CUTOFF_TIMESTAMP - 86400; // 1 day before
         let post_cutoff = RUNTIME_CUTOFF_TIMESTAMP + 86400; // 1 day after
 
         // Parent created before cutoff (should be excluded)
@@ -1574,7 +1598,8 @@ mod tests {
 
         // Conversation from yesterday (after cutoff, within window)
         hierarchy.set_individual_runtime("conv3", 75_000);
-        hierarchy.set_conversation_created_at("conv3", yesterday.max(RUNTIME_CUTOFF_TIMESTAMP + 86400));
+        hierarchy
+            .set_conversation_created_at("conv3", yesterday.max(RUNTIME_CUTOFF_TIMESTAMP + 86400));
 
         let by_day = hierarchy.get_runtime_by_day(365);
 

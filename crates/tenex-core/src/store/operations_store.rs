@@ -67,7 +67,8 @@ impl OperationsStore {
 
         // If llm-runtime tag is present, add confirmed runtime (with deduplication)
         if let Some(runtime_secs) = status.llm_runtime_secs {
-            self.agent_tracking.add_confirmed_runtime(&nostr_event_id, runtime_secs);
+            self.agent_tracking
+                .add_confirmed_runtime(&nostr_event_id, runtime_secs);
         }
 
         // If no agents are working, remove the entry
@@ -132,7 +133,8 @@ impl OperationsStore {
     }
 
     pub fn get_all_active_operations(&self) -> Vec<&OperationsStatus> {
-        let mut operations: Vec<&OperationsStatus> = self.operations_by_event
+        let mut operations: Vec<&OperationsStatus> = self
+            .operations_by_event
             .values()
             .filter(|s| !s.agent_pubkeys.is_empty())
             .collect();
@@ -181,7 +183,12 @@ mod tests {
     use super::*;
     use crate::models::OperationsStatus;
 
-    fn make_test_operations_status(event_id: &str, project: &str, agents: Vec<&str>, created_at: u64) -> OperationsStatus {
+    fn make_test_operations_status(
+        event_id: &str,
+        project: &str,
+        agents: Vec<&str>,
+        created_at: u64,
+    ) -> OperationsStatus {
         OperationsStatus {
             nostr_event_id: format!("nostr-{}", event_id),
             event_id: event_id.to_string(),
@@ -222,9 +229,18 @@ mod tests {
     #[test]
     fn test_per_project_counts() {
         let mut store = OperationsStore::new();
-        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
-        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a2"], 200));
-        store.operations_by_event.insert("ev3".to_string(), make_test_operations_status("ev3", "proj2", vec!["a3"], 300));
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a2"], 200),
+        );
+        store.operations_by_event.insert(
+            "ev3".to_string(),
+            make_test_operations_status("ev3", "proj2", vec!["a3"], 300),
+        );
 
         assert_eq!(store.get_active_operations_count("proj1"), 2);
         assert_eq!(store.get_active_operations_count("proj2"), 1);
@@ -239,8 +255,14 @@ mod tests {
     #[test]
     fn test_empty_agents_not_counted() {
         let mut store = OperationsStore::new();
-        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec![], 100));
-        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a1"], 200));
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec![], 100),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a1"], 200),
+        );
 
         assert_eq!(store.get_active_operations_count("proj1"), 1);
         assert!(!store.is_event_busy("ev1"));
@@ -251,9 +273,18 @@ mod tests {
     #[test]
     fn test_all_active_sorted_by_created_at() {
         let mut store = OperationsStore::new();
-        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 300));
-        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["a2"], 100));
-        store.operations_by_event.insert("ev3".to_string(), make_test_operations_status("ev3", "proj1", vec!["a3"], 200));
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 300),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["a2"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev3".to_string(),
+            make_test_operations_status("ev3", "proj1", vec!["a3"], 200),
+        );
 
         let all = store.get_all_active_operations();
         assert_eq!(all.len(), 3);
@@ -265,8 +296,14 @@ mod tests {
     #[test]
     fn test_project_working_agents_deduped() {
         let mut store = OperationsStore::new();
-        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100));
-        store.operations_by_event.insert("ev2".to_string(), make_test_operations_status("ev2", "proj1", vec!["agent1"], 200));
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["agent1", "agent2"], 100),
+        );
+        store.operations_by_event.insert(
+            "ev2".to_string(),
+            make_test_operations_status("ev2", "proj1", vec!["agent1"], 200),
+        );
 
         let agents = store.get_project_working_agents("proj1");
         assert_eq!(agents.len(), 2);
@@ -275,7 +312,10 @@ mod tests {
     #[test]
     fn test_cleared_on_clear() {
         let mut store = OperationsStore::new();
-        store.operations_by_event.insert("ev1".to_string(), make_test_operations_status("ev1", "proj1", vec!["a1"], 100));
+        store.operations_by_event.insert(
+            "ev1".to_string(),
+            make_test_operations_status("ev1", "proj1", vec!["a1"], 100),
+        );
 
         store.clear();
 

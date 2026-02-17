@@ -15,7 +15,9 @@ use tokio::sync::RwLock;
 
 use crate::constants::RELAY_URL;
 use crate::models::ProjectStatus;
-use crate::stats::{SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo};
+use crate::stats::{
+    SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats, SubscriptionInfo,
+};
 use crate::store::ingest_events;
 use crate::streaming::{LocalStreamChunk, SocketStreamClient};
 
@@ -68,7 +70,10 @@ macro_rules! tlog {
 }
 
 fn debug_log(msg: &str) {
-    if std::env::var("TENEX_DEBUG").map(|v| v == "1").unwrap_or(false) {
+    if std::env::var("TENEX_DEBUG")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+    {
         tlog!("DEBUG", "{}", msg);
     }
 }
@@ -99,7 +104,10 @@ async fn subscribe_project_if_new(
     // Try to subscribe
     match subscribe_project_filters(client, ndb, subscription_stats, a_tag).await {
         Ok(_) => {
-            debug_log(&format!("✅ Subscribed to newly online project: {}", extract_project_name(a_tag)));
+            debug_log(&format!(
+                "✅ Subscribed to newly online project: {}",
+                extract_project_name(a_tag)
+            ));
             Ok(true)
         }
         Err(e) => {
@@ -129,57 +137,89 @@ async fn subscribe_project_filters(
     // Metadata subscription (kind:513)
     let mut metadata_filter = Filter::new()
         .kind(Kind::Custom(KIND_PROJECT_METADATA))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
-    if let Some(latest) = latest_kind_timestamp_for_project(ndb, KIND_PROJECT_METADATA, project_a_tag) {
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            project_a_tag.to_string(),
+        );
+    if let Some(latest) =
+        latest_kind_timestamp_for_project(ndb, KIND_PROJECT_METADATA, project_a_tag)
+    {
         // Subtract 1s to avoid missing same-second events
         metadata_filter = metadata_filter.since(Timestamp::from(latest.saturating_sub(1)));
     }
     let metadata_filter_json = serde_json::to_string(&metadata_filter).ok();
-    let metadata_output = client.subscribe(metadata_filter.clone(), None).await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to metadata for {}: {}", project_name, e))?;
+    let metadata_output = client
+        .subscribe(metadata_filter.clone(), None)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to subscribe to metadata for {}: {}",
+                project_name,
+                e
+            )
+        })?;
     subscription_stats.register(
         metadata_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} metadata", project_name),
             vec![KIND_PROJECT_METADATA],
             Some(project_a_tag.to_string()),
-        ).with_raw_filter(metadata_filter_json.unwrap_or_default()),
+        )
+        .with_raw_filter(metadata_filter_json.unwrap_or_default()),
     );
 
     // Messages subscription (kind:1)
-    let mut message_filter = Filter::new()
-        .kind(Kind::from(KIND_TEXT_NOTE))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+    let mut message_filter = Filter::new().kind(Kind::from(KIND_TEXT_NOTE)).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::A),
+        project_a_tag.to_string(),
+    );
     if let Some(latest) = latest_kind_timestamp_for_project(ndb, KIND_TEXT_NOTE, project_a_tag) {
         // Subtract 1s to avoid missing same-second events
         message_filter = message_filter.since(Timestamp::from(latest.saturating_sub(1)));
     }
     let message_filter_json = serde_json::to_string(&message_filter).ok();
-    let message_output = client.subscribe(message_filter.clone(), None).await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to messages for {}: {}", project_name, e))?;
+    let message_output = client
+        .subscribe(message_filter.clone(), None)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to subscribe to messages for {}: {}",
+                project_name,
+                e
+            )
+        })?;
     subscription_stats.register(
         message_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} messages", project_name),
             vec![KIND_TEXT_NOTE],
             Some(project_a_tag.to_string()),
-        ).with_raw_filter(message_filter_json.unwrap_or_default()),
+        )
+        .with_raw_filter(message_filter_json.unwrap_or_default()),
     );
 
     // Long-form content subscription (kind:30023)
     let longform_filter = Filter::new()
         .kind(Kind::Custom(KIND_LONG_FORM_CONTENT))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::A), project_a_tag.to_string());
+        .custom_tag(
+            SingleLetterTag::lowercase(Alphabet::A),
+            project_a_tag.to_string(),
+        );
     let longform_filter_json = serde_json::to_string(&longform_filter).ok();
-    let longform_output = client.subscribe(longform_filter.clone(), None).await
-        .map_err(|e| anyhow::anyhow!("Failed to subscribe to reports for {}: {}", project_name, e))?;
+    let longform_output = client
+        .subscribe(longform_filter.clone(), None)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!("Failed to subscribe to reports for {}: {}", project_name, e)
+        })?;
     subscription_stats.register(
         longform_output.val.to_string(),
         SubscriptionInfo::new(
             format!("{} reports", project_name),
             vec![KIND_LONG_FORM_CONTENT],
             Some(project_a_tag.to_string()),
-        ).with_raw_filter(longform_filter_json.unwrap_or_default()),
+        )
+        .with_raw_filter(longform_filter_json.unwrap_or_default()),
     );
 
     Ok(())
@@ -357,9 +397,7 @@ pub enum DataChange {
         is_finish: bool,
     },
     /// Ephemeral project status event (kind:24010) - not cached in nostrdb
-    ProjectStatus {
-        json: String,
-    },
+    ProjectStatus { json: String },
     /// MCP tools changed (kind:4200 events)
     MCPToolsChanged,
 }
@@ -449,8 +487,15 @@ impl NostrWorker {
         loop {
             if let Ok(cmd) = self.command_rx.recv() {
                 match cmd {
-                    NostrCommand::Connect { keys, user_pubkey, response_tx } => {
-                        debug_log(&format!("Worker: Connecting with user {}", &user_pubkey[..8]));
+                    NostrCommand::Connect {
+                        keys,
+                        user_pubkey,
+                        response_tx,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Connecting with user {}",
+                            &user_pubkey[..8]
+                        ));
                         let result = rt.block_on(self.handle_connect(keys, user_pubkey));
                         if let Some(tx) = response_tx {
                             let _ = tx.send(result.as_ref().map(|_| ()).map_err(|e| e.to_string()));
@@ -459,9 +504,28 @@ impl NostrWorker {
                             tlog!("ERROR", "Failed to connect: {}", e);
                         }
                     }
-                    NostrCommand::PublishThread { project_a_tag, title, content, agent_pubkey, nudge_ids, skill_ids, reference_conversation_id, fork_message_id, response_tx } => {
+                    NostrCommand::PublishThread {
+                        project_a_tag,
+                        title,
+                        content,
+                        agent_pubkey,
+                        nudge_ids,
+                        skill_ids,
+                        reference_conversation_id,
+                        fork_message_id,
+                        response_tx,
+                    } => {
                         debug_log("Worker: Publishing thread");
-                        match rt.block_on(self.handle_publish_thread(project_a_tag, title, content, agent_pubkey, nudge_ids, skill_ids, reference_conversation_id, fork_message_id)) {
+                        match rt.block_on(self.handle_publish_thread(
+                            project_a_tag,
+                            title,
+                            content,
+                            agent_pubkey,
+                            nudge_ids,
+                            skill_ids,
+                            reference_conversation_id,
+                            fork_message_id,
+                        )) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -472,9 +536,28 @@ impl NostrWorker {
                             }
                         }
                     }
-                    NostrCommand::PublishMessage { thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, skill_ids, ask_author_pubkey, response_tx } => {
+                    NostrCommand::PublishMessage {
+                        thread_id,
+                        project_a_tag,
+                        content,
+                        agent_pubkey,
+                        reply_to,
+                        nudge_ids,
+                        skill_ids,
+                        ask_author_pubkey,
+                        response_tx,
+                    } => {
                         tlog!("SEND", "Worker received PublishMessage command");
-                        match rt.block_on(self.handle_publish_message(thread_id, project_a_tag, content, agent_pubkey, reply_to, nudge_ids, skill_ids, ask_author_pubkey)) {
+                        match rt.block_on(self.handle_publish_message(
+                            thread_id,
+                            project_a_tag,
+                            content,
+                            agent_pubkey,
+                            reply_to,
+                            nudge_ids,
+                            skill_ids,
+                            ask_author_pubkey,
+                        )) {
                             Ok(event_id) => {
                                 if let Some(tx) = response_tx {
                                     let _ = tx.send(event_id);
@@ -485,63 +568,177 @@ impl NostrWorker {
                             }
                         }
                     }
-                    NostrCommand::BootProject { project_a_tag, project_pubkey } => {
+                    NostrCommand::BootProject {
+                        project_a_tag,
+                        project_pubkey,
+                    } => {
                         debug_log(&format!("Worker: Booting project {}", project_a_tag));
-                        if let Err(e) = rt.block_on(self.handle_boot_project(project_a_tag, project_pubkey)) {
+                        if let Err(e) =
+                            rt.block_on(self.handle_boot_project(project_a_tag, project_pubkey))
+                        {
                             tlog!("ERROR", "Failed to boot project: {}", e);
                         }
                     }
-                    NostrCommand::UpdateProjectAgents { project_a_tag, agent_ids, mcp_tool_ids } => {
-                        debug_log(&format!("Worker: Updating project agents for {}", project_a_tag));
-                        if let Err(e) = rt.block_on(self.handle_update_project_agents(project_a_tag, agent_ids, mcp_tool_ids)) {
+                    NostrCommand::UpdateProjectAgents {
+                        project_a_tag,
+                        agent_ids,
+                        mcp_tool_ids,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Updating project agents for {}",
+                            project_a_tag
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_update_project_agents(
+                            project_a_tag,
+                            agent_ids,
+                            mcp_tool_ids,
+                        )) {
                             tlog!("ERROR", "Failed to update project agents: {}", e);
                         }
                     }
-                    NostrCommand::SaveProject { slug, name, description, agent_ids, mcp_tool_ids, client } => {
+                    NostrCommand::SaveProject {
+                        slug,
+                        name,
+                        description,
+                        agent_ids,
+                        mcp_tool_ids,
+                        client,
+                    } => {
                         debug_log(&format!("Worker: Saving project {}", name));
-                        if let Err(e) = rt.block_on(self.handle_save_project(slug, name, description, agent_ids, mcp_tool_ids, client)) {
+                        if let Err(e) = rt.block_on(self.handle_save_project(
+                            slug,
+                            name,
+                            description,
+                            agent_ids,
+                            mcp_tool_ids,
+                            client,
+                        )) {
                             tlog!("ERROR", "Failed to save project: {}", e);
                         }
                     }
-                    NostrCommand::CreateAgentDefinition { name, description, role, instructions, version, source_id, is_fork } => {
+                    NostrCommand::CreateAgentDefinition {
+                        name,
+                        description,
+                        role,
+                        instructions,
+                        version,
+                        source_id,
+                        is_fork,
+                    } => {
                         debug_log(&format!("Worker: Creating agent definition {}", name));
-                        if let Err(e) = rt.block_on(self.handle_create_agent_definition(name, description, role, instructions, version, source_id, is_fork)) {
+                        if let Err(e) = rt.block_on(self.handle_create_agent_definition(
+                            name,
+                            description,
+                            role,
+                            instructions,
+                            version,
+                            source_id,
+                            is_fork,
+                        )) {
                             tlog!("ERROR", "Failed to create agent definition: {}", e);
                         }
                     }
-                    NostrCommand::StopOperations { project_a_tag, event_ids, agent_pubkeys } => {
-                        debug_log(&format!("Worker: Sending stop command for {} events", event_ids.len()));
-                        if let Err(e) = rt.block_on(self.handle_stop_operations(project_a_tag, event_ids, agent_pubkeys)) {
+                    NostrCommand::StopOperations {
+                        project_a_tag,
+                        event_ids,
+                        agent_pubkeys,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Sending stop command for {} events",
+                            event_ids.len()
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_stop_operations(
+                            project_a_tag,
+                            event_ids,
+                            agent_pubkeys,
+                        )) {
                             tlog!("ERROR", "Failed to send stop command: {}", e);
                         }
                     }
-                    NostrCommand::UpdateAgentConfig { project_a_tag, agent_pubkey, model, tools } => {
-                        debug_log(&format!("Worker: Updating agent config for {}", &agent_pubkey[..8]));
-                        if let Err(e) = rt.block_on(self.handle_update_agent_config(project_a_tag, agent_pubkey, model, tools)) {
+                    NostrCommand::UpdateAgentConfig {
+                        project_a_tag,
+                        agent_pubkey,
+                        model,
+                        tools,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Updating agent config for {}",
+                            &agent_pubkey[..8]
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_update_agent_config(
+                            project_a_tag,
+                            agent_pubkey,
+                            model,
+                            tools,
+                        )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
                         }
                     }
                     NostrCommand::SubscribeToProjectMessages { project_a_tag } => {
-                        debug_log(&format!("Worker: Subscribing to messages for project {}", &project_a_tag));
-                        if let Err(e) = rt.block_on(self.handle_subscribe_to_project_messages(project_a_tag)) {
+                        debug_log(&format!(
+                            "Worker: Subscribing to messages for project {}",
+                            &project_a_tag
+                        ));
+                        if let Err(e) =
+                            rt.block_on(self.handle_subscribe_to_project_messages(project_a_tag))
+                        {
                             tlog!("ERROR", "Failed to subscribe to project messages: {}", e);
                         }
                     }
                     NostrCommand::SubscribeToProjectMetadata { project_a_tag } => {
-                        debug_log(&format!("Worker: Subscribing to metadata for project {}", &project_a_tag));
-                        if let Err(e) = rt.block_on(self.handle_subscribe_to_project_metadata(project_a_tag)) {
+                        debug_log(&format!(
+                            "Worker: Subscribing to metadata for project {}",
+                            &project_a_tag
+                        ));
+                        if let Err(e) =
+                            rt.block_on(self.handle_subscribe_to_project_metadata(project_a_tag))
+                        {
                             tlog!("ERROR", "Failed to subscribe to project metadata: {}", e);
                         }
                     }
-                    NostrCommand::CreateNudge { title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
+                    NostrCommand::CreateNudge {
+                        title,
+                        description,
+                        content,
+                        hashtags,
+                        allow_tools,
+                        deny_tools,
+                        only_tools,
+                    } => {
                         debug_log(&format!("Worker: Creating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_create_nudge(title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_create_nudge(
+                            title,
+                            description,
+                            content,
+                            hashtags,
+                            allow_tools,
+                            deny_tools,
+                            only_tools,
+                        )) {
                             tlog!("ERROR", "Failed to create nudge: {}", e);
                         }
                     }
-                    NostrCommand::UpdateNudge { original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools } => {
+                    NostrCommand::UpdateNudge {
+                        original_id,
+                        title,
+                        description,
+                        content,
+                        hashtags,
+                        allow_tools,
+                        deny_tools,
+                        only_tools,
+                    } => {
                         debug_log(&format!("Worker: Updating nudge '{}'", title));
-                        if let Err(e) = rt.block_on(self.handle_update_nudge(original_id, title, description, content, hashtags, allow_tools, deny_tools, only_tools)) {
+                        if let Err(e) = rt.block_on(self.handle_update_nudge(
+                            original_id,
+                            title,
+                            description,
+                            content,
+                            hashtags,
+                            allow_tools,
+                            deny_tools,
+                            only_tools,
+                        )) {
                             tlog!("ERROR", "Failed to update nudge: {}", e);
                         }
                     }
@@ -565,7 +762,8 @@ impl NostrWorker {
                         let connected_count = rt.block_on(async {
                             if let Some(client) = self.client.as_ref() {
                                 let relays = client.relays().await;
-                                relays.values()
+                                relays
+                                    .values()
                                     .filter(|r| r.status() == nostr_sdk::RelayStatus::Connected)
                                     .count()
                             } else {
@@ -616,14 +814,18 @@ impl NostrWorker {
 
         tlog!("CONN", "Starting relay connect...");
         let connect_start = std::time::Instant::now();
-        let connect_result = tokio::time::timeout(std::time::Duration::from_secs(10), client.connect()).await;
+        let connect_result =
+            tokio::time::timeout(std::time::Duration::from_secs(10), client.connect()).await;
         let connect_elapsed = connect_start.elapsed();
 
         match &connect_result {
             Ok(()) => tlog!("CONN", "Connect completed in {:?}", connect_elapsed),
             Err(_) => {
                 tlog!("CONN", "Connect TIMED OUT after {:?}", connect_elapsed);
-                return Err(anyhow::anyhow!("Connection timed out after {:?}", connect_elapsed));
+                return Err(anyhow::anyhow!(
+                    "Connection timed out after {:?}",
+                    connect_elapsed
+                ));
             }
         }
 
@@ -635,16 +837,31 @@ impl NostrWorker {
 
         loop {
             let relays = client.relays().await;
-            let connected_count = relays.values().filter(|r| r.status() == nostr_sdk::RelayStatus::Connected).count();
+            let connected_count = relays
+                .values()
+                .filter(|r| r.status() == nostr_sdk::RelayStatus::Connected)
+                .count();
 
             if connected_count > 0 {
-                tlog!("CONN", "Verified {} relay(s) connected after {:?}", connected_count, verify_start.elapsed());
+                tlog!(
+                    "CONN",
+                    "Verified {} relay(s) connected after {:?}",
+                    connected_count,
+                    verify_start.elapsed()
+                );
                 break;
             }
 
             if verify_start.elapsed() >= verify_timeout {
-                tlog!("CONN", "No relays connected after {:?} polling", verify_timeout);
-                return Err(anyhow::anyhow!("No relays connected after {:?} verification timeout", verify_timeout));
+                tlog!(
+                    "CONN",
+                    "No relays connected after {:?} polling",
+                    verify_timeout
+                );
+                return Err(anyhow::anyhow!(
+                    "No relays connected after {:?} verification timeout",
+                    verify_timeout
+                ));
             }
 
             tokio::time::sleep(poll_interval).await;
@@ -667,7 +884,9 @@ impl NostrWorker {
     }
 
     fn spawn_negentropy_sync(&self, user_pubkey: &str) {
-        let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .expect("spawn_negentropy_sync called before Connect")
             .clone();
         let ndb = self.ndb.clone();
@@ -678,11 +897,15 @@ impl NostrWorker {
                 return;
             }
         };
-        let rt_handle = self.rt_handle.as_ref()
+        let rt_handle = self
+            .rt_handle
+            .as_ref()
             .expect("spawn_negentropy_sync called before runtime initialized")
             .clone();
         let negentropy_stats = self.negentropy_stats.clone();
-        let cancel_rx = self.cancel_tx.as_ref()
+        let cancel_rx = self
+            .cancel_tx
+            .as_ref()
             .expect("spawn_negentropy_sync called before cancel_tx initialized")
             .subscribe();
 
@@ -691,12 +914,23 @@ impl NostrWorker {
 
         let subscribed_projects = self.subscribed_projects.clone();
         rt_handle.spawn(async move {
-            run_negentropy_sync(client, ndb, pubkey, negentropy_stats, cancel_rx, subscribed_projects).await;
+            run_negentropy_sync(
+                client,
+                ndb,
+                pubkey,
+                negentropy_stats,
+                cancel_rx,
+                subscribed_projects,
+            )
+            .await;
         });
     }
 
     async fn start_subscriptions(&mut self, user_pubkey: &str) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         let pubkey = PublicKey::parse(user_pubkey)?;
 
@@ -704,7 +938,9 @@ impl NostrWorker {
         let sub_start = std::time::Instant::now();
 
         // 1. User's projects (kind:31933) - only owned projects
-        let project_filter_owned = Filter::new().kind(Kind::Custom(KIND_PROJECT_DRAFT)).author(pubkey);
+        let project_filter_owned = Filter::new()
+            .kind(Kind::Custom(KIND_PROJECT_DRAFT))
+            .author(pubkey);
         let project_filter_json = serde_json::to_string(&project_filter_owned).ok();
         let output = client.subscribe(project_filter_owned.clone(), None).await?;
         self.subscription_stats.register(
@@ -712,7 +948,11 @@ impl NostrWorker {
             SubscriptionInfo::new("User projects".to_string(), vec![KIND_PROJECT_DRAFT], None)
                 .with_raw_filter(project_filter_json.unwrap_or_default()),
         );
-        tlog!("CONN", "Subscribed to projects (kind:{}) - owned by user", KIND_PROJECT_DRAFT);
+        tlog!(
+            "CONN",
+            "Subscribed to projects (kind:{}) - owned by user",
+            KIND_PROJECT_DRAFT
+        );
 
         // 2. Status events (kind:24010, kind:24133) - since 45 seconds ago
         // kind:24010 is the GLOBAL subscription that tells us which projects are online.
@@ -720,42 +960,78 @@ impl NostrWorker {
         let since_time = Timestamp::now() - 45;
         let project_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_PROJECT_STATUS))
-            .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey.to_string())
+            .custom_tag(
+                SingleLetterTag::lowercase(Alphabet::P),
+                user_pubkey.to_string(),
+            )
             .since(since_time);
         let project_status_json = serde_json::to_string(&project_status_filter).ok();
-        let project_output = client.subscribe(project_status_filter.clone(), None).await?;
+        let project_output = client
+            .subscribe(project_status_filter.clone(), None)
+            .await?;
         self.subscription_stats.register(
             project_output.val.to_string(),
-            SubscriptionInfo::new("Project status updates".to_string(), vec![KIND_PROJECT_STATUS], None)
-                .with_raw_filter(project_status_json.unwrap_or_default()),
+            SubscriptionInfo::new(
+                "Project status updates".to_string(),
+                vec![KIND_PROJECT_STATUS],
+                None,
+            )
+            .with_raw_filter(project_status_json.unwrap_or_default()),
         );
 
         // Backend uses uppercase P tag for kind:24133
         let agent_status_filter = Filter::new()
             .kind(Kind::Custom(KIND_AGENT_STATUS))
-            .custom_tag(SingleLetterTag::uppercase(Alphabet::P), user_pubkey.to_string())
+            .custom_tag(
+                SingleLetterTag::uppercase(Alphabet::P),
+                user_pubkey.to_string(),
+            )
             .since(since_time);
         let agent_status_json = serde_json::to_string(&agent_status_filter).ok();
         let agent_output = client.subscribe(agent_status_filter.clone(), None).await?;
         self.subscription_stats.register(
             agent_output.val.to_string(),
-            SubscriptionInfo::new("Operations status updates".to_string(), vec![KIND_AGENT_STATUS], None)
-                .with_raw_filter(agent_status_json.unwrap_or_default()),
+            SubscriptionInfo::new(
+                "Operations status updates".to_string(),
+                vec![KIND_AGENT_STATUS],
+                None,
+            )
+            .with_raw_filter(agent_status_json.unwrap_or_default()),
         );
 
-        tlog!("CONN", "Subscribed to status events (kind:{}, kind:{})", KIND_PROJECT_STATUS, KIND_AGENT_STATUS);
+        tlog!(
+            "CONN",
+            "Subscribed to status events (kind:{}, kind:{})",
+            KIND_PROJECT_STATUS,
+            KIND_AGENT_STATUS
+        );
 
         // 3. Global event definitions (kind:4199, 4200, 4201, 4202)
-        let global_filter = Filter::new()
-            .kinds(vec![Kind::Custom(KIND_AGENT), Kind::Custom(KIND_MCP_TOOL), Kind::Custom(KIND_NUDGE), Kind::Custom(KIND_SKILL)]);
+        let global_filter = Filter::new().kinds(vec![
+            Kind::Custom(KIND_AGENT),
+            Kind::Custom(KIND_MCP_TOOL),
+            Kind::Custom(KIND_NUDGE),
+            Kind::Custom(KIND_SKILL),
+        ]);
         let global_filter_json = serde_json::to_string(&global_filter).ok();
         let output = client.subscribe(global_filter.clone(), None).await?;
         self.subscription_stats.register(
             output.val.to_string(),
-            SubscriptionInfo::new("Global definitions".to_string(), vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL], None)
-                .with_raw_filter(global_filter_json.unwrap_or_default()),
+            SubscriptionInfo::new(
+                "Global definitions".to_string(),
+                vec![KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL],
+                None,
+            )
+            .with_raw_filter(global_filter_json.unwrap_or_default()),
         );
-        tlog!("CONN", "Subscribed to global definitions (kind:{}, kind:{}, kind:{}, kind:{})", KIND_AGENT, KIND_MCP_TOOL, KIND_NUDGE, KIND_SKILL);
+        tlog!(
+            "CONN",
+            "Subscribed to global definitions (kind:{}, kind:{}, kind:{}, kind:{})",
+            KIND_AGENT,
+            KIND_MCP_TOOL,
+            KIND_NUDGE,
+            KIND_SKILL
+        );
 
         // 4. Per-project subscriptions (kind:513 metadata, kind:1 messages, kind:30023 reports)
         // OPTIMIZATION: We no longer subscribe to ALL projects at startup.
@@ -771,7 +1047,11 @@ impl NostrWorker {
         // - kind:31933 project events arrive (user discovers/adds project)
         tlog!("CONN", "Skipping bulk project subscriptions - will subscribe to projects on-demand when they come online or are explicitly requested");
 
-        tlog!("CONN", "All subscriptions set up in {:?}", sub_start.elapsed());
+        tlog!(
+            "CONN",
+            "All subscriptions set up in {:?}",
+            sub_start.elapsed()
+        );
 
         self.spawn_notification_handler();
 
@@ -779,11 +1059,15 @@ impl NostrWorker {
     }
 
     fn spawn_notification_handler(&self) {
-        let client = self.client.as_ref()
+        let client = self
+            .client
+            .as_ref()
             .expect("spawn_notification_handler called before Connect")
             .clone();
         let ndb = self.ndb.clone();
-        let rt_handle = self.rt_handle.as_ref()
+        let rt_handle = self
+            .rt_handle
+            .as_ref()
             .expect("spawn_notification_handler called before runtime initialized")
             .clone();
         let event_stats = self.event_stats.clone();
@@ -791,7 +1075,9 @@ impl NostrWorker {
         let data_tx = self.data_tx.clone();
         let requested_profiles = self.requested_profiles.clone();
         let subscribed_projects = self.subscribed_projects.clone();
-        let mut cancel_rx = self.cancel_tx.as_ref()
+        let mut cancel_rx = self
+            .cancel_tx
+            .as_ref()
             .expect("spawn_notification_handler called before cancel_tx initialized")
             .subscribe();
 
@@ -962,11 +1248,7 @@ impl NostrWorker {
         });
     }
 
-    fn handle_incoming_event(
-        ndb: &Ndb,
-        event: Event,
-        relay_url: &str,
-    ) -> Result<()> {
+    fn handle_incoming_event(ndb: &Ndb, event: Event, relay_url: &str) -> Result<()> {
         // Ingest the event into nostrdb with relay metadata
         // UI gets notified via nostrdb SubscriptionStream when events are ready
         ingest_events(ndb, &[event.clone()], Some(relay_url))?;
@@ -985,7 +1267,10 @@ impl NostrWorker {
         reference_conversation_id: Option<String>,
         fork_message_id: Option<String>,
     ) -> Result<String> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Parse project coordinate for proper a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
@@ -1054,7 +1339,10 @@ impl NostrWorker {
         }
 
         // Build and sign the event
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
         let signed_event = event.sign_with_keys(keys)?;
         let event_id = signed_event.id.to_hex();
 
@@ -1065,11 +1353,16 @@ impl NostrWorker {
         // Send to relay with timeout (don't block forever on degraded connections)
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Published thread: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send thread to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending thread to relay (event was saved locally)"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending thread to relay (event was saved locally)"
+            ),
         }
 
         Ok(event_id)
@@ -1086,7 +1379,10 @@ impl NostrWorker {
         skill_ids: Vec<String>,
         ask_author_pubkey: Option<String>,
     ) -> Result<String> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Parse project coordinate for proper a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
@@ -1128,7 +1424,6 @@ impl NostrWorker {
             }
         }
 
-
         // Nudge tags
         for nudge_id in nudge_ids {
             event = event.tag(Tag::custom(
@@ -1146,7 +1441,10 @@ impl NostrWorker {
         }
 
         // Build and sign the event
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
         tlog!("SEND", "Signing message...");
         let sign_start = std::time::Instant::now();
         let signed_event = event.sign_with_keys(keys)?;
@@ -1161,19 +1459,40 @@ impl NostrWorker {
         let send_start = std::time::Instant::now();
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
-            Ok(Ok(output)) => tlog!("SEND", "Published message in {:?}: {}", send_start.elapsed(), output.id()),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => tlog!(
+                "SEND",
+                "Published message in {:?}: {}",
+                send_start.elapsed(),
+                output.id()
+            ),
             Ok(Err(e)) => tlog!("SEND", "Failed after {:?}: {}", send_start.elapsed(), e),
-            Err(_) => tlog!("SEND", "TIMEOUT after {:?} (event saved locally)", send_start.elapsed()),
+            Err(_) => tlog!(
+                "SEND",
+                "TIMEOUT after {:?} (event saved locally)",
+                send_start.elapsed()
+            ),
         }
 
         Ok(event_id)
     }
 
-    async fn handle_boot_project(&self, project_a_tag: String, project_pubkey: Option<String>) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+    async fn handle_boot_project(
+        &self,
+        project_a_tag: String,
+        project_pubkey: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Parse project coordinate for proper a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
@@ -1200,8 +1519,10 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Sent boot request: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send boot request to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending boot request to relay"),
@@ -1210,9 +1531,20 @@ impl NostrWorker {
         Ok(())
     }
 
-    async fn handle_update_project_agents(&self, project_a_tag: String, agent_ids: Vec<String>, mcp_tool_ids: Vec<String>) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+    async fn handle_update_project_agents(
+        &self,
+        project_a_tag: String,
+        agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Get the existing project from nostrdb
         let projects = crate::store::get_projects(&self.ndb)?;
@@ -1268,11 +1600,16 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Updated project agents: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send project update to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending project update to relay (saved locally)"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending project update to relay (saved locally)"
+            ),
         }
 
         Ok(())
@@ -1289,8 +1626,14 @@ impl NostrWorker {
     ) -> Result<()> {
         use crate::slug::slug_from_name;
 
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Use provided slug or generate d-tag from name using consistent normalization
         let d_tag = slug.unwrap_or_else(|| slug_from_name(&name));
@@ -1339,8 +1682,10 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Saved project: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send project to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending project to relay (saved locally)"),
@@ -1359,8 +1704,14 @@ impl NostrWorker {
         source_id: Option<String>,
         is_fork: bool,
     ) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Build the agent definition event (kind 4199)
         let mut event = EventBuilder::new(Kind::Custom(4199), &instructions)
@@ -1411,11 +1762,20 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
-            Ok(Ok(output)) => debug_log(&format!("Created agent definition '{}': {}", name, output.id())),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => debug_log(&format!(
+                "Created agent definition '{}': {}",
+                name,
+                output.id()
+            )),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send agent definition to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending agent definition to relay (saved locally)"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending agent definition to relay (saved locally)"
+            ),
         }
 
         Ok(())
@@ -1427,8 +1787,14 @@ impl NostrWorker {
         event_ids: Vec<String>,
         agent_pubkeys: Vec<String>,
     ) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Parse project coordinate for a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
@@ -1463,8 +1829,10 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Sent stop command: {}", output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send stop command to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending stop command to relay"),
@@ -1480,8 +1848,14 @@ impl NostrWorker {
         model: Option<String>,
         tools: Vec<String>,
     ) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Parse project coordinate for a-tag
         let coordinate = Coordinate::parse(&project_a_tag)
@@ -1522,10 +1896,16 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Sent agent config update: {}", output.id())),
-            Ok(Err(e)) => tlog!("ERROR", "Failed to send agent config update to relay: {}", e),
+            Ok(Err(e)) => tlog!(
+                "ERROR",
+                "Failed to send agent config update to relay: {}",
+                e
+            ),
             Err(_) => tlog!("ERROR", "Timeout sending agent config update to relay"),
         }
 
@@ -1543,15 +1923,26 @@ impl NostrWorker {
     /// Used by both handle_subscribe_to_project_messages and handle_subscribe_to_project_metadata
     /// since they had identical logic.
     async fn subscribe_to_project_with_dedup(&self, project_a_tag: String) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
 
         // Use atomic check+insert to prevent duplicate subscriptions
         // This is critical for iOS where refresh() and notification handler can race
-        let is_new = self.subscribed_projects.write().await.insert(project_a_tag.clone());
+        let is_new = self
+            .subscribed_projects
+            .write()
+            .await
+            .insert(project_a_tag.clone());
         if !is_new {
             // Already subscribed (likely by notification handler)
             let project_name = project_a_tag.split(':').nth(2).unwrap_or("unknown");
-            tlog!("CONN", "Skipping duplicate subscription for project: {}", project_name);
+            tlog!(
+                "CONN",
+                "Skipping duplicate subscription for project: {}",
+                project_name
+            );
             return Ok(());
         }
 
@@ -1559,11 +1950,16 @@ impl NostrWorker {
         tlog!("CONN", "Adding subscriptions for project: {}", project_name);
 
         // Use the shared helper for consistent subscription behavior
-        match subscribe_project_filters(client, &self.ndb, &self.subscription_stats, &project_a_tag).await {
+        match subscribe_project_filters(client, &self.ndb, &self.subscription_stats, &project_a_tag)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(e) => {
                 // Subscription failed - remove from set so we can retry later
-                self.subscribed_projects.write().await.remove(&project_a_tag);
+                self.subscribed_projects
+                    .write()
+                    .await
+                    .remove(&project_a_tag);
                 Err(e)
             }
         }
@@ -1643,8 +2039,14 @@ impl NostrWorker {
         deny_tools: Vec<String>,
         only_tools: Vec<String>,
     ) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Build the nudge event (kind:4201)
         let mut event = EventBuilder::new(Kind::Custom(4201), &content)
@@ -1708,8 +2110,10 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Created nudge '{}': {}", title, output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send nudge to relay: {}", e),
             Err(_) => tlog!("ERROR", "Timeout sending nudge to relay (saved locally)"),
@@ -1732,8 +2136,14 @@ impl NostrWorker {
         deny_tools: Vec<String>,
         only_tools: Vec<String>,
     ) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Build the updated nudge event (kind:4201)
         let mut event = EventBuilder::new(Kind::Custom(4201), &content)
@@ -1802,11 +2212,16 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
+            client.send_event(&signed_event),
+        )
+        .await
+        {
             Ok(Ok(output)) => debug_log(&format!("Updated nudge '{}': {}", title, output.id())),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send updated nudge to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending updated nudge to relay (saved locally)"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending updated nudge to relay (saved locally)"
+            ),
         }
 
         Ok(())
@@ -1814,12 +2229,18 @@ impl NostrWorker {
 
     /// Delete a nudge (kind:5 deletion event)
     async fn handle_delete_nudge(&self, nudge_id: String) -> Result<()> {
-        let client = self.client.as_ref().ok_or_else(|| anyhow::anyhow!("No client"))?;
-        let keys = self.keys.as_ref().ok_or_else(|| anyhow::anyhow!("No keys"))?;
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Parse the nudge event ID
-        let event_id = EventId::parse(&nudge_id)
-            .map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
+        let event_id =
+            EventId::parse(&nudge_id).map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
 
         // Build the deletion event (kind:5 per NIP-09)
         let deletion_request = EventDeletionRequest::new().id(event_id);
@@ -1838,11 +2259,20 @@ impl NostrWorker {
         // Send to relay with timeout
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            client.send_event(&signed_event)
-        ).await {
-            Ok(Ok(output)) => debug_log(&format!("Deleted nudge {}: deletion event {}", &nudge_id[..8], output.id())),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => debug_log(&format!(
+                "Deleted nudge {}: deletion event {}",
+                &nudge_id[..8],
+                output.id()
+            )),
             Ok(Err(e)) => tlog!("ERROR", "Failed to send deletion event to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending deletion event to relay (saved locally)"),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending deletion event to relay (saved locally)"
+            ),
         }
 
         Ok(())
@@ -1872,12 +2302,16 @@ async fn run_negentropy_sync(
     loop {
         // Check for cancellation before each cycle
         if *cancel_rx.borrow() {
-            tlog!("SYNC", "Negentropy sync received cancellation signal, exiting");
+            tlog!(
+                "SYNC",
+                "Negentropy sync received cancellation signal, exiting"
+            );
             break;
         }
 
         stats.set_in_progress(true);
-        let total_new = sync_all_filters(&client, &ndb, &user_pubkey, &stats, &subscribed_projects).await;
+        let total_new =
+            sync_all_filters(&client, &ndb, &user_pubkey, &stats, &subscribed_projects).await;
         stats.record_cycle_complete();
         stats.set_in_progress(false);
 
@@ -1886,7 +2320,12 @@ async fn run_negentropy_sync(
             tlog!("SYNC", "No gaps found. Next sync in {}s", interval_secs);
         } else {
             interval_secs = 60;
-            tlog!("SYNC", "Found {} new events. Next sync in {}s", total_new, interval_secs);
+            tlog!(
+                "SYNC",
+                "Found {} new events. Next sync in {}s",
+                total_new,
+                interval_secs
+            );
         }
 
         stats.set_interval(interval_secs);
@@ -1919,15 +2358,14 @@ async fn sync_all_filters(
     let user_pubkey_hex = user_pubkey.to_hex();
 
     // User's projects (kind 31933) - authored by user
-    let project_filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .author(*user_pubkey);
+    let project_filter = Filter::new().kind(Kind::Custom(31933)).author(*user_pubkey);
     total_new += sync_filter(client, project_filter, "31933-authored", stats).await;
 
     // Projects where user is a participant (kind 31933) - via p-tag
-    let project_p_filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .custom_tag(SingleLetterTag::lowercase(Alphabet::P), user_pubkey_hex.clone());
+    let project_p_filter = Filter::new().kind(Kind::Custom(31933)).custom_tag(
+        SingleLetterTag::lowercase(Alphabet::P),
+        user_pubkey_hex.clone(),
+    );
     total_new += sync_filter(client, project_p_filter, "31933-p-tagged", stats).await;
 
     // Agent definitions (kind 4199)
@@ -1998,7 +2436,12 @@ async fn sync_filter(
         page += 1;
 
         if page > MAX_PAGES {
-            tlog!("SYNC", "kind:{} reached max pages ({}), stopping", label, MAX_PAGES);
+            tlog!(
+                "SYNC",
+                "kind:{} reached max pages ({}), stopping",
+                label,
+                MAX_PAGES
+            );
             break;
         }
 
@@ -2008,7 +2451,13 @@ async fn sync_filter(
                 let count = event_ids.len();
 
                 if count > 0 {
-                    tlog!("SYNC", "kind:{} page {} -> {} new events", label, page, count);
+                    tlog!(
+                        "SYNC",
+                        "kind:{} page {} -> {} new events",
+                        label,
+                        page,
+                        count
+                    );
                     total_count += count as u64;
 
                     // If we got a full page, there might be more
@@ -2019,7 +2468,12 @@ async fn sync_filter(
                             if let Some(oldest) = events.iter().map(|e| e.created_at).min() {
                                 // Next page: get events older than this
                                 filter = filter.until(oldest - 1);
-                                tlog!("SYNC_DEBUG", "kind:{} -> fetching next page (events before {})", label, oldest);
+                                tlog!(
+                                    "SYNC_DEBUG",
+                                    "kind:{} -> fetching next page (events before {})",
+                                    label,
+                                    oldest
+                                );
                                 continue; // Fetch next page
                             }
                         }
@@ -2028,16 +2482,27 @@ async fn sync_filter(
 
                 // No more events or couldn't paginate - we're done
                 if page == 1 && count == 0 {
-                    tlog!("SYNC_DEBUG", "kind:{} -> 0 new (DB already had them)", label);
+                    tlog!(
+                        "SYNC_DEBUG",
+                        "kind:{} -> 0 new (DB already had them)",
+                        label
+                    );
                 } else if page > 1 {
-                    tlog!("SYNC", "kind:{} COMPLETE -> {} total events across {} pages", label, total_count, page);
+                    tlog!(
+                        "SYNC",
+                        "kind:{} COMPLETE -> {} total events across {} pages",
+                        label,
+                        total_count,
+                        page
+                    );
                 }
 
                 break; // Done paginating
             }
             Err(e) => {
                 let err_str = format!("{}", e);
-                let is_unsupported = err_str.contains("not supported") || err_str.contains("NEG-ERR");
+                let is_unsupported =
+                    err_str.contains("not supported") || err_str.contains("NEG-ERR");
 
                 if !is_unsupported {
                     tlog!("SYNC", "kind:{} page {} failed: {}", label, page, e);
@@ -2063,7 +2528,8 @@ mod tests {
 
     #[test]
     fn test_coordinate_parse() {
-        let a_tag = "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:DDD-83ayt6";
+        let a_tag =
+            "31933:09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7:DDD-83ayt6";
         let result = Coordinate::parse(a_tag);
         println!("Parse result: {:?}", result);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
@@ -2144,11 +2610,20 @@ mod tests {
         let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
 
         // Exclusive mode: should emit only-tool tags
-        assert!(has_tag_type(&tags, "only-tool"), "Should have only-tool tags");
+        assert!(
+            has_tag_type(&tags, "only-tool"),
+            "Should have only-tool tags"
+        );
 
         // Exclusive mode: should NOT emit allow-tool or deny-tool tags
-        assert!(!has_tag_type(&tags, "allow-tool"), "Should NOT have allow-tool tags in exclusive mode");
-        assert!(!has_tag_type(&tags, "deny-tool"), "Should NOT have deny-tool tags in exclusive mode");
+        assert!(
+            !has_tag_type(&tags, "allow-tool"),
+            "Should NOT have allow-tool tags in exclusive mode"
+        );
+        assert!(
+            !has_tag_type(&tags, "deny-tool"),
+            "Should NOT have deny-tool tags in exclusive mode"
+        );
 
         // Verify the only-tool values
         let only_values = get_tag_values(&tags, "only-tool");
@@ -2166,11 +2641,20 @@ mod tests {
         let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
 
         // Additive mode: should emit allow-tool and deny-tool tags
-        assert!(has_tag_type(&tags, "allow-tool"), "Should have allow-tool tags");
-        assert!(has_tag_type(&tags, "deny-tool"), "Should have deny-tool tags");
+        assert!(
+            has_tag_type(&tags, "allow-tool"),
+            "Should have allow-tool tags"
+        );
+        assert!(
+            has_tag_type(&tags, "deny-tool"),
+            "Should have deny-tool tags"
+        );
 
         // Additive mode: should NOT emit only-tool tags
-        assert!(!has_tag_type(&tags, "only-tool"), "Should NOT have only-tool tags in additive mode");
+        assert!(
+            !has_tag_type(&tags, "only-tool"),
+            "Should NOT have only-tool tags in additive mode"
+        );
 
         // Verify the allow-tool values
         let allow_values = get_tag_values(&tags, "allow-tool");
@@ -2195,8 +2679,14 @@ mod tests {
 
         // Exclusive mode takes precedence
         assert!(has_tag_type(&tags, "only-tool"));
-        assert!(!has_tag_type(&tags, "allow-tool"), "Exclusive mode must never emit allow-tool");
-        assert!(!has_tag_type(&tags, "deny-tool"), "Exclusive mode must never emit deny-tool");
+        assert!(
+            !has_tag_type(&tags, "allow-tool"),
+            "Exclusive mode must never emit allow-tool"
+        );
+        assert!(
+            !has_tag_type(&tags, "deny-tool"),
+            "Exclusive mode must never emit deny-tool"
+        );
 
         // Only the only-tool should be present
         let only_values = get_tag_values(&tags, "only-tool");
@@ -2212,7 +2702,10 @@ mod tests {
         let tags = build_nudge_tool_tags(&allow_tools, &deny_tools, &only_tools);
 
         // Additive mode should never emit only-tool
-        assert!(!has_tag_type(&tags, "only-tool"), "Additive mode must never emit only-tool");
+        assert!(
+            !has_tag_type(&tags, "only-tool"),
+            "Additive mode must never emit only-tool"
+        );
         assert!(has_tag_type(&tags, "allow-tool"));
         assert!(has_tag_type(&tags, "deny-tool"));
     }

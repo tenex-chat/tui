@@ -7,9 +7,7 @@ fn main() -> Result<()> {
 
     println!("Querying for kind 31933 (projects)...");
 
-    let filter = FilterBuilder::new()
-        .kinds([31933])
-        .build();
+    let filter = FilterBuilder::new().kinds([31933]).build();
 
     let txn = nostrdb::Transaction::new(&ndb)?;
     let results = ndb.query(&txn, &[filter], 100)?;
@@ -23,7 +21,10 @@ fn main() -> Result<()> {
         println!("  id: {}", &id_hex[..16]);
         println!("  kind: {}", note.kind());
         println!("  created_at: {}", note.created_at());
-        println!("  content: {}", &note.content()[..50.min(note.content().len())]);
+        println!(
+            "  content: {}",
+            &note.content()[..50.min(note.content().len())]
+        );
         println!();
     }
 

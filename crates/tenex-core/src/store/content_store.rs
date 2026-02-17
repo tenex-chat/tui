@@ -82,7 +82,8 @@ impl ContentStore {
 
     pub fn handle_agent_definition_event(&mut self, note: &Note) {
         if let Some(agent_def) = AgentDefinition::from_note(note) {
-            self.agent_definitions.insert(agent_def.id.clone(), agent_def);
+            self.agent_definitions
+                .insert(agent_def.id.clone(), agent_def);
         }
     }
 
@@ -137,7 +138,8 @@ impl ContentStore {
         for result in results {
             if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
                 if let Some(agent_def) = AgentDefinition::from_note(&note) {
-                    self.agent_definitions.insert(agent_def.id.clone(), agent_def);
+                    self.agent_definitions
+                        .insert(agent_def.id.clone(), agent_def);
                 }
             }
         }
@@ -307,9 +309,18 @@ mod tests {
     #[test]
     fn test_agent_definitions_sorted_descending() {
         let mut store = ContentStore::new();
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Older Agent", 100));
-        store.agent_definitions.insert("a2".to_string(), make_test_agent_def("a2", "Newer Agent", 200));
-        store.agent_definitions.insert("a3".to_string(), make_test_agent_def("a3", "Middle Agent", 150));
+        store.agent_definitions.insert(
+            "a1".to_string(),
+            make_test_agent_def("a1", "Older Agent", 100),
+        );
+        store.agent_definitions.insert(
+            "a2".to_string(),
+            make_test_agent_def("a2", "Newer Agent", 200),
+        );
+        store.agent_definitions.insert(
+            "a3".to_string(),
+            make_test_agent_def("a3", "Middle Agent", 150),
+        );
 
         let defs = store.get_agent_definitions();
         assert_eq!(defs.len(), 3);
@@ -321,7 +332,10 @@ mod tests {
     #[test]
     fn test_agent_definition_lookup() {
         let mut store = ContentStore::new();
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent One", 100));
+        store.agent_definitions.insert(
+            "a1".to_string(),
+            make_test_agent_def("a1", "Agent One", 100),
+        );
 
         assert!(store.get_agent_definition("a1").is_some());
         assert_eq!(store.get_agent_definition("a1").unwrap().name, "Agent One");
@@ -331,8 +345,12 @@ mod tests {
     #[test]
     fn test_mcp_tools_sorted_descending() {
         let mut store = ContentStore::new();
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
-        store.mcp_tools.insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
+        store
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Old Tool", 100));
+        store
+            .mcp_tools
+            .insert("t2".to_string(), make_test_mcp_tool("t2", "New Tool", 200));
 
         let tools = store.get_mcp_tools();
         assert_eq!(tools.len(), 2);
@@ -343,7 +361,9 @@ mod tests {
     #[test]
     fn test_mcp_tool_lookup() {
         let mut store = ContentStore::new();
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
+        store
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Tool One", 100));
 
         assert!(store.get_mcp_tool("t1").is_some());
         assert!(store.get_mcp_tool("missing").is_none());
@@ -352,8 +372,12 @@ mod tests {
     #[test]
     fn test_nudges_sorted_descending() {
         let mut store = ContentStore::new();
-        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
-        store.nudges.insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
+        store
+            .nudges
+            .insert("n1".to_string(), make_test_nudge("n1", "Old Nudge", 100));
+        store
+            .nudges
+            .insert("n2".to_string(), make_test_nudge("n2", "New Nudge", 200));
 
         let nudges = store.get_nudges();
         assert_eq!(nudges.len(), 2);
@@ -364,8 +388,12 @@ mod tests {
     #[test]
     fn test_skills_sorted_descending() {
         let mut store = ContentStore::new();
-        store.skills.insert("s1".to_string(), make_test_skill("s1", "Old Skill", 100));
-        store.skills.insert("s2".to_string(), make_test_skill("s2", "New Skill", 200));
+        store
+            .skills
+            .insert("s1".to_string(), make_test_skill("s1", "Old Skill", 100));
+        store
+            .skills
+            .insert("s2".to_string(), make_test_skill("s2", "New Skill", 200));
 
         let skills = store.get_skills();
         assert_eq!(skills.len(), 2);
@@ -376,7 +404,9 @@ mod tests {
     #[test]
     fn test_skill_lookup() {
         let mut store = ContentStore::new();
-        store.skills.insert("s1".to_string(), make_test_skill("s1", "Skill One", 100));
+        store
+            .skills
+            .insert("s1".to_string(), make_test_skill("s1", "Skill One", 100));
 
         assert!(store.get_skill("s1").is_some());
         assert_eq!(store.get_skill("s1").unwrap().title, "Skill One");
@@ -386,7 +416,9 @@ mod tests {
     #[test]
     fn test_lesson_lookup() {
         let mut store = ContentStore::new();
-        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
+        store
+            .lessons
+            .insert("l1".to_string(), make_test_lesson("l1", "Lesson One", 100));
 
         assert!(store.get_lesson("l1").is_some());
         assert_eq!(store.get_lesson("l1").unwrap().title, "Lesson One");
@@ -396,11 +428,21 @@ mod tests {
     #[test]
     fn test_cleared_on_clear() {
         let mut store = ContentStore::new();
-        store.agent_definitions.insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
-        store.mcp_tools.insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
-        store.nudges.insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
-        store.skills.insert("s1".to_string(), make_test_skill("s1", "Skill", 100));
-        store.lessons.insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
+        store
+            .agent_definitions
+            .insert("a1".to_string(), make_test_agent_def("a1", "Agent", 100));
+        store
+            .mcp_tools
+            .insert("t1".to_string(), make_test_mcp_tool("t1", "Tool", 100));
+        store
+            .nudges
+            .insert("n1".to_string(), make_test_nudge("n1", "Nudge", 100));
+        store
+            .skills
+            .insert("s1".to_string(), make_test_skill("s1", "Skill", 100));
+        store
+            .lessons
+            .insert("l1".to_string(), make_test_lesson("l1", "Lesson", 100));
 
         store.clear();
 

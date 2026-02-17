@@ -51,7 +51,8 @@ impl ProjectStatus {
         let created_at = event.get("created_at")?.as_u64()?;
 
         let tags_value = event.get("tags")?.as_array()?;
-        let tags: Vec<Vec<String>> = tags_value.iter()
+        let tags: Vec<Vec<String>> = tags_value
+            .iter()
             .filter_map(|t| {
                 t.as_array().map(|arr| {
                     arr.iter()
@@ -216,7 +217,10 @@ impl ProjectStatus {
     /// Returns all available tools (including unassigned tools).
     ///
     /// **⚠️ DEPRECATED**: Use `all_tools()` or `agent_assigned_tools()` directly.
-    #[deprecated(since = "0.1.0", note = "Use `all_tools()` or `agent_assigned_tools()` instead")]
+    #[deprecated(
+        since = "0.1.0",
+        note = "Use `all_tools()` or `agent_assigned_tools()` instead"
+    )]
     pub fn tools(&self) -> Vec<&str> {
         self.all_tools()
     }
@@ -262,7 +266,11 @@ mod tests {
         vec![
             // Tool tags with agent assignments (3+ elements)
             vec!["tool".to_string(), "Read".to_string(), "agent1".to_string()],
-            vec!["tool".to_string(), "Write".to_string(), "agent1".to_string()],
+            vec![
+                "tool".to_string(),
+                "Write".to_string(),
+                "agent1".to_string(),
+            ],
             vec!["tool".to_string(), "Bash".to_string(), "agent1".to_string()],
             // Tool tags WITHOUT agent assignments (2 elements) - these should still be collected
             vec!["tool".to_string(), "rag_create_collection".to_string()],
@@ -287,21 +295,54 @@ mod tests {
     /// Only checks for unassigned tools that should always be in all_tools
     fn assert_must_have_unassigned_tools(all_tools: &[String]) {
         // RAG tools (unassigned)
-        assert!(all_tools.contains(&"rag_create_collection".to_string()), "Missing rag_create_collection");
-        assert!(all_tools.contains(&"rag_add_documents".to_string()), "Missing rag_add_documents");
-        assert!(all_tools.contains(&"rag_query".to_string()), "Missing rag_query");
-        assert!(all_tools.contains(&"rag_delete_collection".to_string()), "Missing rag_delete_collection");
-        assert!(all_tools.contains(&"rag_list_collections".to_string()), "Missing rag_list_collections");
+        assert!(
+            all_tools.contains(&"rag_create_collection".to_string()),
+            "Missing rag_create_collection"
+        );
+        assert!(
+            all_tools.contains(&"rag_add_documents".to_string()),
+            "Missing rag_add_documents"
+        );
+        assert!(
+            all_tools.contains(&"rag_query".to_string()),
+            "Missing rag_query"
+        );
+        assert!(
+            all_tools.contains(&"rag_delete_collection".to_string()),
+            "Missing rag_delete_collection"
+        );
+        assert!(
+            all_tools.contains(&"rag_list_collections".to_string()),
+            "Missing rag_list_collections"
+        );
 
         // Scheduling tools (unassigned)
-        assert!(all_tools.contains(&"schedule_task_cancel".to_string()), "Missing schedule_task_cancel");
-        assert!(all_tools.contains(&"schedule_task".to_string()), "Missing schedule_task");
-        assert!(all_tools.contains(&"schedule_task_once".to_string()), "Missing schedule_task_once");
-        assert!(all_tools.contains(&"schedule_tasks_list".to_string()), "Missing schedule_tasks_list");
+        assert!(
+            all_tools.contains(&"schedule_task_cancel".to_string()),
+            "Missing schedule_task_cancel"
+        );
+        assert!(
+            all_tools.contains(&"schedule_task".to_string()),
+            "Missing schedule_task"
+        );
+        assert!(
+            all_tools.contains(&"schedule_task_once".to_string()),
+            "Missing schedule_task_once"
+        );
+        assert!(
+            all_tools.contains(&"schedule_tasks_list".to_string()),
+            "Missing schedule_tasks_list"
+        );
 
         // Other critical tools (unassigned)
-        assert!(all_tools.contains(&"kill_shell".to_string()), "Missing kill_shell");
-        assert!(all_tools.contains(&"conversation_index".to_string()), "Missing conversation_index");
+        assert!(
+            all_tools.contains(&"kill_shell".to_string()),
+            "Missing kill_shell"
+        );
+        assert!(
+            all_tools.contains(&"conversation_index".to_string()),
+            "Missing conversation_index"
+        );
     }
 
     /// Helper to assert that tools with agent assignments are present
@@ -316,7 +357,11 @@ mod tests {
         // Simulate a kind:24010 event with various tool tags
         let mut tags = vec![
             vec!["a".to_string(), "31933:pubkey:identifier".to_string()],
-            vec!["agent".to_string(), "agent1_pubkey".to_string(), "agent1".to_string()],
+            vec![
+                "agent".to_string(),
+                "agent1_pubkey".to_string(),
+                "agent1".to_string(),
+            ],
         ];
         tags.extend(tool_tag_fixtures());
 
@@ -540,13 +585,28 @@ mod tests {
         assert!(ui_tools.contains(&"Read"), "UI must show Read");
         assert!(ui_tools.contains(&"Write"), "UI must show Write");
         assert!(ui_tools.contains(&"Bash"), "UI must show Bash");
-        assert!(ui_tools.contains(&"rag_create_collection"), "UI must show rag_create_collection");
-        assert!(ui_tools.contains(&"rag_add_documents"), "UI must show rag_add_documents");
+        assert!(
+            ui_tools.contains(&"rag_create_collection"),
+            "UI must show rag_create_collection"
+        );
+        assert!(
+            ui_tools.contains(&"rag_add_documents"),
+            "UI must show rag_add_documents"
+        );
         assert!(ui_tools.contains(&"rag_query"), "UI must show rag_query");
-        assert!(ui_tools.contains(&"rag_delete_collection"), "UI must show rag_delete_collection");
-        assert!(ui_tools.contains(&"schedule_task"), "UI must show schedule_task");
+        assert!(
+            ui_tools.contains(&"rag_delete_collection"),
+            "UI must show rag_delete_collection"
+        );
+        assert!(
+            ui_tools.contains(&"schedule_task"),
+            "UI must show schedule_task"
+        );
         assert!(ui_tools.contains(&"kill_shell"), "UI must show kill_shell");
-        assert!(ui_tools.contains(&"conversation_index"), "UI must show conversation_index");
+        assert!(
+            ui_tools.contains(&"conversation_index"),
+            "UI must show conversation_index"
+        );
 
         assert_eq!(ui_tools.len(), 10, "UI should display all 10 tools");
 
@@ -630,11 +690,26 @@ mod tests {
         let status = ProjectStatus::from_json(json).unwrap();
 
         // Find each agent and verify PM status
-        let architect = status.agents.iter().find(|a| a.name == "architect").unwrap();
-        let claude_code = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
-        let researcher = status.agents.iter().find(|a| a.name == "researcher").unwrap();
+        let architect = status
+            .agents
+            .iter()
+            .find(|a| a.name == "architect")
+            .unwrap();
+        let claude_code = status
+            .agents
+            .iter()
+            .find(|a| a.name == "claude-code")
+            .unwrap();
+        let researcher = status
+            .agents
+            .iter()
+            .find(|a| a.name == "researcher")
+            .unwrap();
 
-        assert!(architect.is_pm, "architect should be PM (has 'pm' marker in tag)");
+        assert!(
+            architect.is_pm,
+            "architect should be PM (has 'pm' marker in tag)"
+        );
         assert!(!claude_code.is_pm, "claude-code should NOT be PM");
         assert!(!researcher.is_pm, "researcher should NOT be PM");
 
@@ -661,12 +736,30 @@ mod tests {
         let status = ProjectStatus::from_json(json).unwrap();
 
         // The PM is NOT the first agent - it's the one with the "pm" marker
-        let researcher = status.agents.iter().find(|a| a.name == "researcher").unwrap();
-        let exec_coord = status.agents.iter().find(|a| a.name == "execution-coordinator").unwrap();
-        let claude_code = status.agents.iter().find(|a| a.name == "claude-code").unwrap();
+        let researcher = status
+            .agents
+            .iter()
+            .find(|a| a.name == "researcher")
+            .unwrap();
+        let exec_coord = status
+            .agents
+            .iter()
+            .find(|a| a.name == "execution-coordinator")
+            .unwrap();
+        let claude_code = status
+            .agents
+            .iter()
+            .find(|a| a.name == "claude-code")
+            .unwrap();
 
-        assert!(!researcher.is_pm, "researcher should NOT be PM (no 'pm' marker)");
-        assert!(exec_coord.is_pm, "execution-coordinator should be PM (has 'pm' marker)");
+        assert!(
+            !researcher.is_pm,
+            "researcher should NOT be PM (no 'pm' marker)"
+        );
+        assert!(
+            exec_coord.is_pm,
+            "execution-coordinator should be PM (has 'pm' marker)"
+        );
         assert!(!claude_code.is_pm, "claude-code should NOT be PM");
 
         // Verify pm_agent() returns the correct agent
@@ -691,7 +784,10 @@ mod tests {
         let status = ProjectStatus::from_json(json).unwrap();
 
         // No agent should be marked as PM
-        assert!(!status.agents.iter().any(|a| a.is_pm), "No agent should be PM when no 'pm' marker exists");
+        assert!(
+            !status.agents.iter().any(|a| a.is_pm),
+            "No agent should be PM when no 'pm' marker exists"
+        );
         assert!(status.pm_agent().is_none(), "pm_agent() should return None");
     }
 
@@ -704,9 +800,18 @@ mod tests {
         let status = ProjectStatus::from_json(json).expect("Failed to parse real event");
 
         // Find the architect-orchestrator agent (should be PM based on the fixture)
-        let architect = status.agents.iter().find(|a| a.name == "architect-orchestrator");
-        assert!(architect.is_some(), "Should have architect-orchestrator agent");
-        assert!(architect.unwrap().is_pm, "architect-orchestrator should be PM (has 'pm' marker in fixture)");
+        let architect = status
+            .agents
+            .iter()
+            .find(|a| a.name == "architect-orchestrator");
+        assert!(
+            architect.is_some(),
+            "Should have architect-orchestrator agent"
+        );
+        assert!(
+            architect.unwrap().is_pm,
+            "architect-orchestrator should be PM (has 'pm' marker in fixture)"
+        );
 
         // Verify pm_agent() returns the correct agent
         let pm = status.pm_agent().expect("Should have a PM agent");

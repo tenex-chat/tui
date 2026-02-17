@@ -17,23 +17,31 @@ async fn main() -> Result<()> {
     client.add_relay(RELAY_URL).await?;
 
     println!("Connecting to {}...", RELAY_URL);
-    tokio::time::timeout(Duration::from_secs(5), client.connect()).await.ok();
+    tokio::time::timeout(Duration::from_secs(5), client.connect())
+        .await
+        .ok();
     println!("Connected!");
 
     // Fetch projects (kind 31933)
-    println!("\n=== Fetching projects (kind 31933) for author {} ===", &pubkey.to_hex()[..16]);
-    let project_filter = Filter::new()
-        .kind(Kind::Custom(31933))
-        .author(pubkey);
+    println!(
+        "\n=== Fetching projects (kind 31933) for author {} ===",
+        &pubkey.to_hex()[..16]
+    );
+    let project_filter = Filter::new().kind(Kind::Custom(31933)).author(pubkey);
 
-    let events = client.fetch_events(project_filter, Duration::from_secs(10)).await?;
+    let events = client
+        .fetch_events(project_filter, Duration::from_secs(10))
+        .await?;
     let events_vec: Vec<Event> = events.into_iter().collect();
 
     println!("Found {} project events:", events_vec.len());
     for event in &events_vec {
         println!("  id: {}", &event.id.to_hex()[..16]);
         println!("  created_at: {}", event.created_at.as_secs());
-        println!("  content: {}", &event.content[..100.min(event.content.len())]);
+        println!(
+            "  content: {}",
+            &event.content[..100.min(event.content.len())]
+        );
 
         // Look for d tag (identifier)
         for tag in event.tags.iter() {
@@ -46,12 +54,17 @@ async fn main() -> Result<()> {
     }
 
     // Fetch project status (kind 24010)
-    println!("\n=== Fetching project status (kind 24010) with p-tag {} ===", &pubkey.to_hex()[..16]);
+    println!(
+        "\n=== Fetching project status (kind 24010) with p-tag {} ===",
+        &pubkey.to_hex()[..16]
+    );
     let status_filter = Filter::new()
         .kind(Kind::Custom(24010))
         .custom_tag(SingleLetterTag::lowercase(Alphabet::P), pubkey.to_hex());
 
-    let status_events = client.fetch_events(status_filter, Duration::from_secs(10)).await?;
+    let status_events = client
+        .fetch_events(status_filter, Duration::from_secs(10))
+        .await?;
     let status_vec: Vec<Event> = status_events.into_iter().collect();
 
     println!("Found {} status events:", status_vec.len());

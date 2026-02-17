@@ -6,8 +6,8 @@ pub struct Project {
     pub name: String,
     pub pubkey: String,
     pub participants: Vec<String>,
-    pub agent_ids: Vec<String>,      // Agent definition event IDs (kind 4199)
-    pub mcp_tool_ids: Vec<String>,   // MCP tool event IDs (kind 4200)
+    pub agent_ids: Vec<String>, // Agent definition event IDs (kind 4199)
+    pub mcp_tool_ids: Vec<String>, // MCP tool event IDs (kind 4200)
     pub created_at: u64,
 }
 
@@ -30,13 +30,22 @@ impl Project {
             let tag_name = tag.get(0).and_then(|t| t.variant().str());
             match tag_name {
                 Some("d") => {
-                    id = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    id = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("title") => {
-                    title = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    title = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("name") => {
-                    name = tag.get(1).and_then(|t| t.variant().str()).map(|s| s.to_string());
+                    name = tag
+                        .get(1)
+                        .and_then(|t| t.variant().str())
+                        .map(|s| s.to_string());
                 }
                 Some("p") => {
                     if let Some(p) = tag.get(1).and_then(|t| t.variant().str()) {

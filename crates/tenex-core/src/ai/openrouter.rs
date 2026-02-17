@@ -43,7 +43,8 @@ impl OpenRouterClient {
     pub async fn get_models(&self) -> Result<Vec<Model>> {
         let url = format!("{}/models", OPENROUTER_API_BASE);
 
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .send()
@@ -96,7 +97,8 @@ impl OpenRouterClient {
             ],
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
@@ -108,7 +110,11 @@ impl OpenRouterClient {
         if !response.status().is_success() {
             let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            anyhow::bail!("OpenRouter chat completion error ({}): {}", status, error_text);
+            anyhow::bail!(
+                "OpenRouter chat completion error ({}): {}",
+                status,
+                error_text
+            );
         }
 
         let response_json: serde_json::Value = response
@@ -149,7 +155,12 @@ mod tests {
         let prompt = "Remove code blocks and make this audio-friendly.";
 
         let result = client
-            .massage_text_for_audio(text, Some("Test Conversation"), "openai/gpt-3.5-turbo", prompt)
+            .massage_text_for_audio(
+                text,
+                Some("Test Conversation"),
+                "openai/gpt-3.5-turbo",
+                prompt,
+            )
             .await
             .unwrap();
 

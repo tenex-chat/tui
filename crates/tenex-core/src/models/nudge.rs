@@ -51,11 +51,9 @@ impl Nudge {
                 if let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) {
                     // Handle supersedes tag specially - nostrdb stores 64-char hex strings as Id variant
                     if tag_name == "supersedes" {
-                        supersedes = tag.get(1).and_then(|t| {
-                            match t.variant() {
-                                nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
-                                nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
-                            }
+                        supersedes = tag.get(1).and_then(|t| match t.variant() {
+                            nostrdb::NdbStrVariant::Str(s) => Some(s.to_string()),
+                            nostrdb::NdbStrVariant::Id(bytes) => Some(hex::encode(bytes)),
                         });
                         continue;
                     }
@@ -103,7 +101,10 @@ impl Nudge {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::{events::{ingest_events, wait_for_event_processing}, Database};
+    use crate::store::{
+        events::{ingest_events, wait_for_event_processing},
+        Database,
+    };
     use nostr_sdk::prelude::*;
     use nostrdb::{Filter, Transaction};
     use tempfile::tempdir;
@@ -152,7 +153,10 @@ mod tests {
         let nudge = Nudge::from_note(&note).expect("Should parse nudge");
 
         assert_eq!(nudge.allowed_tools, vec!["Bash", "Read", "Write"]);
-        assert!(nudge.denied_tools.is_empty(), "denied_tools should be empty");
+        assert!(
+            nudge.denied_tools.is_empty(),
+            "denied_tools should be empty"
+        );
         assert!(nudge.only_tools.is_empty(), "only_tools should be empty");
     }
 
@@ -190,7 +194,10 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let nudge = Nudge::from_note(&note).expect("Should parse nudge");
 
-        assert!(nudge.allowed_tools.is_empty(), "allowed_tools should be empty");
+        assert!(
+            nudge.allowed_tools.is_empty(),
+            "allowed_tools should be empty"
+        );
         assert_eq!(nudge.denied_tools, vec!["Bash", "Write"]);
         assert!(nudge.only_tools.is_empty(), "only_tools should be empty");
     }
@@ -229,8 +236,14 @@ mod tests {
         let note = db.ndb.get_note_by_key(&txn, results[0].note_key).unwrap();
         let nudge = Nudge::from_note(&note).expect("Should parse nudge");
 
-        assert!(nudge.allowed_tools.is_empty(), "allowed_tools should be empty in exclusive mode");
-        assert!(nudge.denied_tools.is_empty(), "denied_tools should be empty in exclusive mode");
+        assert!(
+            nudge.allowed_tools.is_empty(),
+            "allowed_tools should be empty in exclusive mode"
+        );
+        assert!(
+            nudge.denied_tools.is_empty(),
+            "denied_tools should be empty in exclusive mode"
+        );
         assert_eq!(nudge.only_tools, vec!["Read", "Grep"]);
     }
 

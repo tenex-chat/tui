@@ -57,7 +57,10 @@ fn main() -> Result<()> {
     };
     let thread_id = hex::encode(thread_note.id());
     println!("Testing with thread: {}", &thread_id[..16]);
-    println!("Thread content: {}\n", &thread_note.content()[..100.min(thread_note.content().len())]);
+    println!(
+        "Thread content: {}\n",
+        &thread_note.content()[..100.min(thread_note.content().len())]
+    );
 
     // Now find messages: kind:1 with e-tag
     let mut all_messages = Vec::new();
@@ -85,7 +88,7 @@ fn main() -> Result<()> {
             if tag.count() >= 2 {
                 if let Some(first) = tag.get(0) {
                     let first_str = first.str().unwrap_or("<not-str>");
-                        if first_str == "e" {
+                    if first_str == "e" {
                         e_tag_examples += 1;
                         if e_tag_examples <= 5 {
                             if let Some(second) = tag.get(1) {
@@ -96,7 +99,10 @@ fn main() -> Result<()> {
                                 } else {
                                     "unknown".to_string()
                                 };
-                                    println!("e-tag example {}: tag[0]='{}' tag[1]={}", e_tag_examples, first_str, val);
+                                println!(
+                                    "e-tag example {}: tag[0]='{}' tag[1]={}",
+                                    e_tag_examples, first_str, val
+                                );
                             }
                         }
                     }
@@ -113,7 +119,7 @@ fn main() -> Result<()> {
     for note in all_messages.iter().take(100) {
         for tag in note.tags() {
             if tag.count() >= 2 {
-                    let is_e_tag = matches!(tag.get(0).and_then(|s| s.str()), Some("e"));
+                let is_e_tag = matches!(tag.get(0).and_then(|s| s.str()), Some("e"));
                 if is_e_tag {
                     if let Some(tag_elem) = tag.get(1) {
                         let tag_value = if let Some(s) = tag_elem.str() {
@@ -139,7 +145,10 @@ fn main() -> Result<()> {
     if thread_refs.contains(&thread_id) {
         println!("\n✅ Thread {} is referenced by messages", &thread_id[..16]);
     } else {
-        println!("\n⚠️  Thread {} is NOT referenced by any of the first 100 messages", &thread_id[..16]);
+        println!(
+            "\n⚠️  Thread {} is NOT referenced by any of the first 100 messages",
+            &thread_id[..16]
+        );
     }
 
     Ok(())

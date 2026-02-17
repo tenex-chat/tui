@@ -1,3 +1,4 @@
+use anyhow::Result;
 /// Test program to investigate nostr-sdk notification paths
 ///
 /// This program:
@@ -8,7 +9,6 @@
 use nostr_sdk::prelude::*;
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
-use anyhow::Result;
 
 const RELAY_URL: &str = "wss://relay.tenex.tech";
 const TEST_PUBKEY: &str = "09d48a1a5dbe13404a729634f1d6ba722d40513468dd713c8ea38ca9b7b6f2c7";
@@ -63,19 +63,40 @@ impl EventStats {
         println!("\n╔════════════════════════════════════════════════════════════════╗");
         println!("║                     EVENT STATISTICS                           ║");
         println!("╠════════════════════════════════════════════════════════════════╣");
-        println!("║ Time elapsed:          {:>8.1}s                             ║", elapsed.as_secs_f64());
-        println!("║ Via Event path:        {:>8} events                        ║", self.total_via_event);
-        println!("║ Via Message path:      {:>8} events                        ║", self.total_via_message);
-        println!("║ Total events:          {:>8}                                 ║", self.total_via_event + self.total_via_message);
-        println!("║ Unique event IDs:      {:>8}                                 ║", unique_count);
-        println!("║ Duplication factor:    {:>8.2}x                              ║", duplication_factor);
+        println!(
+            "║ Time elapsed:          {:>8.1}s                             ║",
+            elapsed.as_secs_f64()
+        );
+        println!(
+            "║ Via Event path:        {:>8} events                        ║",
+            self.total_via_event
+        );
+        println!(
+            "║ Via Message path:      {:>8} events                        ║",
+            self.total_via_message
+        );
+        println!(
+            "║ Total events:          {:>8}                                 ║",
+            self.total_via_event + self.total_via_message
+        );
+        println!(
+            "║ Unique event IDs:      {:>8}                                 ║",
+            unique_count
+        );
+        println!(
+            "║ Duplication factor:    {:>8.2}x                              ║",
+            duplication_factor
+        );
         println!("╚════════════════════════════════════════════════════════════════╝");
     }
 }
 
 async fn test_with_negentropy(enable_negentropy: bool) -> Result<()> {
     println!("\n╔════════════════════════════════════════════════════════════════╗");
-    println!("║  TEST: {} NEGENTROPY                    ║", if enable_negentropy { "WITH" } else { "WITHOUT" });
+    println!(
+        "║  TEST: {} NEGENTROPY                    ║",
+        if enable_negentropy { "WITH" } else { "WITHOUT" }
+    );
     println!("╚════════════════════════════════════════════════════════════════╝\n");
 
     let keys = Keys::generate();
@@ -119,12 +140,11 @@ async fn test_with_negentropy(enable_negentropy: bool) -> Result<()> {
     println!("  ✓ Agent status (kind:24133)");
 
     // 4. Global definitions (kinds 4199, 4200, 4201)
-    let global_filter = Filter::new()
-        .kinds(vec![
-            Kind::Custom(KIND_AGENT),
-            Kind::Custom(KIND_MCP_TOOL),
-            Kind::Custom(KIND_NUDGE),
-        ]);
+    let global_filter = Filter::new().kinds(vec![
+        Kind::Custom(KIND_AGENT),
+        Kind::Custom(KIND_MCP_TOOL),
+        Kind::Custom(KIND_NUDGE),
+    ]);
     client.subscribe(global_filter.clone(), None).await?;
     println!("  ✓ Global definitions (kinds:4199,4200,4201)");
 
@@ -146,7 +166,9 @@ async fn test_with_negentropy(enable_negentropy: bool) -> Result<()> {
 
                 // Sync the same filters
                 let filters = vec![
-                    Filter::new().kind(Kind::Custom(KIND_PROJECT_DRAFT)).author(pubkey_clone),
+                    Filter::new()
+                        .kind(Kind::Custom(KIND_PROJECT_DRAFT))
+                        .author(pubkey_clone),
                     Filter::new().kind(Kind::Custom(KIND_AGENT)),
                     Filter::new().kind(Kind::Custom(KIND_MCP_TOOL)),
                     Filter::new().kind(Kind::Custom(KIND_NUDGE)),
@@ -169,7 +191,10 @@ async fn test_with_negentropy(enable_negentropy: bool) -> Result<()> {
                     }
                 }
 
-                println!("  ✓ Sync completed in {:.1}s\n", sync_start.elapsed().as_secs_f64());
+                println!(
+                    "  ✓ Sync completed in {:.1}s\n",
+                    sync_start.elapsed().as_secs_f64()
+                );
                 tokio::time::sleep(Duration::from_secs(60)).await;
             }
         }))

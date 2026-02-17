@@ -37,7 +37,8 @@ impl ReportsStore {
     }
 
     pub fn get_reports_by_project(&self, project_a_tag: &str) -> Vec<&Report> {
-        let mut reports: Vec<_> = self.reports
+        let mut reports: Vec<_> = self
+            .reports
             .values()
             .filter(|r| r.project_a_tag == project_a_tag)
             .collect();
@@ -72,7 +73,8 @@ impl ReportsStore {
     }
 
     pub fn get_document_threads(&self, document_a_tag: &str) -> &[Thread] {
-        self.document_threads.get(document_a_tag)
+        self.document_threads
+            .get(document_a_tag)
             .map(|v| v.as_slice())
             .unwrap_or(&[])
     }
@@ -97,16 +99,26 @@ impl ReportsStore {
     }
 
     pub fn add_document_thread(&mut self, document_a_tag: &str, thread: Thread) {
-        let threads = self.document_threads.entry(document_a_tag.to_string()).or_default();
+        let threads = self
+            .document_threads
+            .entry(document_a_tag.to_string())
+            .or_default();
         if !threads.iter().any(|t| t.id == thread.id) {
             threads.push(thread);
             threads.sort_by(|a, b| b.last_activity.cmp(&a.last_activity));
         }
     }
 
-    pub fn handle_report_event(&mut self, note: &Note, known_project_a_tags: &[String]) -> Option<Report> {
+    pub fn handle_report_event(
+        &mut self,
+        note: &Note,
+        known_project_a_tags: &[String],
+    ) -> Option<Report> {
         if let Some(report) = Report::from_note(note) {
-            if known_project_a_tags.iter().any(|tag| *tag == report.project_a_tag) {
+            if known_project_a_tags
+                .iter()
+                .any(|tag| *tag == report.project_a_tag)
+            {
                 self.add_report(report.clone());
                 return Some(report);
             }
@@ -126,10 +138,7 @@ impl ReportsStore {
         };
 
         let a_tag_refs: Vec<&str> = project_a_tags.iter().map(|s| s.as_str()).collect();
-        let filter = Filter::new()
-            .kinds([30023])
-            .tags(a_tag_refs, 'a')
-            .build();
+        let filter = Filter::new().kinds([30023]).tags(a_tag_refs, 'a').build();
         let Ok(results) = ndb.query(&txn, &[filter], 1000) else {
             return;
         };
@@ -264,14 +273,20 @@ mod tests {
         assert!(prev.is_some());
         assert_eq!(prev.unwrap().id, "v1-id");
 
-        assert!(store.get_previous_report_version("my-report", "v1-id").is_none());
+        assert!(store
+            .get_previous_report_version("my-report", "v1-id")
+            .is_none());
     }
 
     #[test]
     fn test_document_threads() {
         let mut store = ReportsStore::new();
         let thread = make_test_thread("t1", "pk1", 100);
-        store.document_threads.entry("doc-atag".to_string()).or_default().push(thread);
+        store
+            .document_threads
+            .entry("doc-atag".to_string())
+            .or_default()
+            .push(thread);
 
         let threads = store.get_document_threads("doc-atag");
         assert_eq!(threads.len(), 1);
@@ -284,7 +299,11 @@ mod tests {
     fn test_cleared_on_clear() {
         let mut store = ReportsStore::new();
         store.add_report(make_test_report("slug", "proj1", 100));
-        store.document_threads.entry("doc".to_string()).or_default().push(make_test_thread("t1", "pk1", 100));
+        store
+            .document_threads
+            .entry("doc".to_string())
+            .or_default()
+            .push(make_test_thread("t1", "pk1", 100));
 
         store.clear();
 

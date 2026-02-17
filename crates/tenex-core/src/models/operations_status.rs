@@ -68,12 +68,16 @@ impl OperationsStatus {
 
         for tag_value in tags_value {
             // Skip malformed tags gracefully (tolerant parsing like ProjectStatus)
-            let Some(tag_arr) = tag_value.as_array() else { continue };
+            let Some(tag_arr) = tag_value.as_array() else {
+                continue;
+            };
             if tag_arr.is_empty() {
                 continue;
             }
 
-            let Some(tag_name) = tag_arr.first().and_then(|v| v.as_str()) else { continue };
+            let Some(tag_name) = tag_arr.first().and_then(|v| v.as_str()) else {
+                continue;
+            };
 
             match tag_name {
                 "e" => {
@@ -126,9 +130,7 @@ impl OperationsStatus {
         }
 
         // After loop: prefer first non-root e-tag, fallback to first root e-tag
-        let event_id = non_root_e_tags.first()
-            .or(root_e_tags.first())
-            .cloned()?;
+        let event_id = non_root_e_tags.first().or(root_e_tags.first()).cloned()?;
         // a-tag (project_coordinate) is mandatory - reject malformed events without it
         let project_coordinate = project_coordinate?;
         // Use q-tag for thread_id if available, otherwise fall back to first root e-tag
@@ -169,7 +171,9 @@ impl OperationsStatus {
                 continue;
             }
 
-            let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) else { continue };
+            let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) else {
+                continue;
+            };
 
             match tag_name {
                 "e" => {
@@ -228,9 +232,7 @@ impl OperationsStatus {
         }
 
         // After loop: prefer first non-root e-tag, fallback to first root e-tag
-        let event_id = non_root_e_tags.first()
-            .or(root_e_tags.first())
-            .cloned()?;
+        let event_id = non_root_e_tags.first().or(root_e_tags.first()).cloned()?;
         // a-tag (project_coordinate) is mandatory - reject malformed events without it
         let project_coordinate = project_coordinate?;
         // Use q-tag for thread_id if available, otherwise fall back to first root e-tag

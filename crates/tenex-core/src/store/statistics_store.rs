@@ -84,7 +84,11 @@ impl StatisticsStore {
         self.get_tokens_by_hour_from(current_hour_start, num_hours)
     }
 
-    pub fn get_tokens_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
+    pub fn get_tokens_by_hour_from(
+        &self,
+        current_hour_start: u64,
+        num_hours: usize,
+    ) -> HashMap<u64, u64> {
         let mut result: HashMap<u64, u64> = HashMap::new();
 
         if num_hours == 0 {
@@ -122,7 +126,11 @@ impl StatisticsStore {
         self.get_message_count_by_hour_from(current_hour_start, num_hours)
     }
 
-    pub fn get_message_count_by_hour_from(&self, current_hour_start: u64, num_hours: usize) -> HashMap<u64, u64> {
+    pub fn get_message_count_by_hour_from(
+        &self,
+        current_hour_start: u64,
+        num_hours: usize,
+    ) -> HashMap<u64, u64> {
         let mut result: HashMap<u64, u64> = HashMap::new();
 
         if num_hours == 0 {
@@ -140,7 +148,9 @@ impl StatisticsStore {
             let seconds_since_day_start = hour_start - day_start;
             let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
 
-            if let Some((_, message_count)) = self.llm_activity_by_hour.get(&(day_start, hour_of_day)) {
+            if let Some((_, message_count)) =
+                self.llm_activity_by_hour.get(&(day_start, hour_of_day))
+            {
                 result.insert(hour_start, *message_count);
             }
         }
@@ -155,7 +165,10 @@ impl StatisticsStore {
             .unwrap_or(0);
         let seconds_per_day: u64 = 86400;
         let today_start = (now / seconds_per_day) * seconds_per_day;
-        self.runtime_by_day_counts.get(&today_start).copied().unwrap_or(0)
+        self.runtime_by_day_counts
+            .get(&today_start)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub fn get_runtime_by_day(&self, num_days: usize) -> Vec<(u64, u64)> {
@@ -169,7 +182,8 @@ impl StatisticsStore {
             .unwrap_or(0);
         let seconds_per_day: u64 = 86400;
         let today_start = (now / seconds_per_day) * seconds_per_day;
-        let earliest_day = today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
+        let earliest_day =
+            today_start.saturating_sub((num_days as u64).saturating_sub(1) * seconds_per_day);
 
         let mut result: Vec<(u64, u64)> = self
             .runtime_by_day_counts
@@ -183,11 +197,19 @@ impl StatisticsStore {
 
     // ===== Incremental Updates =====
 
-    pub fn increment_message_day_count(&mut self, created_at: u64, pubkey: &str, user_pubkey: Option<&str>) {
+    pub fn increment_message_day_count(
+        &mut self,
+        created_at: u64,
+        pubkey: &str,
+        user_pubkey: Option<&str>,
+    ) {
         let seconds_per_day: u64 = 86400;
         let day_start = (created_at / seconds_per_day) * seconds_per_day;
 
-        let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+        let entry = self
+            .messages_by_day_counts
+            .entry(day_start)
+            .or_insert((0, 0));
 
         // Increment all count
         entry.1 += 1;
@@ -198,7 +220,11 @@ impl StatisticsStore {
         }
     }
 
-    pub fn increment_llm_activity_hour(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
+    pub fn increment_llm_activity_hour(
+        &mut self,
+        created_at: u64,
+        llm_metadata: &[(String, String)],
+    ) {
         if llm_metadata.is_empty() {
             return;
         }
@@ -216,12 +242,19 @@ impl StatisticsStore {
             .and_then(|(_, value)| value.parse::<u64>().ok())
             .unwrap_or(0);
 
-        let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+        let entry = self
+            .llm_activity_by_hour
+            .entry((day_start, hour_of_day))
+            .or_insert((0, 0));
         entry.0 += tokens;
         entry.1 += 1;
     }
 
-    pub fn increment_runtime_day_count(&mut self, created_at: u64, llm_metadata: &[(String, String)]) {
+    pub fn increment_runtime_day_count(
+        &mut self,
+        created_at: u64,
+        llm_metadata: &[(String, String)],
+    ) {
         if created_at < RUNTIME_CUTOFF_TIMESTAMP {
             return;
         }
@@ -250,7 +283,12 @@ impl StatisticsStore {
         user_pubkey: &Option<String>,
         project_a_tags: &[String],
     ) {
-        self._rebuild_messages_by_day_counts_impl(ndb, user_pubkey, project_a_tags, DEFAULT_PAGINATION_BATCH_SIZE);
+        self._rebuild_messages_by_day_counts_impl(
+            ndb,
+            user_pubkey,
+            project_a_tags,
+            DEFAULT_PAGINATION_BATCH_SIZE,
+        );
     }
 
     #[cfg(test)]
@@ -288,9 +326,8 @@ impl StatisticsStore {
                             let mut total_user_messages: u64 = 0;
 
                             loop {
-                                let mut filter_builder = nostrdb::Filter::new()
-                                    .kinds([1])
-                                    .authors([&pubkey_array]);
+                                let mut filter_builder =
+                                    nostrdb::Filter::new().kinds([1]).authors([&pubkey_array]);
 
                                 if let Some(until) = until_timestamp {
                                     filter_builder = filter_builder.until(until);
@@ -310,18 +347,28 @@ impl StatisticsStore {
                                         let mut new_events_in_page = 0;
 
                                         for result in results.iter() {
-                                            if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                                            if let Ok(note) =
+                                                ndb.get_note_by_key(&txn, result.note_key)
+                                            {
                                                 let event_id = *note.id();
                                                 let created_at = note.created_at();
 
                                                 match page_oldest_timestamp {
-                                                    None => page_oldest_timestamp = Some(created_at),
-                                                    Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
+                                                    None => {
+                                                        page_oldest_timestamp = Some(created_at)
+                                                    }
+                                                    Some(t) if created_at < t => {
+                                                        page_oldest_timestamp = Some(created_at)
+                                                    }
                                                     _ => {}
                                                 }
                                                 match page_newest_timestamp {
-                                                    None => page_newest_timestamp = Some(created_at),
-                                                    Some(t) if created_at > t => page_newest_timestamp = Some(created_at),
+                                                    None => {
+                                                        page_newest_timestamp = Some(created_at)
+                                                    }
+                                                    Some(t) if created_at > t => {
+                                                        page_newest_timestamp = Some(created_at)
+                                                    }
                                                     _ => {}
                                                 }
 
@@ -330,8 +377,12 @@ impl StatisticsStore {
                                                 }
                                                 seen_event_ids.insert(event_id);
 
-                                                let day_start = (created_at / seconds_per_day) * seconds_per_day;
-                                                let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+                                                let day_start = (created_at / seconds_per_day)
+                                                    * seconds_per_day;
+                                                let entry = self
+                                                    .messages_by_day_counts
+                                                    .entry(day_start)
+                                                    .or_insert((0, 0));
                                                 entry.0 += 1;
                                                 total_user_messages += 1;
                                                 new_events_in_page += 1;
@@ -339,7 +390,9 @@ impl StatisticsStore {
                                         }
 
                                         if page_size >= (batch_size as usize) {
-                                            if let (Some(oldest), Some(newest)) = (page_oldest_timestamp, page_newest_timestamp) {
+                                            if let (Some(oldest), Some(newest)) =
+                                                (page_oldest_timestamp, page_newest_timestamp)
+                                            {
                                                 if oldest == newest {
                                                     warn!(
                                                         "Potential same-second overflow detected in user messages query: \
@@ -368,7 +421,10 @@ impl StatisticsStore {
                                         }
                                     }
                                     Err(e) => {
-                                        warn!("Failed to query user messages from nostrdb: {:?}", e);
+                                        warn!(
+                                            "Failed to query user messages from nostrdb: {:?}",
+                                            e
+                                        );
                                         break;
                                     }
                                 }
@@ -377,11 +433,17 @@ impl StatisticsStore {
                             trace!("Counted {} total user messages", total_user_messages);
                         }
                         Err(e) => {
-                            warn!("Failed to create transaction for user messages query: {:?}", e);
+                            warn!(
+                                "Failed to create transaction for user messages query: {:?}",
+                                e
+                            );
                         }
                     }
                 } else {
-                    warn!("Invalid user pubkey length: {} (expected 32 bytes)", pubkey_bytes.len());
+                    warn!(
+                        "Invalid user pubkey length: {} (expected 32 bytes)",
+                        pubkey_bytes.len()
+                    );
                 }
             } else {
                 warn!("Failed to decode user pubkey from hex: {}", user_pk);
@@ -421,18 +483,23 @@ impl StatisticsStore {
                                     let mut new_events_in_page = 0;
 
                                     for result in results.iter() {
-                                        if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) {
+                                        if let Ok(note) = ndb.get_note_by_key(&txn, result.note_key)
+                                        {
                                             let event_id = *note.id();
                                             let created_at = note.created_at();
 
                                             match page_oldest_timestamp {
                                                 None => page_oldest_timestamp = Some(created_at),
-                                                Some(t) if created_at < t => page_oldest_timestamp = Some(created_at),
+                                                Some(t) if created_at < t => {
+                                                    page_oldest_timestamp = Some(created_at)
+                                                }
                                                 _ => {}
                                             }
                                             match page_newest_timestamp {
                                                 None => page_newest_timestamp = Some(created_at),
-                                                Some(t) if created_at > t => page_newest_timestamp = Some(created_at),
+                                                Some(t) if created_at > t => {
+                                                    page_newest_timestamp = Some(created_at)
+                                                }
                                                 _ => {}
                                             }
 
@@ -441,8 +508,12 @@ impl StatisticsStore {
                                             }
                                             seen_event_ids.insert(event_id);
 
-                                            let day_start = (created_at / seconds_per_day) * seconds_per_day;
-                                            let entry = self.messages_by_day_counts.entry(day_start).or_insert((0, 0));
+                                            let day_start =
+                                                (created_at / seconds_per_day) * seconds_per_day;
+                                            let entry = self
+                                                .messages_by_day_counts
+                                                .entry(day_start)
+                                                .or_insert((0, 0));
                                             entry.1 += 1;
                                             total_project_messages += 1;
                                             new_events_in_page += 1;
@@ -450,7 +521,9 @@ impl StatisticsStore {
                                     }
 
                                     if page_size >= (batch_size as usize) {
-                                        if let (Some(oldest), Some(newest)) = (page_oldest_timestamp, page_newest_timestamp) {
+                                        if let (Some(oldest), Some(newest)) =
+                                            (page_oldest_timestamp, page_newest_timestamp)
+                                        {
                                             if oldest == newest {
                                                 warn!(
                                                     "Potential same-second overflow detected in project '{}' messages query: \
@@ -479,23 +552,35 @@ impl StatisticsStore {
                                     }
                                 }
                                 Err(e) => {
-                                    warn!("Failed to query project messages for a-tag '{}': {:?}", a_tag, e);
+                                    warn!(
+                                        "Failed to query project messages for a-tag '{}': {:?}",
+                                        a_tag, e
+                                    );
                                     break;
                                 }
                             }
                         }
                     }
 
-                    trace!("Counted {} total project messages (deduplicated)", total_project_messages);
+                    trace!(
+                        "Counted {} total project messages (deduplicated)",
+                        total_project_messages
+                    );
                 }
                 Err(e) => {
-                    warn!("Failed to create transaction for project messages query: {:?}", e);
+                    warn!(
+                        "Failed to create transaction for project messages query: {:?}",
+                        e
+                    );
                 }
             }
         }
     }
 
-    pub fn rebuild_llm_activity_by_hour(&mut self, messages_by_thread: &HashMap<String, Vec<Message>>) {
+    pub fn rebuild_llm_activity_by_hour(
+        &mut self,
+        messages_by_thread: &HashMap<String, Vec<Message>>,
+    ) {
         self.llm_activity_by_hour.clear();
 
         let seconds_per_day: u64 = 86400;
@@ -510,13 +595,17 @@ impl StatisticsStore {
                     let seconds_since_day_start = created_at - day_start;
                     let hour_of_day = (seconds_since_day_start / seconds_per_hour) as u8;
 
-                    let tokens = message.llm_metadata
+                    let tokens = message
+                        .llm_metadata
                         .iter()
                         .find(|(key, _)| key == "total-tokens")
                         .and_then(|(_, value)| value.parse::<u64>().ok())
                         .unwrap_or(0);
 
-                    let entry = self.llm_activity_by_hour.entry((day_start, hour_of_day)).or_insert((0, 0));
+                    let entry = self
+                        .llm_activity_by_hour
+                        .entry((day_start, hour_of_day))
+                        .or_insert((0, 0));
                     entry.0 += tokens;
                     entry.1 += 1;
                 }
@@ -524,7 +613,10 @@ impl StatisticsStore {
         }
     }
 
-    pub fn rebuild_runtime_by_day_counts(&mut self, messages_by_thread: &HashMap<String, Vec<Message>>) {
+    pub fn rebuild_runtime_by_day_counts(
+        &mut self,
+        messages_by_thread: &HashMap<String, Vec<Message>>,
+    ) {
         let mut counts: HashMap<u64, u64> = HashMap::new();
 
         for messages in messages_by_thread.values() {
@@ -534,7 +626,8 @@ impl StatisticsStore {
                     continue;
                 }
 
-                let runtime_ms: u64 = message.llm_metadata
+                let runtime_ms: u64 = message
+                    .llm_metadata
                     .iter()
                     .filter(|(key, _)| key == "runtime")
                     .filter_map(|(_, value)| value.parse::<u64>().ok())
@@ -559,7 +652,13 @@ impl StatisticsStore {
 mod tests {
     use super::*;
 
-    fn make_test_message(id: &str, pubkey: &str, thread_id: &str, content: &str, created_at: u64) -> Message {
+    fn make_test_message(
+        id: &str,
+        pubkey: &str,
+        thread_id: &str,
+        content: &str,
+        created_at: u64,
+    ) -> Message {
         Message {
             id: id.to_string(),
             content: content.to_string(),
@@ -609,8 +708,12 @@ mod tests {
         let today_start = (now / 86400) * 86400;
 
         store.messages_by_day_counts.insert(today_start, (5, 10));
-        store.messages_by_day_counts.insert(today_start - 86400, (3, 7));
-        store.messages_by_day_counts.insert(today_start - 86400 * 10, (1, 2));
+        store
+            .messages_by_day_counts
+            .insert(today_start - 86400, (3, 7));
+        store
+            .messages_by_day_counts
+            .insert(today_start - 86400 * 10, (1, 2));
 
         let (user, all) = store.get_messages_by_day(3);
         assert_eq!(user.len(), 2);
@@ -696,14 +799,19 @@ mod tests {
 
         let user_msg = make_test_message("msg1", "pubkey1", "thread1", "user message", timestamp);
 
-        let mut llm_msg = make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
+        let mut llm_msg =
+            make_test_message("msg2", "pubkey1", "thread1", "LLM response", timestamp);
         llm_msg.llm_metadata = vec![("total-tokens".to_string(), "150".to_string())];
 
-        let mut empty_metadata_msg = make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
+        let mut empty_metadata_msg =
+            make_test_message("msg3", "pubkey1", "thread1", "empty metadata", timestamp);
         empty_metadata_msg.llm_metadata = vec![];
 
         let mut messages_by_thread = HashMap::new();
-        messages_by_thread.insert("thread1".to_string(), vec![user_msg, llm_msg, empty_metadata_msg]);
+        messages_by_thread.insert(
+            "thread1".to_string(),
+            vec![user_msg, llm_msg, empty_metadata_msg],
+        );
         store.rebuild_llm_activity_by_hour(&messages_by_thread);
 
         assert_eq!(store.llm_activity_by_hour.len(), 1);
@@ -757,9 +865,18 @@ mod tests {
         let mut messages_by_thread: HashMap<String, Vec<Message>> = HashMap::new();
         for i in 0..5u64 {
             let timestamp = base_timestamp + (i * seconds_per_hour);
-            let mut msg = make_test_message(&format!("msg{}", i), "pubkey1", "thread1", "test", timestamp);
+            let mut msg = make_test_message(
+                &format!("msg{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                timestamp,
+            );
             msg.llm_metadata = vec![("total-tokens".to_string(), format!("{}", (i + 1) * 100))];
-            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+            messages_by_thread
+                .entry("thread1".to_string())
+                .or_default()
+                .push(msg);
         }
 
         store.rebuild_llm_activity_by_hour(&messages_by_thread);
@@ -770,9 +887,18 @@ mod tests {
 
         let result = store.get_tokens_by_hour_from(current_hour_start, 3);
         assert_eq!(result.len(), 3);
-        assert_eq!(result.get(&(base_timestamp + 4 * seconds_per_hour)), Some(&500_u64));
-        assert_eq!(result.get(&(base_timestamp + 3 * seconds_per_hour)), Some(&400_u64));
-        assert_eq!(result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&300_u64));
+        assert_eq!(
+            result.get(&(base_timestamp + 4 * seconds_per_hour)),
+            Some(&500_u64)
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 3 * seconds_per_hour)),
+            Some(&400_u64)
+        );
+        assert_eq!(
+            result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&300_u64)
+        );
 
         let result = store.get_tokens_by_hour_from(current_hour_start, 5);
         assert_eq!(result.len(), 5);
@@ -824,20 +950,41 @@ mod tests {
         // Hour 0: 1 message with 1000 tokens
         let mut msg = make_test_message("msg0", "pubkey1", "thread1", "test", base_timestamp);
         msg.llm_metadata = vec![("total-tokens".to_string(), "1000".to_string())];
-        messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+        messages_by_thread
+            .entry("thread1".to_string())
+            .or_default()
+            .push(msg);
 
         // Hour 1: 2 messages with 500 tokens each
         for i in 0..2 {
-            let mut msg = make_test_message(&format!("msg1_{}", i), "pubkey1", "thread1", "test", base_timestamp + seconds_per_hour);
+            let mut msg = make_test_message(
+                &format!("msg1_{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                base_timestamp + seconds_per_hour,
+            );
             msg.llm_metadata = vec![("total-tokens".to_string(), "500".to_string())];
-            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+            messages_by_thread
+                .entry("thread1".to_string())
+                .or_default()
+                .push(msg);
         }
 
         // Hour 2: 3 messages with 333 tokens each
         for i in 0..3 {
-            let mut msg = make_test_message(&format!("msg2_{}", i), "pubkey1", "thread1", "test", base_timestamp + 2 * seconds_per_hour);
+            let mut msg = make_test_message(
+                &format!("msg2_{}", i),
+                "pubkey1",
+                "thread1",
+                "test",
+                base_timestamp + 2 * seconds_per_hour,
+            );
             msg.llm_metadata = vec![("total-tokens".to_string(), "333".to_string())];
-            messages_by_thread.entry("thread1".to_string()).or_default().push(msg);
+            messages_by_thread
+                .entry("thread1".to_string())
+                .or_default()
+                .push(msg);
         }
 
         store.rebuild_llm_activity_by_hour(&messages_by_thread);
@@ -846,13 +993,25 @@ mod tests {
 
         let message_result = store.get_message_count_by_hour_from(current_hour_start, 3);
         assert_eq!(message_result.len(), 3);
-        assert_eq!(message_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&3_u64));
-        assert_eq!(message_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&2_u64));
+        assert_eq!(
+            message_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&3_u64)
+        );
+        assert_eq!(
+            message_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&2_u64)
+        );
         assert_eq!(message_result.get(&base_timestamp), Some(&1_u64));
 
         let token_result = store.get_tokens_by_hour_from(current_hour_start, 3);
-        assert_eq!(token_result.get(&(base_timestamp + 2 * seconds_per_hour)), Some(&999_u64));
-        assert_eq!(token_result.get(&(base_timestamp + 1 * seconds_per_hour)), Some(&1000_u64));
+        assert_eq!(
+            token_result.get(&(base_timestamp + 2 * seconds_per_hour)),
+            Some(&999_u64)
+        );
+        assert_eq!(
+            token_result.get(&(base_timestamp + 1 * seconds_per_hour)),
+            Some(&1000_u64)
+        );
         assert_eq!(token_result.get(&base_timestamp), Some(&1000_u64));
     }
 
@@ -868,7 +1027,13 @@ mod tests {
         let today_start = (now / seconds_per_day) * seconds_per_day;
         let yesterday_start = today_start.saturating_sub(seconds_per_day);
 
-        fn make_message_with_runtime(id: &str, pubkey: &str, thread_id: &str, created_at: u64, runtime_ms: u64) -> Message {
+        fn make_message_with_runtime(
+            id: &str,
+            pubkey: &str,
+            thread_id: &str,
+            created_at: u64,
+            runtime_ms: u64,
+        ) -> Message {
             Message {
                 id: id.to_string(),
                 content: "test".to_string(),

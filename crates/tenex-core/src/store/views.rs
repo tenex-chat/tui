@@ -44,7 +44,10 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
 /// because it scans all kind:1 events ONCE and groups them by project.
 ///
 /// Returns: HashMap<project_a_tag, HashSet<thread_root_id>>
-pub fn build_thread_root_index(ndb: &Ndb, project_a_tags: &[String]) -> Result<HashMap<String, HashSet<String>>> {
+pub fn build_thread_root_index(
+    ndb: &Ndb,
+    project_a_tags: &[String],
+) -> Result<HashMap<String, HashSet<String>>> {
     let txn = Transaction::new(ndb)?;
     let mut index: HashMap<String, HashSet<String>> = HashMap::new();
 
@@ -56,10 +59,7 @@ pub fn build_thread_root_index(ndb: &Ndb, project_a_tags: &[String]) -> Result<H
     // Query all kind:1 events for all projects at once
     // Build a filter with all project a_tags
     for a_tag in project_a_tags {
-        let filter = Filter::new()
-            .kinds([1])
-            .tags([a_tag.as_str()], 'a')
-            .build();
+        let filter = Filter::new().kinds([1]).tags([a_tag.as_str()], 'a').build();
 
         // Query with high limit to get all events
         let results = ndb.query(&txn, &[filter], 100_000)?;
@@ -86,10 +86,7 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
 
     // Get threads (kind:1 with a-tag, no e-tags)
     let mut threads: Vec<Thread> = {
-        let thread_filter = Filter::new()
-            .kinds([1])
-            .tags([project_a_tag], 'a')
-            .build();
+        let thread_filter = Filter::new().kinds([1]).tags([project_a_tag], 'a').build();
         // NOTE: We query ALL kind:1 events because nostrdb doesn't support filtering by "no e-tag".
         // The limit must be high enough to capture all events; Thread::from_note will filter
         // out messages (which have e-tags) keeping only thread roots.
@@ -145,7 +142,10 @@ pub fn get_threads_for_project(ndb: &Ndb, project_a_tag: &str) -> Result<Vec<Thr
 
 /// Fast thread loading using a pre-computed index of known root IDs.
 /// Instead of scanning all kind:1 events, we query directly by event ID.
-pub fn get_threads_by_ids(ndb: &Ndb, root_ids: &std::collections::HashSet<String>) -> Result<Vec<Thread>> {
+pub fn get_threads_by_ids(
+    ndb: &Ndb,
+    root_ids: &std::collections::HashSet<String>,
+) -> Result<Vec<Thread>> {
     if root_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -249,7 +249,10 @@ pub fn get_messages_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Vec<Message
 /// NOTE: Currently performs O(N) queries (one per thread ID) because nostrdb doesn't support
 /// multi-value e-tag filters in a single query. For large thread sets, this could be optimized
 /// by chunking or using a different query strategy if nostrdb adds support.
-pub fn get_metadata_for_threads(ndb: &Ndb, thread_ids: &HashSet<String>) -> Result<HashMap<String, ConversationMetadata>> {
+pub fn get_metadata_for_threads(
+    ndb: &Ndb,
+    thread_ids: &HashSet<String>,
+) -> Result<HashMap<String, ConversationMetadata>> {
     if thread_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -297,7 +300,8 @@ pub fn get_metadata_for_threads(ndb: &Ndb, thread_ids: &HashSet<String>) -> Resu
                     if let Ok(note) = ndb.get_note_by_key(&txn, r.note_key) {
                         if let Some(metadata) = ConversationMetadata::from_note(&note) {
                             // Keep only the most recent metadata for each thread (explicit newest-wins)
-                            let dominated = metadata_map.get(&metadata.thread_id)
+                            let dominated = metadata_map
+                                .get(&metadata.thread_id)
                                 .map(|existing| existing.created_at >= metadata.created_at)
                                 .unwrap_or(false);
                             if !dominated {
@@ -344,8 +348,10 @@ pub fn get_metadata_for_thread(ndb: &Ndb, thread_id: &str) -> Result<Option<Conv
     // Use fallible handling instead of unwrap() to avoid panics
     let filter = {
         let mut f = Filter::new();
-        f.start_tag_field('e').map_err(|e| anyhow::anyhow!("Failed to start tag field: {:?}", e))?;
-        f.add_id_element(&id_arr).map_err(|e| anyhow::anyhow!("Failed to add id element: {:?}", e))?;
+        f.start_tag_field('e')
+            .map_err(|e| anyhow::anyhow!("Failed to start tag field: {:?}", e))?;
+        f.add_id_element(&id_arr)
+            .map_err(|e| anyhow::anyhow!("Failed to add id element: {:?}", e))?;
         f.end_field();
         f.kinds([513]).build()
     };
@@ -519,7 +525,12 @@ mod tests {
         let projects = get_projects(&db.ndb).unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].name, "Project With Agents");
-        assert_eq!(projects[0].agent_ids.len(), 2, "Expected 2 agent IDs, got {:?}", projects[0].agent_ids);
+        assert_eq!(
+            projects[0].agent_ids.len(),
+            2,
+            "Expected 2 agent IDs, got {:?}",
+            projects[0].agent_ids
+        );
         assert_eq!(projects[0].agent_ids[0], agent_id_1);
         assert_eq!(projects[0].agent_ids[1], agent_id_2);
     }
@@ -658,7 +669,8 @@ mod tests {
             "name": "Test User",
             "about": "A test profile",
             "picture": expected_picture_url
-        }).to_string();
+        })
+        .to_string();
 
         let profile_event = EventBuilder::new(Kind::Metadata, profile_content)
             .sign_with_keys(&keys)
@@ -695,7 +707,8 @@ mod tests {
         let profile_content = serde_json::json!({
             "name": "User Without Avatar",
             "about": "A profile without a picture"
-        }).to_string();
+        })
+        .to_string();
 
         let profile_event = EventBuilder::new(Kind::Metadata, profile_content)
             .sign_with_keys(&keys)
@@ -712,6 +725,10 @@ mod tests {
         let result = get_profile_picture(&db.ndb, &pubkey);
 
         // Should return None since there's no picture field
-        assert!(result.is_none(), "Expected None for profile without picture, got {:?}", result);
+        assert!(
+            result.is_none(),
+            "Expected None for profile without picture, got {:?}",
+            result
+        );
     }
 }

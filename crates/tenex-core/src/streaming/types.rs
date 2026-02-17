@@ -37,7 +37,8 @@ impl LocalStreamChunk {
     pub fn reasoning_delta(&self) -> Option<&str> {
         if self.data.get("type")?.as_str()? == "reasoning-delta" {
             // AI SDK uses "delta" or "text" for reasoning chunks
-            self.data.get("delta")
+            self.data
+                .get("delta")
                 .or_else(|| self.data.get("text"))
                 .and_then(|v| v.as_str())
         } else {

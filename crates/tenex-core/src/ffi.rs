@@ -49,10 +49,14 @@ use nostr_sdk::prelude::*;
 use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction};
 
 use crate::models::agent_definition::AgentDefinition;
-use crate::models::{ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, Thread};
+use crate::models::{
+    ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, Thread,
+};
 use crate::nostr::{DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
-use crate::stats::{query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats};
+use crate::stats::{
+    query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats,
+};
 use crate::store::AppDataStore;
 
 /// Shared Tokio runtime for async operations in FFI
@@ -61,10 +65,8 @@ static TOKIO_RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 
 /// Get or initialize the shared Tokio runtime
 fn get_tokio_runtime() -> &'static tokio::runtime::Runtime {
-    TOKIO_RUNTIME.get_or_init(|| {
-        tokio::runtime::Runtime::new()
-            .expect("Failed to create Tokio runtime")
-    })
+    TOKIO_RUNTIME
+        .get_or_init(|| tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime"))
 }
 
 /// Get the data directory for nostrdb
@@ -75,7 +77,10 @@ fn get_data_dir() -> PathBuf {
 }
 
 /// Helper to get the project a_tag from project_id
-fn get_project_a_tag(store: &RwLock<Option<AppDataStore>>, project_id: &str) -> Result<String, TenexError> {
+fn get_project_a_tag(
+    store: &RwLock<Option<AppDataStore>>,
+    project_id: &str,
+) -> Result<String, TenexError> {
     let store_guard = store.read().map_err(|e| TenexError::Internal {
         message: format!("Failed to acquire store lock: {}", e),
     })?;
@@ -83,7 +88,8 @@ fn get_project_a_tag(store: &RwLock<Option<AppDataStore>>, project_id: &str) -> 
         message: "Store not initialized".to_string(),
     })?;
 
-    let project = store.get_projects()
+    let project = store
+        .get_projects()
         .iter()
         .find(|p| p.id == project_id)
         .cloned()
@@ -99,9 +105,12 @@ fn get_core_handle(core_handle: &RwLock<Option<CoreHandle>>) -> Result<CoreHandl
     let handle_guard = core_handle.read().map_err(|e| TenexError::Internal {
         message: format!("Failed to acquire core handle lock: {}", e),
     })?;
-    handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
-        message: "Core runtime not initialized - call init() first".to_string(),
-    }).cloned()
+    handle_guard
+        .as_ref()
+        .ok_or_else(|| TenexError::Internal {
+            message: "Core runtime not initialized - call init() first".to_string(),
+        })
+        .cloned()
 }
 
 /// Format ask answers into markdown response (matching TUI format).
@@ -177,24 +186,30 @@ fn project_to_info(project: &Project) -> ProjectInfo {
 
 /// Convert an AskEvent to AskEventInfo (shared helper).
 fn ask_event_to_info(event: &crate::models::message::AskEvent) -> AskEventInfo {
-    let questions = event.questions.iter().map(|q| {
-        match q {
-            crate::models::message::AskQuestion::SingleSelect { title, question, suggestions } => {
-                AskQuestionInfo::SingleSelect {
-                    title: title.clone(),
-                    question: question.clone(),
-                    suggestions: suggestions.clone(),
-                }
-            }
-            crate::models::message::AskQuestion::MultiSelect { title, question, options } => {
-                AskQuestionInfo::MultiSelect {
-                    title: title.clone(),
-                    question: question.clone(),
-                    options: options.clone(),
-                }
-            }
-        }
-    }).collect();
+    let questions = event
+        .questions
+        .iter()
+        .map(|q| match q {
+            crate::models::message::AskQuestion::SingleSelect {
+                title,
+                question,
+                suggestions,
+            } => AskQuestionInfo::SingleSelect {
+                title: title.clone(),
+                question: question.clone(),
+                suggestions: suggestions.clone(),
+            },
+            crate::models::message::AskQuestion::MultiSelect {
+                title,
+                question,
+                options,
+            } => AskQuestionInfo::MultiSelect {
+                title: title.clone(),
+                question: question.clone(),
+                options: options.clone(),
+            },
+        })
+        .collect();
 
     AskEventInfo {
         title: event.title.clone(),
@@ -204,10 +219,7 @@ fn ask_event_to_info(event: &crate::models::message::AskEvent) -> AskEventInfo {
 }
 
 /// Convert a Message to MessageInfo (shared helper).
-fn message_to_info(
-    store: &AppDataStore,
-    message: &crate::models::Message,
-) -> MessageInfo {
+fn message_to_info(store: &AppDataStore, message: &crate::models::Message) -> MessageInfo {
     let author_name = store.get_profile_name(&message.pubkey);
 
     let author_npub = hex::decode(&message.pubkey)
@@ -258,7 +270,9 @@ fn thread_to_full_info(
     let has_children = store.runtime_hierarchy.has_children(&thread.id);
     let is_active = store.operations.is_event_busy(&thread.id);
     let is_archived = archived_ids.contains(&thread.id);
-    let project_a_tag = store.get_project_a_tag_for_thread(&thread.id).unwrap_or_default();
+    let project_a_tag = store
+        .get_project_a_tag_for_thread(&thread.id)
+        .unwrap_or_default();
 
     ConversationFullInfo {
         id: thread.id.clone(),
@@ -332,7 +346,8 @@ fn project_agent_to_online_info(agent: &crate::models::ProjectAgent) -> OnlineAg
 
 /// Find project id (d-tag) for a given project a-tag.
 fn project_id_from_a_tag(store: &AppDataStore, a_tag: &str) -> Option<String> {
-    store.get_projects()
+    store
+        .get_projects()
         .iter()
         .find(|p| p.a_tag() == a_tag)
         .map(|p| p.id.clone())
@@ -370,8 +385,10 @@ fn process_note_keys_with_deltas(
     };
 
     let mut deltas: Vec<DataChangeType> = Vec::new();
-    let mut conversations_to_upsert: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut inbox_items_to_upsert: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut conversations_to_upsert: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut inbox_items_to_upsert: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
 
     for &note_key in note_keys.iter() {
         if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
@@ -435,7 +452,12 @@ fn process_note_keys_with_deltas(
                             });
 
                             // Inbox additions for thread roots (ask events / mentions)
-                            if store.inbox.get_items().iter().any(|i| i.id == root_message.id) {
+                            if store
+                                .inbox
+                                .get_items()
+                                .iter()
+                                .any(|i| i.id == root_message.id)
+                            {
                                 inbox_items_to_upsert.insert(root_message.id.clone());
                             }
                         }
@@ -453,7 +475,11 @@ fn process_note_keys_with_deltas(
                     // Report/article event
                     if let Some(report) = Report::from_note(&note) {
                         // Find the project ID for this report
-                        if let Some(project) = store.get_projects().iter().find(|p| p.a_tag() == report.project_a_tag) {
+                        if let Some(project) = store
+                            .get_projects()
+                            .iter()
+                            .find(|p| p.a_tag() == report.project_a_tag)
+                        {
                             let project_id = project.id.clone();
                             let author_name = store.get_profile_name(&report.author);
                             let author_npub = hex::decode(&report.author)
@@ -468,7 +494,9 @@ fn process_note_keys_with_deltas(
                                     }
                                 })
                                 .and_then(|pk| pk.to_bech32().ok())
-                                .unwrap_or_else(|| format!("{}...", &report.author[..16.min(report.author.len())]));
+                                .unwrap_or_else(|| {
+                                    format!("{}...", &report.author[..16.min(report.author.len())])
+                                });
 
                             deltas.push(DataChangeType::ReportUpsert {
                                 report: ReportInfo {
@@ -531,7 +559,10 @@ fn process_data_changes_with_deltas(
 
                     // Capture pending state before update to detect new pending approvals
                     let pending_before = if let Some(status) = ProjectStatus::from_value(&event) {
-                        store.trust.has_pending_approval(&status.backend_pubkey, &status.project_coordinate)
+                        store.trust.has_pending_approval(
+                            &status.backend_pubkey,
+                            &status.project_coordinate,
+                        )
                     } else {
                         false
                     };
@@ -544,10 +575,17 @@ fn process_data_changes_with_deltas(
                                 let project_a_tag = status.project_coordinate.clone();
 
                                 if store.project_statuses.get(&project_a_tag).is_some() {
-                                    let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
+                                    let project_id = project_id_from_a_tag(store, &project_a_tag)
+                                        .unwrap_or_default();
                                     let is_online = store.is_project_online(&project_a_tag);
-                                    let online_agents = store.get_online_agents(&project_a_tag)
-                                        .map(|agents| agents.iter().map(project_agent_to_online_info).collect())
+                                    let online_agents = store
+                                        .get_online_agents(&project_a_tag)
+                                        .map(|agents| {
+                                            agents
+                                                .iter()
+                                                .map(project_agent_to_online_info)
+                                                .collect()
+                                        })
                                         .unwrap_or_else(Vec::new);
 
                                     deltas.push(DataChangeType::ProjectStatusChanged {
@@ -567,8 +605,10 @@ fn process_data_changes_with_deltas(
                         24133 => {
                             if let Some(status) = OperationsStatus::from_value(&event) {
                                 let project_a_tag = status.project_coordinate.clone();
-                                let project_id = project_id_from_a_tag(store, &project_a_tag).unwrap_or_default();
-                                let active_conversation_ids = store.operations.get_active_event_ids(&project_a_tag);
+                                let project_id = project_id_from_a_tag(store, &project_a_tag)
+                                    .unwrap_or_default();
+                                let active_conversation_ids =
+                                    store.operations.get_active_event_ids(&project_a_tag);
 
                                 deltas.push(DataChangeType::ActiveConversationsChanged {
                                     project_id,
@@ -581,7 +621,12 @@ fn process_data_changes_with_deltas(
                     }
                 }
             }
-            DataChange::LocalStreamChunk { agent_pubkey, conversation_id, text_delta, .. } => {
+            DataChange::LocalStreamChunk {
+                agent_pubkey,
+                conversation_id,
+                text_delta,
+                ..
+            } => {
                 deltas.push(DataChangeType::StreamChunk {
                     agent_pubkey: agent_pubkey.clone(),
                     conversation_id: conversation_id.clone(),
@@ -1382,27 +1427,32 @@ impl FfiPreferencesStorage {
 
     fn set_selected_voice_ids(&mut self, voice_ids: Vec<String>) -> Result<(), String> {
         self.prefs.ai_audio_settings.selected_voice_ids = voice_ids;
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 
     fn set_openrouter_model(&mut self, model: Option<String>) -> Result<(), String> {
         self.prefs.ai_audio_settings.openrouter_model = model;
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 
     fn set_audio_prompt(&mut self, prompt: String) -> Result<(), String> {
         self.prefs.ai_audio_settings.audio_prompt = prompt;
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 
     fn set_audio_notifications_enabled(&mut self, enabled: bool) -> Result<(), String> {
         self.prefs.ai_audio_settings.enabled = enabled;
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 
     fn set_tts_inactivity_threshold(&mut self, secs: u64) -> Result<(), String> {
         self.prefs.ai_audio_settings.tts_inactivity_threshold_secs = secs;
-        self.save().map_err(|e| format!("Failed to save preferences: {}", e))
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
     }
 }
 
@@ -1419,7 +1469,10 @@ impl FfiPreferencesStorage {
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum DataChangeType {
     /// A new message was appended to a conversation
-    MessageAppended { conversation_id: String, message: MessageInfo },
+    MessageAppended {
+        conversation_id: String,
+        message: MessageInfo,
+    },
     /// A conversation was created or updated
     ConversationUpsert { conversation: ConversationFullInfo },
     /// A project was created or updated
@@ -1429,11 +1482,23 @@ pub enum DataChangeType {
     /// A report was created or updated (kind:30023)
     ReportUpsert { report: ReportInfo },
     /// Project online status updated (kind:24010)
-    ProjectStatusChanged { project_id: String, project_a_tag: String, is_online: bool, online_agents: Vec<OnlineAgentInfo> },
+    ProjectStatusChanged {
+        project_id: String,
+        project_a_tag: String,
+        is_online: bool,
+        online_agents: Vec<OnlineAgentInfo>,
+    },
     /// Backend approval required for a project status event
-    PendingBackendApproval { backend_pubkey: String, project_a_tag: String },
+    PendingBackendApproval {
+        backend_pubkey: String,
+        project_a_tag: String,
+    },
     /// Active conversations updated for a project (kind:24133)
-    ActiveConversationsChanged { project_id: String, project_a_tag: String, active_conversation_ids: Vec<String> },
+    ActiveConversationsChanged {
+        project_id: String,
+        project_a_tag: String,
+        active_conversation_ids: Vec<String>,
+    },
     /// Streaming text chunk arrived (live typing)
     StreamChunk {
         agent_pubkey: String,
@@ -1744,15 +1809,18 @@ impl TenexCore {
             let handle_guard = self.core_handle.read().map_err(|e| TenexError::Internal {
                 message: format!("Failed to acquire core handle lock: {}", e),
             })?;
-            handle_guard.as_ref().ok_or_else(|| TenexError::Internal {
-                message: "Core runtime not initialized - call init() first".to_string(),
-            })?.clone()
+            handle_guard
+                .as_ref()
+                .ok_or_else(|| TenexError::Internal {
+                    message: "Core runtime not initialized - call init() first".to_string(),
+                })?
+                .clone()
         };
 
         let _ = core_handle.send(NostrCommand::Connect {
             keys,
             user_pubkey: pubkey.clone(),
-            response_tx: None,  // Don't wait for response
+            response_tx: None, // Don't wait for response
         });
 
         Ok(LoginResult {
@@ -1848,11 +1916,16 @@ impl TenexCore {
         let disconnect_result = if let Ok(handle_guard) = self.core_handle.read() {
             if let Some(handle) = handle_guard.as_ref() {
                 let (response_tx, response_rx) = mpsc::channel::<Result<(), String>>();
-                if handle.send(NostrCommand::Disconnect {
-                    response_tx: Some(response_tx)
-                }).is_err() {
+                if handle
+                    .send(NostrCommand::Disconnect {
+                        response_tx: Some(response_tx),
+                    })
+                    .is_err()
+                {
                     // Channel closed, worker already stopped - treat as success
-                    eprintln!("[TENEX] logout: Worker channel closed, treating as already disconnected");
+                    eprintln!(
+                        "[TENEX] logout: Worker channel closed, treating as already disconnected"
+                    );
                     Ok(())
                 } else {
                     // Wait for disconnect to complete (with timeout to avoid hanging forever)
@@ -1863,14 +1936,18 @@ impl TenexCore {
                         }
                         Ok(Err(e)) => {
                             eprintln!("[TENEX] logout: Disconnect failed: {}", e);
-                            Err(TenexError::LogoutFailed { message: format!("Disconnect error: {}", e) })
+                            Err(TenexError::LogoutFailed {
+                                message: format!("Disconnect error: {}", e),
+                            })
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                             eprintln!("[TENEX] logout: Disconnect timed out after 5 seconds, forcing shutdown");
                             // On timeout, send Shutdown command and wait for worker thread to stop
                             let _ = handle.send(NostrCommand::Shutdown);
                             // Wait for worker thread to actually stop
-                            let shutdown_success = if let Ok(mut worker_guard) = self.worker_handle.write() {
+                            let shutdown_success = if let Ok(mut worker_guard) =
+                                self.worker_handle.write()
+                            {
                                 if let Some(worker_handle) = worker_guard.take() {
                                     let join_result = worker_handle.join();
                                     if join_result.is_ok() {
@@ -1895,7 +1972,8 @@ impl TenexCore {
                             } else {
                                 // Shutdown failed, return error and don't clear state
                                 Err(TenexError::LogoutFailed {
-                                    message: "Disconnect timed out and forced shutdown failed".to_string()
+                                    message: "Disconnect timed out and forced shutdown failed"
+                                        .to_string(),
                                 })
                             }
                         }
@@ -1911,9 +1989,11 @@ impl TenexCore {
             }
         } else {
             // Lock error - cannot confirm disconnect, return error and don't clear state
-            eprintln!("[TENEX] logout: Could not acquire core_handle lock - cannot confirm disconnect");
+            eprintln!(
+                "[TENEX] logout: Could not acquire core_handle lock - cannot confirm disconnect"
+            );
             Err(TenexError::LogoutFailed {
-                message: "Could not acquire core_handle lock".to_string()
+                message: "Could not acquire core_handle lock".to_string(),
             })
         };
 
@@ -1951,10 +2031,7 @@ impl TenexCore {
             None => return Vec::new(),
         };
 
-        store.get_projects()
-            .iter()
-            .map(project_to_info)
-            .collect()
+        store.get_projects().iter().map(project_to_info).collect()
     }
 
     /// Get conversations for a project.
@@ -1992,7 +2069,10 @@ impl TenexCore {
                 let author_name = store.get_profile_name(&t.pubkey);
 
                 // Determine status from thread's status_label
-                let status = t.status_label.clone().unwrap_or_else(|| "active".to_string());
+                let status = t
+                    .status_label
+                    .clone()
+                    .unwrap_or_else(|| "active".to_string());
 
                 ConversationInfo {
                     id: t.id.clone(),
@@ -2063,7 +2143,10 @@ impl TenexCore {
     /// Get conversations by their IDs.
     /// Returns ConversationFullInfo for each conversation ID that exists.
     /// Conversations that don't exist are silently skipped.
-    pub fn get_conversations_by_ids(&self, conversation_ids: Vec<String>) -> Vec<ConversationFullInfo> {
+    pub fn get_conversations_by_ids(
+        &self,
+        conversation_ids: Vec<String>,
+    ) -> Vec<ConversationFullInfo> {
         let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -2078,7 +2161,8 @@ impl TenexCore {
             Ok(g) => g,
             Err(_) => return Vec::new(),
         };
-        let archived_ids = prefs_guard.as_ref()
+        let archived_ids = prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
@@ -2108,10 +2192,7 @@ impl TenexCore {
         // Get messages for the thread
         let messages = store.get_messages(&conversation_id);
 
-        messages
-            .iter()
-            .map(|m| message_to_info(store, m))
-            .collect()
+        messages.iter().map(|m| message_to_info(store, m)).collect()
     }
 
     /// Get reports for a project.
@@ -2186,7 +2267,9 @@ impl TenexCore {
         };
 
         // Get inbox items from the store
-        store.inbox.get_items()
+        store
+            .inbox
+            .get_items()
             .iter()
             .map(|item| inbox_item_to_info(store, item))
             .collect()
@@ -2257,7 +2340,9 @@ impl TenexCore {
 
             for thread in store.get_threads(&project_a_tag) {
                 for message in store.get_messages(&thread.id) {
-                    if message.content.to_lowercase().contains(&query_lower) && !seen_ids.contains(&message.id) {
+                    if message.content.to_lowercase().contains(&query_lower)
+                        && !seen_ids.contains(&message.id)
+                    {
                         seen_ids.insert(message.id.clone());
 
                         let author = store.get_profile_name(&message.pubkey);
@@ -2294,17 +2379,22 @@ impl TenexCore {
     /// then inactive conversations by effective_last_activity desc.
     ///
     /// Returns Result to distinguish "no data" from "core error".
-    pub fn get_all_conversations(&self, filter: ConversationFilter) -> Result<Vec<ConversationFullInfo>, TenexError> {
-        let store_guard = self.store.read()
-            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+    pub fn get_all_conversations(
+        &self,
+        filter: ConversationFilter,
+    ) -> Result<Vec<ConversationFullInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
+            resource: "store".to_string(),
+        })?;
 
-        let store = store_guard.as_ref()
-            .ok_or(TenexError::CoreNotInitialized)?;
+        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
 
         // Get archived thread IDs from preferences
-        let prefs_guard = self.preferences.read()
-            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
-        let archived_ids = prefs_guard.as_ref()
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+        let archived_ids = prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
@@ -2315,7 +2405,8 @@ impl TenexCore {
             projects.iter().map(|p| p.a_tag()).collect()
         } else {
             // Filter to specified project IDs
-            projects.iter()
+            projects
+                .iter()
                 .filter(|p| filter.project_ids.contains(&p.id))
                 .map(|p| p.a_tag())
                 .collect()
@@ -2336,7 +2427,8 @@ impl TenexCore {
 
         // Pre-compute message counts for all threads to avoid N×M reads
         // Build a map of thread_id -> message_count
-        let mut message_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut message_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
         for project_a_tag in &project_a_tags {
             let threads = store.get_threads(project_a_tag);
             for thread in threads {
@@ -2403,12 +2495,10 @@ impl TenexCore {
         }
 
         // Sort: active first (by effective_last_activity desc), then inactive by effective_last_activity desc
-        conversations.sort_by(|a, b| {
-            match (a.is_active, b.is_active) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => b.effective_last_activity.cmp(&a.effective_last_activity),
-            }
+        conversations.sort_by(|a, b| match (a.is_active, b.is_active) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => b.effective_last_activity.cmp(&a.effective_last_activity),
         });
 
         Ok(conversations)
@@ -2417,43 +2507,49 @@ impl TenexCore {
     /// Get all projects with filter info (visibility, counts).
     /// Returns Result to distinguish "no data" from "core error".
     pub fn get_project_filters(&self) -> Result<Vec<ProjectFilterInfo>, TenexError> {
-        let store_guard = self.store.read()
-            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
+            resource: "store".to_string(),
+        })?;
 
-        let store = store_guard.as_ref()
-            .ok_or(TenexError::CoreNotInitialized)?;
+        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
 
         // Get visible project IDs from preferences
-        let prefs_guard = self.preferences.read()
-            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
-        let visible_projects = prefs_guard.as_ref()
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
+        let visible_projects = prefs_guard
+            .as_ref()
             .map(|p| p.prefs.visible_projects.clone())
             .unwrap_or_default();
 
         let projects = store.get_projects();
 
-        Ok(projects.iter().map(|p| {
-            let a_tag = p.a_tag();
-            let threads = store.get_threads(&a_tag);
-            let total_count = threads.len() as u32;
+        Ok(projects
+            .iter()
+            .map(|p| {
+                let a_tag = p.a_tag();
+                let threads = store.get_threads(&a_tag);
+                let total_count = threads.len() as u32;
 
-            // Count active conversations
-            let active_count = threads.iter()
-                .filter(|t| store.operations.is_event_busy(&t.id))
-                .count() as u32;
+                // Count active conversations
+                let active_count = threads
+                    .iter()
+                    .filter(|t| store.operations.is_event_busy(&t.id))
+                    .count() as u32;
 
-            // Check visibility (empty means all visible)
-            let is_visible = visible_projects.is_empty() || visible_projects.contains(&a_tag);
+                // Check visibility (empty means all visible)
+                let is_visible = visible_projects.is_empty() || visible_projects.contains(&a_tag);
 
-            ProjectFilterInfo {
-                id: p.id.clone(),
-                a_tag,
-                title: p.name.clone(),
-                is_visible,
-                active_count,
-                total_count,
-            }
-        }).collect())
+                ProjectFilterInfo {
+                    id: p.id.clone(),
+                    a_tag,
+                    title: p.name.clone(),
+                    is_visible,
+                    active_count,
+                    total_count,
+                }
+            })
+            .collect())
     }
 
     /// Set which projects are visible in the Conversations tab.
@@ -2534,7 +2630,8 @@ impl TenexCore {
             Err(_) => return false,
         };
 
-        prefs_guard.as_ref()
+        prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.contains(&conversation_id))
             .unwrap_or(false)
     }
@@ -2542,10 +2639,12 @@ impl TenexCore {
     /// Get all archived conversation IDs.
     /// Returns Result to distinguish "no data" from "lock error".
     pub fn get_archived_conversation_ids(&self) -> Result<Vec<String>, TenexError> {
-        let prefs_guard = self.preferences.read()
-            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
 
-        Ok(prefs_guard.as_ref()
+        Ok(prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.iter().cloned().collect())
             .unwrap_or_default())
     }
@@ -2554,10 +2653,12 @@ impl TenexCore {
 
     /// Get all collapsed thread IDs.
     pub fn get_collapsed_thread_ids(&self) -> Result<Vec<String>, TenexError> {
-        let prefs_guard = self.preferences.read()
-            .map_err(|_| TenexError::LockError { resource: "preferences".to_string() })?;
+        let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+            resource: "preferences".to_string(),
+        })?;
 
-        Ok(prefs_guard.as_ref()
+        Ok(prefs_guard
+            .as_ref()
             .map(|p| p.prefs.collapsed_thread_ids.iter().cloned().collect())
             .unwrap_or_default())
     }
@@ -2609,11 +2710,11 @@ impl TenexCore {
             Err(_) => return false,
         };
 
-        prefs_guard.as_ref()
+        prefs_guard
+            .as_ref()
             .map(|p| p.prefs.collapsed_thread_ids.contains(&thread_id))
             .unwrap_or(false)
     }
-
 
     /// Get agents for a project.
     ///
@@ -2629,14 +2730,20 @@ impl TenexCore {
         })?;
 
         // Find the project by ID and get its agent IDs (event IDs of kind:4199 definitions)
-        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|p| p.id == project_id)
+            .cloned();
         let agent_ids: Vec<String> = match project {
             Some(p) => p.agent_ids,
             None => return Ok(Vec::new()), // Project not found = empty agents (not an error)
         };
 
         // Get agent definitions for these IDs
-        Ok(store.content.get_agent_definitions()
+        Ok(store
+            .content
+            .get_agent_definitions()
             .into_iter()
             .filter(|agent| agent_ids.contains(&agent.id))
             .map(agent_to_info)
@@ -2656,7 +2763,9 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.content.get_agent_definitions()
+        Ok(store
+            .content
+            .get_agent_definitions()
             .into_iter()
             .map(agent_to_info)
             .collect())
@@ -2675,7 +2784,9 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.content.get_nudges()
+        Ok(store
+            .content
+            .get_nudges()
             .into_iter()
             .map(|n| NudgeInfo {
                 id: n.id.clone(),
@@ -2699,7 +2810,9 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        Ok(store.content.get_skills()
+        Ok(store
+            .content
+            .get_skills()
             .into_iter()
             .map(|s| SkillInfo {
                 id: s.id.clone(),
@@ -2718,9 +2831,16 @@ impl TenexCore {
     /// can be used for profile picture lookups and p-tags.
     ///
     /// Returns empty if project not found or project is offline.
-    pub fn get_online_agents(&self, project_id: String) -> Result<Vec<OnlineAgentInfo>, TenexError> {
+    pub fn get_online_agents(
+        &self,
+        project_id: String,
+    ) -> Result<Vec<OnlineAgentInfo>, TenexError> {
         use crate::tlog;
-        tlog!("FFI", "get_online_agents called with project_id: {}", project_id);
+        tlog!(
+            "FFI",
+            "get_online_agents called with project_id: {}",
+            project_id
+        );
 
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
@@ -2730,19 +2850,27 @@ impl TenexCore {
             message: "Store not initialized - call init() first".to_string(),
         })?;
 
-        tlog!("FFI", "Total projects in store: {}", store.get_projects().len());
+        tlog!(
+            "FFI",
+            "Total projects in store: {}",
+            store.get_projects().len()
+        );
         tlog!("FFI", "project_statuses HashMap keys:");
         for key in store.project_statuses.keys() {
             tlog!("FFI", "  - '{}'", key);
         }
 
         // Find the project by ID
-        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|p| p.id == project_id)
+            .cloned();
         let project = match project {
             Some(p) => {
                 tlog!("FFI", "Project found: id='{}' a_tag='{}'", p.id, p.a_tag());
                 p
-            },
+            }
             None => {
                 tlog!("FFI", "Project NOT found for id: {}", project_id);
                 return Ok(Vec::new()); // Project not found = empty agents
@@ -2750,20 +2878,34 @@ impl TenexCore {
         };
 
         // Get agents from project status (kind:24010)
-        tlog!("FFI", "Looking up project_statuses for a_tag: '{}'", project.a_tag());
+        tlog!(
+            "FFI",
+            "Looking up project_statuses for a_tag: '{}'",
+            project.a_tag()
+        );
 
         // Check if status exists (even if stale)
         if let Some(status) = store.project_statuses.get(&project.a_tag()) {
             use std::time::{SystemTime, UNIX_EPOCH};
-            let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
             let age_secs = now.saturating_sub(status.created_at);
-            tlog!("FFI", "Status exists: created_at={} now={} age={}s is_online={}",
-                status.created_at, now, age_secs, status.is_online());
+            tlog!(
+                "FFI",
+                "Status exists: created_at={} now={} age={}s is_online={}",
+                status.created_at,
+                now,
+                age_secs,
+                status.is_online()
+            );
         } else {
             tlog!("FFI", "No status found in project_statuses HashMap");
         }
 
-        let agents = store.get_online_agents(&project.a_tag())
+        let agents = store
+            .get_online_agents(&project.a_tag())
             .map(|agents| {
                 tlog!("FFI", "Found {} online agents", agents.len());
                 for agent in agents {
@@ -2784,7 +2926,10 @@ impl TenexCore {
     ///
     /// Returns all available models and tools from the project status (kind:24010).
     /// Used by iOS to populate the agent config modal with available options.
-    pub fn get_project_config_options(&self, project_id: String) -> Result<ProjectConfigOptions, TenexError> {
+    pub fn get_project_config_options(
+        &self,
+        project_id: String,
+    ) -> Result<ProjectConfigOptions, TenexError> {
         let store_guard = self.store.read().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -2794,12 +2939,18 @@ impl TenexCore {
         })?;
 
         // Find the project by ID
-        let project = store.get_projects().iter().find(|p| p.id == project_id).cloned();
+        let project = store
+            .get_projects()
+            .iter()
+            .find(|p| p.id == project_id)
+            .cloned();
         let project = match project {
             Some(p) => p,
-            None => return Err(TenexError::Internal {
-                message: format!("Project not found: {}", project_id),
-            }),
+            None => {
+                return Err(TenexError::Internal {
+                    message: format!("Project not found: {}", project_id),
+                })
+            }
         };
 
         // Get project status to extract all_models and all_tools
@@ -2870,7 +3021,8 @@ impl TenexCore {
         };
 
         // Check if project has a non-stale status
-        store.get_project_status(&project.a_tag())
+        store
+            .get_project_status(&project.a_tag())
             .map(|s| s.is_online())
             .unwrap_or(false)
     }
@@ -2892,7 +3044,8 @@ impl TenexCore {
         })?;
 
         // Find the project by ID
-        let project = store.get_projects()
+        let project = store
+            .get_projects()
             .iter()
             .find(|p| p.id == project_id)
             .cloned()
@@ -2926,7 +3079,11 @@ impl TenexCore {
     /// enabling get_online_agents() to return online agents.
     ///
     /// Call this on app startup with stored approved/blocked backend pubkeys.
-    pub fn set_trusted_backends(&self, approved: Vec<String>, blocked: Vec<String>) -> Result<(), TenexError> {
+    pub fn set_trusted_backends(
+        &self,
+        approved: Vec<String>,
+        blocked: Vec<String>,
+    ) -> Result<(), TenexError> {
         let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
             message: format!("Failed to acquire store lock: {}", e),
         })?;
@@ -2997,14 +3154,30 @@ impl TenexCore {
         tlog!("FFI", "Found {} pending backend approvals", pending.len());
         eprintln!("[DEBUG] Found {} pending backend approvals", pending.len());
         for approval in &pending {
-            tlog!("FFI", "  - Backend: {} for project: {}", approval.backend_pubkey, approval.project_a_tag);
-            eprintln!("[DEBUG]   - Backend: {} for project: {}", approval.backend_pubkey, approval.project_a_tag);
+            tlog!(
+                "FFI",
+                "  - Backend: {} for project: {}",
+                approval.backend_pubkey,
+                approval.project_a_tag
+            );
+            eprintln!(
+                "[DEBUG]   - Backend: {} for project: {}",
+                approval.backend_pubkey, approval.project_a_tag
+            );
         }
 
         let count = store.approve_pending_backends(pending);
-        tlog!("FFI", "Approved {} backends, project_statuses now has {} entries", count, store.project_statuses.len());
+        tlog!(
+            "FFI",
+            "Approved {} backends, project_statuses now has {} entries",
+            count,
+            store.project_statuses.len()
+        );
         eprintln!("[DEBUG] Approved {} backends", count);
-        eprintln!("[DEBUG] project_statuses HashMap now has {} entries", store.project_statuses.len());
+        eprintln!(
+            "[DEBUG] project_statuses HashMap now has {} entries",
+            store.project_statuses.len()
+        );
 
         Ok(count)
     }
@@ -3189,11 +3362,11 @@ impl TenexCore {
     ///
     /// Returns Result to distinguish "no data" from "core error".
     pub fn get_stats_snapshot(&self) -> Result<StatsSnapshot, TenexError> {
-        let store_guard = self.store.read()
-            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
+        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
+            resource: "store".to_string(),
+        })?;
 
-        let store = store_guard.as_ref()
-            .ok_or(TenexError::CoreNotInitialized)?;
+        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
 
         // ===== 1. Metric Cards Data =====
         // Total cost for the past COST_WINDOW_DAYS (shared constant with TUI stats page)
@@ -3210,18 +3383,18 @@ impl TenexCore {
         // Get today's runtime (requires mutable borrow, so we do it separately)
         drop(store_guard);
         let today_runtime_ms = {
-            let mut store_guard = self.store.write()
-                .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
-            let store = store_guard.as_mut()
-                .ok_or(TenexError::CoreNotInitialized)?;
+            let mut store_guard = self.store.write().map_err(|_| TenexError::LockError {
+                resource: "store".to_string(),
+            })?;
+            let store = store_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
             store.statistics.get_today_unique_runtime()
         };
 
         // Re-acquire read lock for remaining data
-        let store_guard = self.store.read()
-            .map_err(|_| TenexError::LockError { resource: "store".to_string() })?;
-        let store = store_guard.as_ref()
-            .ok_or(TenexError::CoreNotInitialized)?;
+        let store_guard = self.store.read().map_err(|_| TenexError::LockError {
+            resource: "store".to_string(),
+        })?;
+        let store = store_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
 
         // ===== 2. Runtime Chart Data (CHART_WINDOW_DAYS) =====
         // Use shared constant for chart window (same as TUI stats view)
@@ -3245,18 +3418,17 @@ impl TenexCore {
             (0, 0)
         } else {
             let total: u64 = non_zero_runtimes.iter().sum();
-            (total / non_zero_runtimes.len() as u64, non_zero_runtimes.len() as u32)
+            (
+                total / non_zero_runtimes.len() as u64,
+                non_zero_runtimes.len() as u32,
+            )
         };
 
         // ===== 3. Rankings Data =====
         let cost_by_project_raw = store.get_cost_by_project();
         let cost_by_project: Vec<ProjectCost> = cost_by_project_raw
             .into_iter()
-            .map(|(a_tag, name, cost)| ProjectCost {
-                a_tag,
-                name,
-                cost,
-            })
+            .map(|(a_tag, name, cost)| ProjectCost { a_tag, name, cost })
             .collect();
 
         const RANKINGS_TABLE_ROWS: usize = 20;
@@ -3280,7 +3452,8 @@ impl TenexCore {
         let (user_messages_raw, all_messages_raw) = store.get_messages_by_day(CHART_WINDOW_DAYS);
 
         // Combine into single vector with day_start as key
-        let mut messages_map: std::collections::HashMap<u64, (u64, u64)> = std::collections::HashMap::new();
+        let mut messages_map: std::collections::HashMap<u64, (u64, u64)> =
+            std::collections::HashMap::new();
         for (day_start, user_count) in user_messages_raw {
             messages_map.entry(day_start).or_insert((0, 0)).0 = user_count;
         }
@@ -3306,11 +3479,22 @@ impl TenexCore {
         let messages_by_hour_raw = store.statistics.get_message_count_by_hour(ACTIVITY_HOURS);
 
         // Find max values for normalization (both tokens and messages)
-        let max_tokens = tokens_by_hour_raw.values().max().copied().unwrap_or(1).max(1);
-        let max_messages = messages_by_hour_raw.values().max().copied().unwrap_or(1).max(1);
+        let max_tokens = tokens_by_hour_raw
+            .values()
+            .max()
+            .copied()
+            .unwrap_or(1)
+            .max(1);
+        let max_messages = messages_by_hour_raw
+            .values()
+            .max()
+            .copied()
+            .unwrap_or(1)
+            .max(1);
 
         // Combine and pre-normalize intensity values (0-255) for BOTH tokens and messages
-        let mut activity_map: std::collections::HashMap<u64, (u64, u64)> = std::collections::HashMap::new();
+        let mut activity_map: std::collections::HashMap<u64, (u64, u64)> =
+            std::collections::HashMap::new();
         for (hour_start, tokens) in tokens_by_hour_raw {
             activity_map.entry(hour_start).or_insert((0, 0)).0 = tokens;
         }
@@ -3452,7 +3636,8 @@ impl TenexCore {
             Ok(g) => g,
             Err(_) => return false,
         };
-        let archived_ids = prefs_guard.as_ref()
+        let archived_ids = prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
@@ -3482,7 +3667,7 @@ impl TenexCore {
             }
         }
 
-        let mut ok = true;
+        let ok = true;
 
         // Release store lock before polling for more events
         drop(store_guard);
@@ -3543,7 +3728,8 @@ impl TenexCore {
             Ok(g) => g,
             Err(_) => return false,
         };
-        let archived_ids = prefs_guard.as_ref()
+        let archived_ids = prefs_guard
+            .as_ref()
             .map(|p| p.prefs.archived_thread_ids.clone())
             .unwrap_or_default();
 
@@ -3641,23 +3827,26 @@ impl TenexCore {
         let data_dir = get_data_dir();
 
         // ===== 1. System Diagnostics (best-effort) =====
-        let system = self.collect_system_diagnostics(&data_dir)
+        let system = self
+            .collect_system_diagnostics(&data_dir)
             .map_err(|e| section_errors.push(format!("System: {}", e)))
             .ok();
 
         // ===== 2. Negentropy Sync Diagnostics (best-effort) =====
-        let sync = self.collect_sync_diagnostics()
+        let sync = self
+            .collect_sync_diagnostics()
             .map_err(|e| section_errors.push(format!("Sync: {}", e)))
             .ok();
 
         // ===== 3. Subscription Diagnostics (best-effort) =====
-        let (subscriptions, total_subscription_events) = match self.collect_subscription_diagnostics() {
-            Ok((subs, total)) => (Some(subs), total),
-            Err(e) => {
-                section_errors.push(format!("Subscriptions: {}", e));
-                (None, 0)
-            }
-        };
+        let (subscriptions, total_subscription_events) =
+            match self.collect_subscription_diagnostics() {
+                Ok((subs, total)) => (Some(subs), total),
+                Err(e) => {
+                    section_errors.push(format!("Subscriptions: {}", e));
+                    (None, 0)
+                }
+            };
 
         // ===== 4. Database Diagnostics (best-effort, optionally skipped) =====
         let database = if include_database_stats {
@@ -3715,7 +3904,8 @@ impl TenexCore {
             *guard = None;
         }
         // Signal listener thread to stop
-        self.callback_listener_running.store(false, Ordering::SeqCst);
+        self.callback_listener_running
+            .store(false, Ordering::SeqCst);
         if let Ok(mut guard) = self.callback_listener_handle.write() {
             if let Some(handle) = guard.take() {
                 let _ = handle.join();
@@ -3731,7 +3921,9 @@ impl TenexCore {
             resource: "preferences".to_string(),
         })?;
 
-        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard
+            .as_ref()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
         let settings = &prefs_storage.prefs.ai_audio_settings;
 
         // Never expose actual API keys - only return whether they're configured
@@ -3748,24 +3940,36 @@ impl TenexCore {
 
     /// Set selected voice IDs
     pub fn set_selected_voice_ids(&self, voice_ids: Vec<String>) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
 
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_selected_voice_ids(voice_ids)
+        let prefs_storage = prefs_guard
+            .as_mut()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage
+            .set_selected_voice_ids(voice_ids)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }
 
     /// Set OpenRouter model
     pub fn set_openrouter_model(&self, model: Option<String>) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
 
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_openrouter_model(model)
+        let prefs_storage = prefs_guard
+            .as_mut()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage
+            .set_openrouter_model(model)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }
@@ -3775,16 +3979,18 @@ impl TenexCore {
         use crate::secure_storage::{SecureKey, SecureStorage};
 
         if let Some(key_value) = key {
-            SecureStorage::set(SecureKey::ElevenLabsApiKey, &key_value)
-                .map_err(|e| TenexError::Internal {
-                    message: format!("Failed to store ElevenLabs API key: {}", e)
-                })?;
+            SecureStorage::set(SecureKey::ElevenLabsApiKey, &key_value).map_err(|e| {
+                TenexError::Internal {
+                    message: format!("Failed to store ElevenLabs API key: {}", e),
+                }
+            })?;
         } else {
             // If key is None, delete the existing key
-            SecureStorage::delete(SecureKey::ElevenLabsApiKey)
-                .map_err(|e| TenexError::Internal {
-                    message: format!("Failed to delete ElevenLabs API key: {}", e)
-                })?;
+            SecureStorage::delete(SecureKey::ElevenLabsApiKey).map_err(|e| {
+                TenexError::Internal {
+                    message: format!("Failed to delete ElevenLabs API key: {}", e),
+                }
+            })?;
         }
         Ok(())
     }
@@ -3794,16 +4000,18 @@ impl TenexCore {
         use crate::secure_storage::{SecureKey, SecureStorage};
 
         if let Some(key_value) = key {
-            SecureStorage::set(SecureKey::OpenRouterApiKey, &key_value)
-                .map_err(|e| TenexError::Internal {
-                    message: format!("Failed to store OpenRouter API key: {}", e)
-                })?;
+            SecureStorage::set(SecureKey::OpenRouterApiKey, &key_value).map_err(|e| {
+                TenexError::Internal {
+                    message: format!("Failed to store OpenRouter API key: {}", e),
+                }
+            })?;
         } else {
             // If key is None, delete the existing key
-            SecureStorage::delete(SecureKey::OpenRouterApiKey)
-                .map_err(|e| TenexError::Internal {
-                    message: format!("Failed to delete OpenRouter API key: {}", e)
-                })?;
+            SecureStorage::delete(SecureKey::OpenRouterApiKey).map_err(|e| {
+                TenexError::Internal {
+                    message: format!("Failed to delete OpenRouter API key: {}", e),
+                }
+            })?;
         }
         Ok(())
     }
@@ -3815,36 +4023,54 @@ impl TenexCore {
 
     /// Set audio prompt
     pub fn set_audio_prompt(&self, prompt: String) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
 
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_audio_prompt(prompt)
+        let prefs_storage = prefs_guard
+            .as_mut()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage
+            .set_audio_prompt(prompt)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }
 
     /// Set TTS inactivity threshold (seconds of inactivity before TTS fires)
     pub fn set_tts_inactivity_threshold(&self, secs: u64) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
 
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_tts_inactivity_threshold(secs)
+        let prefs_storage = prefs_guard
+            .as_mut()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage
+            .set_tts_inactivity_threshold(secs)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }
 
     /// Enable or disable audio notifications
     pub fn set_audio_notifications_enabled(&self, enabled: bool) -> Result<(), TenexError> {
-        let mut prefs_guard = self.preferences.write().map_err(|_| TenexError::LockError {
-            resource: "preferences".to_string(),
-        })?;
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
 
-        let prefs_storage = prefs_guard.as_mut().ok_or_else(|| TenexError::CoreNotInitialized)?;
-        prefs_storage.set_audio_notifications_enabled(enabled)
+        let prefs_storage = prefs_guard
+            .as_mut()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
+        prefs_storage
+            .set_audio_notifications_enabled(enabled)
             .map_err(|e| TenexError::Internal { message: e })?;
         Ok(())
     }
@@ -3869,7 +4095,8 @@ impl TenexCore {
         }
 
         let data_dir = get_data_dir();
-        let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+        let manager =
+            crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
 
         // Initialize audio notifications directory
         manager.init().map_err(|e| TenexError::Internal {
@@ -3882,19 +4109,23 @@ impl TenexCore {
         let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
             resource: "preferences".to_string(),
         })?;
-        let prefs_storage = prefs_guard.as_ref().ok_or_else(|| TenexError::CoreNotInitialized)?;
+        let prefs_storage = prefs_guard
+            .as_ref()
+            .ok_or_else(|| TenexError::CoreNotInitialized)?;
         let ai_settings = &prefs_storage.prefs.ai_audio_settings;
 
-        let notification = runtime.block_on(manager.generate_notification(
-            &agent_pubkey,
-            &conversation_title,
-            &message_text,
-            &elevenlabs_api_key,
-            &openrouter_api_key,
-            ai_settings,
-        )).map_err(|e| TenexError::Internal {
-            message: format!("Failed to generate audio notification: {}", e),
-        })?;
+        let notification = runtime
+            .block_on(manager.generate_notification(
+                &agent_pubkey,
+                &conversation_title,
+                &message_text,
+                &elevenlabs_api_key,
+                &openrouter_api_key,
+                ai_settings,
+            ))
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to generate audio notification: {}", e),
+            })?;
 
         Ok(AudioNotificationInfo {
             id: notification.id,
@@ -3937,7 +4168,6 @@ impl TenexCore {
 
         Ok(url)
     }
-
 }
 
 // Standalone FFI functions — no TenexCore instance needed, bypasses actor serialization.
@@ -3946,33 +4176,42 @@ impl TenexCore {
 #[uniffi::export]
 pub fn list_audio_notifications() -> Result<Vec<AudioNotificationInfo>, TenexError> {
     let data_dir = get_data_dir();
-    let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+    let manager =
+        crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
 
-    let notifications = manager.list_notifications().map_err(|e| TenexError::Internal {
-        message: format!("Failed to list audio notifications: {}", e),
-    })?;
+    let notifications = manager
+        .list_notifications()
+        .map_err(|e| TenexError::Internal {
+            message: format!("Failed to list audio notifications: {}", e),
+        })?;
 
-    Ok(notifications.into_iter().map(|n| AudioNotificationInfo {
-        id: n.id,
-        agent_pubkey: n.agent_pubkey,
-        conversation_title: n.conversation_title,
-        original_text: n.original_text,
-        massaged_text: n.massaged_text,
-        voice_id: n.voice_id,
-        audio_file_path: n.audio_file_path,
-        created_at: n.created_at,
-    }).collect())
+    Ok(notifications
+        .into_iter()
+        .map(|n| AudioNotificationInfo {
+            id: n.id,
+            agent_pubkey: n.agent_pubkey,
+            conversation_title: n.conversation_title,
+            original_text: n.original_text,
+            massaged_text: n.massaged_text,
+            voice_id: n.voice_id,
+            audio_file_path: n.audio_file_path,
+            created_at: n.created_at,
+        })
+        .collect())
 }
 
 /// Delete an audio notification by ID (pure filesystem operation).
 #[uniffi::export]
 pub fn delete_audio_notification(id: String) -> Result<(), TenexError> {
     let data_dir = get_data_dir();
-    let manager = crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
+    let manager =
+        crate::ai::AudioNotificationManager::new(data_dir.to_str().unwrap_or("tenex_data"));
 
-    manager.delete_notification(&id).map_err(|e| TenexError::Internal {
-        message: format!("Failed to delete audio notification: {}", e),
-    })?;
+    manager
+        .delete_notification(&id)
+        .map_err(|e| TenexError::Internal {
+            message: format!("Failed to delete audio notification: {}", e),
+        })?;
 
     Ok(())
 }
@@ -3982,16 +4221,21 @@ pub fn fetch_elevenlabs_voices(api_key: String) -> Result<Vec<VoiceInfo>, TenexE
     let client = crate::ai::ElevenLabsClient::new(api_key);
     let runtime = get_tokio_runtime();
 
-    let voices = runtime.block_on(client.get_voices()).map_err(|e| TenexError::Internal {
-        message: format!("Failed to fetch voices: {}", e),
-    })?;
+    let voices = runtime
+        .block_on(client.get_voices())
+        .map_err(|e| TenexError::Internal {
+            message: format!("Failed to fetch voices: {}", e),
+        })?;
 
-    Ok(voices.into_iter().map(|v| VoiceInfo {
-        voice_id: v.voice_id,
-        name: v.name,
-        category: v.category,
-        description: v.description,
-    }).collect())
+    Ok(voices
+        .into_iter()
+        .map(|v| VoiceInfo {
+            voice_id: v.voice_id,
+            name: v.name,
+            category: v.category,
+            description: v.description,
+        })
+        .collect())
 }
 
 #[uniffi::export]
@@ -3999,22 +4243,30 @@ pub fn fetch_openrouter_models(api_key: String) -> Result<Vec<ModelInfo>, TenexE
     let client = crate::ai::OpenRouterClient::new(api_key);
     let runtime = get_tokio_runtime();
 
-    let models = runtime.block_on(client.get_models()).map_err(|e| TenexError::Internal {
-        message: format!("Failed to fetch models: {}", e),
-    })?;
+    let models = runtime
+        .block_on(client.get_models())
+        .map_err(|e| TenexError::Internal {
+            message: format!("Failed to fetch models: {}", e),
+        })?;
 
-    Ok(models.into_iter().map(|m| ModelInfo {
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        context_length: m.context_length,
-    }).collect())
+    Ok(models
+        .into_iter()
+        .map(|m| ModelInfo {
+            id: m.id,
+            name: m.name,
+            description: m.description,
+            context_length: m.context_length,
+        })
+        .collect())
 }
 
 // Private implementation methods for TenexCore (not exposed via UniFFI)
 impl TenexCore {
     /// Collect system diagnostics (version, status)
-    fn collect_system_diagnostics(&self, data_dir: &std::path::Path) -> Result<SystemDiagnostics, String> {
+    fn collect_system_diagnostics(
+        &self,
+        data_dir: &std::path::Path,
+    ) -> Result<SystemDiagnostics, String> {
         let is_initialized = self.initialized.load(Ordering::SeqCst);
         let is_logged_in = self.is_logged_in();
         let log_path = data_dir.join("tenex.log").to_string_lossy().to_string();
@@ -4039,7 +4291,10 @@ impl TenexCore {
         };
 
         let (tx, rx) = std::sync::mpsc::channel();
-        if handle.send(NostrCommand::GetRelayStatus { response_tx: tx }).is_err() {
+        if handle
+            .send(NostrCommand::GetRelayStatus { response_tx: tx })
+            .is_err()
+        {
             return (false, 0);
         }
 
@@ -4053,15 +4308,18 @@ impl TenexCore {
     fn collect_sync_diagnostics(&self) -> Result<NegentropySyncDiagnostics, String> {
         use crate::stats::NegentropySyncStatus;
 
-        let stats_guard = self.negentropy_stats.read()
+        let stats_guard = self
+            .negentropy_stats
+            .read()
             .map_err(|_| "Failed to acquire negentropy_stats lock".to_string())?;
 
         Ok(if let Some(stats) = stats_guard.as_ref() {
             let snapshot = stats.snapshot();
-            let seconds_since_last_cycle = snapshot.last_cycle_time()
-                .map(|t| t.elapsed().as_secs());
+            let seconds_since_last_cycle =
+                snapshot.last_cycle_time().map(|t| t.elapsed().as_secs());
 
-            let recent_results: Vec<SyncResultDiagnostic> = snapshot.recent_results
+            let recent_results: Vec<SyncResultDiagnostic> = snapshot
+                .recent_results
                 .iter()
                 .map(|r| SyncResultDiagnostic {
                     kind_label: r.kind_label.clone(),
@@ -4104,23 +4362,26 @@ impl TenexCore {
     }
 
     /// Collect subscription diagnostics
-    fn collect_subscription_diagnostics(&self) -> Result<(Vec<SubscriptionDiagnostics>, u64), String> {
-        let stats_guard = self.subscription_stats.read()
+    fn collect_subscription_diagnostics(
+        &self,
+    ) -> Result<(Vec<SubscriptionDiagnostics>, u64), String> {
+        let stats_guard = self
+            .subscription_stats
+            .read()
             .map_err(|_| "Failed to acquire subscription_stats lock".to_string())?;
 
         Ok(if let Some(stats) = stats_guard.as_ref() {
             let snapshot = stats.snapshot();
-            let subs: Vec<SubscriptionDiagnostics> = snapshot.subscriptions
+            let subs: Vec<SubscriptionDiagnostics> = snapshot
+                .subscriptions
                 .iter()
-                .map(|(sub_id, info)| {
-                    SubscriptionDiagnostics {
-                        sub_id: sub_id.clone(),
-                        description: info.description.clone(),
-                        kinds: info.kinds.clone(),
-                        raw_filter: info.raw_filter.clone(),
-                        events_received: info.events_received,
-                        age_secs: info.created_at.elapsed().as_secs(),
-                    }
+                .map(|(sub_id, info)| SubscriptionDiagnostics {
+                    sub_id: sub_id.clone(),
+                    description: info.description.clone(),
+                    kinds: info.kinds.clone(),
+                    raw_filter: info.raw_filter.clone(),
+                    events_received: info.events_received,
+                    age_secs: info.created_at.elapsed().as_secs(),
                 })
                 .collect();
             let total = snapshot.total_events();
@@ -4131,14 +4392,21 @@ impl TenexCore {
     }
 
     /// Collect database diagnostics (potentially expensive - scans event kinds)
-    fn collect_database_diagnostics(&self, data_dir: &std::path::Path) -> Result<DatabaseStats, String> {
+    fn collect_database_diagnostics(
+        &self,
+        data_dir: &std::path::Path,
+    ) -> Result<DatabaseStats, String> {
         // CRITICAL: Acquire transaction lock before creating any nostrdb Transactions.
         // query_ndb_stats() creates a Transaction, so we must hold this lock to prevent
         // concurrent access with refresh() which also creates Transactions.
-        let _tx_guard = self.ndb_transaction_lock.lock()
+        let _tx_guard = self
+            .ndb_transaction_lock
+            .lock()
             .map_err(|_| "Failed to acquire transaction lock".to_string())?;
 
-        let ndb_guard = self.ndb.read()
+        let ndb_guard = self
+            .ndb
+            .read()
             .map_err(|_| "Failed to acquire ndb lock".to_string())?;
 
         Ok(if let Some(ndb) = ndb_guard.as_ref() {
@@ -4148,12 +4416,10 @@ impl TenexCore {
             // Convert to Vec<KindEventCount> and sort by count descending
             let mut event_counts: Vec<KindEventCount> = kind_counts
                 .into_iter()
-                .map(|(kind, count)| {
-                    KindEventCount {
-                        kind,
-                        count,
-                        name: get_kind_name(kind),
-                    }
+                .map(|(kind, count)| KindEventCount {
+                    kind,
+                    count,
+                    name: get_kind_name(kind),
                 })
                 .collect();
             event_counts.sort_by(|a, b| b.count.cmp(&a.count));
@@ -4246,7 +4512,8 @@ impl TenexCore {
                     Ok(g) => g,
                     Err(_) => continue,
                 };
-                let archived_ids = prefs_guard.as_ref()
+                let archived_ids = prefs_guard
+                    .as_ref()
                     .map(|p| p.prefs.archived_thread_ids.clone())
                     .unwrap_or_default();
 
@@ -4311,15 +4578,14 @@ fn get_kind_name(kind: u16) -> String {
 fn get_db_file_size(data_dir: &std::path::Path) -> u64 {
     // LMDB stores data in a file named "data.mdb"
     let db_file = data_dir.join("data.mdb");
-    std::fs::metadata(&db_file)
-        .map(|m| m.len())
-        .unwrap_or(0)
+    std::fs::metadata(&db_file).map(|m| m.len()).unwrap_or(0)
 }
 
 impl Drop for TenexCore {
     fn drop(&mut self) {
         // Stop callback listener if running
-        self.callback_listener_running.store(false, Ordering::SeqCst);
+        self.callback_listener_running
+            .store(false, Ordering::SeqCst);
         if let Ok(mut handle_guard) = self.callback_listener_handle.write() {
             if let Some(handle) = handle_guard.take() {
                 let _ = handle.join();
@@ -4412,7 +4678,7 @@ mod tests {
 
         // Since login now requires relay connection, we just test the basic flow
         // In a real test we'd mock the relay
-        core.logout();
+        let _ = core.logout();
         assert!(!core.is_logged_in());
         assert!(core.get_current_user().is_none());
     }
@@ -4447,7 +4713,9 @@ mod tests {
         let core = TenexCore::new();
         if !core.init() {
             // Skip test if db initialization fails (can happen in parallel test runs)
-            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            println!(
+                "Skipping test due to database initialization failure (parallel test conflict)"
+            );
             return;
         }
 
@@ -4465,7 +4733,9 @@ mod tests {
         let core = TenexCore::new();
         if !core.init() {
             // Skip test if db initialization fails (can happen in parallel test runs)
-            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            println!(
+                "Skipping test due to database initialization failure (parallel test conflict)"
+            );
             return;
         }
 
@@ -4484,7 +4754,9 @@ mod tests {
         let core = TenexCore::new();
         if !core.init() {
             // Skip test if db initialization fails (can happen in parallel test runs)
-            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            println!(
+                "Skipping test due to database initialization failure (parallel test conflict)"
+            );
             return;
         }
 
@@ -4500,24 +4772,35 @@ mod tests {
         let core = TenexCore::new();
         if !core.init() {
             // Skip test if db initialization fails (can happen in parallel test runs)
-            println!("Skipping test due to database initialization failure (parallel test conflict)");
+            println!(
+                "Skipping test due to database initialization failure (parallel test conflict)"
+            );
             return;
         }
 
         let invalid_pubkeys: Vec<String> = vec![
-            "not_hex_at_all!@#$".to_string(),        // Non-hex characters
-            "abc123".to_string(),                     // Too short
-            "0".repeat(65),                          // Too long
-            "g".repeat(64),                          // Invalid hex char 'g'
-            "  ".to_string(),                        // Whitespace only
-            "0123456789abcdef".to_string(),          // Valid hex but wrong length (16 chars)
+            "not_hex_at_all!@#$".to_string(), // Non-hex characters
+            "abc123".to_string(),             // Too short
+            "0".repeat(65),                   // Too long
+            "g".repeat(64),                   // Invalid hex char 'g'
+            "  ".to_string(),                 // Whitespace only
+            "0123456789abcdef".to_string(),   // Valid hex but wrong length (16 chars)
         ];
 
         for pubkey in invalid_pubkeys {
             let result = core.get_profile_picture(pubkey.clone());
             // All should return Ok(None) - graceful handling of invalid input
-            assert!(result.is_ok(), "Expected Ok for pubkey '{}', got {:?}", pubkey, result);
-            assert!(result.unwrap().is_none(), "Expected None for invalid pubkey '{}'", pubkey);
+            assert!(
+                result.is_ok(),
+                "Expected Ok for pubkey '{}', got {:?}",
+                pubkey,
+                result
+            );
+            assert!(
+                result.unwrap().is_none(),
+                "Expected None for invalid pubkey '{}'",
+                pubkey
+            );
         }
     }
 }

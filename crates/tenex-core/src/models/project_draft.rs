@@ -18,7 +18,7 @@ pub struct ProjectDraft {
 pub struct Workspace {
     pub id: String,
     pub name: String,
-    pub project_ids: Vec<String>,  // Project a-tags
+    pub project_ids: Vec<String>, // Project a-tags
     pub created_at: u64,
     pub pinned: bool,
 }
@@ -316,7 +316,9 @@ impl PreferencesStorage {
             self.prefs.archived_project_ids.remove(project_a_tag);
             false
         } else {
-            self.prefs.archived_project_ids.insert(project_a_tag.to_string());
+            self.prefs
+                .archived_project_ids
+                .insert(project_a_tag.to_string());
             true
         };
         self.save_to_file();
@@ -360,7 +362,9 @@ impl PreferencesStorage {
         // Remove from blocked if present
         self.prefs.blocked_backend_pubkeys.remove(pubkey);
         // Add to approved
-        self.prefs.approved_backend_pubkeys.insert(pubkey.to_string());
+        self.prefs
+            .approved_backend_pubkeys
+            .insert(pubkey.to_string());
         self.save_to_file();
     }
 
@@ -368,7 +372,9 @@ impl PreferencesStorage {
         // Remove from approved if present
         self.prefs.approved_backend_pubkeys.remove(pubkey);
         // Add to blocked
-        self.prefs.blocked_backend_pubkeys.insert(pubkey.to_string());
+        self.prefs
+            .blocked_backend_pubkeys
+            .insert(pubkey.to_string());
         self.save_to_file();
     }
 
@@ -424,10 +430,13 @@ impl PreferencesStorage {
     }
 
     pub fn add_workspace(&mut self, name: String, project_ids: Vec<String>) -> Workspace {
-        let id = format!("ws_{}", std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis());
+        let id = format!(
+            "ws_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis()
+        );
         let workspace = Workspace {
             id: id.clone(),
             name,
@@ -477,9 +486,10 @@ impl PreferencesStorage {
     }
 
     pub fn active_workspace(&self) -> Option<&Workspace> {
-        self.prefs.active_workspace_id.as_ref().and_then(|id| {
-            self.prefs.workspaces.iter().find(|w| w.id == *id)
-        })
+        self.prefs
+            .active_workspace_id
+            .as_ref()
+            .and_then(|id| self.prefs.workspaces.iter().find(|w| w.id == *id))
     }
 
     pub fn active_workspace_id(&self) -> Option<&str> {
