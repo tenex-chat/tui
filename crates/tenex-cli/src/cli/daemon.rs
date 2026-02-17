@@ -169,15 +169,14 @@ pub async fn run_daemon(
         // Update the shared data store with status events
         loop {
             match daemon_rx.try_recv() {
-                Ok(data_change) => match &data_change {
-                    DataChange::ProjectStatus { json } => {
+                Ok(data_change) => {
+                    if let DataChange::ProjectStatus { json } = &data_change {
                         shared_data_store
                             .lock()
                             .unwrap()
                             .handle_status_event_json(json);
                     }
-                    _ => {}
-                },
+                }
                 Err(broadcast::error::TryRecvError::Empty) => break,
                 Err(broadcast::error::TryRecvError::Lagged(_)) => continue, // Skip lagged messages
                 Err(broadcast::error::TryRecvError::Closed) => break,
@@ -408,7 +407,7 @@ fn handle_request(
     request: &Request,
     data_store: &Arc<Mutex<AppDataStore>>,
     core_handle: &CoreHandle,
-    start_time: Instant,
+    _start_time: Instant,
     logged_in: bool,
 ) -> (Response, bool) {
     let id = request.id;
