@@ -2,7 +2,8 @@
 
 **⚠️ AUTO-GENERATED - DO NOT EDIT MANUALLY**
 
-Contains UniFFI-generated Swift bindings from Rust. Files are overwritten on regeneration.
+This directory is a local scratch/output location for UniFFI-generated Swift bindings from Rust.
+Generated files here are ignored by git and overwritten on regeneration.
 
 ## Contents
 
