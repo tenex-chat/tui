@@ -4,11 +4,12 @@ set -euo pipefail
 export PATH="$HOME/.cargo/bin:$PATH"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-UDL_PATH="$ROOT_DIR/crates/tenex-core/src/tenex_core.udl"
-# Generate bindings to a temp location, then distribute to correct directories
-TEMP_OUT_DIR="$ROOT_DIR/swift-bindings"
+
+# Generate bindings to a temp location, then copy into iOS source tree.
+TEMP_OUT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/tenex-swift-bindings.XXXXXX")"
 SWIFT_OUT_DIR="$ROOT_DIR/ios-app/Sources/TenexMVP/TenexCore"
 FFI_OUT_DIR="$ROOT_DIR/ios-app/Sources/TenexMVP/TenexCoreFFI"
+trap 'rm -rf "$TEMP_OUT_DIR"' EXIT
 
 # Paths for architecture-specific and universal builds
 ARM64_SIM_LIB="$ROOT_DIR/target/aarch64-apple-ios-sim/release/libtenex_core.a"
@@ -42,7 +43,6 @@ if [ ! -f "$UNIVERSAL_SIM_LIB" ] || [ "${FORCE_REBUILD:-}" = "1" ]; then
   echo "  Universal library created at $UNIVERSAL_SIM_LIB" >&2
 fi
 
-mkdir -p "$TEMP_OUT_DIR"
 mkdir -p "$SWIFT_OUT_DIR"
 mkdir -p "$FFI_OUT_DIR"
 
@@ -59,15 +59,11 @@ if [ ! -f "$TEMP_OUT_DIR/tenex_core.swift" ]; then
   exit 1
 fi
 
-# Move Swift bindings to the correct location
+# Copy Swift bindings to iOS source tree.
 cp "$TEMP_OUT_DIR/tenex_core.swift" "$SWIFT_OUT_DIR/tenex_core.swift"
-echo "Swift bindings copied to $SWIFT_OUT_DIR/tenex_core.swift" >&2
 
-# Move FFI files to the correct location
+# Copy FFI files to iOS source tree.
 cp "$TEMP_OUT_DIR/tenex_coreFFI.h" "$FFI_OUT_DIR/tenex_coreFFI.h"
 cp "$TEMP_OUT_DIR/tenex_coreFFI.modulemap" "$FFI_OUT_DIR/tenex_coreFFI.modulemap"
-echo "FFI files copied to $FFI_OUT_DIR/" >&2
 
-# Clean up temp files (keep swift-bindings as temp/cache location but don't include in build)
-rm -f "$TEMP_OUT_DIR/tenex_core.swift"
-echo "Cleaned up temporary files" >&2
+echo "Swift bindings generated in ios-app sources" >&2

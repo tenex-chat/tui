@@ -23,6 +23,8 @@ cargo build --target aarch64-apple-ios --release -p tenex-core       # Device
 ./scripts/generate-swift-bindings.sh                                 # Regenerate FFI
 ```
 
+Generated UniFFI files are not committed. The iOS target runs a pre-build script to regenerate them automatically.
+
 ## Signing & Bundle Config
 
 Code signing and bundle identifiers are in `Project.swift`. Don't hardcode team IDs—use Tuist's automatic signing where possible.

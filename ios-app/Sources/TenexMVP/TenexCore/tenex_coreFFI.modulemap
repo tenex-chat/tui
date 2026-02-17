@@ -1,7 +1,0 @@
-module tenex_coreFFI {
-    header "tenex_coreFFI.h"
-    export *
-    use "Darwin"
-    use "_Builtin_stdbool"
-    use "_Builtin_stdint"
-}

@@ -3,6 +3,7 @@
 *.xcworkspace/
 Derived/
 .build/
+.xcodebuild/
 
 # Xcode user-specific files
 xcuserdata/

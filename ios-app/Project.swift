@@ -26,18 +26,15 @@ let project = Project(
                 "UIBackgroundModes": ["audio", "fetch", "remote-notification"]
             ]),
             sources: [
-                .glob("Sources/TenexMVP/**/*.swift", excluding: [
-                    "Sources/TenexMVP/Views/SkillSelectorSheet.swift"
-                ])
+                .glob("Sources/TenexMVP/**/*.swift")
             ],
             resources: ["Sources/TenexMVP/Resources/**"],
             scripts: [
-                // Disabled - uniffi-bindgen generates malformed Swift code
-                // .pre(
-                //     script: "bash \"${SRCROOT}/../scripts/generate-swift-bindings.sh\"",
-                //     name: "Generate Swift Bindings",
-                //     basedOnDependencyAnalysis: false
-                // )
+                .pre(
+                    script: "bash \"${SRCROOT}/../scripts/generate-swift-bindings.sh\"",
+                    name: "Generate Swift Bindings",
+                    basedOnDependencyAnalysis: false
+                )
             ],
             dependencies: [
                 .package(product: "Kingfisher", type: .runtime)
