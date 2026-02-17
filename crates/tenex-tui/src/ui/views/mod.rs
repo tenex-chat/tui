@@ -19,6 +19,8 @@ pub mod project_settings;
 pub mod skill_selector;
 pub mod report_viewer;
 pub mod stats;
+pub mod tts_control;
+pub mod report_tab;
 pub mod workspace_modal;
 
 pub use agent_browser::render_agent_browser;
@@ -43,6 +45,8 @@ pub use skill_selector::render_skill_selector;
 pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
 pub use report_viewer::render_report_viewer;
 pub use stats::render_stats;
+pub use tts_control::render_tts_control;
+pub use report_tab::render_report_tab;
 pub use workspace_modal::render_workspace_manager;
 
 use crate::ui::components::{render_modal_items, Modal, ModalItem, ModalSize};
