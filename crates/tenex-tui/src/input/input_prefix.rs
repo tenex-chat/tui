@@ -2,7 +2,7 @@
 //!
 //! This module provides a modular system for handling special prefix characters
 //! when typed at the beginning of an empty input field. Each prefix can trigger
-//! a different action (e.g., `@` opens agent selector, `/` opens nudges, etc.)
+//! a different action (e.g., `@` opens agent selector, `/` opens nudges+skills, etc.)
 //!
 //! ## Adding New Prefix Triggers
 //!
@@ -19,8 +19,8 @@ use crate::ui::App;
 pub enum PrefixTrigger {
     /// `@` - Open agent selector modal
     AgentSelector,
-    /// `/` - Open nudges selector modal
-    NudgeSelector,
+    /// `/` - Open unified nudges/skills selector modal
+    NudgeSkillSelector,
     /// `#` - Open project selector modal
     ProjectSelector,
 }
@@ -33,12 +33,11 @@ impl PrefixTrigger {
     pub fn from_char(c: char) -> Option<Self> {
         match c {
             '@' => Some(PrefixTrigger::AgentSelector),
-            '/' => Some(PrefixTrigger::NudgeSelector),
+            '/' => Some(PrefixTrigger::NudgeSkillSelector),
             '#' => Some(PrefixTrigger::ProjectSelector),
             _ => None,
         }
     }
-
 }
 
 /// Checks if the input is in a state where prefix triggers should be evaluated.
@@ -73,8 +72,8 @@ fn execute_prefix_trigger(app: &mut App, trigger: PrefixTrigger) {
         PrefixTrigger::AgentSelector => {
             app.open_agent_selector();
         }
-        PrefixTrigger::NudgeSelector => {
-            app.open_nudge_selector();
+        PrefixTrigger::NudgeSkillSelector => {
+            app.open_nudge_skill_selector();
         }
         PrefixTrigger::ProjectSelector => {
             // Only allow project switching for new conversations (draft tabs)

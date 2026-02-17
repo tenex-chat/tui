@@ -24,8 +24,11 @@ struct ActiveWorkCache {
 
 impl ActiveWorkCache {
     fn new(app: &App) -> Self {
-        let operations = app.data_store.borrow()
-            .operations.get_all_active_operations()
+        let operations = app
+            .data_store
+            .borrow()
+            .operations
+            .get_all_active_operations()
             .into_iter()
             .cloned()
             .collect();
@@ -47,7 +50,11 @@ impl ActiveWorkCache {
 
 /// Get thread ID at a given index for the current home tab.
 /// For ActiveWork tab, uses the provided cache to avoid snapshot drift.
-fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&ActiveWorkCache>) -> Option<String> {
+fn get_thread_id_at_index(
+    app: &App,
+    index: usize,
+    active_work_cache: Option<&ActiveWorkCache>,
+) -> Option<String> {
     match app.home_panel_focus {
         HomeTab::Conversations => {
             let threads = get_hierarchical_threads(app);
@@ -67,7 +74,9 @@ fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&Ac
                     }
                     // Fall back to looking up thread from event_id (like renderer does)
                     let data_store = app.data_store.borrow();
-                    if let Some((thread_id, _title)) = data_store.get_thread_info_for_event(&op.event_id) {
+                    if let Some((thread_id, _title)) =
+                        data_store.get_thread_info_for_event(&op.event_id)
+                    {
                         return Some(thread_id);
                     }
                 }
@@ -79,15 +88,17 @@ fn get_thread_id_at_index(app: &App, index: usize, active_work_cache: Option<&Ac
                     if let Some(ref thread_id) = op.thread_id {
                         return Some(thread_id.clone());
                     }
-                    if let Some((thread_id, _title)) = data_store.get_thread_info_for_event(&op.event_id) {
+                    if let Some((thread_id, _title)) =
+                        data_store.get_thread_info_for_event(&op.event_id)
+                    {
                         return Some(thread_id);
                     }
                 }
             }
             None
         }
-        HomeTab::Reports => None,      // Reports are not threads
-        HomeTab::Stats => None,        // Stats are not threads
+        HomeTab::Reports => None, // Reports are not threads
+        HomeTab::Stats => None,   // Stats are not threads
     }
 }
 
@@ -248,7 +259,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let current = app.current_selection();
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
+                    if let Some(thread_id) =
+                        get_thread_id_at_index(app, current, active_work_cache.as_ref())
+                    {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 } else {
@@ -259,7 +272,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.set_current_selection(current - 1);
                     // Also add the new position to selection when Shift is held
                     if has_shift {
-                        if let Some(thread_id) = get_thread_id_at_index(app, current - 1, active_work_cache.as_ref()) {
+                        if let Some(thread_id) =
+                            get_thread_id_at_index(app, current - 1, active_work_cache.as_ref())
+                        {
                             app.add_thread_to_multi_select(&thread_id);
                         }
                     }
@@ -279,12 +294,16 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
-                    HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
+                    HomeTab::ActiveWork => active_work_cache
+                        .as_ref()
+                        .map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 // If Shift is held, add current item to multi-selection before moving
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
+                    if let Some(thread_id) =
+                        get_thread_id_at_index(app, current, active_work_cache.as_ref())
+                    {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 } else {
@@ -295,7 +314,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     app.set_current_selection(current + 1);
                     // Also add the new position to selection when Shift is held
                     if has_shift {
-                        if let Some(thread_id) = get_thread_id_at_index(app, current + 1, active_work_cache.as_ref()) {
+                        if let Some(thread_id) =
+                            get_thread_id_at_index(app, current + 1, active_work_cache.as_ref())
+                        {
                             app.add_thread_to_multi_select(&thread_id);
                         }
                     }
@@ -315,7 +336,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                     HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                     HomeTab::Reports => app.reports().len().saturating_sub(1),
-                    HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
+                    HomeTab::ActiveWork => active_work_cache
+                        .as_ref()
+                        .map_or(0, |c| c.len().saturating_sub(1)),
                     HomeTab::Stats => 0, // Stats tab has no list selection
                 };
                 if current > max {
@@ -332,9 +355,13 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 let agent_ids = project.agent_ids.clone();
                 let mcp_tool_ids = project.mcp_tool_ids.clone();
 
-                app.modal_state = ui::modal::ModalState::ProjectSettings(
-                    ui::modal::ProjectSettingsState::new(a_tag, project_name, agent_ids, mcp_tool_ids),
-                );
+                app.modal_state =
+                    ui::modal::ModalState::ProjectSettings(ui::modal::ProjectSettingsState::new(
+                        a_tag,
+                        project_name,
+                        agent_ids,
+                        mcp_tool_ids,
+                    ));
             }
         }
         KeyCode::Char('S') if app.sidebar_focused && has_shift => {
@@ -380,7 +407,10 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                         }) {
                             app.set_warning_status(&format!("Failed to boot: {}", e));
                         } else {
-                            app.set_warning_status(&format!("Boot request sent for {}", project.name));
+                            app.set_warning_status(&format!(
+                                "Boot request sent for {}",
+                                project.name
+                            ));
                         }
                     }
                 }
@@ -397,15 +427,14 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 if let Some(project) = all_projects.get(app.sidebar_project_index) {
                     let a_tag = project.a_tag();
                     let is_archived = app.is_project_archived(&a_tag);
-                    app.modal_state = ui::modal::ModalState::ProjectActions(
-                        ui::modal::ProjectActionsState::new(
+                    app.modal_state =
+                        ui::modal::ModalState::ProjectActions(ui::modal::ProjectActionsState::new(
                             a_tag,
                             project.name.clone(),
                             project.pubkey.clone(),
                             is_online,
                             is_archived,
-                        ),
-                    );
+                        ));
                 }
             } else {
                 let idx = app.current_selection();
@@ -454,9 +483,20 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                     }
                     HomeTab::ActiveWork => {
                         // Open conversation from Active Work tab using cached operations
-                        let (event_id, thread_id_opt, project_a_tag): (String, Option<String>, String) = active_work_cache.as_ref()
+                        let (event_id, thread_id_opt, project_a_tag): (
+                            String,
+                            Option<String>,
+                            String,
+                        ) = active_work_cache
+                            .as_ref()
                             .and_then(|cache| cache.get(idx))
-                            .map(|op| (op.event_id.clone(), op.thread_id.clone(), op.project_coordinate.clone()))
+                            .map(|op| {
+                                (
+                                    op.event_id.clone(),
+                                    op.thread_id.clone(),
+                                    op.project_coordinate.clone(),
+                                )
+                            })
                             .unwrap_or_default();
 
                         if project_a_tag.is_empty() {
@@ -465,13 +505,16 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
 
                         // Try thread_id first, then fall back to event lookup (like renderer does)
                         let resolved_thread_id: Option<String> = thread_id_opt.or_else(|| {
-                            app.data_store.borrow()
+                            app.data_store
+                                .borrow()
                                 .get_thread_info_for_event(&event_id)
                                 .map(|(thread_id, _)| thread_id)
                         });
 
                         if let Some(thread_id) = resolved_thread_id {
-                            let thread = app.data_store.borrow()
+                            let thread = app
+                                .data_store
+                                .borrow()
                                 .get_threads(&project_a_tag)
                                 .iter()
                                 .find(|t| t.id == thread_id)
@@ -520,7 +563,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
         KeyCode::Char('k') | KeyCode::Char('K') if !app.sidebar_focused => {
             let current = app.current_selection();
             if has_shift {
-                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
+                if let Some(thread_id) =
+                    get_thread_id_at_index(app, current, active_work_cache.as_ref())
+                {
                     app.add_thread_to_multi_select(&thread_id);
                 }
             } else {
@@ -529,7 +574,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if current > 0 {
                 app.set_current_selection(current - 1);
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current - 1, active_work_cache.as_ref()) {
+                    if let Some(thread_id) =
+                        get_thread_id_at_index(app, current - 1, active_work_cache.as_ref())
+                    {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 }
@@ -541,11 +588,15 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
                 HomeTab::Inbox => app.inbox_items().len().saturating_sub(1),
                 HomeTab::Conversations => get_hierarchical_threads(app).len().saturating_sub(1),
                 HomeTab::Reports => app.reports().len().saturating_sub(1),
-                HomeTab::ActiveWork => active_work_cache.as_ref().map_or(0, |c| c.len().saturating_sub(1)),
+                HomeTab::ActiveWork => active_work_cache
+                    .as_ref()
+                    .map_or(0, |c| c.len().saturating_sub(1)),
                 HomeTab::Stats => 0, // Stats tab has no list selection
             };
             if has_shift {
-                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
+                if let Some(thread_id) =
+                    get_thread_id_at_index(app, current, active_work_cache.as_ref())
+                {
                     app.add_thread_to_multi_select(&thread_id);
                 }
             } else {
@@ -554,7 +605,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             if current < max {
                 app.set_current_selection(current + 1);
                 if has_shift {
-                    if let Some(thread_id) = get_thread_id_at_index(app, current + 1, active_work_cache.as_ref()) {
+                    if let Some(thread_id) =
+                        get_thread_id_at_index(app, current + 1, active_work_cache.as_ref())
+                    {
                         app.add_thread_to_multi_select(&thread_id);
                     }
                 }
@@ -568,7 +621,9 @@ pub(super) fn handle_home_view_key(app: &mut App, key: KeyEvent) -> Result<()> {
             } else {
                 // Archive just the current selection
                 let current = app.current_selection();
-                if let Some(thread_id) = get_thread_id_at_index(app, current, active_work_cache.as_ref()) {
+                if let Some(thread_id) =
+                    get_thread_id_at_index(app, current, active_work_cache.as_ref())
+                {
                     let is_archived = app.toggle_thread_archived(&thread_id);
                     if is_archived {
                         app.set_warning_status("Archived conversation");
@@ -622,7 +677,8 @@ fn new_conversation_current_project(app: &mut App) {
         // Auto-select PM agent from status
         let pm_agent = {
             let store = app.data_store.borrow();
-            store.get_project_status(&a_tag)
+            store
+                .get_project_status(&a_tag)
                 .and_then(|status| status.pm_agent().cloned())
         };
         if let Some(pm) = pm_agent {
@@ -640,7 +696,10 @@ fn new_conversation_current_project(app: &mut App) {
 
 fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
     use ui::modal::{ProjectSettingsAddMode, ProjectSettingsFocus};
-    use ui::views::{available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
+    use ui::views::{
+        available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
+        get_mcp_tool_id_at_index,
+    };
 
     let code = key.code;
 
@@ -673,26 +732,24 @@ fn handle_project_settings_key(app: &mut App, key: KeyEvent) {
                     state.add_index += 1;
                 }
             }
-            KeyCode::Enter => {
-                match add_mode {
-                    ProjectSettingsAddMode::Agent => {
-                        if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
-                            state.add_agent(agent_id);
-                            state.in_add_mode = None;
-                            state.add_filter.clear();
-                            state.add_index = 0;
-                        }
-                    }
-                    ProjectSettingsAddMode::McpTool => {
-                        if let Some(tool_id) = get_mcp_tool_id_at_index(app, &state, state.add_index) {
-                            state.add_mcp_tool(tool_id);
-                            state.in_add_mode = None;
-                            state.add_filter.clear();
-                            state.add_index = 0;
-                        }
+            KeyCode::Enter => match add_mode {
+                ProjectSettingsAddMode::Agent => {
+                    if let Some(agent_id) = get_agent_id_at_index(app, &state, state.add_index) {
+                        state.add_agent(agent_id);
+                        state.in_add_mode = None;
+                        state.add_filter.clear();
+                        state.add_index = 0;
                     }
                 }
-            }
+                ProjectSettingsAddMode::McpTool => {
+                    if let Some(tool_id) = get_mcp_tool_id_at_index(app, &state, state.add_index) {
+                        state.add_mcp_tool(tool_id);
+                        state.in_add_mode = None;
+                        state.add_filter.clear();
+                        state.add_index = 0;
+                    }
+                }
+            },
             KeyCode::Char(c) => {
                 state.add_filter.push(c);
                 state.add_index = 0;
@@ -993,7 +1050,9 @@ fn handle_create_project_key(app: &mut App, key: KeyEvent) {
 
 pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Check active tab content type and dispatch to appropriate handler
-    let content_type = app.tabs.active_tab()
+    let content_type = app
+        .tabs
+        .active_tab()
         .map(|t| t.content_type.clone())
         .unwrap_or(TabContentType::Conversation);
 
@@ -1041,7 +1100,12 @@ pub(super) fn handle_chat_normal_mode(app: &mut App, key: KeyEvent) -> Result<bo
                         }
                         SidebarSelection::Report(a_tag) => {
                             // Use a_tag-based lookup to avoid slug collisions across different authors
-                            let report = app.data_store.borrow().reports.get_report_by_a_tag(&a_tag).cloned();
+                            let report = app
+                                .data_store
+                                .borrow()
+                                .reports
+                                .get_report_by_a_tag(&a_tag)
+                                .cloned();
                             if let Some(report) = report {
                                 // Open report as a tab instead of modal
                                 app.tabs.open_report(
@@ -1316,7 +1380,11 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
             };
             if is_busy {
                 if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                    let working_agents = app.data_store.borrow().operations.get_working_agents(&stop_thread_id);
+                    let working_agents = app
+                        .data_store
+                        .borrow()
+                        .operations
+                        .get_working_agents(&stop_thread_id);
                     if let Err(e) = core_handle.send(NostrCommand::StopOperations {
                         project_a_tag: a_tag,
                         event_ids: vec![stop_thread_id.clone()],
@@ -1368,8 +1436,7 @@ fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
             }
         }
     } else if c == 'n' && app.view == View::AgentBrowser && !app.home.in_agent_detail() {
-        app.modal_state =
-            ui::modal::ModalState::CreateAgent(ui::modal::CreateAgentState::new());
+        app.modal_state = ui::modal::ModalState::CreateAgent(ui::modal::CreateAgentState::new());
     } else if app.view == View::AgentBrowser && !app.home.in_agent_detail() && c != 'q' && c != 'n'
     {
         app.home.append_to_filter(c);
@@ -1490,7 +1557,11 @@ pub(super) fn handle_editing_mode(
                             } else {
                                 Some(input.as_str())
                             };
-                            nostr::auth::login_with_nsec(nsec, password, &mut app.preferences.borrow_mut())
+                            nostr::auth::login_with_nsec(
+                                nsec,
+                                password,
+                                &mut app.preferences.borrow_mut(),
+                            )
                         } else {
                             Err(anyhow::anyhow!("No credentials provided"))
                         };
@@ -1509,7 +1580,10 @@ pub(super) fn handle_editing_mode(
                                         user_pubkey: user_pubkey.clone(),
                                         response_tx: None,
                                     }) {
-                                        app.set_warning_status(&format!("Failed to connect: {}", e));
+                                        app.set_warning_status(&format!(
+                                            "Failed to connect: {}",
+                                            e
+                                        ));
                                         *login_step = LoginStep::Nsec;
                                     } else {
                                         app.view = View::Home;
@@ -1544,7 +1618,10 @@ pub(super) fn handle_editing_mode(
                                         user_pubkey: user_pubkey.clone(),
                                         response_tx: None,
                                     }) {
-                                        app.set_warning_status(&format!("Failed to connect: {}", e));
+                                        app.set_warning_status(&format!(
+                                            "Failed to connect: {}",
+                                            e
+                                        ));
                                         *login_step = LoginStep::Unlock;
                                     } else {
                                         app.view = View::Home;
@@ -1625,7 +1702,9 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
         // Open source conversation with Enter
         KeyCode::Enter => {
             // Get both conversation_id and message_id from the selected TTS item
-            let (conversation_id, message_id) = app.tabs.tts_state()
+            let (conversation_id, message_id) = app
+                .tabs
+                .tts_state()
                 .and_then(|s| s.queue.get(s.selected_index))
                 .map(|item| (item.conversation_id.clone(), item.message_id.clone()))
                 .unwrap_or((None, None));
@@ -1635,7 +1714,8 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                 let data_store = app.data_store.borrow();
                 if let Some(thread) = data_store.get_thread_by_id(&conv_id) {
                     let thread_title = thread.title.clone();
-                    let project_a_tag = data_store.find_project_for_thread(&conv_id)
+                    let project_a_tag = data_store
+                        .find_project_for_thread(&conv_id)
                         .unwrap_or_default();
                     drop(data_store);
 
@@ -1656,8 +1736,8 @@ fn handle_tts_control_key(app: &mut App, key: KeyEvent) -> Result<bool> {
                     // If we have a message_id, scroll to that message
                     if let Some(msg_id) = message_id {
                         let messages = app.messages();
-                        if let Some((msg_idx, _)) = messages.iter().enumerate()
-                            .find(|(_, m)| m.id == msg_id)
+                        if let Some((msg_idx, _)) =
+                            messages.iter().enumerate().find(|(_, m)| m.id == msg_id)
                         {
                             app.set_selected_message_index(msg_idx);
                             // CRITICAL: Switch to Normal mode so auto-scroll will work
@@ -1692,7 +1772,9 @@ fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
     let code = key.code;
 
     // Get current focus state
-    let focus = app.tabs.active_tab()
+    let focus = app
+        .tabs
+        .active_tab()
         .and_then(|t| t.report_state.as_ref())
         .map(|s| s.focus)
         .unwrap_or(crate::ui::state::ReportTabFocus::Content);
@@ -1721,7 +1803,9 @@ fn handle_report_tab_key(app: &mut App, key: KeyEvent) -> Result<bool> {
             return Ok(true);
         }
         // Content-focused navigation
-        KeyCode::Char('j') | KeyCode::Down if focus == crate::ui::state::ReportTabFocus::Content => {
+        KeyCode::Char('j') | KeyCode::Down
+            if focus == crate::ui::state::ReportTabFocus::Content =>
+        {
             if let Some(tab) = app.tabs.active_tab_mut() {
                 if let Some(ref mut state) = tab.report_state {
                     state.content_scroll += 1;

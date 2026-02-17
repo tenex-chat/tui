@@ -43,7 +43,10 @@ impl AudioPlayer {
         let (stream, stream_handle) = match OutputStream::try_default() {
             Ok((stream, handle)) => (Some(stream), Some(handle)),
             Err(e) => {
-                eprintln!("[AudioPlayer] Warning: Failed to initialize audio output: {}", e);
+                eprintln!(
+                    "[AudioPlayer] Warning: Failed to initialize audio output: {}",
+                    e
+                );
                 (None, None)
             }
         };
@@ -78,8 +81,8 @@ impl AudioPlayer {
             Decoder::new(reader).map_err(|e| format!("Failed to decode audio file: {}", e))?;
 
         // Create a new sink for playback
-        let sink =
-            Sink::try_new(stream_handle).map_err(|e| format!("Failed to create audio sink: {}", e))?;
+        let sink = Sink::try_new(stream_handle)
+            .map_err(|e| format!("Failed to create audio sink: {}", e))?;
 
         // Append the audio source to the sink
         sink.append(source);

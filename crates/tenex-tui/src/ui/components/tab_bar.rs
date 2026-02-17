@@ -156,11 +156,27 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     let home_pad_style = Style::default().bg(home_bg.unwrap_or(theme::BG_APP));
 
     // Top padding line for Home
-    top_spans.push(half_block_span(home_left_pad, LOWER_HALF_BLOCK, home_active));
-    top_spans.push(half_block_span(home_shortcut, LOWER_HALF_BLOCK, home_active));
-    top_spans.push(half_block_span(home_indicator, LOWER_HALF_BLOCK, home_active));
+    top_spans.push(half_block_span(
+        home_left_pad,
+        LOWER_HALF_BLOCK,
+        home_active,
+    ));
+    top_spans.push(half_block_span(
+        home_shortcut,
+        LOWER_HALF_BLOCK,
+        home_active,
+    ));
+    top_spans.push(half_block_span(
+        home_indicator,
+        LOWER_HALF_BLOCK,
+        home_active,
+    ));
     top_spans.push(half_block_span(home_title, LOWER_HALF_BLOCK, home_active));
-    top_spans.push(half_block_span(home_right_pad, LOWER_HALF_BLOCK, home_active));
+    top_spans.push(half_block_span(
+        home_right_pad,
+        LOWER_HALF_BLOCK,
+        home_active,
+    ));
 
     // Title line for Home
     title_spans.push(Span::styled(home_left_pad, home_pad_style));
@@ -178,11 +194,27 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
     project_spans.push(Span::styled(home_suffix, home_pad_style));
 
     // Bottom padding line for Home
-    bottom_spans.push(half_block_span(home_left_pad, UPPER_HALF_BLOCK, home_active));
-    bottom_spans.push(half_block_span(home_shortcut, UPPER_HALF_BLOCK, home_active));
-    bottom_spans.push(half_block_span(home_indicator, UPPER_HALF_BLOCK, home_active));
+    bottom_spans.push(half_block_span(
+        home_left_pad,
+        UPPER_HALF_BLOCK,
+        home_active,
+    ));
+    bottom_spans.push(half_block_span(
+        home_shortcut,
+        UPPER_HALF_BLOCK,
+        home_active,
+    ));
+    bottom_spans.push(half_block_span(
+        home_indicator,
+        UPPER_HALF_BLOCK,
+        home_active,
+    ));
     bottom_spans.push(half_block_span(home_title, UPPER_HALF_BLOCK, home_active));
-    bottom_spans.push(half_block_span(home_right_pad, UPPER_HALF_BLOCK, home_active));
+    bottom_spans.push(half_block_span(
+        home_right_pad,
+        UPPER_HALF_BLOCK,
+        home_active,
+    ));
 
     // Spacing after home
     if !app.open_tabs().is_empty() {
@@ -242,12 +274,12 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
             }
             TabContentType::TTSControl => {
                 // TTS Control tab has special indicator
-                let tts_active = tab.tts_state.as_ref()
+                let tts_active = tab
+                    .tts_state
+                    .as_ref()
                     .map(|s| s.is_active())
                     .unwrap_or(false);
-                let tts_paused = tab.tts_state.as_ref()
-                    .map(|s| s.is_paused)
-                    .unwrap_or(false);
+                let tts_paused = tab.tts_state.as_ref().map(|s| s.is_paused).unwrap_or(false);
 
                 let (ind, ind_fg) = if tts_paused {
                     ("⏸".to_string(), Some(theme::ACCENT_WARNING))
@@ -267,14 +299,16 @@ pub fn render_tab_bar(f: &mut Frame, app: &App, area: Rect) {
                 let (ind, ind_fg) = ("📄".to_string(), Some(theme::ACCENT_PRIMARY));
 
                 // Get report title from store using a_tag (handles slug collisions)
-                let report_title = data_store.reports
+                let report_title = data_store
+                    .reports
                     .get_report_by_a_tag(a_tag)
                     .map(|r| r.title.clone())
                     .unwrap_or_else(|| tab.thread_title.clone());
                 let (title, title_width) = truncate_to_width(&report_title, max_title_width);
 
                 // Get author name for project line
-                let author = data_store.reports
+                let author = data_store
+                    .reports
                     .get_report_by_a_tag(a_tag)
                     .map(|r| data_store.get_profile_name(&r.author))
                     .unwrap_or_else(|| "Report".to_string());

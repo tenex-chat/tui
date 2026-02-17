@@ -25,7 +25,9 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
     // Instructions
     let instructions = match login_step {
         LoginStep::Nsec => "Enter your nsec (private key) to login:",
-        LoginStep::Password => "Enter a password to encrypt your key (optional, press Enter to skip):",
+        LoginStep::Password => {
+            "Enter a password to encrypt your key (optional, press Enter to skip):"
+        }
         LoginStep::Unlock => "Welcome back! Enter your password to unlock:",
     };
     let instruction_widget = Paragraph::new(instructions)
@@ -62,9 +64,13 @@ pub fn render_login(f: &mut Frame, app: &App, area: Rect, login_step: &LoginStep
             NotificationLevel::Warning => theme::ACCENT_WARNING,
             NotificationLevel::Error => theme::ACCENT_ERROR,
         };
-        let status = Paragraph::new(format!("{} {}", notification.level.icon(), notification.message))
-            .style(Style::default().fg(color))
-            .alignment(Alignment::Center);
+        let status = Paragraph::new(format!(
+            "{} {}",
+            notification.level.icon(),
+            notification.message
+        ))
+        .style(Style::default().fg(color))
+        .alignment(Alignment::Center);
         f.render_widget(status, chunks[2]);
     }
 }

@@ -85,7 +85,10 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                     style_stack.push(|s| s.add_modifier(Modifier::BOLD));
                 }
                 Tag::Link { .. } => {
-                    style_stack.push(|s| s.fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::UNDERLINED));
+                    style_stack.push(|s| {
+                        s.fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::UNDERLINED)
+                    });
                 }
                 Tag::Image { dest_url, .. } => {
                     in_image = true;
@@ -173,22 +176,30 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
 
                     lines.push(Line::from(""));
                     lines.push(Line::from(vec![
-                        Span::styled("   🖼  ".to_string(), Style::default().fg(theme::ACCENT_SPECIAL)),
+                        Span::styled(
+                            "   🖼  ".to_string(),
+                            Style::default().fg(theme::ACCENT_SPECIAL),
+                        ),
                         Span::styled(
                             alt_text,
-                            Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .fg(theme::ACCENT_SPECIAL)
+                                .add_modifier(Modifier::BOLD),
                         ),
                     ]));
                     lines.push(Line::from(vec![
                         Span::styled("       ".to_string(), Style::default()),
                         Span::styled(
                             image_url.clone(),
-                            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::UNDERLINED)
+                            Style::default()
+                                .fg(theme::ACCENT_PRIMARY)
+                                .add_modifier(Modifier::UNDERLINED),
                         ),
                     ]));
-                    lines.push(Line::from(vec![
-                        Span::styled("       [Press 'o' to open in viewer]".to_string(), Style::default().fg(theme::TEXT_DIM)),
-                    ]));
+                    lines.push(Line::from(vec![Span::styled(
+                        "       [Press 'o' to open in viewer]".to_string(),
+                        Style::default().fg(theme::TEXT_DIM),
+                    )]));
                     lines.push(Line::from(""));
 
                     image_alt.clear();
@@ -227,26 +238,40 @@ pub fn render_markdown(text: &str) -> Vec<Line<'static>> {
                         // Render rows
                         for (row_idx, row) in table_rows.iter().enumerate() {
                             let mut row_spans: Vec<Span<'static>> = Vec::new();
-                            row_spans.push(Span::styled("│".to_string(), Style::default().fg(theme::TEXT_DIM)));
+                            row_spans.push(Span::styled(
+                                "│".to_string(),
+                                Style::default().fg(theme::TEXT_DIM),
+                            ));
 
                             for (col_idx, cell) in row.iter().enumerate() {
                                 let width = col_widths.get(col_idx).copied().unwrap_or(0);
                                 let padded = format!(" {:width$} ", cell, width = width);
                                 let style = if row_idx == 0 {
                                     // Header row - bold
-                                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+                                    Style::default()
+                                        .fg(theme::TEXT_PRIMARY)
+                                        .add_modifier(Modifier::BOLD)
                                 } else {
                                     Style::default().fg(theme::TEXT_PRIMARY)
                                 };
                                 row_spans.push(Span::styled(padded, style));
-                                row_spans.push(Span::styled("│".to_string(), Style::default().fg(theme::TEXT_DIM)));
+                                row_spans.push(Span::styled(
+                                    "│".to_string(),
+                                    Style::default().fg(theme::TEXT_DIM),
+                                ));
                             }
                             // Fill in missing columns
                             for col_idx in row.len()..col_count {
                                 let width = col_widths.get(col_idx).copied().unwrap_or(0);
                                 let padded = format!(" {:width$} ", "", width = width);
-                                row_spans.push(Span::styled(padded, Style::default().fg(theme::TEXT_PRIMARY)));
-                                row_spans.push(Span::styled("│".to_string(), Style::default().fg(theme::TEXT_DIM)));
+                                row_spans.push(Span::styled(
+                                    padded,
+                                    Style::default().fg(theme::TEXT_PRIMARY),
+                                ));
+                                row_spans.push(Span::styled(
+                                    "│".to_string(),
+                                    Style::default().fg(theme::TEXT_DIM),
+                                ));
                             }
                             lines.push(Line::from(row_spans));
 
@@ -395,14 +420,16 @@ mod tests {
         assert!(lines.len() >= 4);
 
         // Find the line with the icon
-        let icon_line = lines.iter().find(|line| {
-            line.spans.iter().any(|span| span.content.contains("🖼"))
-        });
+        let icon_line = lines
+            .iter()
+            .find(|line| line.spans.iter().any(|span| span.content.contains("🖼")));
         assert!(icon_line.is_some(), "Should have icon line");
 
         // Find the line with the URL
         let url_line = lines.iter().find(|line| {
-            line.spans.iter().any(|span| span.content.contains("https://example.com/image.png"))
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("https://example.com/image.png"))
         });
         assert!(url_line.is_some(), "Should have URL line");
     }
@@ -416,9 +443,9 @@ mod tests {
         assert!(lines.len() > 1);
 
         // Should have image icon
-        let has_icon = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("🖼"))
-        });
+        let has_icon = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("🖼")));
         assert!(has_icon, "Should have image icon");
     }
 
@@ -428,9 +455,10 @@ mod tests {
         let lines = render_markdown(text);
 
         // Should have blocks for both images
-        let icon_count = lines.iter().filter(|line| {
-            line.spans.iter().any(|span| span.content.contains("🖼"))
-        }).count();
+        let icon_count = lines
+            .iter()
+            .filter(|line| line.spans.iter().any(|span| span.content.contains("🖼")))
+            .count();
         assert_eq!(icon_count, 2, "Should have two image blocks");
     }
 
@@ -440,25 +468,27 @@ mod tests {
         let lines = render_markdown(text);
 
         // Should have table borders
-        let has_top_border = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("┌"))
-        });
+        let has_top_border = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("┌")));
         assert!(has_top_border, "Should have top border");
 
-        let has_bottom_border = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("└"))
-        });
+        let has_bottom_border = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("└")));
         assert!(has_bottom_border, "Should have bottom border");
 
         // Should have cell separators
-        let has_separator = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("│"))
-        });
+        let has_separator = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("│")));
         assert!(has_separator, "Should have cell separators");
 
         // Should contain cell content
         let has_feature_header = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("Feature"))
+            line.spans
+                .iter()
+                .any(|span| span.content.contains("Feature"))
         });
         assert!(has_feature_header, "Should have Feature header");
     }
@@ -469,14 +499,14 @@ mod tests {
         let lines = render_markdown(text);
 
         // Should render emoji content
-        let has_check = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("✅"))
-        });
+        let has_check = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("✅")));
         assert!(has_check, "Should have check emoji");
 
-        let has_cross = lines.iter().any(|line| {
-            line.spans.iter().any(|span| span.content.contains("❌"))
-        });
+        let has_cross = lines
+            .iter()
+            .any(|line| line.spans.iter().any(|span| span.content.contains("❌")));
         assert!(has_cross, "Should have cross emoji");
     }
 }

@@ -96,8 +96,8 @@ pub(super) fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
                     .unwrap_or(0);
                 let col = state.instructions_cursor - current_line_start;
 
-                if let Some(prev_line_end) = state.instructions[..current_line_start.saturating_sub(1)]
-                    .rfind('\n')
+                if let Some(prev_line_end) =
+                    state.instructions[..current_line_start.saturating_sub(1)].rfind('\n')
                 {
                     let prev_line_start = prev_line_end + 1;
                     let prev_line_len = current_line_start.saturating_sub(1) - prev_line_start;

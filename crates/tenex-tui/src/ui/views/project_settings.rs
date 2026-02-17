@@ -1,6 +1,6 @@
 use crate::ui::app::fuzzy_matches;
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::{ProjectSettingsState, ProjectSettingsAddMode, ProjectSettingsFocus};
+use crate::ui::modal::{ProjectSettingsAddMode, ProjectSettingsFocus, ProjectSettingsState};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -11,7 +11,12 @@ use ratatui::{
 };
 
 /// Render the project settings modal
-pub fn render_project_settings(f: &mut Frame, app: &App, area: Rect, state: &mut ProjectSettingsState) {
+pub fn render_project_settings(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &mut ProjectSettingsState,
+) {
     match state.in_add_mode {
         Some(ProjectSettingsAddMode::Agent) => render_add_agent_mode(f, app, area, state),
         Some(ProjectSettingsAddMode::McpTool) => render_add_mcp_tool_mode(f, app, area, state),
@@ -52,10 +57,28 @@ fn render_main_settings(f: &mut Frame, app: &App, area: Rect, state: &mut Projec
 
     if use_side_by_side {
         // === HORIZONTAL LAYOUT (side-by-side panes) ===
-        render_side_by_side_layout(f, app, remaining, content_height, state, popup_area, agents_focused, tools_focused);
+        render_side_by_side_layout(
+            f,
+            app,
+            remaining,
+            content_height,
+            state,
+            popup_area,
+            agents_focused,
+            tools_focused,
+        );
     } else {
         // === VERTICAL LAYOUT (single pane, narrow terminal fallback) ===
-        render_single_pane_layout(f, app, remaining, content_height, state, popup_area, agents_focused, tools_focused);
+        render_single_pane_layout(
+            f,
+            app,
+            remaining,
+            content_height,
+            state,
+            popup_area,
+            agents_focused,
+            tools_focused,
+        );
     }
 }
 
@@ -72,16 +95,23 @@ fn render_side_by_side_layout(
 ) {
     // Split horizontally: left = agents, right = tools
     let agents_width = remaining.width / 2;
-    let tools_width = remaining.width.saturating_sub(agents_width).saturating_sub(1); // -1 for gap
+    let tools_width = remaining
+        .width
+        .saturating_sub(agents_width)
+        .saturating_sub(1); // -1 for gap
 
     // === Agents pane (left side) ===
     let agents_header_area = Rect::new(remaining.x, remaining.y, agents_width, 1);
     let agent_count = state.pending_agent_ids.len();
     let header_text = format!("Agents ({})", agent_count);
     let header_style = if agents_focused {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::ITALIC)
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC)
     };
     let header = Paragraph::new(Line::from(vec![Span::styled(header_text, header_style)]));
     f.render_widget(header, agents_header_area);
@@ -97,7 +127,14 @@ fn render_side_by_side_layout(
         agents_list_height as u16,
     );
 
-    render_agents_list(f, app, agents_list_area, state, agents_focused, agents_list_height);
+    render_agents_list(
+        f,
+        app,
+        agents_list_area,
+        state,
+        agents_focused,
+        agents_list_height,
+    );
 
     // === Tools pane (right side) ===
     let tools_x = remaining.x + agents_width + 1; // +1 for gap
@@ -105,11 +142,18 @@ fn render_side_by_side_layout(
     let tool_count = state.pending_mcp_tool_ids.len();
     let tools_header_text = format!("MCP Tools ({})", tool_count);
     let tools_header_style = if tools_focused {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
-        Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::ITALIC)
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::ITALIC)
     };
-    let tools_header = Paragraph::new(Line::from(vec![Span::styled(tools_header_text, tools_header_style)]));
+    let tools_header = Paragraph::new(Line::from(vec![Span::styled(
+        tools_header_text,
+        tools_header_style,
+    )]));
     f.render_widget(tools_header, tools_header_area);
 
     // MCP Tools list area
@@ -121,7 +165,14 @@ fn render_side_by_side_layout(
         tools_list_height as u16,
     );
 
-    render_tools_list(f, app, tools_list_area, state, tools_focused, tools_list_height);
+    render_tools_list(
+        f,
+        app,
+        tools_list_area,
+        state,
+        tools_focused,
+        tools_list_height,
+    );
 
     // Hints at bottom
     render_hints(f, popup_area, state, agents_focused, tools_focused);
@@ -149,8 +200,7 @@ fn render_single_pane_layout(
     } else {
         format!("◀ Agents   ▶ Tools ({})", state.pending_mcp_tool_ids.len())
     };
-    let indicator = Paragraph::new(indicator_text)
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let indicator = Paragraph::new(indicator_text).style(Style::default().fg(theme::TEXT_MUTED));
     let indicator_area = Rect::new(remaining.x, remaining.y, pane_width, 1);
     f.render_widget(indicator, indicator_area);
 
@@ -158,16 +208,22 @@ fn render_single_pane_layout(
     let header_area = Rect::new(remaining.x, remaining.y + 1, pane_width, 1);
     if agents_focused {
         let header_text = format!("Agents ({})", state.pending_agent_ids.len());
-        let header = Paragraph::new(header_text)
-            .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD));
+        let header = Paragraph::new(header_text).style(
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
         f.render_widget(header, header_area);
 
         let list_area = Rect::new(remaining.x, remaining.y + 3, pane_width, list_height as u16);
         render_agents_list(f, app, list_area, state, true, list_height);
     } else {
         let header_text = format!("MCP Tools ({})", state.pending_mcp_tool_ids.len());
-        let header = Paragraph::new(header_text)
-            .style(Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD));
+        let header = Paragraph::new(header_text).style(
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
         f.render_widget(header, header_area);
 
         let list_area = Rect::new(remaining.x, remaining.y + 3, pane_width, list_height as u16);
@@ -207,21 +263,24 @@ fn render_agents_list(
                 let agent_name = app
                     .data_store
                     .borrow()
-                    .content.get_agent_definition(agent_id)
+                    .content
+                    .get_agent_definition(agent_id)
                     .map(|a| a.name.clone())
                     .unwrap_or_else(|| format!("{}...", &agent_id[..16.min(agent_id.len())]));
 
                 let agent_role = app
                     .data_store
                     .borrow()
-                    .content.get_agent_definition(agent_id)
+                    .content
+                    .get_agent_definition(agent_id)
                     .map(|a| a.role.clone())
                     .unwrap_or_else(|| "unknown".to_string());
 
                 let author_pubkey = app
                     .data_store
                     .borrow()
-                    .content.get_agent_definition(agent_id)
+                    .content
+                    .get_agent_definition(agent_id)
                     .map(|a| a.pubkey.clone());
 
                 let mut spans = vec![];
@@ -240,14 +299,21 @@ fn render_agents_list(
 
                 // PM badge
                 if is_pm {
-                    spans.push(Span::styled("[PM] ", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)));
+                    spans.push(Span::styled(
+                        "[PM] ",
+                        Style::default()
+                            .fg(theme::ACCENT_WARNING)
+                            .add_modifier(Modifier::BOLD),
+                    ));
                 } else {
                     spans.push(Span::styled("     ", Style::default()));
                 }
 
                 // Agent name
                 let name_style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
@@ -302,7 +368,8 @@ fn render_tools_list(
                 let tool_name = app
                     .data_store
                     .borrow()
-                    .content.get_mcp_tool(tool_id)
+                    .content
+                    .get_mcp_tool(tool_id)
                     .map(|t| t.name.clone())
                     .unwrap_or_else(|| format!("{}...", &tool_id[..16.min(tool_id.len())]));
 
@@ -310,14 +377,19 @@ fn render_tools_list(
 
                 // Left border indicator
                 if is_selected {
-                    spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled("│", Style::default().fg(theme::TEXT_MUTED)));
                 }
 
                 // Tool name
                 let name_style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
@@ -417,7 +489,8 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
     let available_agents: Vec<_> = app
         .data_store
         .borrow()
-        .content.get_agent_definitions()
+        .content
+        .get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -446,7 +519,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
         f.render_widget(empty_msg, list_area);
     } else {
         let visible_height = list_area.height as usize;
-        let selected_index = state.add_index.min(available_agents.len().saturating_sub(1));
+        let selected_index = state
+            .add_index
+            .min(available_agents.len().saturating_sub(1));
 
         let scroll_offset = if selected_index >= visible_height {
             selected_index - visible_height + 1
@@ -474,7 +549,9 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
 
                 // Agent name
                 let name_style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
@@ -509,7 +586,10 @@ fn render_add_agent_mode(f: &mut Frame, app: &App, area: Rect, state: &ProjectSe
                 2,
             );
             let desc_preview = if agent.description.chars().count() > 80 {
-                format!("{}...", agent.description.chars().take(77).collect::<String>())
+                format!(
+                    "{}...",
+                    agent.description.chars().take(77).collect::<String>()
+                )
             } else {
                 agent.description.clone()
             };
@@ -548,7 +628,8 @@ pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .content.get_agent_definitions()
+        .content
+        .get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -560,11 +641,16 @@ pub fn available_agent_count(app: &App, state: &ProjectSettingsState) -> usize {
 }
 
 /// Get the agent ID at the given index in add mode
-pub fn get_agent_id_at_index(app: &App, state: &ProjectSettingsState, index: usize) -> Option<String> {
+pub fn get_agent_id_at_index(
+    app: &App,
+    state: &ProjectSettingsState,
+    index: usize,
+) -> Option<String> {
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .content.get_agent_definitions()
+        .content
+        .get_agent_definitions()
         .into_iter()
         .filter(|a| !state.pending_agent_ids.contains(&a.id))
         .filter(|a| {
@@ -598,12 +684,11 @@ fn render_add_mcp_tool_mode(f: &mut Frame, app: &App, area: Rect, state: &Projec
     let available_tools: Vec<_> = app
         .data_store
         .borrow()
-        .content.get_mcp_tools()
+        .content
+        .get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
-        .filter(|t| {
-            fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter)
-        })
+        .filter(|t| fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter))
         .cloned()
         .collect();
 
@@ -645,14 +730,19 @@ fn render_add_mcp_tool_mode(f: &mut Frame, app: &App, area: Rect, state: &Projec
 
                 // Left border
                 if is_selected {
-                    spans.push(Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)));
+                    spans.push(Span::styled(
+                        "▌",
+                        Style::default().fg(theme::ACCENT_PRIMARY),
+                    ));
                 } else {
                     spans.push(Span::styled("│", Style::default().fg(theme::TEXT_MUTED)));
                 }
 
                 // Tool name
                 let name_style = if is_selected {
-                    Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(theme::ACCENT_PRIMARY)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(theme::TEXT_PRIMARY)
                 };
@@ -681,7 +771,10 @@ fn render_add_mcp_tool_mode(f: &mut Frame, app: &App, area: Rect, state: &Projec
                 2,
             );
             let desc_preview = if tool.description.chars().count() > 80 {
-                format!("{}...", tool.description.chars().take(77).collect::<String>())
+                format!(
+                    "{}...",
+                    tool.description.chars().take(77).collect::<String>()
+                )
             } else {
                 tool.description.clone()
             };
@@ -720,7 +813,8 @@ pub fn available_mcp_tool_count(app: &App, state: &ProjectSettingsState) -> usiz
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .content.get_mcp_tools()
+        .content
+        .get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
         .filter(|t| fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter))
@@ -728,11 +822,16 @@ pub fn available_mcp_tool_count(app: &App, state: &ProjectSettingsState) -> usiz
 }
 
 /// Get the MCP tool ID at the given index in add mode
-pub fn get_mcp_tool_id_at_index(app: &App, state: &ProjectSettingsState, index: usize) -> Option<String> {
+pub fn get_mcp_tool_id_at_index(
+    app: &App,
+    state: &ProjectSettingsState,
+    index: usize,
+) -> Option<String> {
     let filter = &state.add_filter;
     app.data_store
         .borrow()
-        .content.get_mcp_tools()
+        .content
+        .get_mcp_tools()
         .into_iter()
         .filter(|t| !state.pending_mcp_tool_ids.contains(&t.id))
         .filter(|t| fuzzy_matches(&t.name, filter) || fuzzy_matches(&t.description, filter))

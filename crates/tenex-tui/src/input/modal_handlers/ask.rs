@@ -20,16 +20,27 @@ pub(super) fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
 
     match input_state.mode {
         AskInputMode::Selection => match code {
-            KeyCode::Up | KeyCode::Char('k') if !input_state.is_custom_option_selected() => input_state.prev_option(),
-            KeyCode::Up if input_state.is_custom_option_selected() && input_state.custom_input.is_empty() => input_state.prev_option(),
-            KeyCode::Down | KeyCode::Char('j') if !input_state.is_custom_option_selected() => input_state.next_option(),
+            KeyCode::Up | KeyCode::Char('k') if !input_state.is_custom_option_selected() => {
+                input_state.prev_option()
+            }
+            KeyCode::Up
+                if input_state.is_custom_option_selected()
+                    && input_state.custom_input.is_empty() =>
+            {
+                input_state.prev_option()
+            }
+            KeyCode::Down | KeyCode::Char('j') if !input_state.is_custom_option_selected() => {
+                input_state.next_option()
+            }
             KeyCode::Right if !input_state.is_custom_option_selected() => {
                 input_state.skip_question();
                 if input_state.is_complete() {
                     submit_ask_response(app);
                 }
             }
-            KeyCode::Left if !input_state.is_custom_option_selected() => input_state.prev_question(),
+            KeyCode::Left if !input_state.is_custom_option_selected() => {
+                input_state.prev_question()
+            }
             // When on custom option with text, Left/Right move cursor
             KeyCode::Left if input_state.is_custom_option_selected() => {
                 if input_state.custom_input.is_empty() {
@@ -48,12 +59,16 @@ pub(super) fn handle_ask_modal_key(app: &mut App, key: KeyEvent) {
                     input_state.move_cursor_right();
                 }
             }
-            KeyCode::Char(' ') if input_state.is_multi_select() && !input_state.is_custom_option_selected() => {
+            KeyCode::Char(' ')
+                if input_state.is_multi_select() && !input_state.is_custom_option_selected() =>
+            {
                 input_state.toggle_multi_select();
             }
             KeyCode::Enter => {
                 // If on custom option with text, submit the custom answer
-                if input_state.is_custom_option_selected() && !input_state.custom_input.trim().is_empty() {
+                if input_state.is_custom_option_selected()
+                    && !input_state.custom_input.trim().is_empty()
+                {
                     input_state.submit_custom_answer();
                     if input_state.is_complete() {
                         submit_ask_response(app);
@@ -116,9 +131,11 @@ fn submit_ask_response(app: &mut App) {
     let message_id = modal_state.message_id;
     let ask_author_pubkey = modal_state.ask_author_pubkey;
 
-    if let (Some(ref core_handle), Some(thread), Some(ref project)) =
-        (&app.core_handle, app.selected_thread(), &app.selected_project)
-    {
+    if let (Some(ref core_handle), Some(thread), Some(ref project)) = (
+        &app.core_handle,
+        app.selected_thread(),
+        &app.selected_project,
+    ) {
         let _ = core_handle.send(NostrCommand::PublishMessage {
             thread_id: thread.id.clone(),
             project_a_tag: project.a_tag(),

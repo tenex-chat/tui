@@ -228,11 +228,7 @@ fn render_modal_header(f: &mut Frame, area: Rect, title: &str, hint: &str) -> Re
     let available = header_area.width as usize;
     let spacing = available.saturating_sub(title_len + hint_len);
 
-    let header_line = Line::from(vec![
-        title_span,
-        Span::raw(" ".repeat(spacing)),
-        hint_span,
-    ]);
+    let header_line = Line::from(vec![title_span, Span::raw(" ".repeat(spacing)), hint_span]);
 
     f.render_widget(Paragraph::new(header_line), header_area);
 
@@ -241,12 +237,7 @@ fn render_modal_header(f: &mut Frame, area: Rect, title: &str, hint: &str) -> Re
 
 /// Render a search input field
 /// Returns the remaining area below the search field
-pub fn render_modal_search(
-    f: &mut Frame,
-    area: Rect,
-    filter: &str,
-    placeholder: &str,
-) -> Rect {
+pub fn render_modal_search(f: &mut Frame, area: Rect, filter: &str, placeholder: &str) -> Rect {
     let chunks = Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).split(area);
 
     let search_area = layout::with_modal_padding(chunks[0]);
@@ -403,7 +394,12 @@ pub fn render_modal_items(f: &mut Frame, area: Rect, items: &[ModalItem]) {
 }
 
 /// Render a list of simple items with scroll offset support
-pub fn render_modal_items_with_scroll(f: &mut Frame, area: Rect, items: &[ModalItem], scroll_offset: usize) {
+pub fn render_modal_items_with_scroll(
+    f: &mut Frame,
+    area: Rect,
+    items: &[ModalItem],
+    scroll_offset: usize,
+) {
     let content_area = layout::with_modal_padding(area);
 
     // Skip items before the scroll offset

@@ -73,10 +73,7 @@ fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
     }
 
     // First pass: collect pubkeys
-    let pubkeys: Vec<String> = items
-        .iter()
-        .map(|i| item_pubkey(i).to_string())
-        .collect();
+    let pubkeys: Vec<String> = items.iter().map(|i| item_pubkey(i).to_string()).collect();
 
     // Second pass: calculate and apply states
     for i in 0..len {
@@ -113,9 +110,7 @@ fn calculate_consecutive_states(items: &mut [DisplayItem<'_>]) {
 /// - Q-tag PRESENCE determines IF we render something
 /// - Q-tagged event TYPE determines WHAT we render (ask UI vs delegation card)
 /// - The renderer (messages.rs) checks get_ask_event_by_id() to distinguish
-pub fn group_messages<'a>(
-    messages: &[&'a Message],
-) -> Vec<DisplayItem<'a>> {
+pub fn group_messages<'a>(messages: &[&'a Message]) -> Vec<DisplayItem<'a>> {
     if messages.is_empty() {
         return Vec::new();
     }
@@ -180,7 +175,9 @@ mod tests {
     fn test_should_render_q_tags_with_delegation_tools() {
         // Delegation tools should render q_tags (not in denylist)
         assert!(should_render_q_tags(Some("mcp__tenex__delegate")));
-        assert!(should_render_q_tags(Some("mcp__tenex__delegate_crossproject")));
+        assert!(should_render_q_tags(Some(
+            "mcp__tenex__delegate_crossproject"
+        )));
         assert!(should_render_q_tags(Some("mcp__tenex__delegate_followup")));
     }
 
@@ -238,13 +235,21 @@ mod tests {
 
         // Should have exactly 1 item - the SingleMessage
         // Should NOT have a DelegationPreview despite the q_tags
-        assert_eq!(display_items.len(), 1, "Expected only 1 display item (SingleMessage), got {}", display_items.len());
+        assert_eq!(
+            display_items.len(),
+            1,
+            "Expected only 1 display item (SingleMessage), got {}",
+            display_items.len()
+        );
 
         // Verify the single item is a SingleMessage, not a DelegationPreview
         match &display_items[0] {
             DisplayItem::SingleMessage { message, .. } => {
                 assert_eq!(message.id, "test-report-write-id");
-                assert_eq!(message.tool_name, Some("mcp__tenex__report_write".to_string()));
+                assert_eq!(
+                    message.tool_name,
+                    Some("mcp__tenex__report_write".to_string())
+                );
             }
             DisplayItem::DelegationPreview { .. } => {
                 panic!("report_write q_tags should NOT produce DelegationPreview items!");
@@ -267,7 +272,7 @@ mod tests {
             q_tags: vec!["child-conversation-id".to_string()],
             a_tags: vec![],
             p_tags: vec![],
-            tool_name: Some("mcp__tenex__delegate".to_string()),  // delegation tool (not in denylist)
+            tool_name: Some("mcp__tenex__delegate".to_string()), // delegation tool (not in denylist)
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
@@ -278,7 +283,12 @@ mod tests {
         let display_items = group_messages(&messages);
 
         // Should have 2 items: SingleMessage + DelegationPreview
-        assert_eq!(display_items.len(), 2, "Expected 2 display items, got {}", display_items.len());
+        assert_eq!(
+            display_items.len(),
+            2,
+            "Expected 2 display items, got {}",
+            display_items.len()
+        );
 
         // First should be SingleMessage
         match &display_items[0] {
@@ -290,7 +300,9 @@ mod tests {
 
         // Second should be DelegationPreview (Q-tag reference)
         match &display_items[1] {
-            DisplayItem::DelegationPreview { thread_id, branch, .. } => {
+            DisplayItem::DelegationPreview {
+                thread_id, branch, ..
+            } => {
                 assert_eq!(thread_id, "child-conversation-id");
                 assert_eq!(branch, &Some("feature-branch".to_string()));
             }
@@ -315,7 +327,7 @@ mod tests {
             q_tags: vec!["ask-event-id".to_string()],
             a_tags: vec![],
             p_tags: vec![],
-            tool_name: Some("mcp__tenex__ask".to_string()),  // ask tool (not in denylist)
+            tool_name: Some("mcp__tenex__ask".to_string()), // ask tool (not in denylist)
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
@@ -326,7 +338,12 @@ mod tests {
         let display_items = group_messages(&messages);
 
         // Should have 2 items: SingleMessage + DelegationPreview (for the q-tag)
-        assert_eq!(display_items.len(), 2, "Ask tool q_tags MUST produce QTagReference items, got {}", display_items.len());
+        assert_eq!(
+            display_items.len(),
+            2,
+            "Ask tool q_tags MUST produce QTagReference items, got {}",
+            display_items.len()
+        );
 
         // Second should be DelegationPreview pointing to the ask event
         match &display_items[1] {
@@ -352,7 +369,7 @@ mod tests {
             q_tags: vec!["ask-event-id".to_string()],
             a_tags: vec![],
             p_tags: vec![],
-            tool_name: Some("ask".to_string()),  // short-form ask tool (not in denylist)
+            tool_name: Some("ask".to_string()), // short-form ask tool (not in denylist)
             tool_args: None,
             llm_metadata: vec![],
             delegation_tag: None,
@@ -363,6 +380,11 @@ mod tests {
         let display_items = group_messages(&messages);
 
         // Should have 2 items: SingleMessage + DelegationPreview
-        assert_eq!(display_items.len(), 2, "Short-form 'ask' tool q_tags MUST produce QTagReference items, got {}", display_items.len());
+        assert_eq!(
+            display_items.len(),
+            2,
+            "Short-form 'ask' tool q_tags MUST produce QTagReference items, got {}",
+            display_items.len()
+        );
     }
 }

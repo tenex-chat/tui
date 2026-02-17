@@ -22,12 +22,10 @@ pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
         WorkspaceMode::List => {
             // Sort workspaces same as renderer: pinned first, then by name
             let mut workspaces = app.preferences.borrow().workspaces().to_vec();
-            workspaces.sort_by(|a, b| {
-                match (a.pinned, b.pinned) {
-                    (true, false) => std::cmp::Ordering::Less,
-                    (false, true) => std::cmp::Ordering::Greater,
-                    _ => a.name.cmp(&b.name),
-                }
+            workspaces.sort_by(|a, b| match (a.pinned, b.pinned) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => a.name.cmp(&b.name),
             });
             let workspace_count = workspaces.len();
 
@@ -48,7 +46,10 @@ pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
                         let workspace_id = workspace.id.clone();
                         let project_ids = workspace.project_ids.clone();
                         app.apply_workspace(Some(&workspace_id), &project_ids);
-                        app.set_warning_status(&format!("Switched to workspace: {}", workspace.name));
+                        app.set_warning_status(&format!(
+                            "Switched to workspace: {}",
+                            workspace.name
+                        ));
                         app.modal_state = ModalState::None;
                         return;
                     }
@@ -72,7 +73,10 @@ pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
                 KeyCode::Char('p') => {
                     // Toggle pin on selected workspace
                     if let Some(workspace) = workspaces.get(state.selected_index) {
-                        let is_pinned = app.preferences.borrow_mut().toggle_workspace_pinned(&workspace.id);
+                        let is_pinned = app
+                            .preferences
+                            .borrow_mut()
+                            .toggle_workspace_pinned(&workspace.id);
                         let msg = if is_pinned { "pinned" } else { "unpinned" };
                         app.set_warning_status(&format!("Workspace {}", msg));
                     }
@@ -126,16 +130,24 @@ pub(super) fn handle_workspace_manager_key(app: &mut App, key: KeyEvent) {
                     if state.can_save() {
                         // Save workspace
                         let name = state.editing_name.clone();
-                        let project_ids: Vec<String> = state.editing_project_ids.iter().cloned().collect();
+                        let project_ids: Vec<String> =
+                            state.editing_project_ids.iter().cloned().collect();
 
                         if state.mode == WorkspaceMode::Create {
-                            let ws = app.preferences.borrow_mut().add_workspace(name.clone(), project_ids);
+                            let ws = app
+                                .preferences
+                                .borrow_mut()
+                                .add_workspace(name.clone(), project_ids);
                             app.set_warning_status(&format!("Created workspace: {}", name));
                             // Auto-activate the new workspace
                             let ws_project_ids = ws.project_ids.clone();
                             app.apply_workspace(Some(&ws.id), &ws_project_ids);
                         } else if let Some(ref id) = state.editing_workspace_id {
-                            app.preferences.borrow_mut().update_workspace(id, name.clone(), project_ids.clone());
+                            app.preferences.borrow_mut().update_workspace(
+                                id,
+                                name.clone(),
+                                project_ids.clone(),
+                            );
                             app.set_warning_status(&format!("Updated workspace: {}", name));
                             // If editing the active workspace, re-apply it
                             if app.preferences.borrow().active_workspace_id() == Some(id.as_str()) {
@@ -219,15 +231,13 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                 // Cancel editing, restore original value based on which setting was selected
                 state.stop_editing();
                 match state.current_tab {
-                    ui::modal::SettingsTab::General => {
-                        match state.selected_general_setting() {
-                            Some(GeneralSetting::JaegerEndpoint) => {
-                                state.jaeger_endpoint_input =
-                                    app.preferences.borrow().jaeger_endpoint().to_string();
-                            }
-                            None => {}
+                    ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                        Some(GeneralSetting::JaegerEndpoint) => {
+                            state.jaeger_endpoint_input =
+                                app.preferences.borrow().jaeger_endpoint().to_string();
                         }
-                    }
+                        None => {}
+                    },
                     ui::modal::SettingsTab::AI => {
                         // Restore AI settings inputs from preferences
                         state.ai.elevenlabs_key_input.clear();
@@ -235,9 +245,11 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                         let prefs = app.preferences.borrow();
                         let ai = prefs.ai_audio_settings();
                         state.ai.voice_ids_input = ai.selected_voice_ids.join(", ");
-                        state.ai.openrouter_model_input = ai.openrouter_model.clone().unwrap_or_default();
+                        state.ai.openrouter_model_input =
+                            ai.openrouter_model.clone().unwrap_or_default();
                         state.ai.audio_prompt_input = ai.audio_prompt.clone();
-                        state.ai.tts_inactivity_threshold_input = ai.tts_inactivity_threshold_secs.to_string();
+                        state.ai.tts_inactivity_threshold_input =
+                            ai.tts_inactivity_threshold_secs.to_string();
                     }
                     ui::modal::SettingsTab::Appearance => {
                         // Appearance settings are toggles/selects, no editing to restore
@@ -263,15 +275,20 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                                 match jaeger::validate_and_normalize_endpoint(&new_endpoint) {
                                     Ok(normalized) => {
                                         // Save the normalized endpoint
-                                        let save_result =
-                                            app.preferences.borrow_mut().set_jaeger_endpoint(normalized);
+                                        let save_result = app
+                                            .preferences
+                                            .borrow_mut()
+                                            .set_jaeger_endpoint(normalized);
                                         match save_result {
                                             Ok(()) => {
                                                 app.set_warning_status("Jaeger endpoint saved");
                                                 state.stop_editing();
                                             }
                                             Err(e) => {
-                                                app.set_warning_status(&format!("Failed to save: {}", e));
+                                                app.set_warning_status(&format!(
+                                                    "Failed to save: {}",
+                                                    e
+                                                ));
                                                 // Don't stop editing - let user fix the issue
                                             }
                                         }
@@ -288,114 +305,131 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                             }
                         }
                     }
-                    ui::modal::SettingsTab::AI => {
-                        match state.selected_ai_setting() {
-                            Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
-                                let key = state.ai.elevenlabs_key_input.clone();
-                                if !key.is_empty() {
-                                    match tenex_core::SecureStorage::set(
-                                        tenex_core::SecureKey::ElevenLabsApiKey,
-                                        &key
-                                    ) {
-                                        Ok(()) => {
-                                            app.set_warning_status("ElevenLabs API key saved");
-                                            state.ai.elevenlabs_key_input.clear();
-                                            state.ai.elevenlabs_key_exists = true;
-                                            state.stop_editing();
-                                        }
-                                        Err(e) => {
-                                            app.set_warning_status(&format!("Failed to save: {}", e));
-                                        }
-                                    }
-                                }
-                            }
-                            Some(ui::modal::AiSetting::OpenRouterApiKey) => {
-                                let key = state.ai.openrouter_key_input.clone();
-                                if !key.is_empty() {
-                                    match tenex_core::SecureStorage::set(
-                                        tenex_core::SecureKey::OpenRouterApiKey,
-                                        &key
-                                    ) {
-                                        Ok(()) => {
-                                            app.set_warning_status("OpenRouter API key saved");
-                                            state.ai.openrouter_key_input.clear();
-                                            state.ai.openrouter_key_exists = true;
-                                            state.stop_editing();
-                                        }
-                                        Err(e) => {
-                                            app.set_warning_status(&format!("Failed to save: {}", e));
-                                        }
-                                    }
-                                }
-                            }
-                            Some(ui::modal::AiSetting::SelectedVoiceIds) => {
-                                let ids: Vec<String> = state.ai.voice_ids_input
-                                    .split(',')
-                                    .map(|s| s.trim().to_string())
-                                    .filter(|s| !s.is_empty())
-                                    .collect();
-                                let result = app.preferences.borrow_mut().set_selected_voice_ids(ids);
-                                match result {
+                    ui::modal::SettingsTab::AI => match state.selected_ai_setting() {
+                        Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                            let key = state.ai.elevenlabs_key_input.clone();
+                            if !key.is_empty() {
+                                match tenex_core::SecureStorage::set(
+                                    tenex_core::SecureKey::ElevenLabsApiKey,
+                                    &key,
+                                ) {
                                     Ok(()) => {
-                                        app.set_warning_status("Voice IDs saved");
+                                        app.set_warning_status("ElevenLabs API key saved");
+                                        state.ai.elevenlabs_key_input.clear();
+                                        state.ai.elevenlabs_key_exists = true;
                                         state.stop_editing();
                                     }
                                     Err(e) => {
                                         app.set_warning_status(&format!("Failed to save: {}", e));
                                     }
                                 }
-                            }
-                            Some(ui::modal::AiSetting::OpenRouterModel) => {
-                                let model = state.ai.openrouter_model_input.trim().to_string();
-                                let model_opt = if model.is_empty() { None } else { Some(model) };
-                                let result = app.preferences.borrow_mut().set_openrouter_model(model_opt);
-                                match result {
-                                    Ok(()) => {
-                                        app.set_warning_status("OpenRouter model saved");
-                                        state.stop_editing();
-                                    }
-                                    Err(e) => {
-                                        app.set_warning_status(&format!("Failed to save: {}", e));
-                                    }
-                                }
-                            }
-                            Some(ui::modal::AiSetting::AudioPrompt) => {
-                                let prompt = state.ai.audio_prompt_input.clone();
-                                let result = app.preferences.borrow_mut().set_audio_prompt(prompt);
-                                match result {
-                                    Ok(()) => {
-                                        app.set_warning_status("Audio prompt saved");
-                                        state.stop_editing();
-                                    }
-                                    Err(e) => {
-                                        app.set_warning_status(&format!("Failed to save: {}", e));
-                                    }
-                                }
-                            }
-                            Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
-                                match state.ai.tts_inactivity_threshold_input.trim().parse::<u64>() {
-                                    Ok(secs) => {
-                                        let result = app.preferences.borrow_mut().set_tts_inactivity_threshold(secs);
-                                        match result {
-                                            Ok(()) => {
-                                                app.set_warning_status(&format!("TTS inactivity threshold set to {}s", secs));
-                                                state.stop_editing();
-                                            }
-                                            Err(e) => {
-                                                app.set_warning_status(&format!("Failed to save: {}", e));
-                                            }
-                                        }
-                                    }
-                                    Err(_) => {
-                                        app.set_warning_status("Invalid value: enter a number of seconds");
-                                    }
-                                }
-                            }
-                            Some(ui::modal::AiSetting::AudioEnabled) | None => {
-                                state.stop_editing();
                             }
                         }
-                    }
+                        Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                            let key = state.ai.openrouter_key_input.clone();
+                            if !key.is_empty() {
+                                match tenex_core::SecureStorage::set(
+                                    tenex_core::SecureKey::OpenRouterApiKey,
+                                    &key,
+                                ) {
+                                    Ok(()) => {
+                                        app.set_warning_status("OpenRouter API key saved");
+                                        state.ai.openrouter_key_input.clear();
+                                        state.ai.openrouter_key_exists = true;
+                                        state.stop_editing();
+                                    }
+                                    Err(e) => {
+                                        app.set_warning_status(&format!("Failed to save: {}", e));
+                                    }
+                                }
+                            }
+                        }
+                        Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                            let ids: Vec<String> = state
+                                .ai
+                                .voice_ids_input
+                                .split(',')
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .collect();
+                            let result = app.preferences.borrow_mut().set_selected_voice_ids(ids);
+                            match result {
+                                Ok(()) => {
+                                    app.set_warning_status("Voice IDs saved");
+                                    state.stop_editing();
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to save: {}", e));
+                                }
+                            }
+                        }
+                        Some(ui::modal::AiSetting::OpenRouterModel) => {
+                            let model = state.ai.openrouter_model_input.trim().to_string();
+                            let model_opt = if model.is_empty() { None } else { Some(model) };
+                            let result =
+                                app.preferences.borrow_mut().set_openrouter_model(model_opt);
+                            match result {
+                                Ok(()) => {
+                                    app.set_warning_status("OpenRouter model saved");
+                                    state.stop_editing();
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to save: {}", e));
+                                }
+                            }
+                        }
+                        Some(ui::modal::AiSetting::AudioPrompt) => {
+                            let prompt = state.ai.audio_prompt_input.clone();
+                            let result = app.preferences.borrow_mut().set_audio_prompt(prompt);
+                            match result {
+                                Ok(()) => {
+                                    app.set_warning_status("Audio prompt saved");
+                                    state.stop_editing();
+                                }
+                                Err(e) => {
+                                    app.set_warning_status(&format!("Failed to save: {}", e));
+                                }
+                            }
+                        }
+                        Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                            match state
+                                .ai
+                                .tts_inactivity_threshold_input
+                                .trim()
+                                .parse::<u64>()
+                            {
+                                Ok(secs) => {
+                                    let result = app
+                                        .preferences
+                                        .borrow_mut()
+                                        .set_tts_inactivity_threshold(secs);
+                                    match result {
+                                        Ok(()) => {
+                                            app.set_warning_status(&format!(
+                                                "TTS inactivity threshold set to {}s",
+                                                secs
+                                            ));
+                                            state.stop_editing();
+                                        }
+                                        Err(e) => {
+                                            app.set_warning_status(&format!(
+                                                "Failed to save: {}",
+                                                e
+                                            ));
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    app.set_warning_status(
+                                        "Invalid value: enter a number of seconds",
+                                    );
+                                }
+                            }
+                        }
+                        Some(ui::modal::AiSetting::AudioEnabled) | None => {
+                            state.stop_editing();
+                        }
+                    },
                     ui::modal::SettingsTab::Appearance => {
                         // Appearance settings don't use text editing - stop editing mode
                         state.stop_editing();
@@ -438,7 +472,9 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     // Open voice browser if API key exists
                     let key = app.preferences.borrow().get_elevenlabs_api_key();
                     if let Some(api_key) = key {
-                        let current_ids: Vec<String> = state.ai.voice_ids_input
+                        let current_ids: Vec<String> = state
+                            .ai
+                            .voice_ids_input
                             .split(',')
                             .map(|s| s.trim().to_string())
                             .filter(|s| !s.is_empty())
@@ -486,37 +522,33 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) if state.editing => {
             // Handle character input based on which tab and setting are being edited
             match state.current_tab {
-                ui::modal::SettingsTab::General => {
-                    match state.selected_general_setting() {
-                        Some(GeneralSetting::JaegerEndpoint) => {
-                            state.jaeger_endpoint_input.push(c);
-                        }
-                        None => {}
+                ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                    Some(GeneralSetting::JaegerEndpoint) => {
+                        state.jaeger_endpoint_input.push(c);
                     }
-                }
-                ui::modal::SettingsTab::AI => {
-                    match state.selected_ai_setting() {
-                        Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
-                            state.ai.elevenlabs_key_input.push(c);
-                        }
-                        Some(ui::modal::AiSetting::OpenRouterApiKey) => {
-                            state.ai.openrouter_key_input.push(c);
-                        }
-                        Some(ui::modal::AiSetting::SelectedVoiceIds) => {
-                            state.ai.voice_ids_input.push(c);
-                        }
-                        Some(ui::modal::AiSetting::OpenRouterModel) => {
-                            state.ai.openrouter_model_input.push(c);
-                        }
-                        Some(ui::modal::AiSetting::AudioPrompt) => {
-                            state.ai.audio_prompt_input.push(c);
-                        }
-                        Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
-                            state.ai.tts_inactivity_threshold_input.push(c);
-                        }
-                        _ => {}
+                    None => {}
+                },
+                ui::modal::SettingsTab::AI => match state.selected_ai_setting() {
+                    Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                        state.ai.elevenlabs_key_input.push(c);
                     }
-                }
+                    Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                        state.ai.openrouter_key_input.push(c);
+                    }
+                    Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                        state.ai.voice_ids_input.push(c);
+                    }
+                    Some(ui::modal::AiSetting::OpenRouterModel) => {
+                        state.ai.openrouter_model_input.push(c);
+                    }
+                    Some(ui::modal::AiSetting::AudioPrompt) => {
+                        state.ai.audio_prompt_input.push(c);
+                    }
+                    Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                        state.ai.tts_inactivity_threshold_input.push(c);
+                    }
+                    _ => {}
+                },
                 ui::modal::SettingsTab::Appearance => {
                     // Appearance settings don't have text editing
                 }
@@ -525,37 +557,33 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
         KeyCode::Backspace if state.editing => {
             // Handle backspace based on which tab and setting are being edited
             match state.current_tab {
-                ui::modal::SettingsTab::General => {
-                    match state.selected_general_setting() {
-                        Some(GeneralSetting::JaegerEndpoint) => {
-                            state.jaeger_endpoint_input.pop();
-                        }
-                        None => {}
+                ui::modal::SettingsTab::General => match state.selected_general_setting() {
+                    Some(GeneralSetting::JaegerEndpoint) => {
+                        state.jaeger_endpoint_input.pop();
                     }
-                }
-                ui::modal::SettingsTab::AI => {
-                    match state.selected_ai_setting() {
-                        Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
-                            state.ai.elevenlabs_key_input.pop();
-                        }
-                        Some(ui::modal::AiSetting::OpenRouterApiKey) => {
-                            state.ai.openrouter_key_input.pop();
-                        }
-                        Some(ui::modal::AiSetting::SelectedVoiceIds) => {
-                            state.ai.voice_ids_input.pop();
-                        }
-                        Some(ui::modal::AiSetting::OpenRouterModel) => {
-                            state.ai.openrouter_model_input.pop();
-                        }
-                        Some(ui::modal::AiSetting::AudioPrompt) => {
-                            state.ai.audio_prompt_input.pop();
-                        }
-                        Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
-                            state.ai.tts_inactivity_threshold_input.pop();
-                        }
-                        _ => {}
+                    None => {}
+                },
+                ui::modal::SettingsTab::AI => match state.selected_ai_setting() {
+                    Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
+                        state.ai.elevenlabs_key_input.pop();
                     }
-                }
+                    Some(ui::modal::AiSetting::OpenRouterApiKey) => {
+                        state.ai.openrouter_key_input.pop();
+                    }
+                    Some(ui::modal::AiSetting::SelectedVoiceIds) => {
+                        state.ai.voice_ids_input.pop();
+                    }
+                    Some(ui::modal::AiSetting::OpenRouterModel) => {
+                        state.ai.openrouter_model_input.pop();
+                    }
+                    Some(ui::modal::AiSetting::AudioPrompt) => {
+                        state.ai.audio_prompt_input.pop();
+                    }
+                    Some(ui::modal::AiSetting::TtsInactivityThreshold) => {
+                        state.ai.tts_inactivity_threshold_input.pop();
+                    }
+                    _ => {}
+                },
                 ui::modal::SettingsTab::Appearance => {
                     // Appearance settings don't have text editing
                 }
@@ -574,7 +602,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     Some(ui::modal::AiSetting::ElevenLabsApiKey) => {
                         if state.ai.elevenlabs_key_exists {
                             match tenex_core::SecureStorage::delete(
-                                tenex_core::SecureKey::ElevenLabsApiKey
+                                tenex_core::SecureKey::ElevenLabsApiKey,
                             ) {
                                 Ok(()) => {
                                     app.set_warning_status("ElevenLabs API key deleted");
@@ -591,7 +619,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
                     Some(ui::modal::AiSetting::OpenRouterApiKey) => {
                         if state.ai.openrouter_key_exists {
                             match tenex_core::SecureStorage::delete(
-                                tenex_core::SecureKey::OpenRouterApiKey
+                                tenex_core::SecureKey::OpenRouterApiKey,
                             ) {
                                 Ok(()) => {
                                     app.set_warning_status("OpenRouter API key deleted");
@@ -639,11 +667,7 @@ pub(super) fn handle_app_settings_key(app: &mut App, key: KeyEvent) {
     app.modal_state = ModalState::AppSettings(state);
 }
 
-fn handle_voice_browser_key(
-    app: &mut App,
-    state: &mut ui::modal::AppSettingsState,
-    key: KeyEvent,
-) {
+fn handle_voice_browser_key(app: &mut App, state: &mut ui::modal::AppSettingsState, key: KeyEvent) {
     let browser = match state.voice_browser.as_mut() {
         Some(b) => b,
         None => return,
@@ -680,7 +704,10 @@ fn handle_voice_browser_key(
         KeyCode::Enter => {
             // Confirm selection — save voice IDs
             let ids = browser.selected_voice_ids.clone();
-            let result = app.preferences.borrow_mut().set_selected_voice_ids(ids.clone());
+            let result = app
+                .preferences
+                .borrow_mut()
+                .set_selected_voice_ids(ids.clone());
             match result {
                 Ok(()) => {
                     state.ai.voice_ids_input = ids.join(", ");
@@ -702,11 +729,7 @@ fn handle_voice_browser_key(
     }
 }
 
-fn handle_model_browser_key(
-    app: &mut App,
-    state: &mut ui::modal::AppSettingsState,
-    key: KeyEvent,
-) {
+fn handle_model_browser_key(app: &mut App, state: &mut ui::modal::AppSettingsState, key: KeyEvent) {
     let browser = match state.model_browser.as_mut() {
         Some(b) => b,
         None => return,
@@ -736,7 +759,10 @@ fn handle_model_browser_key(
             let filtered = browser.filtered_items();
             if let Some(item) = filtered.get(browser.selected_index) {
                 let model_id = item.id.clone();
-                let result = app.preferences.borrow_mut().set_openrouter_model(Some(model_id.clone()));
+                let result = app
+                    .preferences
+                    .borrow_mut()
+                    .set_openrouter_model(Some(model_id.clone()));
                 match result {
                     Ok(()) => {
                         state.ai.openrouter_model_input = model_id.clone();

@@ -69,7 +69,9 @@ fn filter_nudges<'a>(
             n.title.to_lowercase().contains(&filter_lower)
                 || n.description.to_lowercase().contains(&filter_lower)
                 || n.content.to_lowercase().contains(&filter_lower)
-                || n.hashtags.iter().any(|h| h.to_lowercase().contains(&filter_lower))
+                || n.hashtags
+                    .iter()
+                    .any(|h| h.to_lowercase().contains(&filter_lower))
         })
         .collect();
 
@@ -79,12 +81,7 @@ fn filter_nudges<'a>(
 }
 
 /// Render the list items
-fn render_nudge_items(
-    f: &mut Frame,
-    area: Rect,
-    nudges: &[&Nudge],
-    state: &NudgeListState,
-) {
+fn render_nudge_items(f: &mut Frame, area: Rect, nudges: &[&Nudge], state: &NudgeListState) {
     let visible_height = area.height as usize;
     let selected_index = state.selected_index.min(nudges.len().saturating_sub(1));
 
@@ -130,7 +127,10 @@ fn render_nudge_items(
                 } else {
                     format!(" - {}", nudge.description)
                 };
-                spans.push(Span::styled(desc_preview, Style::default().fg(theme::TEXT_MUTED)));
+                spans.push(Span::styled(
+                    desc_preview,
+                    Style::default().fg(theme::TEXT_MUTED),
+                ));
             }
 
             // Hashtags
@@ -142,7 +142,10 @@ fn render_nudge_items(
                     .map(|t| format!("#{}", t))
                     .collect::<Vec<_>>()
                     .join(" ");
-                spans.push(Span::styled(format!(" {}", tags), Style::default().fg(theme::ACCENT_WARNING)));
+                spans.push(Span::styled(
+                    format!(" {}", tags),
+                    Style::default().fg(theme::ACCENT_WARNING),
+                ));
             }
 
             ListItem::new(Line::from(spans))

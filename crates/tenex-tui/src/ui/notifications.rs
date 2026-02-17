@@ -146,7 +146,8 @@ impl NotificationQueue {
         }
 
         // Track this message to prevent duplicates
-        self.recent_messages.push((hash, now + Duration::from_secs(2)));
+        self.recent_messages
+            .push((hash, now + Duration::from_secs(2)));
 
         // If there's a current notification, check priority
         if let Some(ref current) = self.current {
@@ -169,7 +170,9 @@ impl NotificationQueue {
             self.current = Some(n);
         } else {
             // Add to queue based on priority (higher priority at front)
-            let pos = self.queue.iter()
+            let pos = self
+                .queue
+                .iter()
                 .position(|n| n.level < notification.level)
                 .unwrap_or(self.queue.len());
             self.queue.insert(pos, notification);
@@ -220,8 +223,8 @@ impl NotificationQueue {
 
     /// Simple hash for deduplication
     fn hash_message(message: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         message.hash(&mut hasher);
         hasher.finish()

@@ -17,8 +17,11 @@ pub fn render_agent_browser(f: &mut Frame, app: &App, area: Rect) {
 
     if app.home.in_agent_detail() {
         if let Some(ref id) = app.home.viewing_agent_id {
-            let agent = app.data_store.borrow()
-                .content.get_agent_definition(id)
+            let agent = app
+                .data_store
+                .borrow()
+                .content
+                .get_agent_definition(id)
                 .cloned();
             if let Some(agent) = agent {
                 render_agent_detail(f, app, area, &agent);
@@ -69,30 +72,38 @@ fn render_list_header(f: &mut Frame, app: &App, area: Rect) {
 
     let title_line = vec![
         Span::styled("🤖 ", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled("Agent Definitions", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-        Span::styled(format!(" ({} agents)", count), Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            "Agent Definitions",
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" ({} agents)", count),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
     ];
 
     let search_line = if app.home.agent_browser_filter.is_empty() {
-        vec![
-            Span::styled("Type to search...", Style::default().fg(theme::TEXT_MUTED)),
-        ]
+        vec![Span::styled(
+            "Type to search...",
+            Style::default().fg(theme::TEXT_MUTED),
+        )]
     } else {
         vec![
             Span::styled("Search: ", Style::default().fg(theme::TEXT_MUTED)),
-            Span::styled(&app.home.agent_browser_filter, Style::default().fg(theme::ACCENT_PRIMARY)),
+            Span::styled(
+                &app.home.agent_browser_filter,
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ),
             Span::styled("▌", Style::default().fg(theme::ACCENT_PRIMARY)),
         ]
     };
 
-    let header = Paragraph::new(vec![
-        Line::from(title_line),
-        Line::from(search_line),
-    ])
-    .block(
+    let header = Paragraph::new(vec![Line::from(title_line), Line::from(search_line)]).block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
     );
 
     f.render_widget(header, area);
@@ -113,14 +124,17 @@ fn render_list_content(f: &mut Frame, app: &App, area: Rect) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+                    .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
             );
         f.render_widget(paragraph, area);
         return;
     }
 
     let visible_height = area.height.saturating_sub(2) as usize;
-    let selected_index = app.home.agent_browser_index.min(agents.len().saturating_sub(1));
+    let selected_index = app
+        .home
+        .agent_browser_index
+        .min(agents.len().saturating_sub(1));
 
     // Calculate scroll to keep selected item visible
     let scroll_offset = if selected_index >= visible_height {
@@ -140,17 +154,20 @@ fn render_list_content(f: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    );
 
     f.render_widget(list, area);
 }
 
-fn create_agent_list_item(app: &App, agent: &AgentDefinition, is_selected: bool) -> ListItem<'static> {
+fn create_agent_list_item(
+    app: &App,
+    agent: &AgentDefinition,
+    is_selected: bool,
+) -> ListItem<'static> {
     let author_name = app.data_store.borrow().get_profile_name(&agent.pubkey);
 
     // Build the line: [role] name - description (author)
@@ -158,7 +175,10 @@ fn create_agent_list_item(app: &App, agent: &AgentDefinition, is_selected: bool)
 
     // Selection indicator
     if is_selected {
-        spans.push(Span::styled(card::COLLAPSE_CLOSED, Style::default().fg(theme::ACCENT_PRIMARY)));
+        spans.push(Span::styled(
+            card::COLLAPSE_CLOSED,
+            Style::default().fg(theme::ACCENT_PRIMARY),
+        ));
     } else {
         spans.push(Span::styled(card::SPACER, Style::default()));
     }
@@ -171,7 +191,9 @@ fn create_agent_list_item(app: &App, agent: &AgentDefinition, is_selected: bool)
 
     // Name
     let name_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_PRIMARY)
     };
@@ -186,7 +208,10 @@ fn create_agent_list_item(app: &App, agent: &AgentDefinition, is_selected: bool)
 
     // Author
     spans.push(Span::styled(" (", Style::default().fg(theme::TEXT_MUTED)));
-    spans.push(Span::styled(author_name, Style::default().fg(theme::ACCENT_SUCCESS)));
+    spans.push(Span::styled(
+        author_name,
+        Style::default().fg(theme::ACCENT_SUCCESS),
+    ));
     spans.push(Span::styled(")", Style::default().fg(theme::TEXT_MUTED)));
 
     ListItem::new(Line::from(spans))
@@ -204,12 +229,11 @@ fn render_list_footer(f: &mut Frame, area: Rect) {
         Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
     ];
 
-    let footer = Paragraph::new(vec![Line::from(help_spans)])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-        );
+    let footer = Paragraph::new(vec![Line::from(help_spans)]).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    );
 
     f.render_widget(footer, area);
 }
@@ -233,7 +257,12 @@ fn render_detail_header(f: &mut Frame, app: &App, agent: &AgentDefinition, area:
 
     let title_line = vec![
         Span::styled("🤖 ", Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(&agent.name, Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &agent.name,
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" [", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(&agent.role, Style::default().fg(theme::ACCENT_SPECIAL)),
         Span::styled("]", Style::default().fg(theme::TEXT_MUTED)),
@@ -245,7 +274,7 @@ fn render_detail_header(f: &mut Frame, app: &App, agent: &AgentDefinition, area:
         if let Some(ref version) = agent.version {
             Span::styled(
                 format!("{}v{}", card::META_SEPARATOR, version),
-                Style::default().fg(theme::TEXT_MUTED)
+                Style::default().fg(theme::TEXT_MUTED),
             )
         } else {
             Span::styled("", Style::default())
@@ -253,7 +282,7 @@ fn render_detail_header(f: &mut Frame, app: &App, agent: &AgentDefinition, area:
         if let Some(ref model) = agent.model {
             Span::styled(
                 format!("{}{}", card::META_SEPARATOR, model),
-                Style::default().fg(theme::ACCENT_SPECIAL)
+                Style::default().fg(theme::ACCENT_SPECIAL),
             )
         } else {
             Span::styled("", Style::default())
@@ -261,9 +290,15 @@ fn render_detail_header(f: &mut Frame, app: &App, agent: &AgentDefinition, area:
     ];
 
     let desc_line = if !agent.description.is_empty() {
-        vec![Span::styled(&agent.description, Style::default().fg(theme::TEXT_DIM))]
+        vec![Span::styled(
+            &agent.description,
+            Style::default().fg(theme::TEXT_DIM),
+        )]
     } else {
-        vec![Span::styled("No description", Style::default().fg(theme::TEXT_MUTED))]
+        vec![Span::styled(
+            "No description",
+            Style::default().fg(theme::TEXT_MUTED),
+        )]
     };
 
     let header = Paragraph::new(vec![
@@ -274,7 +309,7 @@ fn render_detail_header(f: &mut Frame, app: &App, agent: &AgentDefinition, area:
     .block(
         Block::default()
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
     );
 
     f.render_widget(header, area);
@@ -285,9 +320,12 @@ fn render_detail_content(f: &mut Frame, app: &App, agent: &AgentDefinition, area
 
     // Instructions section
     if !agent.instructions.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("📝 Instructions", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "📝 Instructions",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        )]));
         lines.push(Line::from(""));
 
         // Render markdown instructions
@@ -298,51 +336,60 @@ fn render_detail_content(f: &mut Frame, app: &App, agent: &AgentDefinition, area
 
     // Use criteria section
     if !agent.use_criteria.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("🎯 Use Criteria", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "🎯 Use Criteria",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        )]));
         for criteria in &agent.use_criteria {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
-                Style::default().fg(theme::ACCENT_PRIMARY)
-            ),
-            Span::styled(criteria.clone(), Style::default().fg(theme::TEXT_DIM)),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
+                    Style::default().fg(theme::ACCENT_PRIMARY),
+                ),
+                Span::styled(criteria.clone(), Style::default().fg(theme::TEXT_DIM)),
+            ]));
         }
         lines.push(Line::from(""));
     }
 
     // Tools section
     if !agent.tools.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("🔧 Tools", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "🔧 Tools",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        )]));
         for tool in &agent.tools {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
-                Style::default().fg(theme::ACCENT_PRIMARY)
-            ),
-            Span::styled(tool.clone(), Style::default().fg(theme::TEXT_DIM)),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
+                    Style::default().fg(theme::ACCENT_PRIMARY),
+                ),
+                Span::styled(tool.clone(), Style::default().fg(theme::TEXT_DIM)),
+            ]));
         }
         lines.push(Line::from(""));
     }
 
     // MCP servers section
     if !agent.mcp_servers.is_empty() {
-        lines.push(Line::from(vec![
-            Span::styled("🔌 MCP Servers", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-        ]));
+        lines.push(Line::from(vec![Span::styled(
+            "🔌 MCP Servers",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        )]));
         for server in &agent.mcp_servers {
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
-                Style::default().fg(theme::ACCENT_PRIMARY)
-            ),
-            Span::styled(server.clone(), Style::default().fg(theme::TEXT_DIM)),
-        ]));
+            lines.push(Line::from(vec![
+                Span::styled(
+                    format!("{}{}", card::INDENT_UNIT, card::LIST_BULLET),
+                    Style::default().fg(theme::ACCENT_PRIMARY),
+                ),
+                Span::styled(server.clone(), Style::default().fg(theme::TEXT_DIM)),
+            ]));
         }
         lines.push(Line::from(""));
     }
@@ -375,7 +422,7 @@ fn render_detail_content(f: &mut Frame, app: &App, agent: &AgentDefinition, area
             Block::default()
                 .borders(Borders::ALL)
                 .title(block_title)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
+                .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
         );
 
     f.render_widget(content, area);
@@ -393,12 +440,11 @@ fn render_detail_footer(f: &mut Frame, area: Rect) {
         Span::styled(" back", Style::default().fg(theme::TEXT_MUTED)),
     ];
 
-    let footer = Paragraph::new(vec![Line::from(help_spans)])
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::ACCENT_PRIMARY))
-        );
+    let footer = Paragraph::new(vec![Line::from(help_spans)]).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    );
 
     f.render_widget(footer, area);
 }

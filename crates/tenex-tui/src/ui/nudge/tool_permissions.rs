@@ -308,7 +308,10 @@ impl ToolRegistry {
 
     /// Update registry from project status events
     /// Called when project_statuses are updated in AppDataStore
-    pub fn update_from_statuses(&mut self, statuses: &std::collections::HashMap<String, tenex_core::models::ProjectStatus>) {
+    pub fn update_from_statuses(
+        &mut self,
+        statuses: &std::collections::HashMap<String, tenex_core::models::ProjectStatus>,
+    ) {
         let mut all_tools: HashSet<String> = HashSet::new();
 
         for status in statuses.values() {

@@ -59,8 +59,8 @@ pub fn render_view_raw_event_modal(f: &mut Frame, json: &str, scroll_offset: usi
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints =
-        Paragraph::new("↑↓ scroll · y copy · esc close").style(Style::default().fg(theme::TEXT_MUTED));
+    let hints = Paragraph::new("↑↓ scroll · y copy · esc close")
+        .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 
@@ -77,59 +77,74 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     // NOTE: These should eventually be auto-generated from the hotkey registry
     // For now, manually curated for clarity
     let sections = vec![
-        ("Global", vec![
-            ("Ctrl+T", "Open command palette"),
-            ("?", "Show this help"),
-            ("q", "Quit"),
-        ]),
-        ("Navigation", vec![
-            ("1", "Go to home/dashboard"),
-            ("2-9", "Jump to tab 2-9 (Normal mode)"),
-            ("Alt+1-9", "Jump to tab (any mode)"),
-            ("Ctrl+T ←", "Previous tab (works everywhere)"),
-            ("Ctrl+T →", "Next tab (works everywhere)"),
-            ("Tab", "Next tab (Chat) / Switch panel (Home)"),
-            ("Shift+Tab", "Previous tab"),
-            ("↑/↓", "Navigate messages/items"),
-            ("Enter", "Open item / Enter subthread"),
-            ("Esc", "Back / Exit subthread"),
-        ]),
-        ("Chat View (Normal)", vec![
-            ("i", "Enter edit mode"),
-            ("@", "Open agent selector"),
-            ("%", "Open branch selector"),
-            ("Ctrl+T s", "Toggle sidebar"),
-            ("o", "Open first image"),
-            ("x", "Close current tab"),
-            (".", "Stop agent"),
-            ("y", "Copy content"),
-            ("v", "View raw event"),
-        ]),
-        ("Home View", vec![
-            ("p", "Open projects modal"),
-            ("n", "New thread in project"),
-            ("f", "Cycle time filter"),
-            ("/", "Enter search filter (Reports/Search tabs)"),
-            ("Space", "Toggle project visibility (Sidebar)"),
-        ]),
-        ("Input Mode", vec![
-            ("Ctrl+Enter", "Send message"),
-            ("Shift/Alt+Enter", "New line"),
-            ("Ctrl+A/E", "Line start/end"),
-            ("Ctrl+K/U", "Kill to end/start of line"),
-            ("Ctrl+W", "Delete word backward"),
-            ("Ctrl+D", "Delete char at cursor"),
-            ("Ctrl+Z", "Undo"),
-            ("Ctrl+Shift+Z", "Redo"),
-            ("Ctrl+C/X", "Copy/Cut selection"),
-            ("Ctrl+N", "Open nudge selector"),
-            ("Alt+K", "Open skill selector"),
-            ("Home/End", "Line start/end"),
-            ("Alt+←/→", "Word left/right"),
-            ("Alt+Backspace", "Delete word backward"),
-            ("Shift+←/→", "Extend selection"),
-            ("Esc", "Exit edit mode"),
-        ]),
+        (
+            "Global",
+            vec![
+                ("Ctrl+T", "Open command palette"),
+                ("?", "Show this help"),
+                ("q", "Quit"),
+            ],
+        ),
+        (
+            "Navigation",
+            vec![
+                ("1", "Go to home/dashboard"),
+                ("2-9", "Jump to tab 2-9 (Normal mode)"),
+                ("Alt+1-9", "Jump to tab (any mode)"),
+                ("Ctrl+T ←", "Previous tab (works everywhere)"),
+                ("Ctrl+T →", "Next tab (works everywhere)"),
+                ("Tab", "Next tab (Chat) / Switch panel (Home)"),
+                ("Shift+Tab", "Previous tab"),
+                ("↑/↓", "Navigate messages/items"),
+                ("Enter", "Open item / Enter subthread"),
+                ("Esc", "Back / Exit subthread"),
+            ],
+        ),
+        (
+            "Chat View (Normal)",
+            vec![
+                ("i", "Enter edit mode"),
+                ("@", "Open agent selector"),
+                ("%", "Open branch selector"),
+                ("Ctrl+T s", "Toggle sidebar"),
+                ("o", "Open first image"),
+                ("x", "Close current tab"),
+                (".", "Stop agent"),
+                ("y", "Copy content"),
+                ("v", "View raw event"),
+            ],
+        ),
+        (
+            "Home View",
+            vec![
+                ("p", "Open projects modal"),
+                ("n", "New thread in project"),
+                ("f", "Cycle time filter"),
+                ("/", "Enter search filter (Reports/Search tabs)"),
+                ("Space", "Toggle project visibility (Sidebar)"),
+            ],
+        ),
+        (
+            "Input Mode",
+            vec![
+                ("Ctrl+Enter", "Send message"),
+                ("Shift/Alt+Enter", "New line"),
+                ("Ctrl+A/E", "Line start/end"),
+                ("Ctrl+K/U", "Kill to end/start of line"),
+                ("Ctrl+W", "Delete word backward"),
+                ("Ctrl+D", "Delete char at cursor"),
+                ("Ctrl+Z", "Undo"),
+                ("Ctrl+Shift+Z", "Redo"),
+                ("Ctrl+C/X", "Copy/Cut selection"),
+                ("Ctrl+N", "Open nudges/skills selector"),
+                ("Alt+K", "Open nudges/skills selector"),
+                ("Home/End", "Line start/end"),
+                ("Alt+←/→", "Word left/right"),
+                ("Alt+Backspace", "Delete word backward"),
+                ("Shift+←/→", "Extend selection"),
+                ("Esc", "Exit edit mode"),
+            ],
+        ),
     ];
 
     // Render content
@@ -145,13 +160,18 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         // Section header
         lines.push(Line::from(Span::styled(
             section_title,
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(ratatui::style::Modifier::BOLD),
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(ratatui::style::Modifier::BOLD),
         )));
 
         // Hotkeys in this section
         for (key, description) in hotkeys {
             lines.push(Line::from(vec![
-                Span::styled(format!("  {:12}", key), Style::default().fg(theme::TEXT_MUTED)),
+                Span::styled(
+                    format!("  {:12}", key),
+                    Style::default().fg(theme::TEXT_MUTED),
+                ),
                 Span::styled(description, Style::default().fg(theme::TEXT_PRIMARY)),
             ]));
         }
@@ -160,7 +180,10 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
     }
 
     // Truncate to fit
-    let visible_lines: Vec<Line> = lines.into_iter().take(hotkeys_area.height as usize).collect();
+    let visible_lines: Vec<Line> = lines
+        .into_iter()
+        .take(hotkeys_area.height as usize)
+        .collect();
     let paragraph = Paragraph::new(visible_lines);
     f.render_widget(paragraph, hotkeys_area);
 
@@ -171,7 +194,7 @@ pub fn render_hotkey_help_modal(f: &mut Frame, area: Rect) {
         popup_area.width.saturating_sub(4),
         1,
     );
-    let hints = Paragraph::new("Press any key to close")
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints =
+        Paragraph::new("Press any key to close").style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }

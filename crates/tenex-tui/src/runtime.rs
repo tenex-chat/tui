@@ -1,5 +1,8 @@
 use anyhow::Result;
-use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers, MouseEventKind};
+use crossterm::event::{
+    Event, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers,
+    MouseEventKind,
+};
 use futures::StreamExt;
 use std::io::Write;
 use std::path::PathBuf;
@@ -11,10 +14,10 @@ use tenex_core::runtime::CoreRuntime;
 use crate::clipboard::{handle_clipboard_paste, handle_image_file_paste, UploadResult};
 use crate::input::handle_key;
 use crate::render::render;
+use crate::ui::notifications::Notification;
 use crate::ui::state::{TTSQueueItem, TTSQueueItemStatus};
 use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, Tui, View};
-use crate::ui::notifications::Notification;
 
 /// Result from background audio generation task
 enum AudioGenerationResult {
@@ -62,7 +65,8 @@ pub(crate) async fn run_app(
 
     // BULLETPROOF: Channel for receiving publish confirmations from worker threads
     // When a message is confirmed published to relay, we mark the draft as published
-    let (publish_confirm_tx, mut publish_confirm_rx) = tokio::sync::mpsc::channel::<(String, String)>(100);
+    let (publish_confirm_tx, mut publish_confirm_rx) =
+        tokio::sync::mpsc::channel::<(String, String)>(100);
     app.set_publish_confirm_tx(publish_confirm_tx);
 
     // Channel for receiving audio generation results from background tasks
@@ -75,7 +79,10 @@ pub(crate) async fn run_app(
 
     // BULLETPROOF: Surface draft storage load/parse errors at startup
     if let Some(error) = app.draft_storage_last_error() {
-        log_diagnostic(&format!("BULLETPROOF: Draft storage error at startup: {}", error));
+        log_diagnostic(&format!(
+            "BULLETPROOF: Draft storage error at startup: {}",
+            error
+        ));
         app.set_warning_status(&format!("WARNING: Draft load error - {}", error));
         app.draft_storage_clear_error();
     }
@@ -83,10 +90,16 @@ pub(crate) async fn run_app(
     // BULLETPROOF: Clean up old confirmed publish snapshots on startup (>24h old)
     match app.cleanup_confirmed_publishes() {
         Ok(cleaned_up) if cleaned_up > 0 => {
-            log_diagnostic(&format!("BULLETPROOF: Cleaned up {} old confirmed publish snapshots", cleaned_up));
+            log_diagnostic(&format!(
+                "BULLETPROOF: Cleaned up {} old confirmed publish snapshots",
+                cleaned_up
+            ));
         }
         Err(e) => {
-            log_diagnostic(&format!("BULLETPROOF: Error cleaning up publish snapshots: {}", e));
+            log_diagnostic(&format!(
+                "BULLETPROOF: Error cleaning up publish snapshots: {}",
+                e
+            ));
         }
         _ => {}
     }
@@ -94,14 +107,20 @@ pub(crate) async fn run_app(
     // Check for pending (unconfirmed) publish snapshots on startup (recovery)
     let pending_publishes = app.get_pending_publishes();
     if !pending_publishes.is_empty() {
-        log_diagnostic(&format!("BULLETPROOF: Found {} pending (unconfirmed) publish snapshots that may need recovery", pending_publishes.len()));
+        log_diagnostic(&format!(
+            "BULLETPROOF: Found {} pending (unconfirmed) publish snapshots that may need recovery",
+            pending_publishes.len()
+        ));
         // These are messages that were sent but never got relay confirmation
     }
 
     // Check for unpublished drafts on startup (recovery)
     let unpublished = app.get_unpublished_drafts();
     if !unpublished.is_empty() {
-        log_diagnostic(&format!("BULLETPROOF: Found {} drafts with content", unpublished.len()));
+        log_diagnostic(&format!(
+            "BULLETPROOF: Found {} drafts with content",
+            unpublished.len()
+        ));
     }
 
     let mut loop_count: u64 = 0;
@@ -468,20 +487,26 @@ fn handle_core_events(
                         app.mark_tab_waiting_for_user(&thread_id);
 
                         // Get thread title for notification (and audio generation)
-                        let thread_title = app.data_store.borrow()
+                        let thread_title = app
+                            .data_store
+                            .borrow()
                             .get_thread_by_id(&thread_id)
                             .map(|t| t.title.clone())
                             .unwrap_or_else(|| "conversation".to_string());
 
                         // Push status bar notification if not viewing this thread
-                        let is_viewing_thread = app.selected_thread()
-                            .map(|t| t.id.as_str()) == Some(thread_id.as_str());
+                        let is_viewing_thread = app.selected_thread().map(|t| t.id.as_str())
+                            == Some(thread_id.as_str());
 
                         if !is_viewing_thread {
                             // Use message_for_user notification with thread_id for jump-to support
                             // Duration is 30 seconds and includes hint about Alt+M hotkey
-                            let notification_msg = format!("@ Message for you in {} · Alt+M to open", thread_title);
-                            app.notify(Notification::message_for_user(notification_msg, thread_id.clone()));
+                            let notification_msg =
+                                format!("@ Message for you in {} · Alt+M to open", thread_title);
+                            app.notify(Notification::message_for_user(
+                                notification_msg,
+                                thread_id.clone(),
+                            ));
                         }
 
                         // Trigger audio notification generation (if enabled)
@@ -511,7 +536,10 @@ fn handle_core_events(
                     // This ensures the input box reflects the agent who just responded
                     if !app.user_explicitly_selected_agent {
                         // Check if this message is from an agent (not the user)
-                        let is_from_agent = app.data_store.borrow().user_pubkey
+                        let is_from_agent = app
+                            .data_store
+                            .borrow()
+                            .user_pubkey
                             .as_ref()
                             .map(|pk| pk != &message_pubkey)
                             .unwrap_or(true);
@@ -532,7 +560,9 @@ fn handle_core_events(
                 }
             }
             CoreEvent::ProjectStatus(status) => {
-                if app.selected_project.as_ref().map(|p| p.a_tag()) == Some(status.project_coordinate.clone()) {
+                if app.selected_project.as_ref().map(|p| p.a_tag())
+                    == Some(status.project_coordinate.clone())
+                {
                     if app.selected_agent().is_none() {
                         if let Some(pm) = status.pm_agent() {
                             app.set_selected_agent(Some(pm.clone()));
@@ -583,7 +613,9 @@ fn trigger_audio_notification(
         if now.saturating_sub(last_activity) < threshold {
             log_diagnostic(&format!(
                 "AUDIO: Skipping TTS for thread {} - user active {}s ago (threshold: {}s)",
-                thread_id, now.saturating_sub(last_activity), threshold
+                thread_id,
+                now.saturating_sub(last_activity),
+                threshold
             ));
             return;
         }
@@ -637,33 +669,44 @@ fn trigger_audio_notification(
 
         // Initialize audio notifications directory
         if let Err(e) = manager.init() {
-            let _ = audio_tx.send(AudioGenerationResult::Skipped(
-                format!("Failed to init audio dir: {}", e)
-            )).await;
+            let _ = audio_tx
+                .send(AudioGenerationResult::Skipped(format!(
+                    "Failed to init audio dir: {}",
+                    e
+                )))
+                .await;
             return;
         }
 
         // Generate the audio notification
-        match manager.generate_notification(
-            &agent_pubkey,
-            &conversation_title,
-            &message_text,
-            &elevenlabs_key,
-            &openrouter_key,
-            &settings,
-        ).await {
+        match manager
+            .generate_notification(
+                &agent_pubkey,
+                &conversation_title,
+                &message_text,
+                &elevenlabs_key,
+                &openrouter_key,
+                &settings,
+            )
+            .await
+        {
             Ok(notification) => {
                 let path = PathBuf::from(&notification.audio_file_path);
-                let _ = audio_tx.send(AudioGenerationResult::Success {
-                    audio_path: path,
-                    thread_id: thread_id_for_result,
-                    message_id: message_id_for_result,
-                }).await;
+                let _ = audio_tx
+                    .send(AudioGenerationResult::Success {
+                        audio_path: path,
+                        thread_id: thread_id_for_result,
+                        message_id: message_id_for_result,
+                    })
+                    .await;
             }
             Err(e) => {
-                let _ = audio_tx.send(AudioGenerationResult::Skipped(
-                    format!("Generation failed: {}", e)
-                )).await;
+                let _ = audio_tx
+                    .send(AudioGenerationResult::Skipped(format!(
+                        "Generation failed: {}",
+                        e
+                    )))
+                    .await;
             }
         }
     });
@@ -677,7 +720,10 @@ fn check_pending_backend_approvals(app: &mut App) {
     }
 
     // Drain pending approvals from data store and show first one
-    let pending = app.data_store.borrow_mut().drain_pending_backend_approvals();
+    let pending = app
+        .data_store
+        .borrow_mut()
+        .drain_pending_backend_approvals();
     if let Some(first) = pending.into_iter().next() {
         app.show_backend_approval_modal(first.backend_pubkey, first.project_a_tag);
     }
@@ -697,7 +743,8 @@ fn check_pending_new_thread(app: &mut App) {
     // Find the most recent thread from user (threads sorted by last_activity desc)
     let thread = {
         let store = app.data_store.borrow();
-        store.get_threads(&project_a_tag)
+        store
+            .get_threads(&project_a_tag)
             .iter()
             .find(|t| t.pubkey == user_pubkey)
             .cloned()

@@ -95,7 +95,9 @@ fn render_basics_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
 
     // Name field
     let name_label_style = if state.focus == AgentFormFocus::Name {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
@@ -133,7 +135,9 @@ fn render_basics_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
 
     // Description field
     let desc_label_style = if state.focus == AgentFormFocus::Description {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
@@ -171,13 +175,13 @@ fn render_basics_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
 
     // Role field
     let role_label_style = if state.focus == AgentFormFocus::Role {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_MUTED)
     };
-    let role_label = Paragraph::new(Line::from(vec![
-        Span::styled("Role: ", role_label_style),
-    ]));
+    let role_label = Paragraph::new(Line::from(vec![Span::styled("Role: ", role_label_style)]));
     f.render_widget(role_label, Rect::new(area.x, y, area.width, 1));
     y += 1;
 
@@ -221,7 +225,10 @@ fn render_basics_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
     if state.name.trim().is_empty() || state.description.trim().is_empty() {
         let hint = Paragraph::new(Line::from(vec![
             Span::styled("* ", Style::default().fg(theme::ACCENT_ERROR)),
-            Span::styled("Name and description are required", Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                "Name and description are required",
+                Style::default().fg(theme::TEXT_DIM),
+            ),
         ]));
         f.render_widget(hint, Rect::new(area.x, y, area.width, 1));
     }
@@ -231,9 +238,12 @@ fn render_instructions_step(f: &mut Frame, area: Rect, state: &CreateAgentState)
     let mut y = area.y;
 
     // Instructions label
-    let label = Paragraph::new(Line::from(vec![
-        Span::styled("System Prompt / Instructions:", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-    ]));
+    let label = Paragraph::new(Line::from(vec![Span::styled(
+        "System Prompt / Instructions:",
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    )]));
     f.render_widget(label, Rect::new(area.x, y, area.width, 1));
     y += 1;
 
@@ -250,12 +260,17 @@ fn render_instructions_step(f: &mut Frame, area: Rect, state: &CreateAgentState)
     // Split instructions into lines and apply scroll
     let lines: Vec<&str> = state.instructions.lines().collect();
     let visible_height = editor_height.saturating_sub(2) as usize;
-    let scroll = state.instructions_scroll.min(lines.len().saturating_sub(visible_height));
+    let scroll = state
+        .instructions_scroll
+        .min(lines.len().saturating_sub(visible_height));
 
     for (i, line) in lines.iter().skip(scroll).take(visible_height).enumerate() {
         let line_num = scroll + i + 1;
         let line_content = Paragraph::new(Line::from(vec![
-            Span::styled(format!("{:3} │ ", line_num), Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                format!("{:3} │ ", line_num),
+                Style::default().fg(theme::TEXT_DIM),
+            ),
             Span::styled(*line, Style::default().fg(theme::TEXT_PRIMARY)),
         ]));
         f.render_widget(line_content, Rect::new(area.x, y + i as u16, area.width, 1));
@@ -265,7 +280,10 @@ fn render_instructions_step(f: &mut Frame, area: Rect, state: &CreateAgentState)
     if state.instructions.is_empty() {
         let placeholder = Paragraph::new(Line::from(vec![
             Span::styled("  1 │ ", Style::default().fg(theme::TEXT_DIM)),
-            Span::styled("Enter system prompt here...", Style::default().fg(theme::TEXT_DIM)),
+            Span::styled(
+                "Enter system prompt here...",
+                Style::default().fg(theme::TEXT_DIM),
+            ),
         ]));
         f.render_widget(placeholder, Rect::new(area.x, y, area.width, 1));
     }
@@ -280,7 +298,9 @@ fn render_instructions_step(f: &mut Frame, area: Rect, state: &CreateAgentState)
     f.render_widget(count_para, Rect::new(area.x, bottom_y + 1, area.width, 1));
 
     // Position cursor
-    let cursor_line = state.instructions[..state.instructions_cursor].matches('\n').count();
+    let cursor_line = state.instructions[..state.instructions_cursor]
+        .matches('\n')
+        .count();
     let cursor_col = state.instructions[..state.instructions_cursor]
         .rfind('\n')
         .map(|pos| state.instructions_cursor - pos - 1)
@@ -299,16 +319,24 @@ fn render_review_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
     let mut y = area.y;
 
     // Title
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled("Review Agent Definition", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
-    ]));
+    let title = Paragraph::new(Line::from(vec![Span::styled(
+        "Review Agent Definition",
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD),
+    )]));
     f.render_widget(title, Rect::new(area.x, y, area.width, 1));
     y += 2;
 
     // Name
     let name_line = Paragraph::new(Line::from(vec![
         Span::styled("Name: ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(&state.name, Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            &state.name,
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        ),
     ]));
     f.render_widget(name_line, Rect::new(area.x, y, area.width, 1));
     y += 1;
@@ -338,26 +366,35 @@ fn render_review_step(f: &mut Frame, area: Rect, state: &CreateAgentState) {
     y += 2;
 
     // Instructions preview
-    let instructions_label = Paragraph::new(Line::from(vec![
-        Span::styled("Instructions Preview:", Style::default().fg(theme::TEXT_MUTED)),
-    ]));
+    let instructions_label = Paragraph::new(Line::from(vec![Span::styled(
+        "Instructions Preview:",
+        Style::default().fg(theme::TEXT_MUTED),
+    )]));
     f.render_widget(instructions_label, Rect::new(area.x, y, area.width, 1));
     y += 1;
 
     // Instructions content with scroll
     let preview_height = area.height.saturating_sub(y - area.y + 2) as usize;
     let lines: Vec<&str> = state.instructions.lines().collect();
-    let scroll = state.instructions_scroll.min(lines.len().saturating_sub(preview_height));
+    let scroll = state
+        .instructions_scroll
+        .min(lines.len().saturating_sub(preview_height));
 
     for (i, line) in lines.iter().skip(scroll).take(preview_height).enumerate() {
         let line_para = Paragraph::new(*line).style(Style::default().fg(theme::TEXT_PRIMARY));
-        f.render_widget(line_para, Rect::new(area.x + 2, y + i as u16, area.width.saturating_sub(2), 1));
+        f.render_widget(
+            line_para,
+            Rect::new(area.x + 2, y + i as u16, area.width.saturating_sub(2), 1),
+        );
     }
 
     // Scroll indicator if needed
     if lines.len() > preview_height {
         let indicator = format!("({}/{} lines)", scroll + 1, lines.len());
         let indicator_para = Paragraph::new(indicator).style(Style::default().fg(theme::TEXT_DIM));
-        f.render_widget(indicator_para, Rect::new(area.x + area.width.saturating_sub(20), area.y, 20, 1));
+        f.render_widget(
+            indicator_para,
+            Rect::new(area.x + area.width.saturating_sub(20), area.y, 20, 1),
+        );
     }
 }

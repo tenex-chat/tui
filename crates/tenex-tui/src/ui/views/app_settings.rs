@@ -1,7 +1,10 @@
 //! App Settings modal view - global application settings accessible via comma key
 
 use crate::ui::components::{Modal, ModalSize};
-use crate::ui::modal::{AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, ModelBrowserState, SettingsTab, VoiceBrowserState};
+use crate::ui::modal::{
+    AiSetting, AppSettingsState, AppearanceSetting, GeneralSetting, ModelBrowserState, SettingsTab,
+    VoiceBrowserState,
+};
 use crate::ui::{theme, App};
 use ratatui::{
     layout::Rect,
@@ -215,7 +218,8 @@ fn render_ai_tab(f: &mut Frame, area: Rect, state: &AppSettingsState) {
     y_offset += 3;
 
     // 3b. TTS Inactivity Threshold
-    let is_threshold_selected = state.selected_ai_setting() == Some(AiSetting::TtsInactivityThreshold);
+    let is_threshold_selected =
+        state.selected_ai_setting() == Some(AiSetting::TtsInactivityThreshold);
     render_text_setting_row(
         f,
         area.x,
@@ -283,10 +287,9 @@ fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettin
     y_offset += 2;
 
     // 1. Time Filter (select field cycling through options)
-    let is_time_filter_selected = state.selected_appearance_setting() == Some(AppearanceSetting::TimeFilter);
-    let time_filter_label = app.home.time_filter
-        .map(|tf| tf.label())
-        .unwrap_or("All");
+    let is_time_filter_selected =
+        state.selected_appearance_setting() == Some(AppearanceSetting::TimeFilter);
+    let time_filter_label = app.home.time_filter.map(|tf| tf.label()).unwrap_or("All");
     render_select_field(
         f,
         area.x,
@@ -300,7 +303,8 @@ fn render_appearance_tab(f: &mut Frame, app: &App, area: Rect, state: &AppSettin
     y_offset += 3;
 
     // 2. Hide Scheduled toggle
-    let is_hide_scheduled_selected = state.selected_appearance_setting() == Some(AppearanceSetting::HideScheduled);
+    let is_hide_scheduled_selected =
+        state.selected_appearance_setting() == Some(AppearanceSetting::HideScheduled);
     render_toggle_row(
         f,
         area.x,
@@ -408,7 +412,9 @@ fn render_toggle_row(
     };
     spans.push(Span::styled(
         toggle_text,
-        Style::default().fg(toggle_color).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(toggle_color)
+            .add_modifier(Modifier::BOLD),
     ));
 
     let row = Paragraph::new(Line::from(spans)).block(Block::default().borders(Borders::NONE));
@@ -459,11 +465,7 @@ fn render_text_setting_row(
                 .add_modifier(Modifier::UNDERLINED),
         ));
     } else {
-        let display = if value.is_empty() {
-            "(not set)"
-        } else {
-            value
-        };
+        let display = if value.is_empty() { "(not set)" } else { value };
         // Truncate long values for display
         let max_len = width.saturating_sub(label.len() as u16 + 5) as usize;
         let truncated = if display.len() > max_len && max_len > 3 {
@@ -625,17 +627,29 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
             // Appearance tab uses toggle/cycle, not edit mode
             match state.selected_appearance_setting() {
                 Some(AppearanceSetting::TimeFilter) => {
-                    hints.push(Span::styled(" cycle", Style::default().fg(theme::TEXT_MUTED)));
+                    hints.push(Span::styled(
+                        " cycle",
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
                 Some(AppearanceSetting::HideScheduled) => {
-                    hints.push(Span::styled(" toggle", Style::default().fg(theme::TEXT_MUTED)));
+                    hints.push(Span::styled(
+                        " toggle",
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
                 None => {
-                    hints.push(Span::styled(" select", Style::default().fg(theme::TEXT_MUTED)));
+                    hints.push(Span::styled(
+                        " select",
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
             }
         } else {
-            hints.push(Span::styled(" edit", Style::default().fg(theme::TEXT_MUTED)));
+            hints.push(Span::styled(
+                " edit",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
 
         // Show Delete hint on AI tab for clearable settings
@@ -646,16 +660,28 @@ fn render_hints(f: &mut Frame, popup_area: Rect, state: &AppSettingsState) {
                 | Some(AiSetting::SelectedVoiceIds)
                 | Some(AiSetting::OpenRouterModel) => {
                     hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-                    hints.push(Span::styled("Del", Style::default().fg(theme::ACCENT_WARNING)));
-                    hints.push(Span::styled(" clear", Style::default().fg(theme::TEXT_MUTED)));
+                    hints.push(Span::styled(
+                        "Del",
+                        Style::default().fg(theme::ACCENT_WARNING),
+                    ));
+                    hints.push(Span::styled(
+                        " clear",
+                        Style::default().fg(theme::TEXT_MUTED),
+                    ));
                 }
                 _ => {}
             }
         }
 
         hints.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED)));
-        hints.push(Span::styled("Esc", Style::default().fg(theme::ACCENT_WARNING)));
-        hints.push(Span::styled(" close", Style::default().fg(theme::TEXT_MUTED)));
+        hints.push(Span::styled(
+            "Esc",
+            Style::default().fg(theme::ACCENT_WARNING),
+        ));
+        hints.push(Span::styled(
+            " close",
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
 
         hints
     };
@@ -693,13 +719,19 @@ fn render_voice_browser(f: &mut Frame, area: Rect, browser: &VoiceBrowserState) 
             Style::default().fg(theme::ACCENT_PRIMARY),
         )
     };
-    f.render_widget(Paragraph::new(Line::from(vec![search_display])), search_area);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![search_display])),
+        search_area,
+    );
 
     // Loading state
     if browser.loading {
         let loading_area = Rect::new(area.x, area.y + 3, area.width, 1);
-        let loading = Paragraph::new("Loading voices...")
-            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC));
+        let loading = Paragraph::new("Loading voices...").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::ITALIC),
+        );
         f.render_widget(loading, loading_area);
         return;
     }
@@ -711,7 +743,11 @@ fn render_voice_browser(f: &mut Frame, area: Rect, browser: &VoiceBrowserState) 
 
     if filtered.is_empty() {
         let empty_area = Rect::new(area.x, list_y, area.width, 1);
-        let msg = if browser.filter.is_empty() { "No voices available" } else { "No matching voices" };
+        let msg = if browser.filter.is_empty() {
+            "No voices available"
+        } else {
+            "No matching voices"
+        };
         f.render_widget(
             Paragraph::new(msg).style(Style::default().fg(theme::TEXT_DIM)),
             empty_area,
@@ -735,13 +771,23 @@ fn render_voice_browser(f: &mut Frame, area: Rect, browser: &VoiceBrowserState) 
         let is_checked = browser.selected_voice_ids.contains(&item.voice_id);
 
         let checkbox = if is_checked { "[x] " } else { "[ ] " };
-        let checkbox_color = if is_checked { theme::ACCENT_SUCCESS } else { theme::TEXT_DIM };
+        let checkbox_color = if is_checked {
+            theme::ACCENT_SUCCESS
+        } else {
+            theme::TEXT_DIM
+        };
 
         let cursor = if is_selected { ">" } else { " " };
-        let cursor_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_DIM };
+        let cursor_color = if is_selected {
+            theme::ACCENT_PRIMARY
+        } else {
+            theme::TEXT_DIM
+        };
 
         let name_style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
@@ -792,13 +838,19 @@ fn render_model_browser(f: &mut Frame, area: Rect, browser: &ModelBrowserState) 
             Style::default().fg(theme::ACCENT_PRIMARY),
         )
     };
-    f.render_widget(Paragraph::new(Line::from(vec![search_display])), search_area);
+    f.render_widget(
+        Paragraph::new(Line::from(vec![search_display])),
+        search_area,
+    );
 
     // Loading state
     if browser.loading {
         let loading_area = Rect::new(area.x, area.y + 3, area.width, 1);
-        let loading = Paragraph::new("Loading models...")
-            .style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC));
+        let loading = Paragraph::new("Loading models...").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::ITALIC),
+        );
         f.render_widget(loading, loading_area);
         return;
     }
@@ -810,7 +862,11 @@ fn render_model_browser(f: &mut Frame, area: Rect, browser: &ModelBrowserState) 
 
     if filtered.is_empty() {
         let empty_area = Rect::new(area.x, list_y, area.width, 1);
-        let msg = if browser.filter.is_empty() { "No models available" } else { "No matching models" };
+        let msg = if browser.filter.is_empty() {
+            "No models available"
+        } else {
+            "No matching models"
+        };
         f.render_widget(
             Paragraph::new(msg).style(Style::default().fg(theme::TEXT_DIM)),
             empty_area,
@@ -834,13 +890,23 @@ fn render_model_browser(f: &mut Frame, area: Rect, browser: &ModelBrowserState) 
         let is_current = browser.selected_model_id.as_deref() == Some(&item.id);
 
         let radio = if is_current { "(o) " } else { "( ) " };
-        let radio_color = if is_current { theme::ACCENT_SUCCESS } else { theme::TEXT_DIM };
+        let radio_color = if is_current {
+            theme::ACCENT_SUCCESS
+        } else {
+            theme::TEXT_DIM
+        };
 
         let cursor = if is_selected { ">" } else { " " };
-        let cursor_color = if is_selected { theme::ACCENT_PRIMARY } else { theme::TEXT_DIM };
+        let cursor_color = if is_selected {
+            theme::ACCENT_PRIMARY
+        } else {
+            theme::TEXT_DIM
+        };
 
         let name_style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
@@ -862,7 +928,10 @@ fn render_model_browser(f: &mut Frame, area: Rect, browser: &ModelBrowserState) 
             } else {
                 format!("  {} ctx", ctx_len)
             };
-            spans.push(Span::styled(ctx_display, Style::default().fg(theme::TEXT_DIM)));
+            spans.push(Span::styled(
+                ctx_display,
+                Style::default().fg(theme::TEXT_DIM),
+            ));
         }
 
         f.render_widget(Paragraph::new(Line::from(spans)), row_area);

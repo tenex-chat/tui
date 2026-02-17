@@ -50,7 +50,7 @@ const TABLE_RUNTIME_COL_WIDTH: u16 = 12; // Width for runtime column
 // Import shared constants for cost and chart windows
 // COST_WINDOW_DAYS is used for cost calculations (shared with FFI)
 // CHART_WINDOW_DAYS is used for chart rendering (runtime, messages)
-use tenex_core::constants::{COST_WINDOW_DAYS, CHART_WINDOW_DAYS};
+use tenex_core::constants::{CHART_WINDOW_DAYS, COST_WINDOW_DAYS};
 
 // Local alias for chart window (usize for iteration)
 const STATS_WINDOW_DAYS: usize = CHART_WINDOW_DAYS;
@@ -71,8 +71,8 @@ const DAYS_IN_MONTH: usize = 30;
 /// View mode for the activity grid
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityViewMode {
-    Week,   // 7 days × 24 hours = 168 hours
-    Month,  // 30 days × 24 hours = 720 hours
+    Week,  // 7 days × 24 hours = 168 hours
+    Month, // 30 days × 24 hours = 720 hours
 }
 
 impl ActivityViewMode {
@@ -101,7 +101,11 @@ pub enum ActivityVisualization {
 /// Render the Stats tab content with a dashboard layout featuring subtabs
 pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // Get today's runtime first (requires mutable borrow)
-    let today_runtime = app.data_store.borrow_mut().statistics.get_today_unique_runtime();
+    let today_runtime = app
+        .data_store
+        .borrow_mut()
+        .statistics
+        .get_today_unique_runtime();
 
     // Get stats data from the data store (immutable borrow)
     let data_store = app.data_store.borrow();
@@ -134,7 +138,8 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     // 5. Messages by day (user vs all)
-    let (user_messages_by_day, all_messages_by_day) = data_store.get_messages_by_day(STATS_WINDOW_DAYS);
+    let (user_messages_by_day, all_messages_by_day) =
+        data_store.get_messages_by_day(STATS_WINDOW_DAYS);
 
     // Note: Don't drop data_store yet - Activity tab needs it
 
@@ -152,7 +157,9 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     // Calculate adaptive heights using helper function
     let metric_cards_height = 5u16;
     let subtab_nav_height = 3u16;
-    let content_height = area.height.saturating_sub(metric_cards_height + subtab_nav_height);
+    let content_height = area
+        .height
+        .saturating_sub(metric_cards_height + subtab_nav_height);
 
     let vertical_chunks = Layout::vertical([
         Constraint::Length(metric_cards_height), // Metric cards
@@ -162,7 +169,13 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
     .split(area);
 
     // 1. Render Metric Cards Row (always visible)
-    render_metric_cards(f, total_cost, today_runtime, &runtime_by_day, vertical_chunks[0]);
+    render_metric_cards(
+        f,
+        total_cost,
+        today_runtime,
+        &runtime_by_day,
+        vertical_chunks[0],
+    );
 
     // 2. Render Subtab Navigation
     render_subtab_navigation(f, app.stats_subtab, vertical_chunks[1]);
@@ -175,22 +188,31 @@ pub fn render_stats(f: &mut Frame, app: &App, area: Rect) {
         }
         StatsSubtab::Rankings => {
             // Side-by-side tables view
-            let table_chunks = Layout::horizontal([
-                Constraint::Percentage(50),
-                Constraint::Percentage(50),
-            ])
-            .split(vertical_chunks[2]);
+            let table_chunks =
+                Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)])
+                    .split(vertical_chunks[2]);
 
             render_cost_by_project_table(f, &cost_by_project, table_chunks[0]);
             render_top_conversations_table(f, &top_conv_with_titles, table_chunks[1]);
         }
         StatsSubtab::Messages => {
             // Messages per day bar chart (user vs all)
-            render_messages_chart(f, &user_messages_by_day, &all_messages_by_day, vertical_chunks[2]);
+            render_messages_chart(
+                f,
+                &user_messages_by_day,
+                &all_messages_by_day,
+                vertical_chunks[2],
+            );
         }
         StatsSubtab::Activity => {
             // GitHub-style activity grid (default to week view, tokens visualization)
-            render_activity_grid(f, &*data_store, ActivityViewMode::Week, ActivityVisualization::Tokens, vertical_chunks[2]);
+            render_activity_grid(
+                f,
+                &*data_store,
+                ActivityViewMode::Week,
+                ActivityVisualization::Tokens,
+                vertical_chunks[2],
+            );
         }
     }
 
@@ -412,7 +434,11 @@ fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE))
         .title(format!(" LLM Runtime (Last {} Days) ", STATS_WINDOW_DAYS))
-        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -441,8 +467,7 @@ fn render_runtime_chart(f: &mut Frame, runtime_by_day: &[(u64, u64)], area: Rect
     let today_start = (now / seconds_per_day) * seconds_per_day;
 
     // Create a map for quick lookup
-    let runtime_map: std::collections::HashMap<u64, u64> =
-        runtime_by_day.iter().cloned().collect();
+    let runtime_map: std::collections::HashMap<u64, u64> = runtime_by_day.iter().cloned().collect();
 
     // Generate last STATS_WINDOW_DAYS days with proper date labels
     // Order: newest (today) first, oldest last - ensures today is always visible
@@ -510,7 +535,11 @@ fn render_messages_chart(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE))
         .title(format!(" Messages (Last {} Days) ", STATS_WINDOW_DAYS))
-        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -522,8 +551,16 @@ fn render_messages_chart(
     }
 
     // Find max message count for scaling (across both user and all)
-    let max_user = user_messages_by_day.iter().map(|(_, c)| *c).max().unwrap_or(0);
-    let max_all = all_messages_by_day.iter().map(|(_, c)| *c).max().unwrap_or(0);
+    let max_user = user_messages_by_day
+        .iter()
+        .map(|(_, c)| *c)
+        .max()
+        .unwrap_or(0);
+    let max_all = all_messages_by_day
+        .iter()
+        .map(|(_, c)| *c)
+        .max()
+        .unwrap_or(0);
     let max_count = max_user.max(max_all);
 
     if max_count == 0 {
@@ -590,7 +627,10 @@ fn render_messages_chart(
                     Style::default().fg(theme::TEXT_MUTED),
                 ),
                 Span::styled(user_bar, Style::default().fg(theme::ACCENT_PRIMARY)),
-                Span::styled(all_bar_remainder, Style::default().fg(theme::ACCENT_SPECIAL)),
+                Span::styled(
+                    all_bar_remainder,
+                    Style::default().fg(theme::ACCENT_SPECIAL),
+                ),
                 Span::styled(
                     format!(" {}/{}", user_count, all_count),
                     Style::default().fg(theme::TEXT_PRIMARY),
@@ -701,12 +741,20 @@ fn timestamp_to_month_day(timestamp: u64) -> String {
 }
 
 /// Render the cost by project section as a proper table
-fn render_cost_by_project_table(f: &mut Frame, cost_by_project: &[(String, String, f64)], area: Rect) {
+fn render_cost_by_project_table(
+    f: &mut Frame,
+    cost_by_project: &[(String, String, f64)],
+    area: Rect,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE))
         .title(" Cost by Project ")
-        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -746,8 +794,16 @@ fn render_cost_by_project_table(f: &mut Frame, cost_by_project: &[(String, Strin
         .collect();
 
     let header = Row::new(vec![
-        Cell::from("Project").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
-        Cell::from("Cost").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Project").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("Cost").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
     .style(Style::default().bg(theme::BG_SECONDARY))
     .height(1);
@@ -757,9 +813,7 @@ fn render_cost_by_project_table(f: &mut Frame, cost_by_project: &[(String, Strin
         Constraint::Length(TABLE_COST_COL_WIDTH),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .column_spacing(1);
+    let table = Table::new(rows, widths).header(header).column_spacing(1);
 
     // Use consistent inset calculation
     let table_area = Rect::new(
@@ -782,7 +836,11 @@ fn render_top_conversations_table(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE))
         .title(" Top Conversations ")
-        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -821,8 +879,16 @@ fn render_top_conversations_table(
         .collect();
 
     let header = Row::new(vec![
-        Cell::from("Conversation").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
-        Cell::from("Runtime").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Conversation").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("Runtime").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
     .style(Style::default().bg(theme::BG_SECONDARY))
     .height(1);
@@ -832,9 +898,7 @@ fn render_top_conversations_table(
         Constraint::Length(TABLE_RUNTIME_COL_WIDTH),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .column_spacing(1);
+    let table = Table::new(rows, widths).header(header).column_spacing(1);
 
     // Use consistent inset calculation
     let table_area = Rect::new(
@@ -903,11 +967,15 @@ fn render_activity_grid(
 ) {
     let (title, data) = match visualization {
         ActivityVisualization::Tokens => {
-            let tokens_data = data_store.statistics.get_tokens_by_hour(view_mode.num_hours());
+            let tokens_data = data_store
+                .statistics
+                .get_tokens_by_hour(view_mode.num_hours());
             ("LLM Token Usage", tokens_data)
         }
         ActivityVisualization::Messages => {
-            let messages_data = data_store.statistics.get_message_count_by_hour(view_mode.num_hours());
+            let messages_data = data_store
+                .statistics
+                .get_message_count_by_hour(view_mode.num_hours());
             ("Message Activity", messages_data)
         }
     };
@@ -916,7 +984,11 @@ fn render_activity_grid(
         .borders(Borders::ALL)
         .border_style(Style::default().fg(theme::BORDER_INACTIVE))
         .title(format!(" {} (Last {} days) ", title, view_mode.num_days()))
-        .title_style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD));
+        .title_style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = block.inner(area);
     f.render_widget(block, area);
@@ -974,11 +1046,20 @@ fn render_activity_grid(
     // Add legend at top
     lines.push(Line::from(vec![
         Span::styled("    ", Style::default()),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_value, max_value))),
+        Span::styled(
+            "█ ",
+            Style::default().fg(get_activity_color(max_value, max_value)),
+        ),
         Span::styled("High  ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 2, max_value))),
+        Span::styled(
+            "█ ",
+            Style::default().fg(get_activity_color(max_value / 2, max_value)),
+        ),
         Span::styled("Med  ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled("█ ", Style::default().fg(get_activity_color(max_value / 4, max_value))),
+        Span::styled(
+            "█ ",
+            Style::default().fg(get_activity_color(max_value / 4, max_value)),
+        ),
         Span::styled("Low  ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled("█ ", Style::default().fg(get_activity_color(0, max_value))),
         Span::styled("None", Style::default().fg(theme::TEXT_MUTED)),
@@ -1015,12 +1096,10 @@ fn render_activity_grid(
             format_day_label_from_timestamp(day_start, today_start)
         };
 
-        let mut line_spans = vec![
-            Span::styled(
-                format!("{:>5} ", day_label),
-                Style::default().fg(theme::TEXT_MUTED),
-            ),
-        ];
+        let mut line_spans = vec![Span::styled(
+            format!("{:>5} ", day_label),
+            Style::default().fg(theme::TEXT_MUTED),
+        )];
 
         // Hours go left to right (00-23)
         for hour in 0..HOURS_PER_DAY {
@@ -1140,10 +1219,16 @@ mod tests {
 
         // Test Feb 29, 2024 00:00:00 UTC (leap day)
         let result2 = timestamp_to_month_day(1709164800);
-        assert_eq!(result2, "Feb 29", "1709164800 should be Feb 29 UTC (leap day)");
+        assert_eq!(
+            result2, "Feb 29",
+            "1709164800 should be Feb 29 UTC (leap day)"
+        );
 
         // Verify these are different dates
-        assert_ne!(result, result2, "Different timestamps should produce different dates");
+        assert_ne!(
+            result, result2,
+            "Different timestamps should produce different dates"
+        );
     }
 
     #[test]
@@ -1163,7 +1248,12 @@ mod tests {
             let result = timestamp_to_month_day(ts);
 
             // Verify format: "Mon DD" where DD may have leading space
-            assert!(result.len() >= 5, "Timestamp {} produced too short result: '{}'", ts, result);
+            assert!(
+                result.len() >= 5,
+                "Timestamp {} produced too short result: '{}'",
+                ts,
+                result
+            );
 
             let month_part = &result[..3];
             assert!(
@@ -1271,7 +1361,10 @@ mod tests {
         // Verify MIN_MESSAGES_CHART_WIDTH is properly defined
         // and bar_max_width calculation is consistent
         let bar_max_width = MIN_MESSAGES_CHART_WIDTH.saturating_sub(MESSAGES_LABEL_WIDTH);
-        assert_eq!(bar_max_width, 0, "At minimum width, bar area should be zero");
+        assert_eq!(
+            bar_max_width, 0,
+            "At minimum width, bar area should be zero"
+        );
 
         // Verify MESSAGES_LABEL_WIDTH includes both label and counts
         assert_eq!(

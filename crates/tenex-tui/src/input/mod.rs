@@ -7,10 +7,10 @@
 //! - `commands`: Command definitions and execution for the command palette
 
 pub mod commands;
-mod modal_handlers;
-mod view_handlers;
 mod editor_handlers;
 pub mod input_prefix;
+mod modal_handlers;
+mod view_handlers;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -21,9 +21,9 @@ use crate::ui::views::login::LoginStep;
 use crate::ui::{App, InputMode, ModalState, View};
 
 // Re-export handlers for use in main input function
+use editor_handlers::*;
 use modal_handlers::*;
 use view_handlers::*;
-use editor_handlers::*;
 
 /// Main entry point for handling keyboard events.
 /// Routes events to appropriate handlers based on current modal state, view, and input mode.
@@ -102,7 +102,8 @@ pub(crate) fn handle_key(
                 // Ctrl+Shift+T: Open workspace manager
                 HotkeyId::WorkspaceManager => {
                     if !matches!(app.modal_state, ModalState::WorkspaceManager(_)) {
-                        app.modal_state = ModalState::WorkspaceManager(WorkspaceManagerState::new());
+                        app.modal_state =
+                            ModalState::WorkspaceManager(WorkspaceManagerState::new());
                     }
                     return Ok(());
                 }
@@ -215,7 +216,8 @@ fn handle_global_tab_navigation(app: &mut App, key: KeyEvent) -> Result<bool> {
         }
         // Option+2..9 on macOS produces special chars - switch to tab
         // ™=2, £=3, ¢=4, ∞=5, §=6, ¶=7, •=8, ª=9
-        KeyCode::Char(c) if matches!(c, '™' | '£' | '¢' | '∞' | '§' | '¶' | '•' | 'ª') => {
+        KeyCode::Char(c) if matches!(c, '™' | '£' | '¢' | '∞' | '§' | '¶' | '•' | 'ª') =>
+        {
             let tab_index = match c {
                 '™' => 0, // Option+2 -> tab 0
                 '£' => 1, // Option+3 -> tab 1

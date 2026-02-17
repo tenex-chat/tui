@@ -14,7 +14,11 @@ pub enum SettingsTab {
 }
 
 impl SettingsTab {
-    pub const ALL: &'static [SettingsTab] = &[SettingsTab::General, SettingsTab::AI, SettingsTab::Appearance];
+    pub const ALL: &'static [SettingsTab] = &[
+        SettingsTab::General,
+        SettingsTab::AI,
+        SettingsTab::Appearance,
+    ];
 
     pub fn label(&self) -> &'static str {
         match self {
@@ -138,7 +142,11 @@ impl VoiceBrowserState {
                 .iter()
                 .filter(|v| {
                     v.name.to_lowercase().contains(&filter_lower)
-                        || v.category.as_deref().unwrap_or("").to_lowercase().contains(&filter_lower)
+                        || v.category
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&filter_lower)
                         || v.voice_id.to_lowercase().contains(&filter_lower)
                 })
                 .collect()
@@ -233,7 +241,11 @@ impl ModelBrowserState {
                 .iter()
                 .filter(|m| {
                     m.id.to_lowercase().contains(&filter_lower)
-                        || m.name.as_deref().unwrap_or("").to_lowercase().contains(&filter_lower)
+                        || m.name
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&filter_lower)
                 })
                 .collect()
         }
@@ -352,7 +364,10 @@ pub struct AppSettingsState {
 }
 
 impl AppSettingsState {
-    pub fn new(current_jaeger_endpoint: &str, preferences: &tenex_core::models::PreferencesStorage) -> Self {
+    pub fn new(
+        current_jaeger_endpoint: &str,
+        preferences: &tenex_core::models::PreferencesStorage,
+    ) -> Self {
         let ai_settings = preferences.ai_audio_settings();
         Self {
             current_tab: SettingsTab::General,
@@ -388,7 +403,8 @@ impl AppSettingsState {
             .iter()
             .position(|&t| t == self.current_tab)
             .unwrap_or(0);
-        self.current_tab = SettingsTab::ALL[(idx + SettingsTab::ALL.len() - 1) % SettingsTab::ALL.len()];
+        self.current_tab =
+            SettingsTab::ALL[(idx + SettingsTab::ALL.len() - 1) % SettingsTab::ALL.len()];
     }
 
     /// Get selected setting in General tab
@@ -516,18 +532,12 @@ pub struct AskModalState {
     pub ask_author_pubkey: String,
 }
 
-/// State for nudge selector modal (multi-select nudges for messages)
+/// State for unified nudge/skill selector modal (multi-select for messages)
 #[derive(Debug, Clone)]
-pub struct NudgeSelectorState {
+pub struct NudgeSkillSelectorState {
     pub selector: SelectorState,
-    pub selected_nudge_ids: Vec<String>,  // Multi-select
-}
-
-/// State for skill selector modal (multi-select skills for messages)
-#[derive(Debug, Clone)]
-pub struct SkillSelectorState {
-    pub selector: SelectorState,
-    pub selected_skill_ids: Vec<String>,  // Multi-select
+    pub selected_nudge_ids: Vec<String>, // Multi-select
+    pub selected_skill_ids: Vec<String>, // Multi-select
 }
 
 /// State for nudge list view (browse/manage nudges)
@@ -740,7 +750,12 @@ impl CreateProjectState {
 
         // Add tools from selected agents
         for agent_id in &self.agent_ids {
-            if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
+            if let Some(agent) = app
+                .data_store
+                .borrow()
+                .content
+                .get_agent_definition(agent_id)
+            {
                 for mcp_id in &agent.mcp_servers {
                     tool_ids.insert(mcp_id.clone());
                 }
@@ -813,7 +828,9 @@ impl CreateAgentState {
 
     pub fn fork_from(agent: &tenex_core::models::AgentDefinition) -> Self {
         // Increment version
-        let version = agent.version.as_ref()
+        let version = agent
+            .version
+            .as_ref()
             .and_then(|v| v.parse::<u32>().ok())
             .map(|v| (v + 1).to_string())
             .unwrap_or_else(|| "2".to_string());
@@ -872,7 +889,12 @@ impl CreateAgentState {
 pub const DEFAULT_LIST_VISIBLE_HEIGHT: usize = 10;
 
 impl ProjectSettingsState {
-    pub fn new(project_a_tag: String, project_name: String, agent_ids: Vec<String>, mcp_tool_ids: Vec<String>) -> Self {
+    pub fn new(
+        project_a_tag: String,
+        project_name: String,
+        agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Self {
         Self {
             project_a_tag,
             project_name,
@@ -944,7 +966,9 @@ impl ProjectSettingsState {
     pub fn remove_mcp_tool(&mut self, index: usize) {
         if index < self.pending_mcp_tool_ids.len() {
             self.pending_mcp_tool_ids.remove(index);
-            if self.tools_selector_index >= self.pending_mcp_tool_ids.len() && self.tools_selector_index > 0 {
+            if self.tools_selector_index >= self.pending_mcp_tool_ids.len()
+                && self.tools_selector_index > 0
+            {
                 self.tools_selector_index -= 1;
             }
         }
@@ -995,7 +1019,11 @@ impl ConversationAction {
             ConversationAction::Open => "Open Conversation",
             ConversationAction::ExportJsonl => "Export as JSONL",
             ConversationAction::ToggleArchive => {
-                if is_archived { "Unarchive" } else { "Archive" }
+                if is_archived {
+                    "Unarchive"
+                } else {
+                    "Archive"
+                }
             }
         }
     }
@@ -1020,7 +1048,12 @@ pub struct ConversationActionsState {
 }
 
 impl ConversationActionsState {
-    pub fn new(thread_id: String, thread_title: String, project_a_tag: String, is_archived: bool) -> Self {
+    pub fn new(
+        thread_id: String,
+        thread_title: String,
+        project_a_tag: String,
+        is_archived: bool,
+    ) -> Self {
         Self {
             thread_id,
             thread_title,
@@ -1129,7 +1162,11 @@ impl ProjectAction {
             ProjectAction::Boot => "Boot Project",
             ProjectAction::Settings => "Settings",
             ProjectAction::ToggleArchive => {
-                if is_archived { "Unarchive" } else { "Archive" }
+                if is_archived {
+                    "Unarchive"
+                } else {
+                    "Archive"
+                }
             }
         }
     }
@@ -1156,7 +1193,13 @@ pub struct ProjectActionsState {
 }
 
 impl ProjectActionsState {
-    pub fn new(project_a_tag: String, project_name: String, project_pubkey: String, is_online: bool, is_archived: bool) -> Self {
+    pub fn new(
+        project_a_tag: String,
+        project_name: String,
+        project_pubkey: String,
+        is_online: bool,
+        is_archived: bool,
+    ) -> Self {
         Self {
             project_a_tag,
             project_name,
@@ -1336,7 +1379,10 @@ impl AgentSettingsState {
             if let Some(prefix_match) = tool.find('_') {
                 let prefix = &tool[..prefix_match];
                 // Only group if there are at least 2 tools with this prefix
-                let similar_count = tools.iter().filter(|t| t.starts_with(&format!("{}_", prefix))).count();
+                let similar_count = tools
+                    .iter()
+                    .filter(|t| t.starts_with(&format!("{}_", prefix)))
+                    .count();
                 if similar_count >= 2 {
                     let group_key = prefix.to_uppercase();
                     groups.entry(group_key).or_default().push(tool.clone());
@@ -1377,7 +1423,9 @@ impl AgentSettingsState {
     }
 
     pub fn selected_model(&self) -> Option<&str> {
-        self.available_models.get(self.model_index).map(|s| s.as_str())
+        self.available_models
+            .get(self.model_index)
+            .map(|s| s.as_str())
     }
 
     pub fn selected_tools_vec(&self) -> Vec<String> {
@@ -1436,7 +1484,8 @@ impl AgentSettingsState {
                         }
                     } else {
                         // Multi-tool group - toggle expansion
-                        self.tool_groups[group_idx].expanded = !self.tool_groups[group_idx].expanded;
+                        self.tool_groups[group_idx].expanded =
+                            !self.tool_groups[group_idx].expanded;
                     }
                 }
                 Some(tool_idx) => {
@@ -1564,7 +1613,9 @@ impl HistorySearchEntry {
         match &self.kind {
             HistorySearchEntryKind::Message { project_a_tag, .. } => project_a_tag.as_deref(),
             HistorySearchEntryKind::Draft { project_a_tag, .. } => project_a_tag.as_deref(),
-            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => Some(project_a_tag.as_str()),
+            HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => {
+                Some(project_a_tag.as_str())
+            }
         }
     }
 
@@ -1584,7 +1635,9 @@ impl HistorySearchEntry {
     pub fn navigation_id(&self) -> &str {
         match &self.kind {
             HistorySearchEntryKind::Message { event_id, .. } => event_id,
-            HistorySearchEntryKind::Draft { conversation_id, .. } => conversation_id,
+            HistorySearchEntryKind::Draft {
+                conversation_id, ..
+            } => conversation_id,
             HistorySearchEntryKind::NamedDraft { project_a_tag, .. } => project_a_tag,
         }
     }
@@ -1719,10 +1772,10 @@ impl DraftNavigatorState {
 /// Mode for the workspace manager modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkspaceMode {
-    List,    // Browse/switch workspaces
-    Create,  // Creating new workspace
-    Edit,    // Editing existing workspace
-    Delete,  // Confirming deletion
+    List,   // Browse/switch workspaces
+    Create, // Creating new workspace
+    Edit,   // Editing existing workspace
+    Delete, // Confirming deletion
 }
 
 /// Focus within workspace create/edit mode
@@ -2037,7 +2090,7 @@ impl DebugStatsState {
     pub fn switch_tab(&mut self, tab: DebugStatsTab) {
         self.active_tab = tab;
         self.scroll_offset = 0; // Reset scroll when switching tabs
-        // Auto-focus input when switching to E-Tag Query tab
+                                // Auto-focus input when switching to E-Tag Query tab
         self.e_tag_input_focused = tab == DebugStatsTab::ETagQuery;
         // Focus sidebar when switching to subscriptions tab
         if tab == DebugStatsTab::Subscriptions {
@@ -2108,10 +2161,8 @@ pub enum ModalState {
     ProjectSettings(ProjectSettingsState),
     /// Create new project wizard
     CreateProject(CreateProjectState),
-    /// Nudge selector for adding nudges to messages
-    NudgeSelector(NudgeSelectorState),
-    /// Skill selector for adding skills to messages
-    SkillSelector(SkillSelectorState),
+    /// Unified nudge/skill selector for adding context to messages
+    NudgeSkillSelector(NudgeSkillSelectorState),
     /// Conversation action menu in Home view - shows actions for selected conversation (via Ctrl+T)
     ConversationActions(ConversationActionsState),
     /// Chat action menu in Chat view - shows actions for current conversation (via Ctrl+T)

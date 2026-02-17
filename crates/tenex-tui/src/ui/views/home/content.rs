@@ -21,8 +21,8 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
     let recent = app.recent_threads();
 
     if recent.is_empty() {
-        let empty = Paragraph::new("No recent conversations")
-            .style(Style::default().fg(theme::TEXT_MUTED));
+        let empty =
+            Paragraph::new("No recent conversations").style(Style::default().fg(theme::TEXT_MUTED));
         f.render_widget(empty, area);
         return;
     }
@@ -32,7 +32,12 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
 
     // Build hierarchical thread list (with default collapsed state from preferences)
     let default_collapsed = app.threads_default_collapsed();
-    let hierarchy = build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships, default_collapsed);
+    let hierarchy = build_thread_hierarchy(
+        &recent,
+        &app.collapsed_threads,
+        &q_tag_relationships,
+        default_collapsed,
+    );
 
     // Helper to calculate card height
     // Full mode: title+recipient+project, summary+time, status+runtime (always 3 lines)
@@ -40,23 +45,35 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
     // Selected/multi-selected items add 2 lines for half-block borders (top + bottom)
     // and drop spacing line (borders provide visual separation)
     // next_is_selected: if true, this card doesn't need spacing (next card's top border provides it)
-    let calc_card_height = |item: &HierarchicalThread, is_selected: bool, is_multi_selected: bool, next_is_selected: bool| -> u16 {
+    let calc_card_height = |item: &HierarchicalThread,
+                            is_selected: bool,
+                            is_multi_selected: bool,
+                            next_is_selected: bool|
+     -> u16 {
         let is_compact = item.depth > 0;
         if is_compact {
             // Compact: 2 content lines + optional 2 border lines
-            return if is_selected || is_multi_selected { 4 } else { 2 };
+            return if is_selected || is_multi_selected {
+                4
+            } else {
+                2
+            };
         }
         // Full mode:
         // Line 1: title + recipient + project (always)
         // Line 2: summary + relative time (always)
         // Line 3: status + runtime (always, even if empty for consistent layout)
         let mut lines = 3; // All 3 lines always present for consistent layout
-        // Spacing line only when card is not selected/multi-selected and next card is not selected
+                           // Spacing line only when card is not selected/multi-selected and next card is not selected
         if !is_selected && !is_multi_selected && !next_is_selected {
             lines += 1;
         }
         // Selected/multi-selected cards get 2 extra lines for half-block borders
-        if is_selected || is_multi_selected { lines + 2 } else { lines }
+        if is_selected || is_multi_selected {
+            lines + 2
+        } else {
+            lines
+        }
     };
 
     // Calculate scroll offset to keep selected item visible
@@ -70,7 +87,12 @@ fn render_conversations_cards(f: &mut Frame, app: &App, area: Rect, is_focused: 
         let item_is_selected = is_focused && i == selected_idx;
         let item_is_multi_selected = app.is_thread_multi_selected(&item.thread.id);
         let next_is_selected = is_focused && i + 1 == selected_idx;
-        let h = calc_card_height(item, item_is_selected, item_is_multi_selected, next_is_selected);
+        let h = calc_card_height(
+            item,
+            item_is_selected,
+            item_is_multi_selected,
+            next_is_selected,
+        );
         if i < selected_idx {
             height_before_selected += h;
         } else if i == selected_idx {
@@ -141,7 +163,12 @@ pub fn get_hierarchical_threads(app: &App) -> Vec<HierarchicalThread> {
     let recent = app.recent_threads();
     let q_tag_relationships = app.data_store.borrow().get_q_tag_relationships();
     let default_collapsed = app.threads_default_collapsed();
-    build_thread_hierarchy(&recent, &app.collapsed_threads, &q_tag_relationships, default_collapsed)
+    build_thread_hierarchy(
+        &recent,
+        &app.collapsed_threads,
+        &q_tag_relationships,
+        default_collapsed,
+    )
 }
 
 /// Render card content in table-like format:
@@ -180,7 +207,9 @@ fn render_card_content(
         let project_name = store.get_project_name(a_tag);
         let is_busy = store.operations.is_event_busy(&thread.id);
         // Get first recipient only (avoid allocating full Vec when we only need first)
-        let first_recipient: Option<(String, String)> = thread.p_tags.first()
+        let first_recipient: Option<(String, String)> = thread
+            .p_tags
+            .first()
             .map(|pk| (store.get_profile_name(pk), pk.clone()));
         // Get hierarchical runtime (own + all children)
         let runtime = store.get_hierarchical_runtime(&thread.id);
@@ -228,7 +257,9 @@ fn render_card_content(
 
     // Title style uses project color for determinism
     let title_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::project_color(a_tag))
     };
@@ -256,10 +287,13 @@ fn render_card_content(
     // Calculate column widths for table layout (used by both compact and full mode)
     let total_width = area.width as usize;
     let fixed_cols_width = right_col_width + 2; // +2 for spacing
-    let main_col_width = total_width.saturating_sub(fixed_cols_width + indent_len + collapse_col_width);
+    let main_col_width =
+        total_width.saturating_sub(fixed_cols_width + indent_len + collapse_col_width);
 
     // Status text with symbol (for line 3)
-    let status_text = thread.status_label.as_ref()
+    let status_text = thread
+        .status_label
+        .as_ref()
         .map(|s| format!("{} {}", status_label_to_symbol(s), s))
         .unwrap_or_default();
 
@@ -283,19 +317,18 @@ fn render_card_content(
         let recipient_pubkey = first_recipient.as_ref().map(|(_, pk)| pk.clone());
 
         let title_max = main_col_width.saturating_sub(
-            nested_suffix.width() +
-            spinner_suffix.width() +
-            recipient_suffix.width()
+            nested_suffix.width() + spinner_suffix.width() + recipient_suffix.width(),
         );
         let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
-        let title_display_len = title_truncated.width() +
-            spinner_suffix.width() +
-            nested_suffix.width() +
-            recipient_suffix.width();
+        let title_display_len = title_truncated.width()
+            + spinner_suffix.width()
+            + nested_suffix.width()
+            + recipient_suffix.width();
         let title_padding = main_col_width.saturating_sub(title_display_len);
 
         // Project (right column, right-aligned)
-        let project_truncated = truncate_with_ellipsis(&project_name, right_col_width.saturating_sub(2));
+        let project_truncated =
+            truncate_with_ellipsis(&project_name, right_col_width.saturating_sub(2));
         let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
         let project_len = project_display.width();
         let project_padding = right_col_width.saturating_sub(project_len);
@@ -306,37 +339,61 @@ fn render_card_content(
             line1.push(Span::styled(indent.clone(), Style::default()));
         }
         if !collapse_indicator.is_empty() {
-            line1.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                collapse_indicator,
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         if collapse_padding > 0 {
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
         if thread.is_scheduled {
-            line1.push(Span::styled(" ⏰ SCHED", Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                " ⏰ SCHED",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         if is_archived {
-            line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            line1.push(Span::styled(
+                " [archived]",
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
         }
         if has_draft {
-            line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
+            line1.push(Span::styled(
+                " ✎",
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
         }
         if !spinner_suffix.is_empty() {
-            line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
+            line1.push(Span::styled(
+                spinner_suffix,
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ));
         }
         if !nested_suffix.is_empty() {
-            line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                nested_suffix,
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         // Add recipient with deterministic color
         if !recipient_suffix.is_empty() {
-            let color = recipient_pubkey.as_ref()
+            let color = recipient_pubkey
+                .as_ref()
                 .map(|pk| theme::user_color(pk))
                 .unwrap_or(theme::TEXT_MUTED);
             line1.push(Span::styled(recipient_suffix, Style::default().fg(color)));
         }
         line1.push(Span::styled(" ".repeat(title_padding), Style::default()));
         line1.push(Span::styled(" ".repeat(project_padding), Style::default()));
-        line1.push(Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))));
+        line1.push(Span::styled(
+            project_display,
+            Style::default().fg(theme::project_color(a_tag)),
+        ));
         lines.push(Line::from(line1));
 
         // LINE 2: [empty main]                              [time]
@@ -348,10 +405,16 @@ fn render_card_content(
         if !indent.is_empty() {
             line2.push(Span::styled(indent.clone(), Style::default()));
         }
-        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+        line2.push(Span::styled(
+            " ".repeat(collapse_col_width),
+            Style::default(),
+        ));
         line2.push(Span::styled(" ".repeat(main_col_width), Style::default()));
         line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
-        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        line2.push(Span::styled(
+            time_str,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
         lines.push(Line::from(line2));
     } else {
         // FULL MODE: Table-like layout
@@ -378,19 +441,18 @@ fn render_card_content(
             String::new()
         };
         let title_max = main_col_width.saturating_sub(
-            nested_suffix.width() +
-            spinner_suffix.width() +
-            recipient_suffix.width()
+            nested_suffix.width() + spinner_suffix.width() + recipient_suffix.width(),
         );
         let title_truncated = truncate_with_ellipsis(&thread.title, title_max);
-        let title_display_len = title_truncated.width() +
-            spinner_suffix.width() +
-            nested_suffix.width() +
-            recipient_suffix.width();
+        let title_display_len = title_truncated.width()
+            + spinner_suffix.width()
+            + nested_suffix.width()
+            + recipient_suffix.width();
         let title_padding = main_col_width.saturating_sub(title_display_len);
 
         // Project for line 1 (right column, right-aligned)
-        let project_truncated = truncate_with_ellipsis(&project_name, right_col_width.saturating_sub(2));
+        let project_truncated =
+            truncate_with_ellipsis(&project_name, right_col_width.saturating_sub(2));
         let project_display = format!("{}{}", card::BULLET_GLYPH, project_truncated);
         let project_len = project_display.width();
         let project_padding = right_col_width.saturating_sub(project_len);
@@ -401,37 +463,61 @@ fn render_card_content(
             line1.push(Span::styled(indent.clone(), Style::default()));
         }
         if !collapse_indicator.is_empty() {
-            line1.push(Span::styled(collapse_indicator, Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                collapse_indicator,
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         if collapse_padding > 0 {
             line1.push(Span::styled(" ".repeat(collapse_padding), Style::default()));
         }
         line1.push(Span::styled(title_truncated, title_style));
         if thread.is_scheduled {
-            line1.push(Span::styled(" ⏰ SCHED", Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                " ⏰ SCHED",
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         if is_archived {
-            line1.push(Span::styled(" [archived]", Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::DIM)));
+            line1.push(Span::styled(
+                " [archived]",
+                Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
         }
         if has_draft {
-            line1.push(Span::styled(" ✎", Style::default().fg(theme::ACCENT_WARNING)));
+            line1.push(Span::styled(
+                " ✎",
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
         }
         if !spinner_suffix.is_empty() {
-            line1.push(Span::styled(spinner_suffix, Style::default().fg(theme::ACCENT_PRIMARY)));
+            line1.push(Span::styled(
+                spinner_suffix,
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            ));
         }
         if !nested_suffix.is_empty() {
-            line1.push(Span::styled(nested_suffix, Style::default().fg(theme::TEXT_MUTED)));
+            line1.push(Span::styled(
+                nested_suffix,
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
         }
         // Add recipient with deterministic color
         if !recipient_suffix.is_empty() {
-            let color = recipient_pubkey.as_ref()
+            let color = recipient_pubkey
+                .as_ref()
                 .map(|pk| theme::user_color(pk))
                 .unwrap_or(theme::TEXT_MUTED);
             line1.push(Span::styled(recipient_suffix, Style::default().fg(color)));
         }
         line1.push(Span::styled(" ".repeat(title_padding), Style::default()));
         line1.push(Span::styled(" ".repeat(project_padding), Style::default()));
-        line1.push(Span::styled(project_display, Style::default().fg(theme::project_color(a_tag))));
+        line1.push(Span::styled(
+            project_display,
+            Style::default().fg(theme::project_color(a_tag)),
+        ));
         lines.push(Line::from(line1));
 
         // LINE 2: [summary]                                    [relative-last-activity]
@@ -443,18 +529,27 @@ fn render_card_content(
         if !indent.is_empty() {
             line2.push(Span::styled(indent.clone(), Style::default()));
         }
-        line2.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+        line2.push(Span::styled(
+            " ".repeat(collapse_col_width),
+            Style::default(),
+        ));
         if let Some(ref summary) = thread.summary {
             let summary_truncated = truncate_with_ellipsis(summary, summary_max);
             let summary_len = summary_truncated.width();
             let summary_padding = main_col_width.saturating_sub(summary_len);
-            line2.push(Span::styled(summary_truncated, Style::default().fg(theme::TEXT_MUTED)));
+            line2.push(Span::styled(
+                summary_truncated,
+                Style::default().fg(theme::TEXT_MUTED),
+            ));
             line2.push(Span::styled(" ".repeat(summary_padding), Style::default()));
         } else {
             line2.push(Span::styled(" ".repeat(main_col_width), Style::default()));
         }
         line2.push(Span::styled(" ".repeat(time_padding), Style::default()));
-        line2.push(Span::styled(time_str, Style::default().fg(theme::TEXT_MUTED)));
+        line2.push(Span::styled(
+            time_str,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
         lines.push(Line::from(line2));
 
         // LINE 3: [current status]                             [cumulative llm runtime]
@@ -469,21 +564,30 @@ fn render_card_content(
         if !indent.is_empty() {
             line3.push(Span::styled(indent.clone(), Style::default()));
         }
-        line3.push(Span::styled(" ".repeat(collapse_col_width), Style::default()));
+        line3.push(Span::styled(
+            " ".repeat(collapse_col_width),
+            Style::default(),
+        ));
 
         if !status_text.is_empty() {
             let status_max = main_col_width;
             let status_truncated = truncate_with_ellipsis(&status_text, status_max);
             let status_len = status_truncated.width();
             let status_padding = main_col_width.saturating_sub(status_len);
-            line3.push(Span::styled(status_truncated, Style::default().fg(theme::ACCENT_WARNING)));
+            line3.push(Span::styled(
+                status_truncated,
+                Style::default().fg(theme::ACCENT_WARNING),
+            ));
             line3.push(Span::styled(" ".repeat(status_padding), Style::default()));
         } else {
             line3.push(Span::styled(" ".repeat(main_col_width), Style::default()));
         }
 
         line3.push(Span::styled(" ".repeat(runtime_padding), Style::default()));
-        line3.push(Span::styled(runtime_display, Style::default().fg(theme::TEXT_MUTED)));
+        line3.push(Span::styled(
+            runtime_display,
+            Style::default().fg(theme::TEXT_MUTED),
+        ));
         lines.push(Line::from(line3));
 
         // Spacing line (only when neither this nor next card is selected)
@@ -495,8 +599,12 @@ fn render_card_content(
     if is_selected || is_multi_selected {
         // For selected/multi-selected cards, render half-block borders separately from content
         // This creates the visual effect of half-line padding
-        let half_block_top = card::OUTER_HALF_BLOCK_BORDER.horizontal_bottom.repeat(area.width as usize); // ▄
-        let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER.horizontal_top.repeat(area.width as usize); // ▀
+        let half_block_top = card::OUTER_HALF_BLOCK_BORDER
+            .horizontal_bottom
+            .repeat(area.width as usize); // ▄
+        let half_block_bottom = card::OUTER_HALF_BLOCK_BORDER
+            .horizontal_top
+            .repeat(area.width as usize); // ▀
 
         // Top half-block line (fg=selection color, no bg - creates "growing down" effect)
         let top_area = Rect::new(area.x, area.y, area.width, 1);
@@ -507,7 +615,12 @@ fn render_card_content(
         f.render_widget(top_line, top_area);
 
         // Content area (with selection background)
-        let content_area = Rect::new(area.x, area.y + 1, area.width, area.height.saturating_sub(2));
+        let content_area = Rect::new(
+            area.x,
+            area.y + 1,
+            area.width,
+            area.height.saturating_sub(2),
+        );
         let content = Paragraph::new(lines).style(Style::default().bg(theme::BG_SELECTED));
         f.render_widget(content, content_area);
 
@@ -536,8 +649,7 @@ pub(super) fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(theme::TEXT_MUTED),
             )),
         ];
-        let empty = Paragraph::new(empty_lines)
-            .alignment(ratatui::layout::Alignment::Center);
+        let empty = Paragraph::new(empty_lines).alignment(ratatui::layout::Alignment::Center);
         f.render_widget(empty, area);
         return;
     }
@@ -548,7 +660,9 @@ pub(super) fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
         .enumerate()
         .map(|(i, item)| {
             let is_selected = i == selected_idx;
-            let is_multi_selected = item.thread_id.as_ref()
+            let is_multi_selected = item
+                .thread_id
+                .as_ref()
                 .map(|id| app.is_thread_multi_selected(id))
                 .unwrap_or(false);
             render_inbox_card(app, item, is_selected, is_multi_selected)
@@ -563,16 +677,27 @@ pub(super) fn render_inbox_cards(f: &mut Frame, app: &App, area: Rect) {
     f.render_stateful_widget(list, area, &mut state);
 }
 
-fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_selected: bool) -> ListItem<'static> {
+fn render_inbox_card(
+    app: &App,
+    item: &InboxItem,
+    is_selected: bool,
+    is_multi_selected: bool,
+) -> ListItem<'static> {
     // Single borrow to extract all needed data
     let (project_name, author_name) = {
         let store = app.data_store.borrow();
-        (store.get_project_name(&item.project_a_tag), store.get_profile_name(&item.author_pubkey))
+        (
+            store.get_project_name(&item.project_a_tag),
+            store.get_profile_name(&item.author_pubkey),
+        )
     };
     let time_str = format_relative_time(item.created_at);
 
     // Check if this is a "Waiting For You" item (Ask or Mention type = user was p-tagged)
-    let is_waiting_for_user = matches!(item.event_type, InboxEventType::Ask | InboxEventType::Mention) && !item.is_read;
+    let is_waiting_for_user = matches!(
+        item.event_type,
+        InboxEventType::Ask | InboxEventType::Mention
+    ) && !item.is_read;
 
     let type_str = match item.event_type {
         InboxEventType::Ask => "? Asked You",
@@ -580,12 +705,18 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
     };
 
     let title_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else if is_waiting_for_user {
         // Waiting for user items get yellow/warning style
-        Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_WARNING)
+            .add_modifier(Modifier::BOLD)
     } else if !item.is_read {
-        Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::TEXT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_PRIMARY)
     };
@@ -617,7 +748,10 @@ fn render_inbox_card(app: &App, item: &InboxItem, is_selected: bool, is_multi_se
     let line2_spans = vec![
         Span::styled(type_str, type_style),
         Span::styled(" in ", Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(project_name, Style::default().fg(theme::project_color(&item.project_a_tag))),
+        Span::styled(
+            project_name,
+            Style::default().fg(theme::project_color(&item.project_a_tag)),
+        ),
         Span::styled(" by ", Style::default().fg(theme::TEXT_MUTED)),
         Span::styled(author_name, Style::default().fg(theme::ACCENT_SPECIAL)),
     ];
@@ -717,12 +851,18 @@ fn render_report_card(
     let reading_time = format!("{}m", report.reading_time_mins);
 
     let title_style = if is_selected {
-        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(theme::ACCENT_PRIMARY)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(theme::TEXT_PRIMARY)
     };
 
-    let bullet = if is_selected { card::BULLET } else { card::SPACER };
+    let bullet = if is_selected {
+        card::BULLET
+    } else {
+        card::SPACER
+    };
 
     // Line 1: Title + project + reading time + timestamp
     let title_max = area.width as usize - 30;
@@ -732,20 +872,37 @@ fn render_report_card(
         Span::styled(bullet, Style::default().fg(theme::ACCENT_PRIMARY)),
         Span::styled(title, title_style),
         Span::styled("  ", Style::default()),
-        Span::styled(&project_name, Style::default().fg(theme::project_color(&report.project_a_tag))),
-        Span::styled(format!("  {} · {}", reading_time, time_str), Style::default().fg(theme::TEXT_MUTED)),
+        Span::styled(
+            &project_name,
+            Style::default().fg(theme::project_color(&report.project_a_tag)),
+        ),
+        Span::styled(
+            format!("  {} · {}", reading_time, time_str),
+            Style::default().fg(theme::TEXT_MUTED),
+        ),
     ]);
 
     // Line 2: Summary + hashtags + author
     let summary_max = area.width as usize - 40;
     let summary = crate::ui::format::truncate_with_ellipsis(&report.summary, summary_max);
-    let hashtags: String = report.hashtags.iter().take(3).map(|h| format!("#{} ", h)).collect();
+    let hashtags: String = report
+        .hashtags
+        .iter()
+        .take(3)
+        .map(|h| format!("#{} ", h))
+        .collect();
 
     let line2 = Line::from(vec![
         Span::styled("  ", Style::default()),
         Span::styled(summary, Style::default().fg(theme::TEXT_MUTED)),
-        Span::styled(format!("  {}", hashtags.trim()), Style::default().fg(theme::ACCENT_WARNING)),
-        Span::styled(format!("  @{}", author_name), Style::default().fg(theme::ACCENT_SPECIAL)),
+        Span::styled(
+            format!("  {}", hashtags.trim()),
+            Style::default().fg(theme::ACCENT_WARNING),
+        ),
+        Span::styled(
+            format!("  @{}", author_name),
+            Style::default().fg(theme::ACCENT_SPECIAL),
+        ),
     ]);
 
     // Line 3: Spacing
@@ -777,8 +934,7 @@ pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(theme::TEXT_MUTED),
             )),
         ];
-        let empty = Paragraph::new(empty_lines)
-            .alignment(ratatui::layout::Alignment::Center);
+        let empty = Paragraph::new(empty_lines).alignment(ratatui::layout::Alignment::Center);
         f.render_widget(empty, area);
         return;
     }
@@ -793,7 +949,8 @@ pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
         let is_selected = is_focused && i == selected_idx;
 
         // Get agent names (comma-separated if multiple)
-        let agent_names: Vec<String> = op.agent_pubkeys
+        let agent_names: Vec<String> = op
+            .agent_pubkeys
             .iter()
             .map(|pk| data_store.get_profile_name(pk))
             .collect();
@@ -831,19 +988,25 @@ pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
 
         // Set text styles based on selection
         let agent_style = if is_selected {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
 
         let conv_style = if is_selected {
-            Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::TEXT_PRIMARY)
         };
 
         let project_style = if is_selected {
-            Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_SUCCESS)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(theme::ACCENT_SUCCESS)
         };
@@ -855,39 +1018,60 @@ pub(super) fn render_active_work(f: &mut Frame, app: &App, area: Rect) {
         };
 
         // Add selection indicator
-        let bullet = if is_selected { card::BULLET } else { card::SPACER };
+        let bullet = if is_selected {
+            card::BULLET
+        } else {
+            card::SPACER
+        };
         let agent_display = format!("{} {}", bullet, truncate_with_ellipsis(&agent_str, 18));
 
-        rows.push(Row::new(vec![
-            Cell::from(agent_display).style(agent_style),
-            Cell::from(truncate_with_ellipsis(&conv_title, 30)).style(conv_style),
-            Cell::from(truncate_with_ellipsis(&project_name, 20)).style(project_style),
-            Cell::from(duration).style(duration_style),
-        ]).style(row_style));
+        rows.push(
+            Row::new(vec![
+                Cell::from(agent_display).style(agent_style),
+                Cell::from(truncate_with_ellipsis(&conv_title, 30)).style(conv_style),
+                Cell::from(truncate_with_ellipsis(&project_name, 20)).style(project_style),
+                Cell::from(duration).style(duration_style),
+            ])
+            .style(row_style),
+        );
     }
 
     drop(data_store);
 
     // Create header
     let header = Row::new(vec![
-        Cell::from("Agent").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
-        Cell::from("Conversation").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
-        Cell::from("Project").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
-        Cell::from("Duration").style(Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::BOLD)),
+        Cell::from("Agent").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("Conversation").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("Project").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Cell::from("Duration").style(
+            Style::default()
+                .fg(theme::TEXT_MUTED)
+                .add_modifier(Modifier::BOLD),
+        ),
     ])
     .style(Style::default().bg(theme::BG_SECONDARY))
     .height(1);
 
     let widths = [
-        Constraint::Length(22),  // Agent
-        Constraint::Min(20),     // Conversation (flexible)
-        Constraint::Length(22),  // Project
-        Constraint::Length(12),  // Duration
+        Constraint::Length(22), // Agent
+        Constraint::Min(20),    // Conversation (flexible)
+        Constraint::Length(22), // Project
+        Constraint::Length(12), // Duration
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .column_spacing(2);
+    let table = Table::new(rows, widths).header(header).column_spacing(2);
 
     f.render_widget(table, area);
 }

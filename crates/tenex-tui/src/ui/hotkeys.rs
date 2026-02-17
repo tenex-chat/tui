@@ -37,30 +37,30 @@ pub enum HotkeyId {
     PageDown,
     GoToTop,
     GoToBottom,
-    Select,           // Enter
-    Back,             // Escape
+    Select, // Enter
+    Back,   // Escape
 
     // === Tab Management ===
     NextTab,
     PrevTab,
     CloseTab,
     TabModal,
-    NextHomeTab,      // Tab key in Home view
-    PrevHomeTab,      // Shift+Tab in Home view
+    NextHomeTab, // Tab key in Home view
+    PrevHomeTab, // Shift+Tab in Home view
 
     // === Home View - Recent Tab ===
     NewConversation,
     NewConversationWithPicker,
     OpenSelected,
     ArchiveToggle,
-    ShowHideArchived,      // Toggle visibility of all archived items
+    ShowHideArchived, // Toggle visibility of all archived items
     ExportJsonl,
     SwitchProject,
     TimeFilter,
     AgentBrowser,
     CreateProject,
-    SearchReports,         // '/' in Reports tab
-    ToggleHideScheduled,   // Shift+S to toggle scheduled events filter
+    SearchReports,       // '/' in Reports tab
+    ToggleHideScheduled, // Shift+S to toggle scheduled events filter
 
     // === Home View - Inbox Tab ===
     MarkAsRead,
@@ -71,8 +71,8 @@ pub enum HotkeyId {
     ProjectSettings,
     BootProject,
     StopAllAgents,
-    FocusSidebar,          // Right arrow to focus sidebar
-    UnfocusSidebar,        // Left arrow to unfocus sidebar
+    FocusSidebar,   // Right arrow to focus sidebar
+    UnfocusSidebar, // Left arrow to unfocus sidebar
 
     // === Chat View - Normal Mode ===
     MentionAgent,
@@ -90,8 +90,7 @@ pub enum HotkeyId {
     InsertNewline,
     CancelEdit,
     HistorySearch,
-    OpenNudgeSelector,
-    SkillSelector,
+    OpenNudgeSkillSelector,
 
     // === Agent Browser ===
     ViewAgent,
@@ -144,8 +143,7 @@ pub enum HotkeyContext {
     ProjectActionsModal,
     ViewRawEventModal,
     HotkeyHelpModal,
-    NudgeSelectorModal,
-    SkillSelectorModal,
+    NudgeSkillSelectorModal,
     ReportViewerModal,
     AgentSettingsModal,
     ProjectSettingsModal,
@@ -180,14 +178,16 @@ impl HotkeyContext {
         home_panel_focus: &super::HomeTab,
         sidebar_focused: bool,
     ) -> Self {
-        use super::{View, InputMode, ModalState, HomeTab};
+        use super::{HomeTab, InputMode, ModalState, View};
 
         // Modal contexts take priority
         match modal_state {
             ModalState::CommandPalette(_) => return HotkeyContext::CommandPaletteModal,
             ModalState::AgentSelector { .. } => return HotkeyContext::AgentSelectorModal,
             ModalState::ProjectsModal { .. } => return HotkeyContext::ProjectSelectorModal,
-            ModalState::ComposerProjectSelector { .. } => return HotkeyContext::ProjectSelectorModal,
+            ModalState::ComposerProjectSelector { .. } => {
+                return HotkeyContext::ProjectSelectorModal
+            }
             ModalState::AskModal(_) => return HotkeyContext::AskModal,
             ModalState::AttachmentEditor { .. } => return HotkeyContext::AttachmentModal,
             ModalState::ConversationActions(_) => return HotkeyContext::ConversationActionsModal,
@@ -195,8 +195,7 @@ impl HotkeyContext {
             ModalState::ProjectActions(_) => return HotkeyContext::ProjectActionsModal,
             ModalState::ViewRawEvent { .. } => return HotkeyContext::ViewRawEventModal,
             ModalState::HotkeyHelp => return HotkeyContext::HotkeyHelpModal,
-            ModalState::NudgeSelector(_) => return HotkeyContext::NudgeSelectorModal,
-            ModalState::SkillSelector(_) => return HotkeyContext::SkillSelectorModal,
+            ModalState::NudgeSkillSelector(_) => return HotkeyContext::NudgeSkillSelectorModal,
             ModalState::ReportViewer(_) => return HotkeyContext::ReportViewerModal,
             ModalState::AgentSettings(_) => return HotkeyContext::AgentSettingsModal,
             ModalState::ProjectSettings(_) => return HotkeyContext::ProjectSettingsModal,
@@ -232,12 +231,10 @@ impl HotkeyContext {
                     }
                 }
             }
-            View::Chat => {
-                match input_mode {
-                    InputMode::Editing => HotkeyContext::ChatEditing,
-                    InputMode::Normal => HotkeyContext::ChatNormal,
-                }
-            }
+            View::Chat => match input_mode {
+                InputMode::Editing => HotkeyContext::ChatEditing,
+                InputMode::Normal => HotkeyContext::ChatNormal,
+            },
             View::AgentBrowser => HotkeyContext::AgentBrowserList,
             View::LessonViewer => HotkeyContext::Global, // Fallback for now
         }
@@ -431,7 +428,8 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Command Palette",
         "Global",
         &[HotkeyContext::Global],
-    ).with_priority(100), // High priority - always available
+    )
+    .with_priority(100), // High priority - always available
     HotkeyBinding::new(
         HotkeyId::GoToHome,
         KeyCode::Char('1'),
@@ -452,15 +450,16 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Jump to Message",
         "Global",
         &[HotkeyContext::Global],
-    ).with_priority(90), // High priority - works almost everywhere
+    )
+    .with_priority(90), // High priority - works almost everywhere
     HotkeyBinding::ctrl(
         HotkeyId::WorkspaceManager,
         KeyCode::Char('p'),
         "Workspaces",
         "Global",
         &[HotkeyContext::Global],
-    ).with_priority(95), // High priority - opens workspace manager
-
+    )
+    .with_priority(95), // High priority - opens workspace manager
     // === Navigation (Universal) ===
     HotkeyBinding::new(
         HotkeyId::NavigateUp,
@@ -521,7 +520,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Navigation",
         &[HotkeyContext::Global],
     ),
-
     // === Tab Management ===
     // Tab navigation is done via Ctrl+T + Left/Right (handled in command palette)
     // These are documented here but not used for direct key resolution
@@ -532,21 +530,28 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Tabs",
         &[HotkeyContext::ChatNormal],
     ),
-
     // === Home View - Recent Tab ===
     HotkeyBinding::new(
         HotkeyId::NewConversation,
         KeyCode::Char('n'),
         "New Conversation",
         "Conversation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeSidebar, HotkeyContext::ChatNormal],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeSidebar,
+            HotkeyContext::ChatNormal,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::OpenSelected,
         KeyCode::Char('o'),
         "Open Selected",
         "Conversation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeReports,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::ArchiveToggle,
@@ -567,7 +572,11 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('p'),
         "Switch Project",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeReports,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::TimeFilter,
@@ -611,21 +620,32 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Filter",
         &[HotkeyContext::Global],
     ),
-
     // === Home View Tab Navigation ===
     HotkeyBinding::new(
         HotkeyId::NextHomeTab,
         KeyCode::Tab,
         "Next Tab",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeReports,
+            HotkeyContext::HomeActiveWork,
+            HotkeyContext::HomeStats,
+        ],
     ),
     HotkeyBinding::shift(
         HotkeyId::PrevHomeTab,
         KeyCode::BackTab,
         "Previous Tab",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork, HotkeyContext::HomeStats],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeReports,
+            HotkeyContext::HomeActiveWork,
+            HotkeyContext::HomeStats,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::SearchReports,
@@ -639,14 +659,23 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         KeyCode::Char('S'),
         "Toggle Scheduled Events",
         "Filter",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeActiveWork],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeActiveWork,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::FocusSidebar,
         KeyCode::Right,
         "Focus Sidebar",
         "Navigation",
-        &[HotkeyContext::HomeConversations, HotkeyContext::HomeInbox, HotkeyContext::HomeReports, HotkeyContext::HomeActiveWork],
+        &[
+            HotkeyContext::HomeConversations,
+            HotkeyContext::HomeInbox,
+            HotkeyContext::HomeReports,
+            HotkeyContext::HomeActiveWork,
+        ],
     ),
     HotkeyBinding::new(
         HotkeyId::UnfocusSidebar,
@@ -655,7 +684,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Navigation",
         &[HotkeyContext::HomeSidebar],
     ),
-
     // === Home View - Inbox Tab ===
     HotkeyBinding::shift(
         HotkeyId::MarkAsRead,
@@ -671,7 +699,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Inbox",
         &[HotkeyContext::HomeInbox],
     ),
-
     // === Home View - Sidebar ===
     HotkeyBinding::new(
         HotkeyId::ToggleProjectVisibility,
@@ -701,7 +728,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Project",
         &[HotkeyContext::HomeSidebar],
     ),
-
     // === Chat View - Normal Mode ===
     HotkeyBinding::new(
         HotkeyId::MentionAgent,
@@ -759,7 +785,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Search",
         &[HotkeyContext::ChatNormal],
     ),
-
     // === Chat View - Edit Mode ===
     HotkeyBinding::ctrl(
         HotkeyId::SendMessage,
@@ -767,7 +792,8 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Send Message",
         "Input",
         &[HotkeyContext::ChatEditing],
-    ).with_priority(50),
+    )
+    .with_priority(50),
     HotkeyBinding::ctrl(
         HotkeyId::ExpandEditor,
         KeyCode::Char('e'),
@@ -788,7 +814,8 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Cancel Edit",
         "Input",
         &[HotkeyContext::ChatEditing],
-    ).with_priority(50),
+    )
+    .with_priority(50),
     HotkeyBinding::ctrl(
         HotkeyId::HistorySearch,
         KeyCode::Char('r'),
@@ -796,31 +823,30 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
-    // Nudge selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
+    // Unified nudges/skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
     // Note: Ctrl+_ is also handled in editor_handlers.rs for terminal compatibility
     // (some terminals report Ctrl+/ as Ctrl+_)
     HotkeyBinding::ctrl(
-        HotkeyId::OpenNudgeSelector,
+        HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('/'),
-        "Open Nudge Selector",
+        "Open Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::ctrl(
-        HotkeyId::OpenNudgeSelector,
+        HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('n'),
-        "Open Nudge Selector",
+        "Open Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::alt(
-        HotkeyId::SkillSelector,
+        HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('k'),
-        "Select Skills",
+        "Open Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
-
     // === Agent Browser ===
     HotkeyBinding::new(
         HotkeyId::ViewAgent,
@@ -850,7 +876,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Agent",
         &[HotkeyContext::AgentBrowserDetail],
     ),
-
     // === Report Viewer ===
     HotkeyBinding::new(
         HotkeyId::ToggleReportView,
@@ -866,7 +891,6 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Report",
         &[HotkeyContext::ReportViewerModal],
     ),
-
     // === Modal Actions ===
     HotkeyBinding::new(
         HotkeyId::ModalClose,
@@ -874,7 +898,8 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Close",
         "Modal",
         &[HotkeyContext::AnyModal],
-    ).with_priority(10),
+    )
+    .with_priority(10),
     HotkeyBinding::new(
         HotkeyId::ModalConfirm,
         KeyCode::Enter,
@@ -911,7 +936,12 @@ impl HotkeyResolver {
 
     /// Find the matching hotkey for a key event in the given context.
     /// Returns the first matching hotkey (respecting priority).
-    pub fn resolve(&self, key: KeyCode, modifiers: KeyModifiers, context: HotkeyContext) -> Option<HotkeyId> {
+    pub fn resolve(
+        &self,
+        key: KeyCode,
+        modifiers: KeyModifiers,
+        context: HotkeyContext,
+    ) -> Option<HotkeyId> {
         for binding in &self.bindings {
             if binding.matches(key, modifiers) && binding.is_active_in(context) {
                 return Some(binding.id);
@@ -930,14 +960,14 @@ impl HotkeyResolver {
     }
 
     /// Get all hotkeys grouped by section for help display.
-    pub fn hotkeys_by_section(&self, context: HotkeyContext) -> HashMap<&'static str, Vec<&'static HotkeyBinding>> {
+    pub fn hotkeys_by_section(
+        &self,
+        context: HotkeyContext,
+    ) -> HashMap<&'static str, Vec<&'static HotkeyBinding>> {
         let mut sections: HashMap<&'static str, Vec<&'static HotkeyBinding>> = HashMap::new();
 
         for binding in self.hotkeys_for_context(context) {
-            sections
-                .entry(binding.section)
-                .or_default()
-                .push(binding);
+            sections.entry(binding.section).or_default().push(binding);
         }
 
         sections
@@ -963,7 +993,10 @@ impl HotkeyResolver {
                     // Check for overlapping contexts
                     for ctx_a in a.contexts {
                         for ctx_b in b.contexts {
-                            if ctx_a == ctx_b || *ctx_a == HotkeyContext::Global || *ctx_b == HotkeyContext::Global {
+                            if ctx_a == ctx_b
+                                || *ctx_a == HotkeyContext::Global
+                                || *ctx_b == HotkeyContext::Global
+                            {
                                 conflicts.push((a.id, b.id));
                             }
                         }
@@ -985,7 +1018,11 @@ pub fn resolver() -> &'static HotkeyResolver {
 
 /// Resolve a key event to a HotkeyId given the current context.
 /// This is the main entry point for the hotkey system.
-pub fn resolve_hotkey(key: KeyCode, modifiers: KeyModifiers, context: HotkeyContext) -> Option<HotkeyId> {
+pub fn resolve_hotkey(
+    key: KeyCode,
+    modifiers: KeyModifiers,
+    context: HotkeyContext,
+) -> Option<HotkeyId> {
     resolver().resolve(key, modifiers, context)
 }
 

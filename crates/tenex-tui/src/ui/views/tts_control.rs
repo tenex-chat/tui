@@ -6,9 +6,9 @@
 //! - Navigate through queue items (j/k)
 //! - Open source conversations (Enter)
 
+use crate::ui::format::format_relative_time;
 use crate::ui::state::{TTSControlState, TTSQueueItem, TTSQueueItemStatus};
 use crate::ui::{card, theme, App};
-use crate::ui::format::format_relative_time;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     style::{Modifier, Style},
@@ -20,8 +20,7 @@ use ratatui::{
 /// Render the TTS control tab content
 pub fn render_tts_control(f: &mut Frame, app: &App, area: Rect) {
     // Get TTS state from the active tab
-    let tts_state = app.tabs.active_tab()
-        .and_then(|t| t.tts_state.as_ref());
+    let tts_state = app.tabs.active_tab().and_then(|t| t.tts_state.as_ref());
 
     let Some(state) = tts_state else {
         render_no_tts_state(f, area);
@@ -30,9 +29,9 @@ pub fn render_tts_control(f: &mut Frame, app: &App, area: Rect) {
 
     // Layout: Header | Queue List | Help Bar
     let chunks = Layout::vertical([
-        Constraint::Length(3),  // Header
-        Constraint::Min(0),     // Queue list
-        Constraint::Length(2),  // Help bar
+        Constraint::Length(3), // Header
+        Constraint::Min(0),    // Queue list
+        Constraint::Length(2), // Help bar
     ])
     .split(area);
 
@@ -49,28 +48,48 @@ fn render_no_tts_state(f: &mut Frame, area: Rect) {
             Style::default().fg(theme::TEXT_MUTED),
         )),
     ])
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+    );
     f.render_widget(message, area);
 }
 
 fn render_header(f: &mut Frame, _app: &App, state: &TTSControlState, area: Rect) {
     let playback_status = if state.is_paused {
-        Span::styled(" PAUSED ", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " PAUSED ",
+            Style::default()
+                .fg(theme::ACCENT_WARNING)
+                .add_modifier(Modifier::BOLD),
+        )
     } else if state.playing_index.is_some() {
-        Span::styled(" PLAYING ", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD))
+        Span::styled(
+            " PLAYING ",
+            Style::default()
+                .fg(theme::ACCENT_SUCCESS)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         Span::styled(" STOPPED ", Style::default().fg(theme::TEXT_MUTED))
     };
 
-    let queue_info = format!(
-        "{} items in queue",
-        state.queue.len()
-    );
+    let queue_info = format!("{} items in queue", state.queue.len());
 
-    let pending_count = state.queue.iter()
-        .filter(|i| matches!(i.status, TTSQueueItemStatus::Pending | TTSQueueItemStatus::Ready))
+    let pending_count = state
+        .queue
+        .iter()
+        .filter(|i| {
+            matches!(
+                i.status,
+                TTSQueueItemStatus::Pending | TTSQueueItemStatus::Ready
+            )
+        })
         .count();
-    let completed_count = state.queue.iter()
+    let completed_count = state
+        .queue
+        .iter()
         .filter(|i| i.status == TTSQueueItemStatus::Completed)
         .count();
 
@@ -78,7 +97,12 @@ fn render_header(f: &mut Frame, _app: &App, state: &TTSControlState, area: Rect)
 
     let header = Paragraph::new(vec![
         Line::from(vec![
-            Span::styled("  TTS Control  ", Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "  TTS Control  ",
+                Style::default()
+                    .fg(theme::TEXT_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
             playback_status,
         ]),
         Line::from(vec![
@@ -106,9 +130,11 @@ fn render_queue(f: &mut Frame, app: &App, state: &TTSControlState, area: Rect) {
                 Style::default().fg(theme::TEXT_MUTED),
             )),
         ])
-        .block(Block::default()
-            .borders(Borders::LEFT)
-            .border_style(Style::default().fg(theme::BORDER_INACTIVE)));
+        .block(
+            Block::default()
+                .borders(Borders::LEFT)
+                .border_style(Style::default().fg(theme::BORDER_INACTIVE)),
+        );
         f.render_widget(empty_msg, area);
         return;
     }
@@ -143,7 +169,9 @@ fn render_queue(f: &mut Frame, app: &App, state: &TTSControlState, area: Rect) {
 
         // Text style based on status
         let text_style = if is_playing {
-            Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_SUCCESS)
+                .add_modifier(Modifier::BOLD)
         } else if item.status == TTSQueueItemStatus::Completed {
             Style::default().fg(theme::TEXT_MUTED)
         } else if is_selected {
@@ -164,7 +192,11 @@ fn render_queue(f: &mut Frame, app: &App, state: &TTSControlState, area: Rect) {
         let time_str = format_relative_time(item.queued_at);
         let conv_info = if let Some(ref conv_id) = item.conversation_id {
             // Try to get conversation title
-            let short_id = if conv_id.len() > 8 { &conv_id[..8] } else { conv_id };
+            let short_id = if conv_id.len() > 8 {
+                &conv_id[..8]
+            } else {
+                conv_id
+            };
             format!("from conversation {}", short_id)
         } else {
             "no source".to_string()
@@ -202,10 +234,11 @@ fn render_queue(f: &mut Frame, app: &App, state: &TTSControlState, area: Rect) {
         .take(visible_height)
         .collect();
 
-    let queue_widget = Paragraph::new(visible_lines)
-        .block(Block::default()
+    let queue_widget = Paragraph::new(visible_lines).block(
+        Block::default()
             .borders(Borders::LEFT)
-            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)));
+            .border_style(Style::default().fg(theme::ACCENT_PRIMARY)),
+    );
 
     f.render_widget(queue_widget, inner_area);
 }
@@ -222,7 +255,6 @@ fn render_help_bar(f: &mut Frame, state: &TTSControlState, area: Rect) {
         pause_hint
     );
 
-    let help = Paragraph::new(hints)
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let help = Paragraph::new(hints).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(help, area);
 }

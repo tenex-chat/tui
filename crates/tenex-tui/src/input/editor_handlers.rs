@@ -60,7 +60,9 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
             }
         }
         // Up = cycle through message history (when input is empty)
-        KeyCode::Up if app.chat_editor().text.is_empty() && !app.chat_editor().has_attachments() => {
+        KeyCode::Up
+            if app.chat_editor().text.is_empty() && !app.chat_editor().has_attachments() =>
+        {
             app.history_prev();
         }
         // Down = cycle forward through message history (when browsing)
@@ -71,7 +73,9 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up
             if app.chat_editor().has_attachments()
                 && app.chat_editor().focused_attachment.is_none()
-                && app.chat_editor().is_on_first_visual_line(app.chat_input_wrap_width) =>
+                && app
+                    .chat_editor()
+                    .is_on_first_visual_line(app.chat_input_wrap_width) =>
         {
             app.chat_editor_mut().focus_attachments();
         }
@@ -96,18 +100,18 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
                 }
             }
         }
-        // Ctrl+N or Ctrl+/ = open nudge selector
+        // Ctrl+N or Ctrl+/ = open unified nudge/skill selector
         // Note: Ctrl+_ is included for terminal compatibility (some terminals send
         // ASCII 0x1F for Ctrl+/, which crossterm reports as Ctrl+_)
         // These bindings are handled directly here rather than through the hotkey
         // registry because they only apply during text editing and need to be
         // processed before regular character input.
         KeyCode::Char('n') | KeyCode::Char('/') | KeyCode::Char('_') if has_ctrl => {
-            app.open_nudge_selector();
+            app.open_nudge_skill_selector();
         }
-        // Alt+K = open skill selector (K for sKills; Alt+S conflicts with global audio stop)
+        // Alt+K = open unified nudge/skill selector (Alt+S conflicts with global audio stop)
         KeyCode::Char('k') if has_alt => {
-            app.open_skill_selector();
+            app.open_nudge_skill_selector();
         }
         // Ctrl+R = open history search
         KeyCode::Char('r') if has_ctrl => {
@@ -118,14 +122,12 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
         // Ctrl+A = move to beginning of visual line
         KeyCode::Char('a') if has_ctrl => {
             let wrap_width = app.chat_input_wrap_width;
-            app.chat_editor_mut()
-                .move_to_visual_line_start(wrap_width);
+            app.chat_editor_mut().move_to_visual_line_start(wrap_width);
         }
         // Ctrl+E = move to end of visual line
         KeyCode::Char('e') if has_ctrl => {
             let wrap_width = app.chat_input_wrap_width;
-            app.chat_editor_mut()
-                .move_to_visual_line_end(wrap_width);
+            app.chat_editor_mut().move_to_visual_line_end(wrap_width);
         }
         // Ctrl+K = kill to end of line
         KeyCode::Char('k') if has_ctrl => {
@@ -352,7 +354,8 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                                 .borrow()
                                 .get_project_status(&project.a_tag())
                                 .map(|status| {
-                                    let tools = status.all_tools().iter().map(|s| s.to_string()).collect();
+                                    let tools =
+                                        status.all_tools().iter().map(|s| s.to_string()).collect();
                                     let models = status.all_models.clone();
                                     (tools, models)
                                 })
@@ -381,11 +384,11 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
                 }
                 InputContextFocus::Nudge => {
                     app.input_context_focus = None;
-                    app.open_nudge_selector();
+                    app.open_nudge_skill_selector();
                 }
                 InputContextFocus::Skill => {
                     app.input_context_focus = None;
-                    app.open_skill_selector();
+                    app.open_nudge_skill_selector();
                 }
             }
         }
@@ -482,14 +485,17 @@ fn handle_send_message(app: &mut App) {
                 // CRITICAL FIX: Get draft_id from the ACTIVE tab, not just any draft tab
                 // for this project. This fixes the bug where sending from tab 2 would
                 // incorrectly convert tab 1 when multiple draft tabs exist.
-                let draft_id = app.tabs.active_tab()
-                    .and_then(|tab| tab.draft_id.clone());
+                let draft_id = app.tabs.active_tab().and_then(|tab| tab.draft_id.clone());
 
                 // Use the draft_id as the conversation_id for the snapshot
-                let conversation_id = draft_id.clone().unwrap_or_else(|| format!("new-thread-{}", project_a_tag));
+                let conversation_id = draft_id
+                    .clone()
+                    .unwrap_or_else(|| format!("new-thread-{}", project_a_tag));
 
                 // BULLETPROOF: Create a publish snapshot BEFORE sending
-                let publish_id = match app.create_publish_snapshot(&conversation_id, content.clone()) {
+                let publish_id = match app
+                    .create_publish_snapshot(&conversation_id, content.clone())
+                {
                     Ok(id) => id,
                     Err(e) => {
                         app.set_warning_status(&format!("Failed to save publish snapshot: {}", e));
@@ -498,8 +504,15 @@ fn handle_send_message(app: &mut App) {
                 };
 
                 // Get reference_conversation_id and fork_message_id from current tab
-                let (reference_conversation_id, fork_message_id) = app.tabs.active_tab()
-                    .map(|tab| (tab.reference_conversation_id.clone(), tab.fork_message_id.clone()))
+                let (reference_conversation_id, fork_message_id) = app
+                    .tabs
+                    .active_tab()
+                    .map(|tab| {
+                        (
+                            tab.reference_conversation_id.clone(),
+                            tab.fork_message_id.clone(),
+                        )
+                    })
                     .unwrap_or((None, None));
 
                 // Create response channel for publish confirmation

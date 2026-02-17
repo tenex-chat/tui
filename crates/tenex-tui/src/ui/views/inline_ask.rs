@@ -1,6 +1,6 @@
 use crate::models::AskQuestion;
-use crate::ui::modal::AskModalState;
 use crate::ui::card;
+use crate::ui::modal::AskModalState;
 use crate::ui::theme;
 use ratatui::{
     layout::{Alignment, Constraint, Layout, Rect},
@@ -47,7 +47,10 @@ pub fn render_inline_ask_lines(
             };
 
             let style = if is_current {
-                Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(bg)
             } else if is_answered {
                 Style::default().fg(theme::ACCENT_SUCCESS).bg(bg)
             } else {
@@ -58,7 +61,10 @@ pub fn render_inline_ask_lines(
             tab_len += title.len();
 
             if i < input_state.questions.len() - 1 {
-                tab_spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                tab_spans.push(Span::styled(
+                    " │ ",
+                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                ));
                 tab_len += 3;
             }
         }
@@ -77,7 +83,13 @@ pub fn render_inline_ask_lines(
         let mut q_spans: Vec<Span<'static>> = vec![
             Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
             Span::styled(" ", Style::default().bg(bg)),
-            Span::styled(question_text.clone(), Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)),
+            Span::styled(
+                question_text.clone(),
+                Style::default()
+                    .fg(theme::TEXT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
+                    .bg(bg),
+            ),
         ];
         let q_len = 2 + question_text.len();
         pad_to_width(&mut q_spans, q_len);
@@ -99,9 +111,16 @@ pub fn render_inline_ask_lines(
                 // Render options
                 for (i, suggestion) in suggestions.iter().enumerate() {
                     let is_selected = i == input_state.selected_option_index;
-                    let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+                    let marker = if is_selected {
+                        card::COLLAPSE_CLOSED
+                    } else {
+                        card::SPACER
+                    };
                     let style = if is_selected {
-                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)
+                        Style::default()
+                            .fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(bg)
                     } else {
                         Style::default().fg(theme::TEXT_PRIMARY).bg(bg)
                     };
@@ -120,7 +139,11 @@ pub fn render_inline_ask_lines(
                 // Custom input option at the end - show inline input when selected
                 let custom_idx = suggestions.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
-                let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+                let custom_marker = if is_custom_selected {
+                    card::COLLAPSE_CLOSED
+                } else {
+                    card::SPACER
+                };
 
                 if is_custom_selected {
                     // Show inline input at this option
@@ -129,17 +152,33 @@ pub fn render_inline_ask_lines(
                     let mut custom_opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
-                        Span::styled(prefix.clone(), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)),
-                        Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
-                        Span::styled(cursor_indicator.to_string(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                        Span::styled(
+                            prefix.clone(),
+                            Style::default()
+                                .fg(theme::ACCENT_WARNING)
+                                .add_modifier(Modifier::BOLD)
+                                .bg(bg),
+                        ),
+                        Span::styled(
+                            input_state.custom_input.clone(),
+                            Style::default().fg(theme::ACCENT_WARNING).bg(bg),
+                        ),
+                        Span::styled(
+                            cursor_indicator.to_string(),
+                            Style::default().fg(theme::ACCENT_WARNING).bg(bg),
+                        ),
                     ];
-                    let custom_opt_len = 2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
+                    let custom_opt_len =
+                        2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
                     pad_to_width(&mut custom_opt_spans, custom_opt_len);
                     lines.push(Line::from(custom_opt_spans));
                 } else {
                     let custom_style = Style::default().fg(theme::TEXT_MUTED).bg(bg);
-                    let custom_option_text =
-                        format!("{}{}. Or type your own answer...", custom_marker, custom_idx + 1);
+                    let custom_option_text = format!(
+                        "{}{}. Or type your own answer...",
+                        custom_marker,
+                        custom_idx + 1
+                    );
                     let mut custom_opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
@@ -154,12 +193,27 @@ pub fn render_inline_ask_lines(
                 // Render options with checkboxes
                 for (i, option) in options.iter().enumerate() {
                     let is_selected = i == input_state.selected_option_index;
-                    let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
+                    let is_checked = input_state
+                        .multi_select_state
+                        .get(i)
+                        .copied()
+                        .unwrap_or(false);
 
-                    let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-                    let checkbox = if is_checked { card::CHECKBOX_ON } else { card::CHECKBOX_OFF };
+                    let marker = if is_selected {
+                        card::COLLAPSE_CLOSED
+                    } else {
+                        card::SPACER
+                    };
+                    let checkbox = if is_checked {
+                        card::CHECKBOX_ON
+                    } else {
+                        card::CHECKBOX_OFF
+                    };
                     let style = if is_selected {
-                        Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg)
+                        Style::default()
+                            .fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
+                            .bg(bg)
                     } else {
                         Style::default().fg(theme::TEXT_PRIMARY).bg(bg)
                     };
@@ -178,7 +232,11 @@ pub fn render_inline_ask_lines(
                 // Custom input option - show inline input when selected
                 let custom_idx = options.len();
                 let is_custom_selected = custom_idx == input_state.selected_option_index;
-                let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+                let custom_marker = if is_custom_selected {
+                    card::COLLAPSE_CLOSED
+                } else {
+                    card::SPACER
+                };
 
                 if is_custom_selected {
                     // Show inline input at this option
@@ -187,18 +245,34 @@ pub fn render_inline_ask_lines(
                     let mut custom_opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
-                        Span::styled(prefix.clone(), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD).bg(bg)),
-                        Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
-                        Span::styled(cursor_indicator.to_string(), Style::default().fg(theme::ACCENT_WARNING).bg(bg)),
+                        Span::styled(
+                            prefix.clone(),
+                            Style::default()
+                                .fg(theme::ACCENT_WARNING)
+                                .add_modifier(Modifier::BOLD)
+                                .bg(bg),
+                        ),
+                        Span::styled(
+                            input_state.custom_input.clone(),
+                            Style::default().fg(theme::ACCENT_WARNING).bg(bg),
+                        ),
+                        Span::styled(
+                            cursor_indicator.to_string(),
+                            Style::default().fg(theme::ACCENT_WARNING).bg(bg),
+                        ),
                     ];
-                    let custom_opt_len = 2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
+                    let custom_opt_len =
+                        2 + prefix.len() + input_state.custom_input.len() + cursor_indicator.len();
                     pad_to_width(&mut custom_opt_spans, custom_opt_len);
                     lines.push(Line::from(custom_opt_spans));
                 } else {
                     let custom_style = Style::default().fg(theme::TEXT_MUTED).bg(bg);
                     // No "Or" for multiselect - just "Type your own answer..."
-                    let custom_option_text =
-                        format!("{}{}. Type your own answer...", custom_marker, custom_idx + 1);
+                    let custom_option_text = format!(
+                        "{}{}. Type your own answer...",
+                        custom_marker,
+                        custom_idx + 1
+                    );
                     let mut custom_opt_spans: Vec<Span<'static>> = vec![
                         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                         Span::styled(" ", Style::default().bg(bg)),
@@ -228,7 +302,10 @@ pub fn render_inline_ask_lines(
     let mut help_spans: Vec<Span<'static>> = vec![
         Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
         Span::styled(" ", Style::default().bg(bg)),
-        Span::styled(help_text.to_string(), Style::default().fg(theme::TEXT_MUTED).bg(bg)),
+        Span::styled(
+            help_text.to_string(),
+            Style::default().fg(theme::TEXT_MUTED).bg(bg),
+        ),
     ];
     let help_len = 2 + help_text.len();
     pad_to_width(&mut help_spans, help_len);
@@ -243,10 +320,11 @@ pub fn render_inline_ask_ui(f: &mut Frame, modal_state: &AskModalState, area: Re
 
     // Split into: tab bar (1 line), question area (rest), help bar (3 lines)
     let chunks = Layout::vertical([
-        Constraint::Length(1),  // Tab bar
-        Constraint::Min(3),     // Question content
-        Constraint::Length(3),  // Help bar
-    ]).split(area);
+        Constraint::Length(1), // Tab bar
+        Constraint::Min(3),    // Question content
+        Constraint::Length(3), // Help bar
+    ])
+    .split(area);
 
     // Render tab bar with question titles
     render_tab_bar(f, input_state, chunks[0]);
@@ -275,7 +353,9 @@ fn render_tab_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputSta
         };
 
         let style = if is_current {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else if is_answered {
             Style::default().fg(theme::ACCENT_SUCCESS)
         } else {
@@ -294,12 +374,13 @@ fn render_tab_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputSta
         spans.push(Span::styled(" │ ", Style::default().fg(theme::TEXT_MUTED)));
         spans.push(Span::styled(
             "Submit",
-            Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(theme::ACCENT_SUCCESS)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
-    let tab_line = Paragraph::new(Line::from(spans))
-        .alignment(Alignment::Left);
+    let tab_line = Paragraph::new(Line::from(spans)).alignment(Alignment::Left);
 
     f.render_widget(tab_line, area);
 }
@@ -312,10 +393,18 @@ fn render_question(
     area: Rect,
 ) {
     match question {
-        AskQuestion::SingleSelect { title, question: q_text, suggestions } => {
+        AskQuestion::SingleSelect {
+            title,
+            question: q_text,
+            suggestions,
+        } => {
             render_single_select(f, input_state, title, q_text, suggestions, area);
         }
-        AskQuestion::MultiSelect { title, question: q_text, options } => {
+        AskQuestion::MultiSelect {
+            title,
+            question: q_text,
+            options,
+        } => {
             render_multi_select(f, input_state, title, q_text, options, area);
         }
     }
@@ -331,13 +420,18 @@ fn render_single_select(
     area: Rect,
 ) {
     let layout = Layout::vertical([
-        Constraint::Length(2),  // Question header
-        Constraint::Min(3),     // Options
-    ]).split(area);
+        Constraint::Length(2), // Question header
+        Constraint::Min(3),    // Options
+    ])
+    .split(area);
 
     // Question text
     let question_widget = Paragraph::new(question)
-        .style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
@@ -347,10 +441,16 @@ fn render_single_select(
         .enumerate()
         .map(|(i, suggestion)| {
             let is_selected = i == input_state.selected_option_index;
-            let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+            let marker = if is_selected {
+                card::COLLAPSE_CLOSED
+            } else {
+                card::SPACER
+            };
 
             let style = if is_selected {
-                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::TEXT_PRIMARY)
             };
@@ -366,7 +466,11 @@ fn render_single_select(
     // Custom input option at the end - show inline input when selected
     let custom_idx = suggestions.len();
     let is_custom_selected = custom_idx == input_state.selected_option_index;
-    let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+    let custom_marker = if is_custom_selected {
+        card::COLLAPSE_CLOSED
+    } else {
+        card::SPACER
+    };
 
     let mut all_items = items;
     if is_custom_selected {
@@ -374,8 +478,16 @@ fn render_single_select(
         let cursor_indicator = "▌";
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
-            Span::styled(format!("{}. ", custom_idx + 1), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(
+                format!("{}. ", custom_idx + 1),
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                input_state.custom_input.clone(),
+                Style::default().fg(theme::ACCENT_WARNING),
+            ),
             Span::styled(cursor_indicator, Style::default().fg(theme::ACCENT_WARNING)),
         ])));
     } else {
@@ -401,13 +513,18 @@ fn render_multi_select(
     area: Rect,
 ) {
     let layout = Layout::vertical([
-        Constraint::Length(2),  // Question header
-        Constraint::Min(3),     // Options
-    ]).split(area);
+        Constraint::Length(2), // Question header
+        Constraint::Min(3),    // Options
+    ])
+    .split(area);
 
     // Question text
     let question_widget = Paragraph::new(question)
-        .style(Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(theme::TEXT_PRIMARY)
+                .add_modifier(Modifier::BOLD),
+        )
         .wrap(Wrap { trim: true });
     f.render_widget(question_widget, layout[0]);
 
@@ -417,13 +534,27 @@ fn render_multi_select(
         .enumerate()
         .map(|(i, option)| {
             let is_selected = i == input_state.selected_option_index;
-            let is_checked = input_state.multi_select_state.get(i).copied().unwrap_or(false);
+            let is_checked = input_state
+                .multi_select_state
+                .get(i)
+                .copied()
+                .unwrap_or(false);
 
-            let marker = if is_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
-            let checkbox = if is_checked { card::CHECKBOX_ON_PAD } else { card::CHECKBOX_OFF_PAD };
+            let marker = if is_selected {
+                card::COLLAPSE_CLOSED
+            } else {
+                card::SPACER
+            };
+            let checkbox = if is_checked {
+                card::CHECKBOX_ON_PAD
+            } else {
+                card::CHECKBOX_OFF_PAD
+            };
 
             let style = if is_selected {
-                Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(theme::TEXT_PRIMARY)
             };
@@ -440,7 +571,11 @@ fn render_multi_select(
     // Custom input option - show inline input when selected
     let custom_idx = options.len();
     let is_custom_selected = custom_idx == input_state.selected_option_index;
-    let custom_marker = if is_custom_selected { card::COLLAPSE_CLOSED } else { card::SPACER };
+    let custom_marker = if is_custom_selected {
+        card::COLLAPSE_CLOSED
+    } else {
+        card::SPACER
+    };
 
     let mut all_items = items;
     if is_custom_selected {
@@ -448,8 +583,16 @@ fn render_multi_select(
         let cursor_indicator = "▌";
         all_items.push(ListItem::new(Line::from(vec![
             Span::raw(custom_marker),
-            Span::styled(format!("{}. ", custom_idx + 1), Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
-            Span::styled(input_state.custom_input.clone(), Style::default().fg(theme::ACCENT_WARNING)),
+            Span::styled(
+                format!("{}. ", custom_idx + 1),
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                input_state.custom_input.clone(),
+                Style::default().fg(theme::ACCENT_WARNING),
+            ),
             Span::styled(cursor_indicator, Style::default().fg(theme::ACCENT_WARNING)),
         ])));
     } else {
@@ -472,47 +615,127 @@ fn render_help_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputSt
         if input_state.custom_input.is_empty() {
             vec![
                 Span::raw("Type to enter custom answer · "),
-                Span::styled("↑", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "↑",
+                    Style::default()
+                        .fg(theme::ACCENT_WARNING)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" previous option · "),
-                Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(theme::ACCENT_ERROR)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" cancel"),
             ]
         } else {
             vec![
-                Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Enter",
+                    Style::default()
+                        .fg(theme::ACCENT_SUCCESS)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" submit · "),
-                Span::styled("← →", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "← →",
+                    Style::default()
+                        .fg(theme::ACCENT_WARNING)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" cursor · "),
-                Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    "Esc",
+                    Style::default()
+                        .fg(theme::ACCENT_ERROR)
+                        .add_modifier(Modifier::BOLD),
+                ),
                 Span::raw(" clear"),
             ]
         }
     } else if input_state.is_multi_select() {
         vec![
-            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(theme::ACCENT_SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" select · "),
-            Span::styled("Space", Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Space",
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" toggle · "),
-            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "↑↓",
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" navigate · "),
-            Span::styled("←", Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "←",
+                Style::default()
+                    .fg(theme::ACCENT_SPECIAL)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" back · "),
-            Span::styled("→", Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "→",
+                Style::default()
+                    .fg(theme::ACCENT_SPECIAL)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" skip · "),
-            Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(theme::ACCENT_ERROR)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" cancel"),
         ]
     } else {
         vec![
-            Span::styled("Enter", Style::default().fg(theme::ACCENT_SUCCESS).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(theme::ACCENT_SUCCESS)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" select · "),
-            Span::styled("↑↓", Style::default().fg(theme::ACCENT_WARNING).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "↑↓",
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" navigate · "),
-            Span::styled("←", Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "←",
+                Style::default()
+                    .fg(theme::ACCENT_SPECIAL)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" back · "),
-            Span::styled("→", Style::default().fg(theme::ACCENT_SPECIAL).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "→",
+                Style::default()
+                    .fg(theme::ACCENT_SPECIAL)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" skip · "),
-            Span::styled("Esc", Style::default().fg(theme::ACCENT_ERROR).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(theme::ACCENT_ERROR)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" cancel"),
         ]
     };
@@ -521,7 +744,7 @@ fn render_help_bar(f: &mut Frame, input_state: &crate::ui::ask_input::AskInputSt
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(theme::TEXT_MUTED))
+                .border_style(Style::default().fg(theme::TEXT_MUTED)),
         )
         .alignment(Alignment::Center);
 

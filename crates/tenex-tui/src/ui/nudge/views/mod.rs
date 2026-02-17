@@ -6,12 +6,12 @@
 //! - NudgeDetailView: Read-only nudge view
 //! - NudgeDeleteConfirm: Deletion confirmation
 
-mod list_view;
 mod create_form;
-mod detail_view;
 mod delete_confirm;
+mod detail_view;
+mod list_view;
 
-pub use list_view::render_nudge_list;
 pub use create_form::render_nudge_create;
-pub use detail_view::render_nudge_detail;
 pub use delete_confirm::render_nudge_delete_confirm;
+pub use detail_view::render_nudge_detail;
+pub use list_view::render_nudge_list;

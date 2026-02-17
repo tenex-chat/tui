@@ -8,19 +8,18 @@ pub mod create_project;
 pub mod debug_stats;
 pub mod draft_navigator;
 pub mod history_search;
-mod home_helpers;
 pub mod home;
+mod home_helpers;
 pub mod inline_ask;
 pub mod lesson_viewer;
 pub mod login;
 pub mod nudge_crud;
-pub mod nudge_selector;
+pub mod nudge_skill_selector;
 pub mod project_settings;
-pub mod skill_selector;
+pub mod report_tab;
 pub mod report_viewer;
 pub mod stats;
 pub mod tts_control;
-pub mod report_tab;
 pub mod workspace_modal;
 
 pub use agent_browser::render_agent_browser;
@@ -37,34 +36,26 @@ pub use home::{render_composer_project_selector, render_home, render_projects_mo
 pub use inline_ask::render_inline_ask_lines;
 pub use lesson_viewer::render_lesson_viewer;
 pub use nudge_crud::{
-    render_nudge_list, render_nudge_create,
-    render_nudge_detail, render_nudge_delete_confirm,
+    render_nudge_create, render_nudge_delete_confirm, render_nudge_detail, render_nudge_list,
 };
-pub use nudge_selector::render_nudge_selector;
-pub use skill_selector::render_skill_selector;
-pub use project_settings::{render_project_settings, available_agent_count, get_agent_id_at_index, available_mcp_tool_count, get_mcp_tool_id_at_index};
+pub use nudge_skill_selector::render_nudge_skill_selector;
+pub use project_settings::{
+    available_agent_count, available_mcp_tool_count, get_agent_id_at_index,
+    get_mcp_tool_id_at_index, render_project_settings,
+};
+pub use report_tab::render_report_tab;
 pub use report_viewer::render_report_viewer;
 pub use stats::render_stats;
 pub use tts_control::render_tts_control;
-pub use report_tab::render_report_tab;
 pub use workspace_modal::render_workspace_manager;
 
 use crate::ui::components::{render_modal_items, Modal, ModalItem, ModalSize};
 use crate::ui::modal::{BackendApprovalAction, BackendApprovalState};
 use crate::ui::theme;
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
 /// Render the backend approval modal
-pub fn render_backend_approval_modal(
-    f: &mut Frame,
-    area: Rect,
-    state: &BackendApprovalState,
-) {
+pub fn render_backend_approval_modal(f: &mut Frame, area: Rect, state: &BackendApprovalState) {
     let actions = BackendApprovalAction::ALL;
     let content_height = (actions.len() + 4) as u16;
     let total_height = content_height + 6;
@@ -72,7 +63,11 @@ pub fn render_backend_approval_modal(
 
     // Truncate pubkey for display
     let short_pubkey = if state.backend_pubkey.len() > 16 {
-        format!("{}...{}", &state.backend_pubkey[..8], &state.backend_pubkey[state.backend_pubkey.len()-8..])
+        format!(
+            "{}...{}",
+            &state.backend_pubkey[..8],
+            &state.backend_pubkey[state.backend_pubkey.len() - 8..]
+        )
     } else {
         state.backend_pubkey.clone()
     };

@@ -1,18 +1,18 @@
 //! Nudge delete confirmation dialog
 
-use crate::ui::components::{Modal, ModalSize, render_modal_items, ModalItem};
+use crate::ui::components::{render_modal_items, Modal, ModalItem, ModalSize};
 use crate::ui::modal::NudgeDeleteConfirmState;
 use crate::ui::theme;
 use crate::ui::App;
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
 /// Render the nudge delete confirmation dialog
-pub fn render_nudge_delete_confirm(f: &mut Frame, app: &App, area: Rect, state: &NudgeDeleteConfirmState) {
+pub fn render_nudge_delete_confirm(
+    f: &mut Frame,
+    app: &App,
+    area: Rect,
+    state: &NudgeDeleteConfirmState,
+) {
     let data_store = app.data_store.borrow();
     let nudge = data_store.content.nudges.get(&state.nudge_id);
 
@@ -31,7 +31,10 @@ pub fn render_nudge_delete_confirm(f: &mut Frame, app: &App, area: Rect, state: 
                 nudge_title
             ))
             .style(Style::default().fg(theme::ACCENT_WARNING));
-            f.render_widget(warning, Rect::new(content_area.x, content_area.y, content_area.width, 3));
+            f.render_widget(
+                warning,
+                Rect::new(content_area.x, content_area.y, content_area.width, 3),
+            );
 
             // Action buttons
             let actions_area = Rect::new(

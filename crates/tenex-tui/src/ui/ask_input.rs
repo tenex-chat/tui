@@ -82,7 +82,10 @@ impl AskInputState {
     }
 
     pub fn is_multi_select(&self) -> bool {
-        matches!(self.current_question(), Some(AskQuestion::MultiSelect { .. }))
+        matches!(
+            self.current_question(),
+            Some(AskQuestion::MultiSelect { .. })
+        )
     }
 
     pub fn next_option(&mut self) {
@@ -109,7 +112,8 @@ impl AskInputState {
             return;
         }
         if self.is_multi_select() && self.selected_option_index < self.multi_select_state.len() {
-            self.multi_select_state[self.selected_option_index] = !self.multi_select_state[self.selected_option_index];
+            self.multi_select_state[self.selected_option_index] =
+                !self.multi_select_state[self.selected_option_index];
         }
     }
 
@@ -146,13 +150,14 @@ impl AskInputState {
 
     fn get_selected_multi_options(&self) -> Vec<String> {
         match self.current_question() {
-            Some(AskQuestion::MultiSelect { options, .. }) => {
-                options.iter()
-                    .enumerate()
-                    .filter(|(i, _): &(usize, &String)| self.multi_select_state.get(*i).copied().unwrap_or(false))
-                    .map(|(_, opt): (usize, &String)| opt.clone())
-                    .collect()
-            }
+            Some(AskQuestion::MultiSelect { options, .. }) => options
+                .iter()
+                .enumerate()
+                .filter(|(i, _): &(usize, &String)| {
+                    self.multi_select_state.get(*i).copied().unwrap_or(false)
+                })
+                .map(|(_, opt): (usize, &String)| opt.clone())
+                .collect(),
             _ => Vec::new(),
         }
     }
@@ -211,7 +216,8 @@ impl AskInputState {
     pub fn prev_question(&mut self) {
         if self.current_question_index > 0 {
             // Remove the answer for the previous question if it exists
-            self.answers.retain(|a| a.question_index != self.current_question_index - 1);
+            self.answers
+                .retain(|a| a.question_index != self.current_question_index - 1);
 
             self.current_question_index -= 1;
             self.selected_option_index = 0;
@@ -291,13 +297,11 @@ mod tests {
 
     #[test]
     fn test_single_select_flow() {
-        let questions = vec![
-            AskQuestion::SingleSelect {
-                title: "Q1".to_string(),
-                question: "Choose one".to_string(),
-                suggestions: vec!["A".to_string(), "B".to_string(), "C".to_string()],
-            }
-        ];
+        let questions = vec![AskQuestion::SingleSelect {
+            title: "Q1".to_string(),
+            question: "Choose one".to_string(),
+            suggestions: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        }];
 
         let mut state = AskInputState::new(questions);
         assert_eq!(state.current_question_index, 0);
@@ -319,13 +323,11 @@ mod tests {
 
     #[test]
     fn test_multi_select_flow() {
-        let questions = vec![
-            AskQuestion::MultiSelect {
-                title: "Q1".to_string(),
-                question: "Choose multiple".to_string(),
-                options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
-            }
-        ];
+        let questions = vec![AskQuestion::MultiSelect {
+            title: "Q1".to_string(),
+            question: "Choose multiple".to_string(),
+            options: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+        }];
 
         let mut state = AskInputState::new(questions);
         assert_eq!(state.multi_select_state, vec![false, false, false]);
@@ -354,13 +356,11 @@ mod tests {
 
     #[test]
     fn test_custom_input() {
-        let questions = vec![
-            AskQuestion::SingleSelect {
-                title: "Q1".to_string(),
-                question: "Your answer?".to_string(),
-                suggestions: vec![],
-            }
-        ];
+        let questions = vec![AskQuestion::SingleSelect {
+            title: "Q1".to_string(),
+            question: "Your answer?".to_string(),
+            suggestions: vec![],
+        }];
 
         let mut state = AskInputState::new(questions);
         state.enter_custom_mode();
@@ -392,7 +392,7 @@ mod tests {
                 title: "Q2".to_string(),
                 question: "Second".to_string(),
                 options: vec!["X".to_string(), "Y".to_string()],
-            }
+            },
         ];
 
         let mut state = AskInputState::new(questions);

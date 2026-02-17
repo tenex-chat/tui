@@ -13,7 +13,11 @@ use ratatui::{
 };
 use std::collections::HashMap;
 
-use super::cards::{author_line, author_line_with_recipient, bottom_half_block_line, dot_line, llm_metadata_line, markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines, top_half_block_line};
+use super::cards::{
+    author_line, author_line_with_recipient, bottom_half_block_line, dot_line, llm_metadata_line,
+    markdown_lines, pad_line, reasoning_author_line, reasoning_dot_line, reasoning_lines,
+    top_half_block_line,
+};
 use super::grouping::{group_messages, DisplayItem};
 
 /// Result of computing message background styling policy.
@@ -76,7 +80,10 @@ fn render_markdown_with_indicator(
     let context_rendered = render_markdown(content);
     for md_line in context_rendered.iter() {
         let mut spans = vec![
-            Span::styled(indicator.to_string(), Style::default().fg(indicator_color).bg(bg)),
+            Span::styled(
+                indicator.to_string(),
+                Style::default().fg(indicator_color).bg(bg),
+            ),
             Span::styled(pad.to_string(), Style::default().bg(bg)),
         ];
         for span in md_line.spans.iter() {
@@ -84,7 +91,11 @@ fn render_markdown_with_indicator(
             new_span.style = new_span.style.bg(bg);
             spans.push(new_span);
         }
-        let line_len: usize = md_line.spans.iter().map(|s| s.content.chars().count()).sum();
+        let line_len: usize = md_line
+            .spans
+            .iter()
+            .map(|s| s.content.chars().count())
+            .sum();
         pad_line(&mut spans, 1 + pad.len() + line_len, content_width, bg);
         lines.push(Line::from(spans));
     }
@@ -107,7 +118,10 @@ pub(crate) fn render_messages_panel(
         if let Some(ref parent_id) = msg.reply_to {
             // Only count as a reply if parent is NOT the thread root
             if Some(parent_id.as_str()) != thread_id {
-                replies_by_parent.entry(parent_id.as_str()).or_default().push(msg);
+                replies_by_parent
+                    .entry(parent_id.as_str())
+                    .or_default()
+                    .push(msg);
             }
         }
     }
@@ -212,8 +226,8 @@ pub(crate) fn render_messages_panel(
                     has_next_consecutive,
                 } => {
                     // Check if this message is selected (for navigation)
-                    let is_selected =
-                        group_idx == app.selected_message_index() && app.input_mode == InputMode::Normal;
+                    let is_selected = group_idx == app.selected_message_index()
+                        && app.input_mode == InputMode::Normal;
 
                     let author = profile_cache
                         .get(&msg.pubkey)
@@ -231,7 +245,8 @@ pub(crate) fn render_messages_panel(
 
                     // Check if this message has a search match (per-tab isolated)
                     let has_search_match = app.message_has_search_match(&msg.id);
-                    let is_current_search = app.chat_search()
+                    let is_current_search = app
+                        .chat_search()
                         .filter(|s| s.active)
                         .and_then(|s| s.match_locations.get(s.current_match))
                         .map(|loc| loc.message_id == msg.id)
@@ -259,31 +274,40 @@ pub(crate) fn render_messages_panel(
 
                         // Try to construct ToolCall from tool_args tag first (preferred)
                         let tool_call_from_args = msg.tool_args.as_ref().and_then(|args_json| {
-                            serde_json::from_str::<serde_json::Value>(args_json).ok().map(|params| {
-                                ToolCall {
+                            serde_json::from_str::<serde_json::Value>(args_json)
+                                .ok()
+                                .map(|params| ToolCall {
                                     id: String::new(),
                                     name: tool_name.to_string(),
                                     parameters: params,
                                     result: None,
-                                }
-                            })
+                                })
                         });
 
                         if let Some(tool_call) = tool_call_from_args {
                             // Render using the structured tool_args data
                             // Pass content as fallback for unknown tools
-                            messages_text.push(render_tool_line(&tool_call, indicator_color, Some(&msg.content)));
+                            messages_text.push(render_tool_line(
+                                &tool_call,
+                                indicator_color,
+                                Some(&msg.content),
+                            ));
                         } else {
                             // Fallback: parse content for embedded JSON tool calls
                             let parsed = parse_message_content(&msg.content);
 
                             if let MessageContent::Mixed { tool_calls, .. } = &parsed {
                                 for tool_call in tool_calls {
-                                    messages_text.push(render_tool_line(tool_call, indicator_color, Some(&msg.content)));
+                                    messages_text.push(render_tool_line(
+                                        tool_call,
+                                        indicator_color,
+                                        Some(&msg.content),
+                                    ));
                                 }
                             } else {
                                 // Final fallback: show tool name with content preview
-                                let content_preview: String = msg.content.chars().take(50).collect();
+                                let content_preview: String =
+                                    msg.content.chars().take(50).collect();
                                 messages_text.push(Line::from(vec![
                                     Span::styled("│", Style::default().fg(indicator_color)),
                                     Span::raw("  "),
@@ -325,7 +349,11 @@ pub(crate) fn render_messages_panel(
 
                         // Top half-block padding for new cards (only if message has card background)
                         if starts_new_card && bg_policy.has_card_bg {
-                            messages_text.push(top_half_block_line(indicator_color, bg, content_width));
+                            messages_text.push(top_half_block_line(
+                                indicator_color,
+                                bg,
+                                content_width,
+                            ));
                         }
 
                         // First line: author header OR dot indicator for consecutive messages
@@ -334,7 +362,8 @@ pub(crate) fn render_messages_panel(
                             // Resolve p-tag pubkeys to display names
                             let recipient_names: Vec<String> = {
                                 let store = app.data_store.borrow();
-                                msg.p_tags.iter()
+                                msg.p_tags
+                                    .iter()
                                     .map(|pk| store.get_profile_name(pk))
                                     .collect()
                             };
@@ -395,13 +424,18 @@ pub(crate) fn render_messages_panel(
                         // Tool calls from content (with tool-specific rendering, no background)
                         if let MessageContent::Mixed { tool_calls, .. } = &parsed {
                             for tool_call in tool_calls {
-                                messages_text.push(render_tool_line(tool_call, indicator_color, Some(&msg.content)));
+                                messages_text.push(render_tool_line(
+                                    tool_call,
+                                    indicator_color,
+                                    Some(&msg.content),
+                                ));
                             }
                         }
                     }
 
                     // Debug info: shown when selected/setting enabled with llm_metadata
-                    let show_debug_for_llm = (is_selected || app.show_llm_metadata()) && !msg.llm_metadata.is_empty();
+                    let show_debug_for_llm =
+                        (is_selected || app.show_llm_metadata()) && !msg.llm_metadata.is_empty();
 
                     if show_debug_for_llm {
                         // LLM metadata line (id + time + token info)
@@ -421,10 +455,7 @@ pub(crate) fn render_messages_panel(
                             let replies_text = format!("{} replies", replies.len());
                             let replies_len = 7 + replies_text.len(); // "│  └→ " + text
                             let mut replies_spans = vec![
-                                Span::styled(
-                                    "│",
-                                    Style::default().fg(indicator_color).bg(bg),
-                                ),
+                                Span::styled("│", Style::default().fg(indicator_color).bg(bg)),
                                 Span::styled(
                                     "  └→ ",
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
@@ -445,7 +476,11 @@ pub(crate) fn render_messages_panel(
                     if ends_card && bg_policy.has_card_bg {
                         // Only add half-block for non-tool, non-reasoning messages (those have card bg)
                         if !is_tool_use && !msg.is_reasoning {
-                            messages_text.push(bottom_half_block_line(indicator_color, bg, content_width));
+                            messages_text.push(bottom_half_block_line(
+                                indicator_color,
+                                bg,
+                                content_width,
+                            ));
                         }
                     }
                 }
@@ -458,13 +493,17 @@ pub(crate) fn render_messages_panel(
                     branch: _, // branch from delegation tool-call is incorrect; we fetch from thread root below
                 } => {
                     // Check if this delegation preview is selected
-                    let is_selected =
-                        group_idx == app.selected_message_index() && app.input_mode == InputMode::Normal;
+                    let is_selected = group_idx == app.selected_message_index()
+                        && app.input_mode == InputMode::Normal;
 
                     let indicator_color = theme::user_color(parent_pubkey);
                     let card_bg = theme::BG_CARD;
                     let card_bg_selected = theme::BG_SELECTED;
-                    let bg = if is_selected { card_bg_selected } else { card_bg };
+                    let bg = if is_selected {
+                        card_bg_selected
+                    } else {
+                        card_bg
+                    };
 
                     let indicator = if *is_consecutive { "·  " } else { "│  " };
 
@@ -481,27 +520,44 @@ pub(crate) fn render_messages_panel(
 
                         if ask_answered {
                             // Answered ask with visual hierarchy like Svelte
-                            let title_text = ask_event.title.clone().unwrap_or_else(|| "Question".to_string());
+                            let title_text = ask_event
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| "Question".to_string());
                             let pad = "   "; // 3-space padding for content
                             let response_bg = theme::BG_CARD; // Distinct background for response box
 
                             // === QUESTION SECTION ===
                             // Title (bold, with padding)
                             let mut title_spans = vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(pad, Style::default().bg(bg)),
                                 Span::styled(
                                     title_text.clone(),
-                                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg),
+                                    Style::default()
+                                        .fg(theme::TEXT_PRIMARY)
+                                        .add_modifier(Modifier::BOLD)
+                                        .bg(bg),
                                 ),
                             ];
-                            pad_line(&mut title_spans, 1 + pad.len() + title_text.len(), content_width, bg);
+                            pad_line(
+                                &mut title_spans,
+                                1 + pad.len() + title_text.len(),
+                                content_width,
+                                bg,
+                            );
                             messages_text.push(Line::from(title_spans));
 
                             // Context (with padding)
                             if !ask_event.context.is_empty() {
                                 // Empty line after title
-                                let mut empty1 = vec![Span::styled(indicator, Style::default().fg(indicator_color).bg(bg))];
+                                let mut empty1 = vec![Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                )];
                                 pad_line(&mut empty1, 1, content_width, bg);
                                 messages_text.push(Line::from(empty1));
 
@@ -517,48 +573,80 @@ pub(crate) fn render_messages_panel(
                             }
 
                             // Empty line before status
-                            let mut empty2 = vec![Span::styled(indicator, Style::default().fg(indicator_color).bg(bg))];
+                            let mut empty2 = vec![Span::styled(
+                                indicator,
+                                Style::default().fg(indicator_color).bg(bg),
+                            )];
                             pad_line(&mut empty2, 1, content_width, bg);
                             messages_text.push(Line::from(empty2));
 
                             // Status line: ✓ Response submitted
                             let status_text = "✓ Response submitted";
                             let mut status_spans = vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(pad, Style::default().bg(bg)),
                                 Span::styled(
                                     status_text,
                                     Style::default().fg(theme::ACCENT_SUCCESS).bg(bg),
                                 ),
                             ];
-                            pad_line(&mut status_spans, 1 + pad.len() + status_text.len(), content_width, bg);
+                            pad_line(
+                                &mut status_spans,
+                                1 + pad.len() + status_text.len(),
+                                content_width,
+                                bg,
+                            );
                             messages_text.push(Line::from(status_spans));
 
                             // === RESPONSE SECTION (boxed with different background) ===
                             if let Some(response) = app.get_user_response_to_ask(thread_id) {
                                 // Empty line before response box
-                                let mut empty3 = vec![Span::styled(indicator, Style::default().fg(indicator_color).bg(bg))];
+                                let mut empty3 = vec![Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                )];
                                 pad_line(&mut empty3, 1, content_width, bg);
                                 messages_text.push(Line::from(empty3));
 
                                 // Top border of response box
                                 let box_width = content_width.saturating_sub(4); // Account for indicator + padding
-                                let top_border = format!("┌{}┐", "─".repeat(box_width.saturating_sub(2)));
+                                let top_border =
+                                    format!("┌{}┐", "─".repeat(box_width.saturating_sub(2)));
                                 let mut top_spans = vec![
-                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                    Span::styled(
+                                        indicator,
+                                        Style::default().fg(indicator_color).bg(bg),
+                                    ),
                                     Span::styled(pad, Style::default().bg(bg)),
-                                    Span::styled(top_border.clone(), Style::default().fg(theme::TEXT_MUTED).bg(bg)),
+                                    Span::styled(
+                                        top_border.clone(),
+                                        Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                    ),
                                 ];
-                                pad_line(&mut top_spans, 1 + pad.len() + top_border.len(), content_width, bg);
+                                pad_line(
+                                    &mut top_spans,
+                                    1 + pad.len() + top_border.len(),
+                                    content_width,
+                                    bg,
+                                );
                                 messages_text.push(Line::from(top_spans));
 
                                 // Response content with left border and background
                                 let rendered = render_markdown(&response);
                                 for md_line in rendered.iter() {
                                     let mut spans = vec![
-                                        Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                        Span::styled(
+                                            indicator,
+                                            Style::default().fg(indicator_color).bg(bg),
+                                        ),
                                         Span::styled(pad, Style::default().bg(bg)),
-                                        Span::styled("│ ", Style::default().fg(theme::TEXT_MUTED).bg(response_bg)),
+                                        Span::styled(
+                                            "│ ",
+                                            Style::default().fg(theme::TEXT_MUTED).bg(response_bg),
+                                        ),
                                     ];
                                     let mut content_len = 0;
                                     for span in md_line.spans.iter() {
@@ -569,26 +657,47 @@ pub(crate) fn render_messages_panel(
                                     }
                                     // Pad inside the box and add right border
                                     let inner_pad = box_width.saturating_sub(4 + content_len);
-                                    spans.push(Span::styled(" ".repeat(inner_pad), Style::default().bg(response_bg)));
-                                    spans.push(Span::styled(" │", Style::default().fg(theme::TEXT_MUTED).bg(response_bg)));
+                                    spans.push(Span::styled(
+                                        " ".repeat(inner_pad),
+                                        Style::default().bg(response_bg),
+                                    ));
+                                    spans.push(Span::styled(
+                                        " │",
+                                        Style::default().fg(theme::TEXT_MUTED).bg(response_bg),
+                                    ));
                                     // Pad rest of line
                                     pad_line(&mut spans, content_width, content_width, bg);
                                     messages_text.push(Line::from(spans));
                                 }
 
                                 // Bottom border
-                                let bottom_border = format!("└{}┘", "─".repeat(box_width.saturating_sub(2)));
+                                let bottom_border =
+                                    format!("└{}┘", "─".repeat(box_width.saturating_sub(2)));
                                 let mut bottom_spans = vec![
-                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                    Span::styled(
+                                        indicator,
+                                        Style::default().fg(indicator_color).bg(bg),
+                                    ),
                                     Span::styled(pad, Style::default().bg(bg)),
-                                    Span::styled(bottom_border.clone(), Style::default().fg(theme::TEXT_MUTED).bg(bg)),
+                                    Span::styled(
+                                        bottom_border.clone(),
+                                        Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                    ),
                                 ];
-                                pad_line(&mut bottom_spans, 1 + pad.len() + bottom_border.len(), content_width, bg);
+                                pad_line(
+                                    &mut bottom_spans,
+                                    1 + pad.len() + bottom_border.len(),
+                                    content_width,
+                                    bg,
+                                );
                                 messages_text.push(Line::from(bottom_spans));
                             }
                         } else {
                             // Render ask event title/context
-                            let title_text = ask_event.title.clone().unwrap_or_else(|| "Question".to_string());
+                            let title_text = ask_event
+                                .title
+                                .clone()
+                                .unwrap_or_else(|| "Question".to_string());
                             let agent_name = {
                                 let store = app.data_store.borrow();
                                 store.get_profile_name(&ask_pubkey)
@@ -596,14 +705,20 @@ pub(crate) fn render_messages_panel(
 
                             // Header line with title
                             let mut header_spans = vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(
                                     format!("@{} ", agent_name),
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
                                 ),
                                 Span::styled(
                                     title_text.clone(),
-                                    Style::default().fg(theme::TEXT_PRIMARY).add_modifier(Modifier::BOLD).bg(bg),
+                                    Style::default()
+                                        .fg(theme::TEXT_PRIMARY)
+                                        .add_modifier(Modifier::BOLD)
+                                        .bg(bg),
                                 ),
                             ];
                             let header_len = 1 + agent_name.len() + 2 + title_text.len();
@@ -613,7 +728,10 @@ pub(crate) fn render_messages_panel(
                             // Context (with proper markdown rendering, not truncated)
                             if !ask_event.context.is_empty() {
                                 // Empty line after title
-                                let mut empty1 = vec![Span::styled(indicator, Style::default().fg(indicator_color).bg(bg))];
+                                let mut empty1 = vec![Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                )];
                                 pad_line(&mut empty1, 1, content_width, bg);
                                 messages_text.push(Line::from(empty1));
 
@@ -647,7 +765,15 @@ pub(crate) fn render_messages_panel(
                         // Get thread info from data store
                         // NOTE: We get branch from the delegated thread's root message,
                         // NOT from the delegation tool-call event (which has the wrong branch)
-                        let (title, from_agent_name, to_agent_name, status, activity, is_busy, thread_branch) = {
+                        let (
+                            title,
+                            from_agent_name,
+                            to_agent_name,
+                            status,
+                            activity,
+                            is_busy,
+                            thread_branch,
+                        ) = {
                             let store = app.data_store.borrow();
                             // Check if any agents are working on this delegation
                             let is_busy = store.operations.is_event_busy(thread_id);
@@ -660,14 +786,16 @@ pub(crate) fn render_messages_panel(
                                     t.title.clone()
                                 };
                                 let messages = store.get_messages(thread_id);
-                                let activity = t.status_current_activity.clone().unwrap_or_else(|| {
-                                    messages
-                                        .last()
-                                        .map(|m| m.content.chars().take(60).collect())
-                                        .unwrap_or_default()
-                                });
+                                let activity =
+                                    t.status_current_activity.clone().unwrap_or_else(|| {
+                                        messages
+                                            .last()
+                                            .map(|m| m.content.chars().take(60).collect())
+                                            .unwrap_or_default()
+                                    });
                                 // Get branch from the root message of the delegated thread (by ID, not ordering)
-                                let root_branch = messages.iter()
+                                let root_branch = messages
+                                    .iter()
                                     .find(|m| m.id == *thread_id)
                                     .and_then(|m| m.branch.clone());
                                 // Get the "to" agent name from the thread's p_tags (who was delegated TO)
@@ -702,7 +830,10 @@ pub(crate) fn render_messages_panel(
                         if to_agent_name.is_empty() {
                             // Thread not found - show ID only
                             messages_text.push(Line::from(vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(
                                     format!("→ {}", title),
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
@@ -716,7 +847,10 @@ pub(crate) fn render_messages_panel(
                             // Top border: │  ┌─────────────────────┐
                             let top_border: String = "─".repeat(card_inner_width);
                             messages_text.push(Line::from(vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(
                                     format!("┌{}┐", top_border),
                                     Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
@@ -726,12 +860,20 @@ pub(crate) fn render_messages_panel(
                             // Title line: │  │ Title (Enter to open)                    │
                             let hint = if is_selected { " (Enter to open)" } else { "" };
                             let title_max_width = card_inner_width.saturating_sub(1 + hint.len()); // space + hint
-                            let title_display: String = title.chars().take(title_max_width).collect();
-                            let title_padding = card_inner_width.saturating_sub(title_display.chars().count() + hint.len());
+                            let title_display: String =
+                                title.chars().take(title_max_width).collect();
+                            let title_padding = card_inner_width
+                                .saturating_sub(title_display.chars().count() + hint.len());
                             let title_pad_str: String = " ".repeat(title_padding);
                             messages_text.push(Line::from(vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
+                                Span::styled(
+                                    "│",
+                                    Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                ),
                                 Span::styled(
                                     format!(" {}", title_display),
                                     Style::default()
@@ -739,36 +881,43 @@ pub(crate) fn render_messages_panel(
                                         .bg(bg)
                                         .add_modifier(Modifier::BOLD),
                                 ),
-                                Span::styled(
-                                    hint,
-                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                                ),
+                                Span::styled(hint, Style::default().fg(theme::TEXT_MUTED).bg(bg)),
                                 Span::styled(title_pad_str, Style::default().bg(bg)),
-                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                Span::styled(
+                                    "│",
+                                    Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                ),
                             ]));
 
                             // Agent and status line: │  │ @from -> @to · Done ·  branch        │
                             // Build agent line with proper coloring
                             let mut agent_spans = vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
+                                Span::styled(
+                                    "│",
+                                    Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                ),
                                 Span::styled(
                                     format!(" @{}", from_agent_name),
                                     Style::default().fg(theme::TEXT_MUTED).bg(bg),
                                 ),
-                                Span::styled(
-                                    " → ",
-                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
-                                ),
+                                Span::styled(" → ", Style::default().fg(theme::TEXT_MUTED).bg(bg)),
                                 Span::styled(
                                     format!("@{}", to_agent_name),
                                     Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
                                 ),
                             ];
                             // Calculate content length for padding
-                            let mut content_len = 1 + from_agent_name.len() + 4 + to_agent_name.len(); // " @from -> @to" = 1 + len + 4 + len
+                            let mut content_len =
+                                1 + from_agent_name.len() + 4 + to_agent_name.len(); // " @from -> @to" = 1 + len + 4 + len
                             if is_busy {
-                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_spans.push(Span::styled(
+                                    " · ",
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ));
                                 let working_text = format!("{} working...", app.spinner_char());
                                 content_len += 3 + working_text.len();
                                 agent_spans.push(Span::styled(
@@ -776,17 +925,27 @@ pub(crate) fn render_messages_panel(
                                     Style::default().fg(theme::ACCENT_PRIMARY).bg(bg),
                                 ));
                             } else if let Some(ref status_label) = status {
-                                let status_color = if status_label == "done" || status_label == "Done" {
-                                    theme::ACCENT_SUCCESS
-                                } else {
-                                    theme::ACCENT_WARNING
-                                };
-                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                let status_color =
+                                    if status_label == "done" || status_label == "Done" {
+                                        theme::ACCENT_SUCCESS
+                                    } else {
+                                        theme::ACCENT_WARNING
+                                    };
+                                agent_spans.push(Span::styled(
+                                    " · ",
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ));
                                 content_len += 3 + status_label.len();
-                                agent_spans.push(Span::styled(status_label.clone(), Style::default().fg(status_color).bg(bg)));
+                                agent_spans.push(Span::styled(
+                                    status_label.clone(),
+                                    Style::default().fg(status_color).bg(bg),
+                                ));
                             }
                             if let Some(ref branch_name) = thread_branch {
-                                agent_spans.push(Span::styled(" · ", Style::default().fg(theme::TEXT_MUTED).bg(bg)));
+                                agent_spans.push(Span::styled(
+                                    " · ",
+                                    Style::default().fg(theme::TEXT_MUTED).bg(bg),
+                                ));
                                 let branch_display = format!(" {}", branch_name);
                                 content_len += 3 + branch_display.len();
                                 agent_spans.push(Span::styled(
@@ -797,31 +956,51 @@ pub(crate) fn render_messages_panel(
                             let agent_padding = card_inner_width.saturating_sub(content_len);
                             let agent_pad_str: String = " ".repeat(agent_padding);
                             agent_spans.push(Span::styled(agent_pad_str, Style::default().bg(bg)));
-                            agent_spans.push(Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)));
+                            agent_spans.push(Span::styled(
+                                "│",
+                                Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                            ));
                             messages_text.push(Line::from(agent_spans));
 
                             // Activity line (if present): │  │ Activity text...                │
                             if !activity.is_empty() {
                                 let activity_max_width = card_inner_width.saturating_sub(1); // space prefix
-                                let activity_display: String = activity.chars().take(activity_max_width).collect();
-                                let activity_padding = card_inner_width.saturating_sub(1 + activity_display.chars().count());
+                                let activity_display: String =
+                                    activity.chars().take(activity_max_width).collect();
+                                let activity_padding = card_inner_width
+                                    .saturating_sub(1 + activity_display.chars().count());
                                 let activity_pad_str: String = " ".repeat(activity_padding);
                                 messages_text.push(Line::from(vec![
-                                    Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
-                                    Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                    Span::styled(
+                                        indicator,
+                                        Style::default().fg(indicator_color).bg(bg),
+                                    ),
+                                    Span::styled(
+                                        "│",
+                                        Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                    ),
                                     Span::styled(
                                         format!(" {}", activity_display),
-                                        Style::default().fg(theme::TEXT_MUTED).bg(bg).add_modifier(Modifier::ITALIC),
+                                        Style::default()
+                                            .fg(theme::TEXT_MUTED)
+                                            .bg(bg)
+                                            .add_modifier(Modifier::ITALIC),
                                     ),
                                     Span::styled(activity_pad_str, Style::default().bg(bg)),
-                                    Span::styled("│", Style::default().fg(theme::BORDER_INACTIVE).bg(bg)),
+                                    Span::styled(
+                                        "│",
+                                        Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
+                                    ),
                                 ]));
                             }
 
                             // Bottom border: │  └─────────────────────┘
                             let bottom_border: String = "─".repeat(card_inner_width);
                             messages_text.push(Line::from(vec![
-                                Span::styled(indicator, Style::default().fg(indicator_color).bg(bg)),
+                                Span::styled(
+                                    indicator,
+                                    Style::default().fg(indicator_color).bg(bg),
+                                ),
                                 Span::styled(
                                     format!("└{}┘", bottom_border),
                                     Style::default().fg(theme::BORDER_INACTIVE).bg(bg),
@@ -862,8 +1041,9 @@ pub(crate) fn render_messages_panel(
 
             // Render reasoning content first if present (muted style)
             if !buffer.reasoning_content.is_empty() {
-                let reasoning_style =
-                    Style::default().fg(theme::TEXT_MUTED).add_modifier(Modifier::ITALIC);
+                let reasoning_style = Style::default()
+                    .fg(theme::TEXT_MUTED)
+                    .add_modifier(Modifier::ITALIC);
                 for line in buffer.reasoning_content.lines() {
                     messages_text.push(Line::from(vec![
                         Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL)),
@@ -876,8 +1056,10 @@ pub(crate) fn render_messages_panel(
             if !buffer.text_content.is_empty() {
                 let markdown_lines = render_markdown(&buffer.text_content);
                 for (i, line) in markdown_lines.iter().enumerate() {
-                    let mut line_spans =
-                        vec![Span::styled("│  ", Style::default().fg(theme::ACCENT_SPECIAL))];
+                    let mut line_spans = vec![Span::styled(
+                        "│  ",
+                        Style::default().fg(theme::ACCENT_SPECIAL),
+                    )];
                     line_spans.extend(line.spans.clone());
 
                     // Add cursor indicator at the end of the last line
@@ -952,7 +1134,8 @@ pub(crate) fn render_messages_panel(
                     // If selected item is below visible area, scroll down to show it
                     else if selected_end > current_scroll + visible_height {
                         // Scroll so the end of the selected item is at bottom of viewport
-                        app.scroll_offset = selected_end.saturating_sub(visible_height).min(max_scroll);
+                        app.scroll_offset =
+                            selected_end.saturating_sub(visible_height).min(max_scroll);
                     }
                 }
             }

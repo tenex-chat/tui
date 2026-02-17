@@ -44,7 +44,9 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
         ref mut selector, ..
     } = app.modal_state
     {
-        match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
+        match handle_selector_key(selector, key, item_count, |idx| {
+            all_projects.get(idx).cloned()
+        }) {
             SelectorAction::Selected(project) => {
                 let a_tag = project.a_tag();
                 let needs_agent = for_new_thread || app.selected_agent().is_none();
@@ -55,7 +57,11 @@ pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<
                 let pm_agent = {
                     let store = app.data_store.borrow();
                     if let Some(status) = store.get_project_status(&a_tag) {
-                        if needs_agent { status.pm_agent().cloned() } else { None }
+                        if needs_agent {
+                            status.pm_agent().cloned()
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
@@ -135,7 +141,9 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
     let item_count = all_projects.len();
 
     if let ModalState::ComposerProjectSelector { ref mut selector } = app.modal_state {
-        match handle_selector_key(selector, key, item_count, |idx| all_projects.get(idx).cloned()) {
+        match handle_selector_key(selector, key, item_count, |idx| {
+            all_projects.get(idx).cloned()
+        }) {
             SelectorAction::Selected(project) => {
                 let a_tag = project.a_tag();
                 let project_name = project.name.clone();
@@ -153,9 +161,12 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
                     if let Some(old_draft_id) = current_draft_id {
                         if old_draft_id != format!("{}:new", a_tag) {
                             // Find and close the old draft tab
-                            if let Some(old_idx) = app.tabs.tabs().iter().position(|t| {
-                                t.draft_id.as_deref() == Some(&old_draft_id)
-                            }) {
+                            if let Some(old_idx) = app
+                                .tabs
+                                .tabs()
+                                .iter()
+                                .position(|t| t.draft_id.as_deref() == Some(&old_draft_id))
+                            {
                                 app.close_tab_at(old_idx);
                             }
                         }
@@ -179,7 +190,8 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
                 // If no PM agent is found, clear the selected agent to prevent stale selection
                 let pm_agent = {
                     let store = app.data_store.borrow();
-                    store.get_project_status(&a_tag)
+                    store
+                        .get_project_status(&a_tag)
                         .and_then(|status| status.pm_agent().cloned())
                 };
                 if let Some(pm) = pm_agent {
@@ -204,11 +216,11 @@ pub(super) fn handle_composer_project_selector_key(app: &mut App, key: KeyEvent)
     Ok(())
 }
 
-pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
-    let nudges = app.filtered_nudges();
-    let item_count = nudges.len();
+pub(super) fn handle_nudge_skill_selector_key(app: &mut App, key: KeyEvent) {
+    let items = app.filtered_nudge_skill_items();
+    let item_count = items.len();
 
-    if let ModalState::NudgeSelector(ref mut state) = app.modal_state {
+    if let ModalState::NudgeSkillSelector(ref mut state) = app.modal_state {
         // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
         if item_count > 0 {
             state.selector.index = state.selector.index.min(item_count - 1);
@@ -222,9 +234,11 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
             }
             KeyCode::Enter => {
                 // Apply to current tab (per-tab isolated)
-                let selected_ids = state.selected_nudge_ids.clone();
+                let selected_nudges = state.selected_nudge_ids.clone();
+                let selected_skills = state.selected_skill_ids.clone();
                 if let Some(tab) = app.tabs.active_tab_mut() {
-                    tab.selected_nudge_ids = selected_ids;
+                    tab.selected_nudge_ids = selected_nudges;
+                    tab.selected_skill_ids = selected_skills;
                 }
                 app.modal_state = ModalState::None;
             }
@@ -239,71 +253,32 @@ pub(super) fn handle_nudge_selector_key(app: &mut App, key: KeyEvent) {
                 }
             }
             KeyCode::Char(' ') => {
-                if let Some(nudge) = nudges.get(state.selector.index) {
-                    let nudge_id = nudge.id.clone();
-                    if let Some(pos) = state.selected_nudge_ids.iter().position(|id| id == &nudge_id)
-                    {
-                        state.selected_nudge_ids.remove(pos);
-                    } else {
-                        state.selected_nudge_ids.push(nudge_id);
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                state.selector.filter.push(c);
-                state.selector.index = 0;
-            }
-            KeyCode::Backspace => {
-                state.selector.filter.pop();
-                state.selector.index = 0;
-            }
-            _ => {}
-        }
-    }
-}
-
-pub(super) fn handle_skill_selector_key(app: &mut App, key: KeyEvent) {
-    let skills = app.filtered_skills();
-    let item_count = skills.len();
-
-    if let ModalState::SkillSelector(ref mut state) = app.modal_state {
-        // Clamp index to valid range when filtered list shrinks (e.g., data changed between renders)
-        if item_count > 0 {
-            state.selector.index = state.selector.index.min(item_count - 1);
-        } else {
-            state.selector.index = 0;
-        }
-
-        match key.code {
-            KeyCode::Esc => {
-                app.modal_state = ModalState::None;
-            }
-            KeyCode::Enter => {
-                // Apply to current tab (per-tab isolated)
-                let selected_ids = state.selected_skill_ids.clone();
-                if let Some(tab) = app.tabs.active_tab_mut() {
-                    tab.selected_skill_ids = selected_ids;
-                }
-                app.modal_state = ModalState::None;
-            }
-            KeyCode::Up => {
-                if state.selector.index > 0 {
-                    state.selector.index -= 1;
-                }
-            }
-            KeyCode::Down => {
-                if item_count > 0 && state.selector.index < item_count - 1 {
-                    state.selector.index += 1;
-                }
-            }
-            KeyCode::Char(' ') => {
-                if let Some(skill) = skills.get(state.selector.index) {
-                    let skill_id = skill.id.clone();
-                    if let Some(pos) = state.selected_skill_ids.iter().position(|id| id == &skill_id)
-                    {
-                        state.selected_skill_ids.remove(pos);
-                    } else {
-                        state.selected_skill_ids.push(skill_id);
+                if let Some(item) = items.get(state.selector.index) {
+                    match item {
+                        crate::ui::app::NudgeSkillSelectorItem::Nudge(nudge) => {
+                            let nudge_id = nudge.id.clone();
+                            if let Some(pos) = state
+                                .selected_nudge_ids
+                                .iter()
+                                .position(|id| id == &nudge_id)
+                            {
+                                state.selected_nudge_ids.remove(pos);
+                            } else {
+                                state.selected_nudge_ids.push(nudge_id);
+                            }
+                        }
+                        crate::ui::app::NudgeSkillSelectorItem::Skill(skill) => {
+                            let skill_id = skill.id.clone();
+                            if let Some(pos) = state
+                                .selected_skill_ids
+                                .iter()
+                                .position(|id| id == &skill_id)
+                            {
+                                state.selected_skill_ids.remove(pos);
+                            } else {
+                                state.selected_skill_ids.push(skill_id);
+                            }
+                        }
                     }
                 }
             }

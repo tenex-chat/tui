@@ -138,9 +138,8 @@ pub static COMMANDS: &[Command] = &[
         execute: |app| {
             let reports = app.reports();
             if let Some(report) = reports.get(app.current_selection()) {
-                app.modal_state = ModalState::ReportViewer(modal::ReportViewerState::new(
-                    report.clone(),
-                ));
+                app.modal_state =
+                    ModalState::ReportViewer(modal::ReportViewerState::new(report.clone()));
             }
         },
     },
@@ -251,7 +250,10 @@ pub static COMMANDS: &[Command] = &[
         available: |app| {
             app.view == View::Home
                 && !app.sidebar_focused
-                && matches!(app.home_panel_focus, HomeTab::Conversations | HomeTab::Reports)
+                && matches!(
+                    app.home_panel_focus,
+                    HomeTab::Conversations | HomeTab::Reports
+                )
         },
         execute: |app| {
             app.toggle_sidebar_search();
@@ -377,7 +379,10 @@ pub static COMMANDS: &[Command] = &[
             }
             let (online, _) = app.filtered_projects();
             if let Some(project) = online.get(app.sidebar_project_index) {
-                app.data_store.borrow().operations.is_project_busy(&project.a_tag())
+                app.data_store
+                    .borrow()
+                    .operations
+                    .is_project_busy(&project.a_tag())
             } else {
                 false
             }
@@ -493,7 +498,11 @@ pub static COMMANDS: &[Command] = &[
         key: 'F',
         label: "Fork conversation",
         section: "Conversation",
-        available: |app| app.view == View::Chat && app.input_mode == InputMode::Normal && app.selected_thread().is_some(),
+        available: |app| {
+            app.view == View::Chat
+                && app.input_mode == InputMode::Normal
+                && app.selected_thread().is_some()
+        },
         execute: fork_conversation,
     },
     Command {
@@ -586,11 +595,11 @@ pub static COMMANDS: &[Command] = &[
     },
     Command {
         key: 'K',
-        label: "Select Skills",
+        label: "Select Nudges/Skills",
         section: "Input",
         available: |app| app.view == View::Chat,
         execute: |app| {
-            app.open_skill_selector();
+            app.open_nudge_skill_selector();
         },
     },
     // =========================================================================
@@ -630,7 +639,12 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
-                if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
+                if let Some(agent) = app
+                    .data_store
+                    .borrow()
+                    .content
+                    .get_agent_definition(agent_id)
+                {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::fork_from(&agent));
                 }
@@ -644,7 +658,12 @@ pub static COMMANDS: &[Command] = &[
         available: |app| app.view == View::AgentBrowser && app.home.in_agent_detail(),
         execute: |app| {
             if let Some(agent_id) = &app.home.viewing_agent_id {
-                if let Some(agent) = app.data_store.borrow().content.get_agent_definition(agent_id) {
+                if let Some(agent) = app
+                    .data_store
+                    .borrow()
+                    .content
+                    .get_agent_definition(agent_id)
+                {
                     app.modal_state =
                         ModalState::CreateAgent(modal::CreateAgentState::clone_from(&agent));
                 }
@@ -673,10 +692,7 @@ pub fn available_commands(app: &App) -> Vec<&'static Command> {
 /// Execute a command by its key. Returns true if a command was executed.
 pub fn execute_command(app: &mut App, key: char) -> bool {
     // Find and execute the first available command with this key
-    if let Some(cmd) = COMMANDS
-        .iter()
-        .find(|c| c.key == key && (c.available)(app))
-    {
+    if let Some(cmd) = COMMANDS.iter().find(|c| c.key == key && (c.available)(app)) {
         (cmd.execute)(app);
         true
     } else {
@@ -739,7 +755,8 @@ fn new_conversation_current_project(app: &mut App) {
         // Auto-select PM agent from status
         let pm_agent = {
             let store = app.data_store.borrow();
-            store.get_project_status(&a_tag)
+            store
+                .get_project_status(&a_tag)
                 .and_then(|status| status.pm_agent().cloned())
         };
         if let Some(pm) = pm_agent {
@@ -852,7 +869,11 @@ fn open_message_trace(app: &mut App) {
         if let Some(id) = get_message_id(item) {
             if let Some(trace_ctx) = get_trace_context(&app.db.ndb, &id) {
                 let jaeger_endpoint = app.preferences.borrow().jaeger_endpoint().to_string();
-                match jaeger::open_trace(&jaeger_endpoint, &trace_ctx.trace_id, Some(&trace_ctx.span_id)) {
+                match jaeger::open_trace(
+                    &jaeger_endpoint,
+                    &trace_ctx.trace_id,
+                    Some(&trace_ctx.span_id),
+                ) {
                     Ok(()) => {
                         app.set_warning_status("Opening trace in browser...");
                     }
@@ -890,7 +911,11 @@ fn stop_agents(app: &mut App) {
         };
         if is_busy {
             if let (Some(core_handle), Some(a_tag)) = (app.core_handle.clone(), project_a_tag) {
-                let working_agents = app.data_store.borrow().operations.get_working_agents(&stop_thread_id);
+                let working_agents = app
+                    .data_store
+                    .borrow()
+                    .operations
+                    .get_working_agents(&stop_thread_id);
                 if let Err(e) = core_handle.send(NostrCommand::StopOperations {
                     project_a_tag: a_tag,
                     event_ids: vec![stop_thread_id.clone()],
@@ -911,9 +936,7 @@ fn go_to_parent(app: &mut App) {
             let parent_data = {
                 let store = app.data_store.borrow();
                 store.get_thread_by_id(parent_id).map(|t| {
-                    let a_tag = store
-                        .find_project_for_thread(parent_id)
-                        .unwrap_or_default();
+                    let a_tag = store.find_project_for_thread(parent_id).unwrap_or_default();
                     (t.clone(), a_tag)
                 })
             };

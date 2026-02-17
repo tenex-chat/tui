@@ -9,7 +9,6 @@
 /// - Ctrl+Z: Undo last change
 /// - Alt+Left/Right: Word jumping
 /// - Large pastes become attachments
-
 use serde::{Deserialize, Serialize};
 
 /// Represents a pasted attachment (large text that was pasted)
@@ -119,14 +118,14 @@ impl TextEditor {
 
     /// Get selection range as (start, end) byte offsets
     pub fn selection_range(&self) -> Option<(usize, usize)> {
-        self.selection_anchor.map(|anchor| {
-            (anchor.min(self.cursor), anchor.max(self.cursor))
-        })
+        self.selection_anchor
+            .map(|anchor| (anchor.min(self.cursor), anchor.max(self.cursor)))
     }
 
     /// Get selected text
     pub fn selected_text(&self) -> Option<String> {
-        self.selection_range().map(|(start, end)| self.text[start..end].to_string())
+        self.selection_range()
+            .map(|(start, end)| self.text[start..end].to_string())
     }
 
     /// Delete the selected text
@@ -312,9 +311,7 @@ impl TextEditor {
 
         // Python
         if text.contains("def ") && text.contains(":")
-            || text.contains("import ")
-                && !text.contains(" from \"")
-                && !text.contains(" from '")
+            || text.contains("import ") && !text.contains(" from \"") && !text.contains(" from '")
             || text.contains("class ") && text.contains(":")
             || text.contains("if __name__")
         {
@@ -348,8 +345,7 @@ impl TextEditor {
 
         // SQL
         if text.to_uppercase().contains("SELECT ")
-            && (text.to_uppercase().contains(" FROM ")
-                || text.to_uppercase().contains(" WHERE "))
+            && (text.to_uppercase().contains(" FROM ") || text.to_uppercase().contains(" WHERE "))
         {
             return Some("sql");
         }
@@ -688,7 +684,12 @@ impl TextEditor {
         self.next_attachment_id = max_attachment_id + 1;
 
         // Find max ID in image attachments and set next_image_id to max+1
-        let max_image_id = self.image_attachments.iter().map(|a| a.id).max().unwrap_or(0);
+        let max_image_id = self
+            .image_attachments
+            .iter()
+            .map(|a| a.id)
+            .max()
+            .unwrap_or(0);
         self.next_image_id = max_image_id + 1;
     }
 

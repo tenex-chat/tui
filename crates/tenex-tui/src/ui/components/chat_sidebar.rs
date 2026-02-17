@@ -135,12 +135,14 @@ impl SidebarState {
         let del_count = self.delegations.len();
         if global_index < del_count {
             // Delegation
-            self.delegations.get(global_index)
+            self.delegations
+                .get(global_index)
                 .map(|d| SidebarSelection::Delegation(d.thread_id.clone()))
         } else {
             // Report
             let report_idx = global_index - del_count;
-            self.reports.get(report_idx)
+            self.reports
+                .get(report_idx)
                 .map(|r| SidebarSelection::Report(r.a_tag.clone()))
         }
     }
@@ -184,7 +186,11 @@ pub struct ConversationMetadata {
 
 impl ConversationMetadata {
     pub fn has_content(&self) -> bool {
-        self.title.is_some() || self.status_label.is_some() || self.status_current_activity.is_some() || self.summary.is_some() || self.total_llm_runtime_ms > 0
+        self.title.is_some()
+            || self.status_label.is_some()
+            || self.status_current_activity.is_some()
+            || self.summary.is_some()
+            || self.total_llm_runtime_ms > 0
     }
 
     pub fn is_busy(&self) -> bool {
@@ -292,9 +298,7 @@ pub fn render_chat_sidebar(
         )));
     }
 
-
-    let sidebar = Paragraph::new(lines)
-        .style(Style::default().bg(theme::BG_SIDEBAR));
+    let sidebar = Paragraph::new(lines).style(Style::default().bg(theme::BG_SIDEBAR));
 
     f.render_widget(sidebar, area);
 
@@ -362,7 +366,12 @@ fn render_work_indicator_section(
     ]));
 }
 
-fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_width: usize, h_padding: usize) {
+fn render_todos_section(
+    lines: &mut Vec<Line>,
+    todo_state: &TodoState,
+    content_width: usize,
+    h_padding: usize,
+) {
     let padding = " ".repeat(h_padding);
 
     let completed = todo_state.completed_count();
@@ -397,7 +406,10 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
         lines.push(Line::from(vec![
             Span::raw(padding.clone()),
             Span::styled(
-                format!("  {}", truncate_with_ellipsis(&active.title, content_width.saturating_sub(2))),
+                format!(
+                    "  {}",
+                    truncate_with_ellipsis(&active.title, content_width.saturating_sub(2))
+                ),
                 theme::text_primary(),
             ),
         ]));
@@ -405,7 +417,10 @@ fn render_todos_section(lines: &mut Vec<Line>, todo_state: &TodoState, content_w
             lines.push(Line::from(vec![
                 Span::raw(padding.clone()),
                 Span::styled(
-                    format!("  {}", truncate_with_ellipsis(desc, content_width.saturating_sub(2))),
+                    format!(
+                        "  {}",
+                        truncate_with_ellipsis(desc, content_width.saturating_sub(2))
+                    ),
                     theme::text_muted(),
                 ),
             ]));
@@ -472,7 +487,9 @@ fn render_delegations_section(
         // Target/recipient line only
         let target = truncate_with_ellipsis(&delegation.target, content_width.saturating_sub(4));
         let target_style = if is_selected {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             theme::text_primary()
         };
@@ -517,7 +534,9 @@ fn render_reports_section(
         // Title line with document icon
         let title = truncate_with_ellipsis(&report.title, content_width.saturating_sub(6));
         let title_style = if is_selected {
-            Style::default().fg(theme::ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+            Style::default()
+                .fg(theme::ACCENT_PRIMARY)
+                .add_modifier(Modifier::BOLD)
         } else {
             theme::text_primary()
         };
@@ -544,7 +563,10 @@ fn render_metadata_section<'a>(
             Span::raw(padding.clone()),
             Span::styled("⏱ ", Style::default().fg(theme::ACCENT_PRIMARY)),
             Span::styled("Runtime: ", theme::text_muted()),
-            Span::styled(runtime_str.clone(), Style::default().fg(theme::TEXT_PRIMARY)),
+            Span::styled(
+                runtime_str.clone(),
+                Style::default().fg(theme::TEXT_PRIMARY),
+            ),
         ]));
     }
 
