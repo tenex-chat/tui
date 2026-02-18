@@ -1425,40 +1425,13 @@ struct MainShellView: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            VStack(spacing: 0) {
-                List(selection: $selectedSection) {
-                    ForEach(AppSection.allCases) { section in
-                        shellSidebarRow(for: section)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedSection = section
-                            }
-                            .tag(Optional(section))
-                            .accessibilityIdentifier(section.accessibilityRowID)
-                    }
-                }
-                .listStyle(.sidebar)
-                .accessibilityIdentifier("app_sidebar")
-
-                Divider()
-                shellSidebarBottomBar
+        Group {
+            if currentSection == .agentDefinitions {
+                agentDefinitionsTwoColumnShell
+            } else {
+                threeColumnShell
             }
-            #if os(macOS)
-            .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
-            #endif
-        } content: {
-            sectionListColumn
-                .accessibilityIdentifier("section_list_column")
-                #if os(macOS)
-                .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 520)
-                #endif
-        } detail: {
-            sectionDetailColumn
-                .accessibilityIdentifier("detail_column")
         }
-        .navigationSplitViewStyle(.balanced)
         .onChange(of: coreManager.projects.map(\.id)) { _, ids in
             if let selectedProjectId, !ids.contains(selectedProjectId) {
                 self.selectedProjectId = nil
@@ -1470,6 +1443,64 @@ struct MainShellView: View {
                 selectedProjectId = nil
             }
         }
+    }
+
+    private var appSidebar: some View {
+        VStack(spacing: 0) {
+            List(selection: $selectedSection) {
+                ForEach(AppSection.allCases) { section in
+                    shellSidebarRow(for: section)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            selectedSection = section
+                        }
+                        .tag(Optional(section))
+                        .accessibilityIdentifier(section.accessibilityRowID)
+                }
+            }
+            .listStyle(.sidebar)
+            .accessibilityIdentifier("app_sidebar")
+
+            Divider()
+            shellSidebarBottomBar
+        }
+        #if os(macOS)
+        .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
+        #endif
+    }
+
+    private var threeColumnShell: some View {
+        NavigationSplitView {
+            appSidebar
+        } content: {
+            sectionListColumn
+                .accessibilityIdentifier("section_list_column")
+                #if os(macOS)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 420, max: 520)
+                #endif
+        } detail: {
+            sectionDetailColumn
+                .accessibilityIdentifier("detail_column")
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var agentDefinitionsTwoColumnShell: some View {
+        NavigationSplitView {
+            appSidebar
+        } detail: {
+            agentDefinitionsContent
+                .accessibilityIdentifier("section_list_column")
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    private var agentDefinitionsContent: some View {
+        AgentDefinitionsTabView(
+            layoutMode: .shellList,
+            selectedAgent: $selectedAgentDefinition
+        )
     }
 
     @ViewBuilder
@@ -1603,9 +1634,11 @@ struct MainShellView: View {
         case .search:
             SearchView(layoutMode: .shellDetail, selectedConversation: $selectedSearchConversation)
         case .agentDefinitions:
-            AgentDefinitionsTabView(
-                layoutMode: .shellDetail,
-                selectedAgent: $selectedAgentDefinition
+            // Unreachable in normal shell routing. Agent Definitions uses `agentDefinitionsTwoColumnShell`.
+            ContentUnavailableView(
+                "Agent Definitions",
+                systemImage: "person.3.sequence",
+                description: Text("Open an agent definition to see details.")
             )
         }
     }

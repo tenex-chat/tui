@@ -8,16 +8,18 @@ enum AgentDefinitionsLayoutMode {
 
 struct AgentDefinitionsTabView: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     let layoutMode: AgentDefinitionsLayoutMode
     private let selectedAgentBindingOverride: Binding<AgentInfo?>?
-
-    #if os(iOS)
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    #endif
 
     @StateObject private var viewModel = AgentDefinitionsViewModel()
     @State private var selectedAgentState: AgentInfo?
     @State private var hasConfiguredViewModel = false
+    @State private var navigationPath: [AgentDefinitionListItem] = []
+    @State private var assignmentTarget: AgentDefinitionListItem?
+    @State private var assignmentResult: AgentAssignmentResult?
+    @State private var showNewAgentDefinitionModal = false
 
     init(
         layoutMode: AgentDefinitionsLayoutMode = .adaptive,
@@ -31,33 +33,16 @@ struct AgentDefinitionsTabView: View {
         selectedAgentBindingOverride ?? $selectedAgentState
     }
 
-    private var useSplitView: Bool {
-        if layoutMode == .shellList || layoutMode == .shellDetail {
-            return true
-        }
-        #if os(macOS)
-        return true
-        #else
-        return horizontalSizeClass == .regular
-        #endif
-    }
-
     var body: some View {
         Group {
             switch layoutMode {
-            case .shellList:
-                shellListLayout
+            case .shellList, .adaptive:
+                navigationListLayout
             case .shellDetail:
                 shellDetailLayout
-            case .adaptive:
-                if useSplitView {
-                    splitLayout
-                } else {
-                    shellListLayout
-                }
             }
         }
-        .task(id: layoutMode == .shellDetail) {
+        .task {
             if !hasConfiguredViewModel {
                 viewModel.configure(with: coreManager)
                 hasConfiguredViewModel = true
@@ -66,6 +51,31 @@ struct AgentDefinitionsTabView: View {
         }
         .onChange(of: coreManager.diagnosticsVersion) { _, _ in
             Task { await viewModel.refresh() }
+        }
+        .sheet(item: $assignmentTarget) { item in
+            AgentDefinitionProjectAssignmentSheet(item: item) { result in
+                assignmentResult = result
+            }
+            .environmentObject(coreManager)
+        }
+        .sheet(isPresented: $showNewAgentDefinitionModal) {
+            NewAgentDefinitionSheet {
+                Task {
+                    await viewModel.refresh()
+                    if let newestMine = viewModel.mine.first {
+                        selectedAgentBinding.wrappedValue = newestMine.agent
+                        navigationPath = [newestMine]
+                    }
+                }
+            }
+            .environmentObject(coreManager)
+        }
+        .alert(item: $assignmentResult) { result in
+            Alert(
+                title: Text(result.title),
+                message: Text(result.message),
+                dismissButton: .default(Text("OK"))
+            )
         }
         .alert(
             "Unable to Load Agent Definitions",
@@ -86,43 +96,75 @@ struct AgentDefinitionsTabView: View {
         }
     }
 
-    private var shellListLayout: some View {
-        listContent
-            .navigationTitle("Agent Definitions")
-            .accessibilityIdentifier("section_list_column")
+    private var navigationListLayout: some View {
+        NavigationStack(path: $navigationPath) {
+            listContent
+                .navigationTitle("Agent Definitions")
+                #if os(iOS)
+                .navigationBarTitleDisplayMode(.inline)
+                #else
+                .toolbarTitleDisplayMode(.inline)
+                #endif
+                .navigationDestination(for: AgentDefinitionListItem.self) { item in
+                    AgentDefinitionDetailView(
+                        item: item,
+                        canDelete: viewModel.canDelete(item),
+                        onAssign: {
+                            assignmentTarget = item
+                        },
+                        onDelete: {
+                            let deleted = await viewModel.deleteAgentDefinition(id: item.id)
+                            if deleted {
+                                selectedAgentBinding.wrappedValue = nil
+                                navigationPath.removeAll { $0.id == item.id }
+                            }
+                            return deleted
+                        }
+                    )
+                }
+                .searchable(text: $viewModel.searchText, placement: .toolbar, prompt: "Search definitions")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        if viewModel.isLoading {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showNewAgentDefinitionModal = true
+                        } label: {
+                            Label("New", systemImage: "plus")
+                        }
+                    }
+
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            Task { await viewModel.refresh() }
+                        } label: {
+                            Label("Refresh", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(viewModel.isLoading)
+                    }
+                }
+        }
+        .accessibilityIdentifier("section_list_column")
     }
 
     private var shellDetailLayout: some View {
-        detailContent
-            .accessibilityIdentifier("detail_column")
-    }
-
-    private var splitLayout: some View {
-        #if os(macOS)
-        return AnyView(
-            HSplitView {
-                listContent
-                    .frame(minWidth: 340, idealWidth: 460, maxWidth: 560, maxHeight: .infinity)
-                detailContent
-                    .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
-            }
+        ContentUnavailableView(
+            "Agent Definitions",
+            systemImage: "person.3.sequence",
+            description: Text("Agent details now open from the definitions list.")
         )
-        #else
-        return AnyView(
-            NavigationSplitView {
-                listContent
-            } detail: {
-                detailContent
-            }
-        )
-        #endif
+        .accessibilityIdentifier("detail_column")
     }
 
     private var listContent: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 18) {
                 headerSection
-                controlsSection
 
                 if viewModel.filteredMine.isEmpty, viewModel.filteredCommunity.isEmpty {
                     emptyState
@@ -144,8 +186,9 @@ struct AgentDefinitionsTabView: View {
                     }
                 }
             }
-            .padding()
+            .padding(20)
         }
+        .background(listBackground)
         #if os(iOS)
         .refreshable {
             await viewModel.refresh()
@@ -153,58 +196,43 @@ struct AgentDefinitionsTabView: View {
         #endif
     }
 
+    private var listBackground: some View {
+        LinearGradient(
+            colors: [
+                Color.agentBrand.opacity(reduceTransparency ? 0.04 : 0.10),
+                Color.systemGroupedBackground,
+                Color.systemGroupedBackground
+            ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+        .ignoresSafeArea()
+    }
+
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             Text("Agent Definitions")
                 .font(.largeTitle.weight(.bold))
 
-            Text("Browse reusable agent templates (kind:4199)")
+            Text("Reusable agent templates (kind:4199) in a single card browser")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-        }
-    }
 
-    private var controlsSection: some View {
-        HStack(spacing: 10) {
-            searchField
-
-            Button {
-                Task { await viewModel.refresh() }
-            } label: {
-                if viewModel.isLoading {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-            }
-            .buttonStyle(.bordered)
-            .disabled(viewModel.isLoading)
-        }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
+            Text("\(viewModel.filteredMine.count + viewModel.filteredCommunity.count) visible")
+                .font(.caption)
                 .foregroundStyle(.secondary)
-
-            TextField("Search definitions", text: $viewModel.searchText)
-                .textFieldStyle(.plain)
-
-            if !viewModel.searchText.isEmpty {
-                Button {
-                    viewModel.searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.systemGray6)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
+                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(.white.opacity(reduceTransparency ? 0.05 : 0.16), lineWidth: 1)
+        }
     }
 
     private func sectionGrid(
@@ -212,7 +240,7 @@ struct AgentDefinitionsTabView: View {
         subtitle: String,
         items: [AgentDefinitionListItem]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.headline)
@@ -221,12 +249,18 @@ struct AgentDefinitionsTabView: View {
                     .foregroundStyle(.secondary)
             }
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 280, maximum: 380), spacing: 12)], spacing: 12) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300, maximum: 420), spacing: 14)], spacing: 14) {
                 ForEach(items) { item in
                     AgentDefinitionCardView(
                         item: item,
-                        isSelected: selectedAgentBinding.wrappedValue?.id == item.id,
-                        onSelect: { selectedAgentBinding.wrappedValue = item.agent }
+                        reduceTransparency: reduceTransparency,
+                        onOpen: {
+                            selectedAgentBinding.wrappedValue = item.agent
+                            navigationPath.append(item)
+                        },
+                        onAssign: {
+                            assignmentTarget = item
+                        }
                     )
                 }
             }
@@ -241,27 +275,13 @@ struct AgentDefinitionsTabView: View {
         )
         .frame(maxWidth: .infinity, minHeight: 280)
     }
-
-    @ViewBuilder
-    private var detailContent: some View {
-        if let selectedAgent = selectedAgentBinding.wrappedValue,
-           let item = viewModel.listItem(for: selectedAgent)
-        {
-            AgentDefinitionDetailView(item: item)
-        } else {
-            ContentUnavailableView(
-                "Select an Agent Definition",
-                systemImage: "person.3.sequence",
-                description: Text("Choose a card to inspect details")
-            )
-        }
-    }
 }
 
 private struct AgentDefinitionCardView: View {
     let item: AgentDefinitionListItem
-    let isSelected: Bool
-    let onSelect: () -> Void
+    let reduceTransparency: Bool
+    let onOpen: () -> Void
+    let onAssign: () -> Void
 
     private var attachmentCount: Int {
         item.agent.fileIds.count
@@ -272,86 +292,121 @@ private struct AgentDefinitionCardView: View {
     }
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .top, spacing: 10) {
-                    AgentAvatarView(
-                        agentName: displayName,
-                        pubkey: item.agent.pubkey,
-                        fallbackPictureUrl: item.agent.picture,
-                        size: 36,
-                        fontSize: 12,
-                        showBorder: false,
-                        isSelected: false
-                    )
+        VStack(alignment: .leading, spacing: 12) {
+            Button(action: onOpen) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .top, spacing: 10) {
+                        AgentAvatarView(
+                            agentName: displayName,
+                            pubkey: item.agent.pubkey,
+                            fallbackPictureUrl: item.agent.picture,
+                            size: 36,
+                            fontSize: 12,
+                            showBorder: false,
+                            isSelected: false
+                        )
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(displayName)
-                            .font(.headline)
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(displayName)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
 
-                        HStack(spacing: 6) {
-                            if !item.agent.role.isEmpty {
-                                tag(item.agent.role)
+                            HStack(spacing: 6) {
+                                if !item.agent.role.isEmpty {
+                                    tag(item.agent.role)
+                                }
+                                if let model = item.agent.model, !model.isEmpty {
+                                    tag(model)
+                                }
                             }
-                            if let model = item.agent.model, !model.isEmpty {
-                                tag(model)
-                            }
+                        }
+
+                        Spacer(minLength: 0)
+
+                        if let version = item.agent.version, !version.isEmpty {
+                            Text("v\(version)")
+                                .font(.caption2.weight(.medium))
+                                .foregroundStyle(.secondary)
                         }
                     }
 
-                    Spacer(minLength: 0)
-
-                    if let version = item.agent.version, !version.isEmpty {
-                        Text("v\(version)")
-                            .font(.caption2.weight(.medium))
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(3)
-
-                HStack(spacing: 10) {
-                    Label(item.authorDisplayName, systemImage: "person")
-                        .font(.caption)
+                    Text(item.agent.description.isEmpty ? "No description provided" : item.agent.description)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        .lineLimit(3)
 
-                    if attachmentCount > 0 {
-                        Label("\(attachmentCount) file\(attachmentCount == 1 ? "" : "s")", systemImage: "paperclip")
+                    HStack(spacing: 10) {
+                        Label(item.authorDisplayName, systemImage: "person")
                             .font(.caption)
-                            .foregroundStyle(Color.skillBrand)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+
+                        if attachmentCount > 0 {
+                            Label("\(attachmentCount) file\(attachmentCount == 1 ? "" : "s")", systemImage: "paperclip")
+                                .font(.caption)
+                                .foregroundStyle(Color.skillBrand)
+                        }
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.systemBackground)
-            .overlay {
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isSelected ? Color.agentBrand : Color.systemGray5, lineWidth: isSelected ? 2 : 1)
+            .buttonStyle(.plain)
+
+            Divider()
+                .overlay(.white.opacity(reduceTransparency ? 0.06 : 0.14))
+
+            HStack {
+                Button {
+                    onAssign()
+                } label: {
+                    Label("Add to Projects", systemImage: "plus.circle")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.agentBrand)
+                }
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
+                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
+        }
     }
 
     private func tag(_ text: String) -> some View {
         Text(text)
             .font(.caption2)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Color.systemGray6)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(Color.systemGray6.opacity(0.7))
             .clipShape(Capsule())
     }
 }
 
 private struct AgentDefinitionDetailView: View {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
     let item: AgentDefinitionListItem
+    let canDelete: Bool
+    let onAssign: () -> Void
+    let onDelete: () async -> Bool
+
+    @State private var showDeleteConfirmation = false
+    @State private var isDeleting = false
 
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -385,7 +440,37 @@ private struct AgentDefinitionDetailView: View {
                     fileReferencesCard
                 }
             }
-            .padding()
+            .padding(20)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color.agentBrand.opacity(reduceTransparency ? 0.03 : 0.08), Color.systemGroupedBackground],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
+        .navigationTitle(displayName)
+        #if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        #else
+        .toolbarTitleDisplayMode(.inline)
+        #endif
+        .confirmationDialog(
+            "Delete Agent Definition",
+            isPresented: $showDeleteConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("Delete", role: .destructive) {
+                Task {
+                    isDeleting = true
+                    _ = await onDelete()
+                    isDeleting = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This publishes a NIP-09 kind:5 deletion for this definition event.")
         }
     }
 
@@ -395,13 +480,13 @@ private struct AgentDefinitionDetailView: View {
                 agentName: displayName,
                 pubkey: item.agent.pubkey,
                 fallbackPictureUrl: item.agent.picture,
-                size: 44,
-                fontSize: 14,
+                size: 48,
+                fontSize: 16,
                 showBorder: false,
                 isSelected: false
             )
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(displayName)
                     .font(.title2.weight(.bold))
 
@@ -419,6 +504,36 @@ private struct AgentDefinitionDetailView: View {
             }
 
             Spacer(minLength: 0)
+
+            Button(action: onAssign) {
+                Label("Add to Projects", systemImage: "plus")
+            }
+            .adaptiveGlassButtonStyle()
+
+            if canDelete {
+                Button(role: .destructive) {
+                    showDeleteConfirmation = true
+                } label: {
+                    if isDeleting {
+                        ProgressView()
+                    } else {
+                        Label("Delete", systemImage: "trash")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isDeleting)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.55))
+                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
         }
     }
 
@@ -517,12 +632,15 @@ private struct AgentDefinitionDetailView: View {
                 .font(.headline)
             content()
         }
-        .padding()
-        .background(Color.systemBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(16)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.systemBackground.opacity(reduceTransparency ? 1.0 : 0.56))
+                .modifier(AvailableGlassEffect(reduceTransparency: reduceTransparency))
+        }
         .overlay {
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.systemGray5, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(.white.opacity(reduceTransparency ? 0.06 : 0.14), lineWidth: 1)
         }
     }
 
@@ -559,4 +677,213 @@ private struct AgentDefinitionDetailView: View {
         guard value.count > 16 else { return value }
         return "\(value.prefix(8))...\(value.suffix(8))"
     }
+}
+
+private struct AgentDefinitionProjectAssignmentSheet: View {
+    @EnvironmentObject private var coreManager: TenexCoreManager
+    @Environment(\.dismiss) private var dismiss
+
+    let item: AgentDefinitionListItem
+    let onFinished: (AgentAssignmentResult) -> Void
+
+    @State private var selectedProjectIds: Set<String> = []
+    @State private var searchText = ""
+    @State private var isSaving = false
+
+    private var displayName: String {
+        item.agent.name.isEmpty ? "Unnamed Agent" : item.agent.name
+    }
+
+    private var sortedProjects: [ProjectInfo] {
+        coreManager.projects
+            .filter { !$0.isDeleted }
+            .sorted { lhs, rhs in
+                lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
+            }
+    }
+
+    private var filteredProjects: [ProjectInfo] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return sortedProjects }
+
+        return sortedProjects.filter { project in
+            project.title.localizedCaseInsensitiveContains(query)
+                || project.id.localizedCaseInsensitiveContains(query)
+                || (project.description?.localizedCaseInsensitiveContains(query) ?? false)
+        }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if filteredProjects.isEmpty {
+                    ContentUnavailableView(
+                        "No Projects",
+                        systemImage: "folder.badge.questionmark",
+                        description: Text(searchText.isEmpty ? "No kind:31933 project events found." : "No projects match your search.")
+                    )
+                } else {
+                    ForEach(filteredProjects, id: \.id) { project in
+                        projectRow(project)
+                            .listRowSeparator(.visible)
+                    }
+                }
+            }
+            #if os(iOS)
+            .listStyle(.insetGrouped)
+            #else
+            .listStyle(.inset)
+            #endif
+            .searchable(text: $searchText, prompt: "Search projects")
+            .navigationTitle("Add to Projects")
+            #if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
+            #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                    .disabled(isSaving)
+                }
+
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        Task { await assignToProjects() }
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text("Add")
+                                .fontWeight(.semibold)
+                        }
+                    }
+                    .disabled(selectedProjectIds.isEmpty || isSaving)
+                }
+            }
+        }
+        #if os(iOS)
+        .tenexModalPresentation(detents: [.medium, .large])
+        #else
+        .frame(minWidth: 500, idealWidth: 620, minHeight: 420, idealHeight: 560)
+        #endif
+    }
+
+    private func projectRow(_ project: ProjectInfo) -> some View {
+        let alreadyAssigned = project.agentIds.contains(item.agent.id)
+        let isSelected = selectedProjectIds.contains(project.id)
+
+        return Button {
+            guard !alreadyAssigned else { return }
+            if isSelected {
+                selectedProjectIds.remove(project.id)
+            } else {
+                selectedProjectIds.insert(project.id)
+            }
+        } label: {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(project.title)
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Text(project.id)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if alreadyAssigned {
+                        Text("Already has this agent tag")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                if alreadyAssigned {
+                    Label("Added", systemImage: "checkmark.seal.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title3)
+                        .foregroundStyle(isSelected ? Color.agentBrand : .secondary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isSaving)
+    }
+
+    private func assignToProjects() async {
+        guard !selectedProjectIds.isEmpty else { return }
+
+        isSaving = true
+        defer { isSaving = false }
+
+        let targetProjects = sortedProjects.filter { selectedProjectIds.contains($0.id) }
+
+        var updatedCount = 0
+        var failedProjects: [String] = []
+
+        for project in targetProjects {
+            if project.agentIds.contains(item.agent.id) {
+                continue
+            }
+
+            var updatedAgentIds = project.agentIds
+            updatedAgentIds.append(item.agent.id)
+
+            do {
+                try await coreManager.safeCore.updateProject(
+                    projectId: project.id,
+                    title: project.title,
+                    description: project.description ?? "",
+                    repoUrl: project.repoUrl,
+                    pictureUrl: project.pictureUrl,
+                    agentIds: updatedAgentIds,
+                    mcpToolIds: project.mcpToolIds
+                )
+                updatedCount += 1
+            } catch {
+                failedProjects.append(project.title)
+            }
+        }
+
+        if updatedCount > 0 {
+            await coreManager.fetchData()
+        }
+
+        let result: AgentAssignmentResult
+        if failedProjects.isEmpty {
+            result = AgentAssignmentResult(
+                title: "Agent Added",
+                message: "Added \(displayName) to \(updatedCount) project\(updatedCount == 1 ? "" : "s")."
+            )
+        } else if updatedCount > 0 {
+            result = AgentAssignmentResult(
+                title: "Partially Added",
+                message: "Added to \(updatedCount) project\(updatedCount == 1 ? "" : "s"). Failed for \(failedProjects.count) project\(failedProjects.count == 1 ? "" : "s")."
+            )
+        } else {
+            result = AgentAssignmentResult(
+                title: "Unable to Add",
+                message: "No projects were updated for \(displayName)."
+            )
+        }
+
+        onFinished(result)
+        dismiss()
+    }
+}
+
+private struct AgentAssignmentResult: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
