@@ -37,6 +37,7 @@ struct SearchView: View {
     @State private var isLoadingConversation = false
     @State private var loadingConversationId: String?  // Track which conversation we're loading for "latest wins"
     @State private var loadErrorMessage: String?  // Error feedback for failed loads
+    @State private var showGlobalFilterSheet = false
 
     init(
         layoutMode: SearchLayoutMode = .adaptive,
@@ -79,6 +80,18 @@ struct SearchView: View {
         .onChange(of: searchText) { _, newValue in
             performSearch(query: newValue)
         }
+        .onChange(of: coreManager.appFilterProjectIds) { _, _ in
+            performSearch(query: searchText)
+        }
+        .onChange(of: coreManager.appFilterTimeWindow) { _, _ in
+            performSearch(query: searchText)
+        }
+        .onChange(of: groupedResults.map(\.id)) { _, visibleConversationIds in
+            if let selectedId = selectedConversationBinding.wrappedValue?.id,
+               !visibleConversationIds.contains(selectedId) {
+                selectedConversationBinding.wrappedValue = nil
+            }
+        }
         .overlay {
             if isSearching || isLoadingConversation {
                 ProgressView()
@@ -96,6 +109,13 @@ struct SearchView: View {
             if let message = loadErrorMessage {
                 Text(message)
             }
+        }
+        .sheet(isPresented: $showGlobalFilterSheet) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
         }
     }
 
@@ -218,11 +238,19 @@ struct SearchView: View {
         #else
         .searchable(text: $searchText)
         #endif
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                AppGlobalFilterToolbarButton {
+                    showGlobalFilterSheet = true
+                }
+            }
+        }
     }
 
     private func performSearch(query: String) {
         // Cancel any pending search
         searchTask?.cancel()
+        let filterSnapshot = coreManager.appFilterSnapshot
 
         guard query.count >= 2 else {
             groupedResults = []
@@ -241,9 +269,15 @@ struct SearchView: View {
 
             guard !Task.isCancelled else { return }
 
+            let now = UInt64(Date().timeIntervalSince1970)
+            let filteredResults = searchResults.filter { result in
+                let projectId = result.projectATag.map(TenexCoreManager.projectId(fromATag:))
+                return filterSnapshot.includes(projectId: projectId, timestamp: result.createdAt, now: now)
+            }
+
             // Group results by threadId
             var grouped: [String: [SearchResult]] = [:]
-            for result in searchResults {
+            for result in filteredResults {
                 if let threadId = result.threadId {
                     grouped[threadId, default: []].append(result)
                 }
@@ -261,7 +295,15 @@ struct SearchView: View {
             // Build grouped results
             let groups = grouped.compactMap { threadId, matches -> ConversationSearchGroup? in
                 let conv = conversationMap[threadId]
-                let projectId = matches.first?.projectATag?.components(separatedBy: ":").last
+                let projectIdFromConversation: String? = {
+                    guard let conv else { return nil }
+                    let parsed = TenexCoreManager.projectId(fromATag: conv.projectATag)
+                    return parsed.isEmpty ? nil : parsed
+                }()
+                let projectId = projectIdFromConversation ?? matches
+                    .compactMap { $0.projectATag }
+                    .map(TenexCoreManager.projectId(fromATag:))
+                    .first(where: { !$0.isEmpty })
                 let projectName = projectId.flatMap { projectMap[$0] }
 
                 return ConversationSearchGroup(

@@ -139,6 +139,7 @@ struct InboxView: View {
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
     @State private var activeConversationIdState: String?
+    @State private var showGlobalFilterSheet = false
 
     init(
         layoutMode: InboxLayoutMode = .adaptive,
@@ -164,15 +165,10 @@ struct InboxView: View {
         activeConversationIdBindingOverride ?? $activeConversationIdState
     }
 
-    // MARK: - 48-Hour Cap Constants & Time Invalidation
-
-    /// Hard cap: 48 hours in seconds (48 * 60 * 60 = 172,800).
-    /// NOTE: This value is synchronized with Rust constant `tenex_core::constants::INBOX_48H_CAP_SECONDS`.
-    /// If changed, update both locations for cross-platform consistency.
-    private static let inbox48HourCapSeconds: UInt64 = 48 * 60 * 60
+    // MARK: - Time Invalidation
 
     /// Refresh interval for time-based invalidation (1 minute).
-    /// Items crossing the 48h threshold will disappear on next tick.
+    /// Items crossing the selected time window boundary will disappear on next tick.
     private static let refreshIntervalSeconds: TimeInterval = 60
 
     private var useSplitView: Bool {
@@ -188,34 +184,33 @@ struct InboxView: View {
 
     // MARK: - Computed Properties (Time-Aware)
 
-    /// Items within the 48-hour window from centralized store.
-    /// Takes `now` as parameter to ensure consistent filtering across all derived computations.
-    private func itemsWithin48Hours(now: UInt64) -> [InboxItem] {
-        let cutoff = now > Self.inbox48HourCapSeconds ? now - Self.inbox48HourCapSeconds : 0
-        return coreManager.inboxItems.filter { $0.createdAt >= cutoff }
+    /// Items within the global project/time filter scope.
+    private func itemsWithinGlobalFilter(now: UInt64) -> [InboxItem] {
+        coreManager.inboxItems.filter { item in
+            coreManager.inboxItemMatchesAppFilter(item, now: now)
+        }
     }
 
-    /// Items filtered by current tab selection (after 48h cap).
+    /// Items filtered by current tab selection (after global project/time filter).
     private func filteredItems(now: UInt64) -> [InboxItem] {
-        itemsWithin48Hours(now: now).filter { $0.matches(filter: selectedFilterBinding.wrappedValue) }
+        itemsWithinGlobalFilter(now: now).filter { $0.matches(filter: selectedFilterBinding.wrappedValue) }
     }
 
-    /// Count of unread items for badge display (within 48h cap).
+    /// Count of unread items for badge display (within global project/time filter).
     private func unreadCount(now: UInt64) -> Int {
-        itemsWithin48Hours(now: now).filter(\.isUnread).count
+        itemsWithinGlobalFilter(now: now).filter(\.isUnread).count
     }
 
-    /// Unread count for a specific filter (within 48h cap).
+    /// Unread count for a specific segment (within global project/time filter).
     private func unreadCount(for filter: InboxFilter, now: UInt64) -> Int {
         if filter == .all {
             return unreadCount(now: now)
         }
-        return itemsWithin48Hours(now: now).filter { $0.matches(filter: filter) && $0.isUnread }.count
+        return itemsWithinGlobalFilter(now: now).filter { $0.matches(filter: filter) && $0.isUnread }.count
     }
 
     var body: some View {
-        // TimelineView triggers re-render periodically to invalidate stale items
-        // that have crossed the 48h threshold since last render.
+        // TimelineView triggers periodic re-render so time-window filtering stays current.
         TimelineView(.periodic(from: .now, by: Self.refreshIntervalSeconds)) { context in
             // Compute `now` once per render cycle for consistent filtering
             let now = UInt64(context.date.timeIntervalSince1970)
@@ -244,6 +239,13 @@ struct InboxView: View {
                     activeConversationIdBinding.wrappedValue = nil
                 }
             }
+        }
+        .sheet(isPresented: $showGlobalFilterSheet) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
         }
     }
 
@@ -297,6 +299,13 @@ struct InboxView: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                AppGlobalFilterToolbarButton {
+                    showGlobalFilterSheet = true
+                }
+            }
+        }
     }
 
     @ViewBuilder
@@ -324,8 +333,7 @@ struct InboxView: View {
 
     private func selectedItem(now: UInt64) -> InboxItem? {
         guard let selectedItemId = selectedItemIdBinding.wrappedValue else { return nil }
-        return itemsWithin48Hours(now: now).first(where: { $0.id == selectedItemId })
-            ?? coreManager.inboxItems.first(where: { $0.id == selectedItemId })
+        return itemsWithinGlobalFilter(now: now).first(where: { $0.id == selectedItemId })
     }
 
     private func shellListLayout(items: [InboxItem], now: UInt64) -> some View {
@@ -360,6 +368,13 @@ struct InboxView: View {
             }
             .navigationTitle("Inbox")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    AppGlobalFilterToolbarButton {
+                        showGlobalFilterSheet = true
+                    }
+                }
+            }
             .sheet(item: $presentedItem, onDismiss: {
                 if let pending = pendingNavigation {
                     navigateToConversation = pending

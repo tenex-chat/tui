@@ -16,9 +16,6 @@ final class ReportsViewModel: ObservableObject {
     /// Search text for filtering reports
     @Published var searchText = ""
 
-    /// Selected project IDs for filtering (empty means all projects)
-    @Published var selectedProjectIds: Set<String> = []
-
     // MARK: - Private Properties
 
     private weak var coreManager: TenexCoreManager?
@@ -26,14 +23,19 @@ final class ReportsViewModel: ObservableObject {
 
     // MARK: - Computed Properties
 
-    /// Filtered reports based on search text and selected projects
+    /// Filtered reports based on global project/time filters and search text.
     var filteredReports: [ReportInfo] {
         var result = reports
 
-        // Filter by selected projects
-        if !selectedProjectIds.isEmpty {
+        // Filter by global app filter first
+        if let coreManager {
+            let now = UInt64(Date().timeIntervalSince1970)
             result = result.filter { report in
-                selectedProjectIds.contains(report.projectId)
+                coreManager.matchesAppFilter(
+                    projectId: report.projectId,
+                    timestamp: report.updatedAt,
+                    now: now
+                )
             }
         }
 
