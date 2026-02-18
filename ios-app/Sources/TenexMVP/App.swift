@@ -301,11 +301,20 @@ class TenexCoreManager: ObservableObject {
     }
 
     @MainActor
-    func applyProjectStatusChanged(projectId: String, projectATag _: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]) {
-        let previousStatus = projectOnlineStatus[projectId]
-        let previousAgents = self.onlineAgents[projectId]
-        setProjectOnlineStatus(isOnline, for: projectId)
-        setOnlineAgentsCache(onlineAgents, for: projectId)
+    func applyProjectStatusChanged(projectId: String, projectATag: String, isOnline: Bool, onlineAgents: [OnlineAgentInfo]) {
+        let resolvedProjectId: String = {
+            if !projectId.isEmpty {
+                return projectId
+            }
+            return Self.projectId(fromATag: projectATag)
+        }()
+
+        guard !resolvedProjectId.isEmpty else { return }
+
+        let previousStatus = projectOnlineStatus[resolvedProjectId]
+        let previousAgents = self.onlineAgents[resolvedProjectId]
+        setProjectOnlineStatus(isOnline, for: resolvedProjectId)
+        setOnlineAgentsCache(onlineAgents, for: resolvedProjectId)
         if previousStatus != isOnline || previousAgents != onlineAgents {
             signalDiagnosticsUpdate()
         }
