@@ -256,6 +256,9 @@ pub(crate) async fn run_app(
                 app.tick(); // Increment frame counter for animations
                 app.check_for_data_updates()?;
 
+                // Sync working agent state to open tabs (for blue indicator)
+                sync_tab_working_state(app);
+
                 // Check for pending backend approvals
                 check_pending_backend_approvals(app);
             }
@@ -435,6 +438,30 @@ pub(crate) async fn run_app(
         }
     }
     Ok(())
+}
+
+/// Sync the working agent state from data store to open tabs.
+/// This updates the `is_agent_working` flag on each tab based on kind:24133 operation events.
+fn sync_tab_working_state(app: &mut App) {
+    let store = app.data_store.borrow();
+
+    // Collect thread IDs and their working status
+    let working_status: Vec<(String, bool)> = app
+        .open_tabs()
+        .iter()
+        .filter(|tab| tab.is_conversation() && !tab.thread_id.is_empty())
+        .map(|tab| {
+            let is_working = !store.operations.get_working_agents(&tab.thread_id).is_empty();
+            (tab.thread_id.clone(), is_working)
+        })
+        .collect();
+
+    drop(store); // Release borrow before mutating app
+
+    // Update tab states
+    for (thread_id, is_working) in working_status {
+        app.set_tab_agent_working(&thread_id, is_working);
+    }
 }
 
 fn dispatch_paste_as_keys(

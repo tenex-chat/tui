@@ -2523,6 +2523,12 @@ impl App {
         self.tabs.clear_waiting_for_user(thread_id);
     }
 
+    /// Update the agent working state for a thread tab
+    /// This is used to show a blue indicator when agents are actively working
+    pub fn set_tab_agent_working(&mut self, thread_id: &str, is_working: bool) {
+        self.tabs.set_agent_working(thread_id, is_working);
+    }
+
     /// Record that the user was active in a thread (for TTS inactivity gating)
     pub fn record_user_activity(&mut self, thread_id: &str) {
         let now = std::time::SystemTime::now()
