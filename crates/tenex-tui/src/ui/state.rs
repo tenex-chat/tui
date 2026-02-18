@@ -182,8 +182,7 @@ impl TabMessageHistory {
 
 /// The type of content displayed in a tab.
 /// This enum discriminates between different tab content types in the unified tab system.
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum TabContentType {
     /// A conversation thread (existing behavior)
     #[default]
@@ -198,7 +197,6 @@ pub enum TabContentType {
         a_tag: String,
     },
 }
-
 
 // =============================================================================
 // TTS QUEUE STATE

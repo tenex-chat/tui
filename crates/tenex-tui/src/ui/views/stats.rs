@@ -1266,8 +1266,12 @@ mod tests {
 
             // Verify day part is numeric
             let day_part = result[4..].trim();
-            let day_num: u32 = day_part.parse().unwrap_or_else(|_| panic!("Timestamp {} produced non-numeric day '{}' in result '{}'",
-                ts, day_part, result));
+            let day_num: u32 = day_part.parse().unwrap_or_else(|_| {
+                panic!(
+                    "Timestamp {} produced non-numeric day '{}' in result '{}'",
+                    ts, day_part, result
+                )
+            });
             assert!(
                 (1..=31).contains(&day_num),
                 "Day {} out of range for timestamp {}",

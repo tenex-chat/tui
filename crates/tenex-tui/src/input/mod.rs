@@ -54,12 +54,11 @@ pub(crate) fn handle_key(
         || matches!(
             app.modal_state,
             ModalState::CommandPalette(_)
-                | ModalState::AgentSelector { .. }
+                | ModalState::AgentConfig(_)
                 | ModalState::ProjectsModal { .. }
                 | ModalState::CreateAgent(_)
                 | ModalState::CreateProject(_)
                 | ModalState::ProjectSettings(_)
-                | ModalState::AgentSettings(_)
                 | ModalState::ExpandedEditor { .. }
                 | ModalState::AskModal(_)
                 | ModalState::ComposerProjectSelector { .. }
@@ -154,10 +153,9 @@ pub(crate) fn handle_key(
     // GLOBAL TAB NAVIGATION (works in all views except Login)
     // =========================================================================
 
-    if app.view != View::Login
-        && handle_global_tab_navigation(app, key)? {
-            return Ok(());
-        }
+    if app.view != View::Login && handle_global_tab_navigation(app, key)? {
+        return Ok(());
+    }
 
     // =========================================================================
     // VIEW-SPECIFIC HANDLERS
@@ -176,10 +174,12 @@ pub(crate) fn handle_key(
     }
 
     // Handle tab navigation in Chat view (Normal mode)
-    if app.view == View::Chat && app.input_mode == InputMode::Normal
-        && handle_chat_normal_mode(app, key)? {
-            return Ok(());
-        }
+    if app.view == View::Chat
+        && app.input_mode == InputMode::Normal
+        && handle_chat_normal_mode(app, key)?
+    {
+        return Ok(());
+    }
 
     // =========================================================================
     // INPUT MODE HANDLERS

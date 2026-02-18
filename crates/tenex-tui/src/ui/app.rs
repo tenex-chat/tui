@@ -7,14 +7,13 @@ use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::audio_player::{AudioPlaybackState, AudioPlayer};
 use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
-use crate::ui::modal::{CommandPaletteState, ModalState};
+use crate::ui::modal::{AgentConfigState, CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::selector::SelectorState;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
 use crate::ui::state::{
     ChatSearchMatch, ChatSearchState, ConversationState, HomeViewState, LocalStreamBuffer,
-    NavigationStackEntry, OpenTab,
-    TTSQueueItemStatus, TabManager, ViewLocation,
+    NavigationStackEntry, OpenTab, TTSQueueItemStatus, TabManager, ViewLocation,
 };
 use crate::ui::text_editor::{ImageAttachment, PasteAttachment, TextEditor};
 use nostr_sdk::Keys;
@@ -94,6 +93,24 @@ pub fn is_within_48h_cap(created_at: u64, now: u64) -> bool {
     created_at >= cutoff
 }
 
+fn resolve_selected_agent_from_status(
+    current: Option<&ProjectAgent>,
+    status: &ProjectStatus,
+) -> Option<ProjectAgent> {
+    if let Some(current_agent) = current {
+        if let Some(updated) = status
+            .agents
+            .iter()
+            .find(|agent| agent.pubkey == current_agent.pubkey)
+        {
+            return Some(updated.clone());
+        }
+        return Some(current_agent.clone());
+    }
+
+    status.pm_agent().cloned()
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum View {
     Login,
@@ -153,20 +170,46 @@ impl StatsSubtab {
 // ChatSearchState, ChatSearchMatch, OpenTab, TabManager, HomeViewState, ChatViewState,
 // LocalStreamBuffer, ConversationState are now in ui::state module
 
-/// Focus state for the context line (agent/model bar below input)
+/// Focus state for the context line (agent/project bar below input)
 /// None means the text input is focused, Some(X) means item X in context line is selected
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputContextFocus {
     /// Agent name is selected
     Agent,
-    /// Model selector is selected
-    Model,
     /// Project selector is selected (only available for new conversations/draft tabs)
     Project,
-    /// Nudge selector is selected
-    Nudge,
-    /// Skill selector is selected
-    Skill,
+    /// Unified nudge/skill selector is selected
+    NudgeSkill,
+}
+
+impl InputContextFocus {
+    pub fn move_left(self, is_draft_tab: bool) -> Self {
+        match self {
+            InputContextFocus::Agent => InputContextFocus::Agent,
+            InputContextFocus::Project => InputContextFocus::Agent,
+            InputContextFocus::NudgeSkill => {
+                if is_draft_tab {
+                    InputContextFocus::Project
+                } else {
+                    InputContextFocus::Agent
+                }
+            }
+        }
+    }
+
+    pub fn move_right(self, is_draft_tab: bool) -> Self {
+        match self {
+            InputContextFocus::Agent => {
+                if is_draft_tab {
+                    InputContextFocus::Project
+                } else {
+                    InputContextFocus::NudgeSkill
+                }
+            }
+            InputContextFocus::Project => InputContextFocus::NudgeSkill,
+            InputContextFocus::NudgeSkill => InputContextFocus::NudgeSkill,
+        }
+    }
 }
 
 /// Actions that can be undone
@@ -1660,6 +1703,7 @@ impl App {
                 }
                 DataChange::ProjectStatus { json } => {
                     self.data_store.borrow_mut().handle_status_event_json(&json);
+                    self.refresh_selected_agent_from_project_status();
                 }
                 DataChange::MCPToolsChanged => {
                     // MCP tools are already updated in the store by the worker
@@ -1667,6 +1711,26 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    /// Refresh selected_agent from the latest selected-project status.
+    /// Ensures model/tool changes are reflected in the composer immediately.
+    pub fn refresh_selected_agent_from_project_status(&mut self) {
+        let status = self.selected_project.as_ref().and_then(|project| {
+            self.data_store
+                .borrow()
+                .get_project_status(&project.a_tag())
+                .cloned()
+        });
+
+        let Some(status) = status else {
+            return;
+        };
+
+        let current = self.selected_agent().cloned();
+        if let Some(resolved) = resolve_selected_agent_from_status(current.as_ref(), &status) {
+            self.set_selected_agent(Some(resolved));
+        }
     }
 
     /// Get the thread_id from the current notification (if it has one)
@@ -1855,19 +1919,20 @@ impl App {
         // Also check the thread itself (the original message that started the thread)
         // The thread author might be an agent - use last_activity as timestamp proxy
         // Note: for the thread root, we only consider it if no messages from agents exist yet
-        if latest_agent_pubkey.is_none() && agent_pubkeys.contains(thread.pubkey.as_str())
+        if latest_agent_pubkey.is_none()
+            && agent_pubkeys.contains(thread.pubkey.as_str())
             && user_pubkey
                 .as_ref()
                 .map(|pk| pk != &thread.pubkey)
                 .unwrap_or(true)
-            {
-                latest_agent_pubkey = Some(thread.pubkey.as_str());
-                tlog!(
-                    "AGENT",
-                    "  using thread author as agent: pubkey={}",
-                    &thread.pubkey[..8]
-                );
-            }
+        {
+            latest_agent_pubkey = Some(thread.pubkey.as_str());
+            tlog!(
+                "AGENT",
+                "  using thread author as agent: pubkey={}",
+                &thread.pubkey[..8]
+            );
+        }
 
         // Find and return the matching agent
         let result = latest_agent_pubkey
@@ -1884,13 +1949,7 @@ impl App {
         result
     }
 
-    /// Get agents filtered by current filter (from ModalState or empty)
-    /// Results are sorted by match quality (prefix matches first, then by gap count)
-    pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
-        let filter = match &self.modal_state {
-            ModalState::AgentSelector { selector } => &selector.filter,
-            _ => "",
-        };
+    fn filtered_agents_with_filter(&self, filter: &str) -> Vec<crate::models::ProjectAgent> {
         let mut agents_with_scores: Vec<_> = self
             .available_agents()
             .into_iter()
@@ -1903,42 +1962,80 @@ impl App {
         agents_with_scores.into_iter().map(|(a, _)| a).collect()
     }
 
-    /// Get agent selector index (from ModalState)
-    pub fn agent_selector_index(&self) -> usize {
-        match &self.modal_state {
-            ModalState::AgentSelector { selector } => selector.index,
-            _ => 0,
-        }
-    }
-
-    /// Get agent selector filter (from ModalState)
-    pub fn agent_selector_filter(&self) -> &str {
-        match &self.modal_state {
-            ModalState::AgentSelector { selector } => &selector.filter,
+    /// Get agents filtered by the active agent-config modal filter.
+    pub fn filtered_agents(&self) -> Vec<crate::models::ProjectAgent> {
+        let filter = match &self.modal_state {
+            ModalState::AgentConfig(state) => state.selector.filter.as_str(),
             _ => "",
-        }
-    }
-
-    /// Get agent selector scroll offset (from ModalState)
-    pub fn agent_selector_scroll(&self) -> usize {
-        match &self.modal_state {
-            ModalState::AgentSelector { selector } => selector.scroll_offset,
-            _ => 0,
-        }
-    }
-
-    /// Open the agent selector modal
-    pub fn open_agent_selector(&mut self) {
-        self.modal_state = ModalState::AgentSelector {
-            selector: SelectorState::new(),
         };
+        self.filtered_agents_with_filter(filter)
     }
 
-    /// Close the agent selector modal
-    pub fn close_agent_selector(&mut self) {
-        if matches!(self.modal_state, ModalState::AgentSelector { .. }) {
-            self.modal_state = ModalState::None;
+    fn build_agent_settings_for(
+        &self,
+        agent: &crate::models::ProjectAgent,
+    ) -> Option<crate::ui::modal::AgentSettingsState> {
+        let project = self.selected_project.as_ref()?;
+        // Use status.all_tools() to show ALL tools (including unassigned ones)
+        let (all_tools, all_models) = self
+            .data_store
+            .borrow()
+            .get_project_status(&project.a_tag())
+            .map(|status| {
+                let tools = status.all_tools().iter().map(|s| s.to_string()).collect();
+                let models = status.all_models.clone();
+                (tools, models)
+            })
+            .unwrap_or_default();
+
+        Some(crate::ui::modal::AgentSettingsState::new(
+            agent.name.clone(),
+            agent.pubkey.clone(),
+            project.a_tag(),
+            agent.model.clone(),
+            agent.tools.clone(),
+            all_models,
+            all_tools,
+        ))
+    }
+
+    /// Refresh right-pane settings for the currently highlighted agent in the unified modal.
+    pub fn refresh_agent_config_modal_state(&self, state: &mut AgentConfigState) {
+        let filtered = self.filtered_agents_with_filter(&state.selector.filter);
+        state.selector.clamp_index(filtered.len());
+
+        let Some(agent) = filtered.get(state.selector.index) else {
+            state.load_agent_settings(None, None, None, HashSet::new());
+            return;
+        };
+
+        if state.active_agent_pubkey.as_deref() == Some(agent.pubkey.as_str()) {
+            return;
         }
+
+        let settings = self.build_agent_settings_for(agent);
+        state.load_agent_settings(
+            Some(agent.pubkey.clone()),
+            settings,
+            agent.model.clone(),
+            agent.tools.iter().cloned().collect(),
+        );
+    }
+
+    /// Open the unified agent selection + configuration modal.
+    pub fn open_agent_config_modal(&mut self) {
+        let mut state = AgentConfigState::new();
+        if let Some(selected_agent) = self.selected_agent() {
+            let filtered = self.filtered_agents_with_filter("");
+            if let Some(index) = filtered
+                .iter()
+                .position(|a| a.pubkey == selected_agent.pubkey)
+            {
+                state.selector.index = index;
+            }
+        }
+        self.refresh_agent_config_modal_state(&mut state);
+        self.modal_state = ModalState::AgentConfig(state);
     }
 
     /// Get the current hotkey context based on application state.
@@ -3942,9 +4039,10 @@ impl App {
         // Check if the selected item is a DelegationPreview
         if let Some(item) = grouped.get(self.conversation.selected_message_index) {
             if let DisplayItem::DelegationPreview {
-                    thread_id: delegation_thread_id,
-                    ..
-                } = item {
+                thread_id: delegation_thread_id,
+                ..
+            } = item
+            {
                 return Some(delegation_thread_id.clone());
             }
         }
@@ -4640,5 +4738,154 @@ mod inbox_48h_cap_tests {
 
         // Item at epoch (0) should be exactly at the boundary
         assert!(is_within_48h_cap(0, now));
+    }
+}
+
+#[cfg(test)]
+mod input_context_focus_tests {
+    use super::InputContextFocus;
+
+    #[test]
+    fn non_draft_traversal_skips_project() {
+        assert_eq!(
+            InputContextFocus::Agent.move_right(false),
+            InputContextFocus::NudgeSkill
+        );
+        assert_eq!(
+            InputContextFocus::NudgeSkill.move_left(false),
+            InputContextFocus::Agent
+        );
+    }
+
+    #[test]
+    fn draft_traversal_includes_project() {
+        assert_eq!(
+            InputContextFocus::Agent.move_right(true),
+            InputContextFocus::Project
+        );
+        assert_eq!(
+            InputContextFocus::Project.move_right(true),
+            InputContextFocus::NudgeSkill
+        );
+        assert_eq!(
+            InputContextFocus::NudgeSkill.move_left(true),
+            InputContextFocus::Project
+        );
+        assert_eq!(
+            InputContextFocus::Project.move_left(true),
+            InputContextFocus::Agent
+        );
+    }
+}
+
+#[cfg(test)]
+mod selected_agent_refresh_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn make_status(agents: Vec<ProjectAgent>) -> ProjectStatus {
+        let mut tags: Vec<Vec<String>> =
+            vec![vec!["a".to_string(), "31933:backend:project".to_string()]];
+
+        for agent in &agents {
+            let mut agent_tag = vec![
+                "agent".to_string(),
+                agent.pubkey.clone(),
+                agent.name.clone(),
+            ];
+            if agent.is_pm {
+                agent_tag.push("pm".to_string());
+            }
+            tags.push(agent_tag);
+
+            if let Some(model) = &agent.model {
+                tags.push(vec!["model".to_string(), model.clone(), agent.name.clone()]);
+            }
+
+            for tool in &agent.tools {
+                tags.push(vec!["tool".to_string(), tool.clone(), agent.name.clone()]);
+            }
+        }
+
+        let event = json!({
+            "kind": 24010,
+            "pubkey": "backend",
+            "created_at": 1,
+            "tags": tags,
+        });
+
+        ProjectStatus::from_value(&event).expect("status fixture should parse")
+    }
+
+    #[test]
+    fn status_update_refreshes_selected_agent_model() {
+        let current = ProjectAgent {
+            pubkey: "agent-a".to_string(),
+            name: "Agent A".to_string(),
+            is_pm: false,
+            model: Some("old-model".to_string()),
+            tools: vec!["shell".to_string()],
+        };
+        let status = make_status(vec![ProjectAgent {
+            pubkey: "agent-a".to_string(),
+            name: "Agent A".to_string(),
+            is_pm: false,
+            model: Some("new-model".to_string()),
+            tools: vec!["shell".to_string()],
+        }]);
+
+        let resolved = resolve_selected_agent_from_status(Some(&current), &status)
+            .expect("selected agent should resolve");
+
+        assert_eq!(resolved.model.as_deref(), Some("new-model"));
+    }
+
+    #[test]
+    fn status_update_keeps_selected_agent_if_missing() {
+        let current = ProjectAgent {
+            pubkey: "agent-a".to_string(),
+            name: "Agent A".to_string(),
+            is_pm: false,
+            model: Some("old-model".to_string()),
+            tools: vec!["shell".to_string()],
+        };
+        let status = make_status(vec![ProjectAgent {
+            pubkey: "agent-b".to_string(),
+            name: "Agent B".to_string(),
+            is_pm: true,
+            model: Some("pm-model".to_string()),
+            tools: vec![],
+        }]);
+
+        let resolved = resolve_selected_agent_from_status(Some(&current), &status)
+            .expect("selected agent should remain set");
+
+        assert_eq!(resolved.pubkey, "agent-a");
+        assert_eq!(resolved.model.as_deref(), Some("old-model"));
+    }
+
+    #[test]
+    fn status_update_defaults_to_pm_when_none_selected() {
+        let status = make_status(vec![
+            ProjectAgent {
+                pubkey: "agent-a".to_string(),
+                name: "Agent A".to_string(),
+                is_pm: false,
+                model: Some("model-a".to_string()),
+                tools: vec![],
+            },
+            ProjectAgent {
+                pubkey: "agent-pm".to_string(),
+                name: "PM".to_string(),
+                is_pm: true,
+                model: Some("model-pm".to_string()),
+                tools: vec![],
+            },
+        ]);
+
+        let resolved = resolve_selected_agent_from_status(None, &status)
+            .expect("pm should be selected by default");
+
+        assert_eq!(resolved.pubkey, "agent-pm");
     }
 }

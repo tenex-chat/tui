@@ -132,7 +132,7 @@ pub enum HotkeyContext {
     /// Modal contexts
     AnyModal,
     CommandPaletteModal,
-    AgentSelectorModal,
+    AgentConfigModal,
     ProjectSelectorModal,
     AskModal,
     AttachmentModal,
@@ -145,7 +145,6 @@ pub enum HotkeyContext {
     HotkeyHelpModal,
     NudgeSkillSelectorModal,
     ReportViewerModal,
-    AgentSettingsModal,
     ProjectSettingsModal,
     CreateProjectModal,
     CreateAgentModal,
@@ -183,7 +182,7 @@ impl HotkeyContext {
         // Modal contexts take priority
         match modal_state {
             ModalState::CommandPalette(_) => return HotkeyContext::CommandPaletteModal,
-            ModalState::AgentSelector { .. } => return HotkeyContext::AgentSelectorModal,
+            ModalState::AgentConfig(_) => return HotkeyContext::AgentConfigModal,
             ModalState::ProjectsModal { .. } => return HotkeyContext::ProjectSelectorModal,
             ModalState::ComposerProjectSelector { .. } => {
                 return HotkeyContext::ProjectSelectorModal
@@ -197,7 +196,6 @@ impl HotkeyContext {
             ModalState::HotkeyHelp => return HotkeyContext::HotkeyHelpModal,
             ModalState::NudgeSkillSelector(_) => return HotkeyContext::NudgeSkillSelectorModal,
             ModalState::ReportViewer(_) => return HotkeyContext::ReportViewerModal,
-            ModalState::AgentSettings(_) => return HotkeyContext::AgentSettingsModal,
             ModalState::ProjectSettings(_) => return HotkeyContext::ProjectSettingsModal,
             ModalState::CreateProject(_) => return HotkeyContext::CreateProjectModal,
             ModalState::CreateAgent(_) => return HotkeyContext::CreateAgentModal,
@@ -823,27 +821,27 @@ pub static HOTKEYS: &[HotkeyBinding] = &[
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
-    // Unified nudges/skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
+    // Unified [/] nudges/skills selector has two bindings: Ctrl+/ (primary) and Ctrl+N (alternative)
     // Note: Ctrl+_ is also handled in editor_handlers.rs for terminal compatibility
     // (some terminals report Ctrl+/ as Ctrl+_)
     HotkeyBinding::ctrl(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('/'),
-        "Open Nudges/Skills Selector",
+        "Open [/] Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::ctrl(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('n'),
-        "Open Nudges/Skills Selector",
+        "Open [/] Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),
     HotkeyBinding::alt(
         HotkeyId::OpenNudgeSkillSelector,
         KeyCode::Char('k'),
-        "Open Nudges/Skills Selector",
+        "Open [/] Nudges/Skills Selector",
         "Input",
         &[HotkeyContext::ChatEditing],
     ),

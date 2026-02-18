@@ -562,11 +562,9 @@ fn handle_core_events(
             CoreEvent::ProjectStatus(status) => {
                 if app.selected_project.as_ref().map(|p| p.a_tag())
                     == Some(status.project_coordinate.clone())
-                    && app.selected_agent().is_none() {
-                        if let Some(pm) = status.pm_agent() {
-                            app.set_selected_agent(Some(pm.clone()));
-                        }
-                    }
+                {
+                    app.refresh_selected_agent_from_project_status();
+                }
             }
             CoreEvent::PendingBackendApproval(pending) => {
                 // Show approval modal if no modal is currently open
