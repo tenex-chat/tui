@@ -110,6 +110,15 @@ struct SearchView: View {
                 Text(message)
             }
         }
+        #if os(macOS)
+        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
+        }
+        #else
         .sheet(isPresented: $showGlobalFilterSheet) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
@@ -117,6 +126,7 @@ struct SearchView: View {
             )
             .environmentObject(coreManager)
         }
+        #endif
     }
 
     // MARK: - Layouts

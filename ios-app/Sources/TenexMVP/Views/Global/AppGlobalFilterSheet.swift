@@ -141,7 +141,11 @@ struct AppGlobalFilterSheet: View {
                 }
             }
         }
+        #if os(iOS)
         .tenexModalPresentation(detents: [.medium, .large])
+        #else
+        .frame(minWidth: 560, idealWidth: 640, minHeight: 560, idealHeight: 720)
+        #endif
     }
 
     private var sortedProjects: [ProjectInfo] {
