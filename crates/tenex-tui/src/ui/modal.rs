@@ -1271,11 +1271,30 @@ impl ReportViewerState {
     }
 }
 
-/// Focus area in agent settings modal
+/// Focused column in the unified agent configuration modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentSettingsFocus {
+pub enum AgentConfigFocus {
+    Agents,
     Model,
     Tools,
+}
+
+impl AgentConfigFocus {
+    pub fn next(self) -> Self {
+        match self {
+            AgentConfigFocus::Agents => AgentConfigFocus::Model,
+            AgentConfigFocus::Model => AgentConfigFocus::Tools,
+            AgentConfigFocus::Tools => AgentConfigFocus::Agents,
+        }
+    }
+
+    pub fn prev(self) -> Self {
+        match self {
+            AgentConfigFocus::Agents => AgentConfigFocus::Tools,
+            AgentConfigFocus::Model => AgentConfigFocus::Agents,
+            AgentConfigFocus::Tools => AgentConfigFocus::Model,
+        }
+    }
 }
 
 /// A group of related tools (MCP server or common prefix)
@@ -1305,7 +1324,6 @@ pub struct AgentSettingsState {
     pub agent_name: String,
     pub agent_pubkey: String,
     pub project_a_tag: String,
-    pub focus: AgentSettingsFocus,
     /// Available models to choose from (from project status)
     pub available_models: Vec<String>,
     /// Index of selected model in available_models
@@ -1346,7 +1364,6 @@ impl AgentSettingsState {
             agent_name,
             agent_pubkey,
             project_a_tag,
-            focus: AgentSettingsFocus::Model,
             available_models,
             model_index,
             tool_groups,
@@ -1553,6 +1570,59 @@ impl AgentSettingsState {
         else if self.tools_cursor >= self.tools_scroll + visible_height {
             self.tools_scroll = self.tools_cursor.saturating_sub(visible_height - 1);
         }
+    }
+}
+
+/// State for the unified agent selection + configuration modal.
+#[derive(Debug, Clone)]
+pub struct AgentConfigState {
+    /// Left column selector state (agent list + filter + scroll)
+    pub selector: SelectorState,
+    /// Which column is currently focused
+    pub focus: AgentConfigFocus,
+    /// Currently active agent (from highlighted row in Agents column)
+    pub active_agent_pubkey: Option<String>,
+    /// Current settings snapshot for the active agent
+    pub settings: Option<AgentSettingsState>,
+    /// Original model for change detection
+    pub original_model: Option<String>,
+    /// Original tools for change detection
+    pub original_tools: std::collections::HashSet<String>,
+}
+
+impl AgentConfigState {
+    pub fn new() -> Self {
+        Self {
+            selector: SelectorState::new(),
+            focus: AgentConfigFocus::Agents,
+            active_agent_pubkey: None,
+            settings: None,
+            original_model: None,
+            original_tools: std::collections::HashSet::new(),
+        }
+    }
+
+    /// Replace the active-agent settings. Used when switching highlighted agents.
+    pub fn load_agent_settings(
+        &mut self,
+        active_agent_pubkey: Option<String>,
+        settings: Option<AgentSettingsState>,
+        original_model: Option<String>,
+        original_tools: std::collections::HashSet<String>,
+    ) {
+        self.active_agent_pubkey = active_agent_pubkey;
+        self.settings = settings;
+        self.original_model = original_model;
+        self.original_tools = original_tools;
+    }
+
+    /// Returns true when the current settings differ from the original snapshot.
+    pub fn has_config_changes(&self) -> bool {
+        let Some(settings) = &self.settings else {
+            return false;
+        };
+        let current_model = settings.selected_model().map(str::to_string);
+        current_model != self.original_model || settings.selected_tools != self.original_tools
     }
 }
 
@@ -2141,8 +2211,7 @@ impl DebugStatsState {
 }
 
 /// Unified modal state - only one modal can be open at a time
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub enum ModalState {
     #[default]
     None,
@@ -2151,9 +2220,7 @@ pub enum ModalState {
     AttachmentEditor {
         editor: TextEditor,
     },
-    AgentSelector {
-        selector: SelectorState,
-    },
+    AgentConfig(AgentConfigState),
     ProjectsModal {
         selector: SelectorState,
         /// If true, selecting a project navigates to chat view to create a new thread
@@ -2187,8 +2254,6 @@ pub enum ModalState {
     ExpandedEditor {
         editor: TextEditor,
     },
-    /// Agent settings modal (model and tools configuration)
-    AgentSettings(AgentSettingsState),
     /// Draft navigator modal for viewing and restoring saved drafts
     DraftNavigator(DraftNavigatorState),
     /// Backend approval modal for unknown backend pubkeys
@@ -2216,7 +2281,6 @@ pub enum ModalState {
     },
 }
 
-
 impl ModalState {
     pub fn is_none(&self) -> bool {
         matches!(self, Self::None)
@@ -2224,5 +2288,102 @@ impl ModalState {
 
     pub fn close(&mut self) {
         *self = Self::None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn agent_config_focus_cycles_both_directions() {
+        assert_eq!(AgentConfigFocus::Agents.next(), AgentConfigFocus::Model);
+        assert_eq!(AgentConfigFocus::Model.next(), AgentConfigFocus::Tools);
+        assert_eq!(AgentConfigFocus::Tools.next(), AgentConfigFocus::Agents);
+
+        assert_eq!(AgentConfigFocus::Agents.prev(), AgentConfigFocus::Tools);
+        assert_eq!(AgentConfigFocus::Model.prev(), AgentConfigFocus::Agents);
+        assert_eq!(AgentConfigFocus::Tools.prev(), AgentConfigFocus::Model);
+    }
+
+    #[test]
+    fn agent_config_change_detection_works() {
+        let mut state = AgentConfigState::new();
+        let settings = AgentSettingsState::new(
+            "agent-a".to_string(),
+            "pubkey-a".to_string(),
+            "31933:pubkey:project".to_string(),
+            Some("model-a".to_string()),
+            vec!["tool_read".to_string()],
+            vec!["model-a".to_string(), "model-b".to_string()],
+            vec!["tool_read".to_string(), "tool_write".to_string()],
+        );
+
+        state.load_agent_settings(
+            Some("pubkey-a".to_string()),
+            Some(settings),
+            Some("model-a".to_string()),
+            HashSet::from(["tool_read".to_string()]),
+        );
+        assert!(!state.has_config_changes());
+
+        // Model change
+        if let Some(s) = state.settings.as_mut() {
+            s.model_index = 1;
+        }
+        assert!(state.has_config_changes());
+
+        // Revert model, change tools
+        if let Some(s) = state.settings.as_mut() {
+            s.model_index = 0;
+            s.selected_tools.insert("tool_write".to_string());
+        }
+        assert!(state.has_config_changes());
+    }
+
+    #[test]
+    fn loading_new_agent_state_replaces_previous_edits() {
+        let mut state = AgentConfigState::new();
+        let first = AgentSettingsState::new(
+            "agent-a".to_string(),
+            "pubkey-a".to_string(),
+            "31933:pubkey:project".to_string(),
+            Some("model-a".to_string()),
+            vec!["tool_read".to_string()],
+            vec!["model-a".to_string(), "model-b".to_string()],
+            vec!["tool_read".to_string(), "tool_write".to_string()],
+        );
+
+        state.load_agent_settings(
+            Some("pubkey-a".to_string()),
+            Some(first),
+            Some("model-a".to_string()),
+            HashSet::from(["tool_read".to_string()]),
+        );
+        if let Some(s) = state.settings.as_mut() {
+            s.model_index = 1;
+            s.selected_tools.insert("tool_write".to_string());
+        }
+        assert!(state.has_config_changes());
+
+        let second = AgentSettingsState::new(
+            "agent-b".to_string(),
+            "pubkey-b".to_string(),
+            "31933:pubkey:project".to_string(),
+            Some("model-b".to_string()),
+            vec!["tool_write".to_string()],
+            vec!["model-a".to_string(), "model-b".to_string()],
+            vec!["tool_read".to_string(), "tool_write".to_string()],
+        );
+        state.load_agent_settings(
+            Some("pubkey-b".to_string()),
+            Some(second),
+            Some("model-b".to_string()),
+            HashSet::from(["tool_write".to_string()]),
+        );
+
+        assert_eq!(state.active_agent_pubkey.as_deref(), Some("pubkey-b"));
+        assert!(!state.has_config_changes());
     }
 }

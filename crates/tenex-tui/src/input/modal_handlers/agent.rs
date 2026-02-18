@@ -185,71 +185,146 @@ pub(super) fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
     app.modal_state = ModalState::CreateAgent(state);
 }
 
-pub(super) fn handle_agent_settings_modal_key(app: &mut App, key: KeyEvent) {
-    use ui::modal::AgentSettingsFocus;
+pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
+    use ui::modal::AgentConfigFocus;
 
-    if let ModalState::AgentSettings(ref mut state) = app.modal_state {
-        match key.code {
-            KeyCode::Esc => {
-                app.modal_state = ModalState::None;
-            }
-            KeyCode::Tab => {
-                state.focus = match state.focus {
-                    AgentSettingsFocus::Model => AgentSettingsFocus::Tools,
-                    AgentSettingsFocus::Tools => AgentSettingsFocus::Model,
-                };
-            }
-            KeyCode::Up => match state.focus {
-                AgentSettingsFocus::Model => {
-                    if state.model_index > 0 {
-                        state.model_index -= 1;
-                    }
-                }
-                AgentSettingsFocus::Tools => {
-                    state.move_cursor_up();
-                }
-            },
-            KeyCode::Down => match state.focus {
-                AgentSettingsFocus::Model => {
-                    if state.model_index < state.available_models.len().saturating_sub(1) {
-                        state.model_index += 1;
-                    }
-                }
-                AgentSettingsFocus::Tools => {
-                    state.move_cursor_down();
-                }
-            },
-            KeyCode::Char(' ') => {
-                if state.focus == AgentSettingsFocus::Tools {
-                    state.toggle_at_cursor();
-                }
-            }
-            KeyCode::Char('a') => {
-                if state.focus == AgentSettingsFocus::Tools {
-                    state.toggle_group_all();
-                }
-            }
-            KeyCode::Enter => {
-                let project_a_tag = state.project_a_tag.clone();
-                let agent_pubkey = state.agent_pubkey.clone();
-                let model = state.selected_model().map(|s| s.to_string());
-                let tools = state.selected_tools_vec();
-
-                if let Some(ref core_handle) = app.core_handle {
-                    if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
-                        project_a_tag,
-                        agent_pubkey,
-                        model,
-                        tools,
-                    }) {
-                        app.set_warning_status(&format!("Failed to update agent config: {}", e));
-                    } else {
-                        app.set_warning_status("Agent config update sent");
-                    }
-                }
-                app.modal_state = ModalState::None;
-            }
-            _ => {}
+    let mut state = match std::mem::replace(&mut app.modal_state, ModalState::None) {
+        ModalState::AgentConfig(s) => s,
+        other => {
+            app.modal_state = other;
+            return;
         }
+    };
+
+    let mut should_close = false;
+
+    match key.code {
+        KeyCode::Esc => {
+            should_close = true;
+        }
+        KeyCode::Left => {
+            state.focus = state.focus.prev();
+        }
+        KeyCode::Right => {
+            state.focus = state.focus.next();
+        }
+        KeyCode::BackTab => {
+            state.focus = state.focus.prev();
+        }
+        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+            state.focus = state.focus.prev();
+        }
+        KeyCode::Tab => {
+            state.focus = state.focus.next();
+        }
+        KeyCode::Up => match state.focus {
+            AgentConfigFocus::Agents => {
+                state.selector.index = state.selector.index.saturating_sub(1);
+                app.refresh_agent_config_modal_state(&mut state);
+            }
+            AgentConfigFocus::Model => {
+                if let Some(settings) = state.settings.as_mut() {
+                    if settings.model_index > 0 {
+                        settings.model_index -= 1;
+                    }
+                }
+            }
+            AgentConfigFocus::Tools => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_cursor_up();
+                }
+            }
+        },
+        KeyCode::Down => match state.focus {
+            AgentConfigFocus::Agents => {
+                state.selector.index = state.selector.index.saturating_add(1);
+                app.refresh_agent_config_modal_state(&mut state);
+            }
+            AgentConfigFocus::Model => {
+                if let Some(settings) = state.settings.as_mut() {
+                    if settings.model_index < settings.available_models.len().saturating_sub(1) {
+                        settings.model_index += 1;
+                    }
+                }
+            }
+            AgentConfigFocus::Tools => {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.move_cursor_down();
+                }
+            }
+        },
+        KeyCode::Char(' ') => {
+            if state.focus == AgentConfigFocus::Tools {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.toggle_at_cursor();
+                }
+            }
+        }
+        KeyCode::Char('a') => {
+            if state.focus == AgentConfigFocus::Tools {
+                if let Some(settings) = state.settings.as_mut() {
+                    settings.toggle_group_all();
+                }
+            }
+        }
+        KeyCode::Char(c)
+            if state.focus == AgentConfigFocus::Agents
+                && !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            state.selector.add_filter_char(c);
+            app.refresh_agent_config_modal_state(&mut state);
+        }
+        KeyCode::Backspace if state.focus == AgentConfigFocus::Agents => {
+            state.selector.backspace_filter();
+            app.refresh_agent_config_modal_state(&mut state);
+        }
+        KeyCode::Enter => {
+            if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
+                let selected_agent = app
+                    .available_agents()
+                    .into_iter()
+                    .find(|a| a.pubkey == *active_pubkey);
+                if let Some(agent) = selected_agent {
+                    app.set_selected_agent(Some(agent));
+                    app.user_explicitly_selected_agent = true;
+                }
+            }
+
+            if state.has_config_changes() {
+                if let Some(settings) = state.settings.as_ref() {
+                    let project_a_tag = settings.project_a_tag.clone();
+                    let agent_pubkey = settings.agent_pubkey.clone();
+                    let model = settings.selected_model().map(str::to_string);
+                    let tools = settings.selected_tools_vec();
+
+                    if let Some(ref core_handle) = app.core_handle {
+                        if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
+                            project_a_tag,
+                            agent_pubkey,
+                            model,
+                            tools,
+                        }) {
+                            app.set_warning_status(&format!(
+                                "Failed to update agent config: {}",
+                                e
+                            ));
+                        } else {
+                            app.set_warning_status("Agent config update sent");
+                        }
+                    }
+                }
+            }
+
+            should_close = true;
+        }
+        _ => {}
+    }
+
+    if should_close {
+        app.modal_state = ModalState::None;
+    } else {
+        app.modal_state = ModalState::AgentConfig(state);
     }
 }

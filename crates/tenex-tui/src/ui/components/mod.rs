@@ -8,8 +8,8 @@ pub use chat_sidebar::{
     SidebarSelection, SidebarState,
 };
 pub use modal_frame::{
-    render_modal_items, render_modal_items_with_scroll, render_modal_search, render_modal_sections,
-    visible_items_in_content_area, Modal, ModalItem, ModalSection, ModalSize,
+    render_modal_items, render_modal_search, render_modal_sections, visible_items_in_content_area,
+    Modal, ModalItem, ModalSection, ModalSize,
 };
 pub use statusbar::render_statusbar;
 pub use tab_bar::render_tab_bar;

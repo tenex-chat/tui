@@ -286,10 +286,8 @@ pub(super) fn handle_chat_editor_key(app: &mut App, key: KeyEvent) {
     }
 }
 
-/// Handle key events when context line is focused (agent/model/project/nudge selection)
+/// Handle key events when context line is focused (agent/project/nudge+skill selection)
 fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
-    use crate::ui::ModalState;
-
     let focus = match app.input_context_focus {
         Some(f) => f,
         None => return,
@@ -303,95 +301,32 @@ fn handle_context_focus_key(app: &mut App, key: KeyEvent) {
         KeyCode::Up | KeyCode::Esc => {
             app.input_context_focus = None;
         }
-        // Left = move to previous item (Skill -> Nudge -> Project -> Model -> Agent)
-        // Project is only included for draft tabs
+        // Left = move to previous item (NudgeSkill -> Project -> Agent)
         KeyCode::Left => {
-            app.input_context_focus = Some(match focus {
-                InputContextFocus::Agent => InputContextFocus::Agent, // Already at leftmost
-                InputContextFocus::Model => InputContextFocus::Agent,
-                InputContextFocus::Project => InputContextFocus::Model,
-                InputContextFocus::Nudge => {
-                    if is_draft_tab {
-                        InputContextFocus::Project
-                    } else {
-                        InputContextFocus::Model
-                    }
-                }
-                InputContextFocus::Skill => InputContextFocus::Nudge,
-            });
+            app.input_context_focus = Some(focus.move_left(is_draft_tab));
         }
-        // Right = move to next item (Agent -> Model -> Project -> Nudge -> Skill)
-        // Project is only included for draft tabs
+        // Right = move to next item (Agent -> Project -> NudgeSkill)
         KeyCode::Right => {
-            app.input_context_focus = Some(match focus {
-                InputContextFocus::Agent => InputContextFocus::Model,
-                InputContextFocus::Model => {
-                    if is_draft_tab {
-                        InputContextFocus::Project
-                    } else {
-                        InputContextFocus::Nudge
-                    }
-                }
-                InputContextFocus::Project => InputContextFocus::Nudge,
-                InputContextFocus::Nudge => InputContextFocus::Skill,
-                InputContextFocus::Skill => InputContextFocus::Skill, // Already at rightmost
-            });
+            app.input_context_focus = Some(focus.move_right(is_draft_tab));
         }
         // Enter = open the appropriate selector modal
-        KeyCode::Enter => {
-            match focus {
-                InputContextFocus::Agent => {
+        KeyCode::Enter => match focus {
+            InputContextFocus::Agent => {
+                app.input_context_focus = None;
+                app.open_agent_config_modal();
+            }
+            InputContextFocus::Project => {
+                // Only allow project selection for draft tabs (new conversations)
+                if is_draft_tab {
                     app.input_context_focus = None;
-                    app.open_agent_selector();
-                }
-                InputContextFocus::Model => {
-                    // Open agent settings for the current agent to change the model
-                    if let Some(agent) = app.selected_agent() {
-                        if let Some(project) = &app.selected_project {
-                            // Use status.all_tools() to show ALL tools (including unassigned ones)
-                            let (all_tools, all_models) = app
-                                .data_store
-                                .borrow()
-                                .get_project_status(&project.a_tag())
-                                .map(|status| {
-                                    let tools =
-                                        status.all_tools().iter().map(|s| s.to_string()).collect();
-                                    let models = status.all_models.clone();
-                                    (tools, models)
-                                })
-                                .unwrap_or_default();
-
-                            let settings_state = crate::ui::modal::AgentSettingsState::new(
-                                agent.name.clone(),
-                                agent.pubkey.clone(),
-                                project.a_tag(),
-                                agent.model.clone(),
-                                agent.tools.clone(),
-                                all_models,
-                                all_tools,
-                            );
-                            app.input_context_focus = None;
-                            app.modal_state = ModalState::AgentSettings(settings_state);
-                        }
-                    }
-                }
-                InputContextFocus::Project => {
-                    // Only allow project selection for draft tabs (new conversations)
-                    if is_draft_tab {
-                        app.input_context_focus = None;
-                        app.open_composer_project_selector();
-                    }
-                }
-                InputContextFocus::Nudge => {
-                    app.input_context_focus = None;
-                    app.open_nudge_skill_selector();
-                }
-                InputContextFocus::Skill => {
-                    app.input_context_focus = None;
-                    app.open_nudge_skill_selector();
+                    app.open_composer_project_selector();
                 }
             }
-        }
+            InputContextFocus::NudgeSkill => {
+                app.input_context_focus = None;
+                app.open_nudge_skill_selector();
+            }
+        },
         _ => {}
     }
 }

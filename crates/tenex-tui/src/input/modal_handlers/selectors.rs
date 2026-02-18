@@ -4,27 +4,6 @@ use crossterm::event::{KeyCode, KeyEvent};
 use crate::ui::selector::{handle_selector_key, SelectorAction};
 use crate::ui::{App, ModalState, View};
 
-pub(super) fn handle_agent_selector_key(app: &mut App, key: KeyEvent) -> Result<()> {
-    let agents = app.filtered_agents();
-    let item_count = agents.len();
-
-    if let ModalState::AgentSelector { ref mut selector } = app.modal_state {
-        match handle_selector_key(selector, key, item_count, |idx| agents.get(idx).cloned()) {
-            SelectorAction::Selected(agent) => {
-                // Set agent as recipient - never insert text into input
-                app.set_selected_agent(Some(agent));
-                app.user_explicitly_selected_agent = true;
-                app.modal_state = ModalState::None;
-            }
-            SelectorAction::Cancelled => {
-                app.modal_state = ModalState::None;
-            }
-            SelectorAction::Continue => {}
-        }
-    }
-    Ok(())
-}
-
 pub(super) fn handle_projects_modal_key(app: &mut App, key: KeyEvent) -> Result<()> {
     let (online_projects, offline_projects) = app.filtered_projects();
     let all_projects: Vec<_> = online_projects

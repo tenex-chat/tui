@@ -25,8 +25,7 @@ pub(crate) fn top_half_block_line(
     ];
     // Rest of the line: bottom-half = card bg, top-half = terminal bg
     if width > 1 {
-        let fill: String = std::iter::repeat_n(LOWER_HALF_BLOCK, width - 1)
-            .collect();
+        let fill: String = std::iter::repeat_n(LOWER_HALF_BLOCK, width - 1).collect();
         spans.push(Span::styled(
             fill,
             Style::default().fg(bg).bg(theme::BG_APP),
@@ -52,8 +51,7 @@ pub(crate) fn bottom_half_block_line(
     ];
     // Rest of the line: top-half = card bg, bottom-half = terminal bg
     if width > 1 {
-        let fill: String = std::iter::repeat_n(UPPER_HALF_BLOCK, width - 1)
-            .collect();
+        let fill: String = std::iter::repeat_n(UPPER_HALF_BLOCK, width - 1).collect();
         spans.push(Span::styled(
             fill,
             Style::default().fg(bg).bg(theme::BG_APP),

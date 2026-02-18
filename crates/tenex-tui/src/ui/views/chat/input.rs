@@ -144,18 +144,18 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     let input_bg = theme::BG_INPUT;
 
-    // Agent display with model info (no @ prefix)
-    let (agent_display, agent_model_display) = app
+    // Agent display with model info in a single selectable chip (no @ prefix)
+    let agent_chip_display = app
         .selected_agent()
         .map(|a| {
-            let model = a
+            let model_display = a
                 .model
                 .as_ref()
                 .map(|m| format!("({})", m))
                 .unwrap_or_else(|| "(no model)".to_string());
-            (a.name.clone(), model)
+            format!("{} {}", a.name, model_display)
         })
-        .unwrap_or_else(|| ("none".to_string(), String::new()));
+        .unwrap_or_else(|| "none (no model)".to_string());
 
     // Check if current tab is a draft (new conversation) - project selector only available for drafts
     let is_draft_tab = app.tabs.active_tab().map(|t| t.is_draft()).unwrap_or(false);
@@ -328,45 +328,34 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         ]));
     }
 
-    // Build nudge display string - always show "/" even if empty (for selection)
-    // Uses per-tab isolated nudge selections
+    // Build unified nudge/skill display string - always show "[/]" even if empty (for selection)
+    // Uses per-tab isolated nudge + skill selections
     let selected_nudge_ids = app.selected_nudge_ids();
-    let nudge_display = if selected_nudge_ids.is_empty() {
-        "/".to_string()
-    } else {
-        let nudge_titles: Vec<String> = selected_nudge_ids
-            .iter()
-            .filter_map(|id| {
-                app.data_store
-                    .borrow()
-                    .content
-                    .get_nudge(id)
-                    .map(|n| format!("/{}", n.title))
-            })
-            .collect();
-        format!("[{}]", nudge_titles.join(", "))
-    };
-
-    // Build skill display string - always show "⚡" even if empty (for selection)
-    // Uses per-tab isolated skill selections
     let selected_skill_ids = app.selected_skill_ids();
-    let skill_display = if selected_skill_ids.is_empty() {
-        "⚡".to_string()
+    let mut selected_labels: Vec<String> = selected_nudge_ids
+        .iter()
+        .filter_map(|id| {
+            app.data_store
+                .borrow()
+                .content
+                .get_nudge(id)
+                .map(|n| format!("/{}", n.title))
+        })
+        .collect();
+    selected_labels.extend(selected_skill_ids.iter().filter_map(|id| {
+        app.data_store
+            .borrow()
+            .content
+            .get_skill(id)
+            .map(|s| format!("skill/{}", s.title))
+    }));
+    let nudge_skill_display = if selected_labels.is_empty() {
+        "[/]".to_string()
     } else {
-        let skill_titles: Vec<String> = selected_skill_ids
-            .iter()
-            .filter_map(|id| {
-                app.data_store
-                    .borrow()
-                    .content
-                    .get_skill(id)
-                    .map(|s| format!("/{}", s.title))
-            })
-            .collect();
-        format!("[{}]", skill_titles.join(", "))
+        format!("[{}]", selected_labels.join(", "))
     };
 
-    // Context line at bottom: agent (model) branch project [nudges]
+    // Context line at bottom: agent (model) project [/] (nudges + skills)
     // Add scroll indicator if we're scrolling
     let scroll_indicator = if total_content_lines > available_content_lines {
         let current_line = cursor_visual_row + 1;
@@ -387,12 +376,11 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
 
     // Calculate context string for padding (use unicode width for proper display width with emoji)
-    let nudge_str = format!(" {}", nudge_display);
+    let nudge_skill_str = format!(" {}", nudge_skill_display);
     let project_str = format!(" {}", project_display);
-    let skill_str = format!(" {}", skill_display);
     let context_str = format!(
-        "{} {}{}{}{}{}",
-        agent_display, agent_model_display, project_str, nudge_str, skill_str, scroll_indicator
+        "{}{}{}{}",
+        agent_chip_display, project_str, nudge_skill_str, scroll_indicator
     );
     let context_pad = area
         .width
@@ -405,24 +393,13 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
         Span::styled(" ".repeat(input_padding), Style::default().bg(input_bg)),
     ];
 
-    // Agent name (highlighted if focused)
+    // Agent chip (highlighted if focused)
     let agent_style = if context_focus == Some(InputContextFocus::Agent) {
         focused_style(theme::ACCENT_PRIMARY)
     } else {
         Style::default().fg(theme::ACCENT_PRIMARY).bg(input_bg)
     };
-    context_spans.push(Span::styled(agent_display.clone(), agent_style));
-
-    // Space separator
-    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
-
-    // Model (highlighted if focused)
-    let model_style = if context_focus == Some(InputContextFocus::Model) {
-        focused_style(theme::TEXT_PRIMARY)
-    } else {
-        Style::default().fg(theme::TEXT_DIM).bg(input_bg)
-    };
-    context_spans.push(Span::styled(agent_model_display.clone(), model_style));
+    context_spans.push(Span::styled(agent_chip_display.clone(), agent_style));
 
     // Project (selectable only for draft tabs, otherwise muted)
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
@@ -437,23 +414,14 @@ pub(crate) fn render_input_box(f: &mut Frame, app: &mut App, area: Rect) {
     };
     context_spans.push(Span::styled(project_display.clone(), project_style));
 
-    // Nudge display (highlighted if focused) - always shown
+    // Unified nudge/skill display (highlighted if focused) - always shown
     context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
-    let nudge_style = if context_focus == Some(InputContextFocus::Nudge) {
+    let nudge_skill_style = if context_focus == Some(InputContextFocus::NudgeSkill) {
         focused_style(theme::ACCENT_WARNING)
     } else {
         Style::default().fg(theme::ACCENT_WARNING).bg(input_bg)
     };
-    context_spans.push(Span::styled(nudge_display, nudge_style));
-
-    // Skill display (highlighted if focused) - always shown
-    context_spans.push(Span::styled(" ", Style::default().bg(input_bg)));
-    let skill_style = if context_focus == Some(InputContextFocus::Skill) {
-        focused_style(theme::ACCENT_SPECIAL)
-    } else {
-        Style::default().fg(theme::ACCENT_SPECIAL).bg(input_bg)
-    };
-    context_spans.push(Span::styled(skill_display, skill_style));
+    context_spans.push(Span::styled(nudge_skill_display, nudge_skill_style));
 
     // Add scroll indicator if scrolling
     if !scroll_indicator.is_empty() {

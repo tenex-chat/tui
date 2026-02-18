@@ -4,12 +4,7 @@ use crate::ui::components::{
 use crate::ui::format::truncate_with_ellipsis;
 use crate::ui::modal::{ConversationAction, ConversationActionsState, ProjectActionsState};
 use crate::ui::{card, theme, App, View};
-use ratatui::{
-    layout::Rect,
-    style::Style,
-    widgets::Paragraph,
-    Frame,
-};
+use ratatui::{layout::Rect, style::Style, widgets::Paragraph, Frame};
 
 /// Shared helper for rendering project selector modals
 /// Used by both `render_projects_modal` and `render_composer_project_selector`

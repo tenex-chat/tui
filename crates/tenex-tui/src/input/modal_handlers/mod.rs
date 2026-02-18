@@ -69,9 +69,9 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
         return Ok(true);
     }
 
-    // Handle agent selector when open
-    if matches!(app.modal_state, ModalState::AgentSelector { .. }) {
-        selectors::handle_agent_selector_key(app, key)?;
+    // Handle unified agent configuration modal when open
+    if matches!(app.modal_state, ModalState::AgentConfig(_)) {
+        agent::handle_agent_config_modal_key(app, key);
         return Ok(true);
     }
 
@@ -120,12 +120,6 @@ pub(super) fn handle_modal_input(app: &mut App, key: KeyEvent) -> Result<bool> {
     // Handle report viewer modal when open
     if matches!(app.modal_state, ModalState::ReportViewer(_)) {
         view::handle_report_viewer_modal_key(app, key);
-        return Ok(true);
-    }
-
-    // Handle agent settings modal when open
-    if matches!(app.modal_state, ModalState::AgentSettings(_)) {
-        agent::handle_agent_settings_modal_key(app, key);
         return Ok(true);
     }
 

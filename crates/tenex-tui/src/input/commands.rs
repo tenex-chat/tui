@@ -442,11 +442,11 @@ pub static COMMANDS: &[Command] = &[
     // =========================================================================
     Command {
         key: '@',
-        label: "Mention agent",
+        label: "Agent configuration",
         section: "Input",
         available: |app| app.view == View::Chat && !app.available_agents().is_empty(),
         execute: |app| {
-            app.open_agent_selector();
+            app.open_agent_config_modal();
         },
     },
     Command {

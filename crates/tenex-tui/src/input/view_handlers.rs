@@ -1367,9 +1367,9 @@ pub(super) fn handle_normal_mode(
 
 fn handle_normal_mode_char(app: &mut App, c: char) -> Result<()> {
     if c == 'a' && app.view == View::Chat && !app.available_agents().is_empty() {
-        app.open_agent_selector();
+        app.open_agent_config_modal();
     } else if c == '@' && app.view == View::Chat && !app.available_agents().is_empty() {
-        app.open_agent_selector();
+        app.open_agent_config_modal();
     } else if c == '.' && app.view == View::Chat {
         if let Some(stop_thread_id) = app.get_stop_target_thread_id() {
             let (is_busy, project_a_tag) = {
