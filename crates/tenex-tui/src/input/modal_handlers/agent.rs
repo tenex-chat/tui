@@ -196,7 +196,26 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         }
     };
 
+    let has_shift = key.modifiers.contains(KeyModifiers::SHIFT);
     let mut should_close = false;
+
+    // Track whether Shift is held — used to show global-save hint and project list.
+    // We update this on every key event so the hint reflects the current modifier state.
+    let previously_shift_held = state.shift_held;
+    state.shift_held = has_shift;
+
+    // When Shift starts being held, populate the list of projects for the active agent.
+    if has_shift && !previously_shift_held {
+        if let Some(ref pubkey) = state.active_agent_pubkey.clone() {
+            state.agent_projects = app.projects_for_agent(pubkey);
+        } else {
+            state.agent_projects = Vec::new();
+        }
+    }
+    // When Shift is released, clear the list.
+    if !has_shift && previously_shift_held {
+        state.agent_projects = Vec::new();
+    }
 
     match key.code {
         KeyCode::Esc => {
@@ -211,7 +230,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::BackTab => {
             state.focus = state.focus.prev();
         }
-        KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
+        KeyCode::Tab if has_shift => {
             state.focus = state.focus.prev();
         }
         KeyCode::Tab => {
@@ -271,7 +290,8 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
             if state.focus == AgentConfigFocus::Agents
                 && !key
                     .modifiers
-                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+                && !has_shift =>
         {
             state.selector.add_filter_char(c);
             app.refresh_agent_config_modal_state(&mut state);
@@ -280,7 +300,8 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
             state.selector.backspace_filter();
             app.refresh_agent_config_modal_state(&mut state);
         }
-        KeyCode::Enter => {
+        // Shift+Enter: save as global agent config (kind:24020 without a-tag) then close.
+        KeyCode::Enter if has_shift => {
             if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
                 let selected_agent = app
                     .available_agents()
@@ -294,7 +315,6 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
 
             if state.has_config_changes() {
                 if let Some(settings) = state.settings.as_ref() {
-                    let project_a_tag = settings.project_a_tag.clone();
                     let agent_pubkey = settings.agent_pubkey.clone();
                     let model = settings.selected_model().map(str::to_string);
                     let tools = settings.selected_tools_vec();
@@ -305,21 +325,37 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     };
 
                     if let Some(ref core_handle) = app.core_handle {
-                        if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
-                            project_a_tag,
-                            agent_pubkey,
-                            model,
-                            tools,
-                            tags,
-                        }) {
+                        if let Err(e) =
+                            core_handle.send(NostrCommand::UpdateGlobalAgentConfig {
+                                agent_pubkey,
+                                model,
+                                tools,
+                                tags,
+                            })
+                        {
                             app.set_warning_status(&format!(
-                                "Failed to update agent config: {}",
+                                "Failed to update global agent config: {}",
                                 e
                             ));
                         } else {
-                            app.set_warning_status("Agent config update sent");
+                            app.set_warning_status("Global agent config update sent");
                         }
                     }
+                }
+            }
+
+            should_close = true;
+        }
+        // Plain Enter: select the agent and close without saving config changes.
+        KeyCode::Enter => {
+            if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
+                let selected_agent = app
+                    .available_agents()
+                    .into_iter()
+                    .find(|a| a.pubkey == *active_pubkey);
+                if let Some(agent) = selected_agent {
+                    app.set_selected_agent(Some(agent));
+                    app.user_explicitly_selected_agent = true;
                 }
             }
 

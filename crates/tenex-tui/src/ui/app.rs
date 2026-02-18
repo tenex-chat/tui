@@ -1864,6 +1864,23 @@ impl App {
             .unwrap_or_default()
     }
 
+    /// Find all projects that have the given agent pubkey in their kind:24010 status.
+    /// Returns a list of (project_name, project_a_tag) pairs.
+    pub fn projects_for_agent(&self, agent_pubkey: &str) -> Vec<(String, String)> {
+        let store = self.data_store.borrow();
+        let projects = store.get_projects();
+        let mut result = Vec::new();
+        for project in projects {
+            let a_tag = project.a_tag();
+            if let Some(status) = store.get_project_status(&a_tag) {
+                if status.agents.iter().any(|a| a.pubkey == agent_pubkey) {
+                    result.push((project.name.clone(), a_tag));
+                }
+            }
+        }
+        result
+    }
+
     /// Get the most recent agent that published a message in the current conversation.
     /// Returns the agent from available_agents whose pubkey matches the most recent
     /// non-user message in the conversation.
