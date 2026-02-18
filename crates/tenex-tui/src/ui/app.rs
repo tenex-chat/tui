@@ -7,7 +7,7 @@ use crate::store::{get_trace_context, AppDataStore, Database};
 use crate::ui::ask_input::AskInputState;
 use crate::ui::audio_player::{AudioPlaybackState, AudioPlayer};
 use crate::ui::components::{ReportCoordinate, SidebarDelegation, SidebarReport, SidebarState};
-use crate::ui::modal::{AgentConfigState, CommandPaletteState, ModalState};
+use crate::ui::modal::{AgentConfigState, AgentProjectRef, CommandPaletteState, ModalState};
 use crate::ui::notifications::Notification;
 use crate::ui::selector::SelectorState;
 use crate::ui::services::{AnimationClock, DraftService, NotificationManager};
@@ -660,6 +660,14 @@ impl App {
     #[inline]
     pub fn set_selected_agent(&mut self, agent: Option<ProjectAgent>) {
         self.conversation.selected_agent = agent;
+    }
+
+    /// Select an agent as the result of an explicit user choice (e.g. from the agent config modal).
+    /// Sets both the selected agent and the `user_explicitly_selected_agent` flag so the choice
+    /// is preserved through subsequent autosaves.
+    pub fn select_agent_explicit(&mut self, agent: ProjectAgent) {
+        self.conversation.selected_agent = Some(agent);
+        self.user_explicitly_selected_agent = true;
     }
 
     /// Get the subthread root message ID (if viewing a subthread)
@@ -1864,9 +1872,9 @@ impl App {
             .unwrap_or_default()
     }
 
-    /// Find all projects that have the given agent pubkey in their kind:24010 status.
+    /// Find all projects that contain the given agent in their kind:24010 status.
     /// Returns a list of (project_name, project_a_tag) pairs.
-    pub fn projects_for_agent(&self, agent_pubkey: &str) -> Vec<(String, String)> {
+    pub fn projects_containing_agent(&self, agent_pubkey: &str) -> Vec<AgentProjectRef> {
         let store = self.data_store.borrow();
         let projects = store.get_projects();
         let mut result = Vec::new();
@@ -1874,7 +1882,10 @@ impl App {
             let a_tag = project.a_tag();
             if let Some(status) = store.get_project_status(&a_tag) {
                 if status.agents.iter().any(|a| a.pubkey == agent_pubkey) {
-                    result.push((project.name.clone(), a_tag));
+                    result.push(AgentProjectRef {
+                        name: project.name.clone(),
+                        a_tag,
+                    });
                 }
             }
         }

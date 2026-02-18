@@ -185,6 +185,20 @@ pub(super) fn handle_create_agent_key(app: &mut App, key: KeyEvent) {
     app.modal_state = ModalState::CreateAgent(state);
 }
 
+/// Select the currently highlighted agent and mark it as an explicit user choice.
+/// Shared by both the Enter and Shift+Enter handlers in the agent config modal.
+fn select_active_agent(app: &mut App, state: &ui::modal::AgentConfigState) {
+    if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
+        let selected_agent = app
+            .available_agents()
+            .into_iter()
+            .find(|a| a.pubkey == *active_pubkey);
+        if let Some(agent) = selected_agent {
+            app.select_agent_explicit(agent);
+        }
+    }
+}
+
 pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
     use ui::modal::AgentConfigFocus;
 
@@ -206,8 +220,8 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
 
     // When Shift starts being held, populate the list of projects for the active agent.
     if has_shift && !previously_shift_held {
-        if let Some(ref pubkey) = state.active_agent_pubkey.clone() {
-            state.agent_projects = app.projects_for_agent(pubkey);
+        if let Some(ref pubkey) = state.active_agent_pubkey {
+            state.agent_projects = app.projects_containing_agent(pubkey);
         } else {
             state.agent_projects = Vec::new();
         }
@@ -302,16 +316,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         }
         // Shift+Enter: save as global agent config (kind:24020 without a-tag) then close.
         KeyCode::Enter if has_shift => {
-            if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
-                let selected_agent = app
-                    .available_agents()
-                    .into_iter()
-                    .find(|a| a.pubkey == *active_pubkey);
-                if let Some(agent) = selected_agent {
-                    app.set_selected_agent(Some(agent));
-                    app.user_explicitly_selected_agent = true;
-                }
-            }
+            select_active_agent(app, &state);
 
             if state.has_config_changes() {
                 if let Some(settings) = state.settings.as_ref() {
@@ -340,6 +345,8 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                         } else {
                             app.set_warning_status("Global agent config update sent");
                         }
+                    } else {
+                        app.set_warning_status("Not connected — global agent config not saved");
                     }
                 }
             }
@@ -348,17 +355,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
         }
         // Plain Enter: select the agent and close without saving config changes.
         KeyCode::Enter => {
-            if let Some(active_pubkey) = state.active_agent_pubkey.as_ref() {
-                let selected_agent = app
-                    .available_agents()
-                    .into_iter()
-                    .find(|a| a.pubkey == *active_pubkey);
-                if let Some(agent) = selected_agent {
-                    app.set_selected_agent(Some(agent));
-                    app.user_explicitly_selected_agent = true;
-                }
-            }
-
+            select_active_agent(app, &state);
             should_close = true;
         }
         _ => {}
