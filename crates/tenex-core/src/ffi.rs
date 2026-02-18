@@ -1499,6 +1499,24 @@ impl FfiPreferences {
         let contents = std::fs::read_to_string(path).ok()?;
         serde_json::from_str(&contents).ok()
     }
+
+    fn trusted_backend_fields_present(path: &std::path::Path) -> bool {
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+
+        let value: serde_json::Value = match serde_json::from_str(&contents) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        let Some(obj) = value.as_object() else {
+            return false;
+        };
+
+        obj.contains_key("approved_backend_pubkeys") || obj.contains_key("blocked_backend_pubkeys")
+    }
 }
 
 /// Wrapper that handles persistence
@@ -1510,12 +1528,64 @@ struct FfiPreferencesStorage {
 impl FfiPreferencesStorage {
     fn new(data_dir: &std::path::Path) -> Self {
         let path = data_dir.join("ios_preferences.json");
+        let trusted_fields_present = FfiPreferences::trusted_backend_fields_present(&path);
         let mut prefs = FfiPreferences::load_from_file(&path).unwrap_or_default();
+        let mut imported_legacy_trust = false;
+
+        // Migration: if FFI prefs don't contain trust fields yet, import from TUI preferences
+        // so desktop app trust state matches TUI and status events are not held as pending.
+        if !trusted_fields_present
+            && prefs.approved_backend_pubkeys.is_empty()
+            && prefs.blocked_backend_pubkeys.is_empty()
+        {
+            if let Some((approved, blocked)) = Self::read_legacy_tui_trusted_backends() {
+                prefs.approved_backend_pubkeys = approved;
+                prefs.blocked_backend_pubkeys = blocked;
+                imported_legacy_trust = true;
+            }
+        }
 
         // Migrate any existing API keys from JSON to secure storage
         Self::migrate_api_keys(&mut prefs.ai_audio_settings);
 
-        Self { prefs, path }
+        let storage = Self { prefs, path };
+        if imported_legacy_trust {
+            let _ = storage.save();
+        }
+        storage
+    }
+
+    fn read_legacy_tui_trusted_backends(
+    ) -> Option<(
+        std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
+    )> {
+        let path = dirs::home_dir()?
+            .join(".tenex")
+            .join("cli")
+            .join("preferences.json");
+        let contents = std::fs::read_to_string(path).ok()?;
+        let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
+
+        let collect = |key: &str| -> std::collections::HashSet<String> {
+            value
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+
+        let approved = collect("approved_backend_pubkeys");
+        let blocked = collect("blocked_backend_pubkeys");
+        if approved.is_empty() && blocked.is_empty() {
+            None
+        } else {
+            Some((approved, blocked))
+        }
     }
 
     /// Migrate API keys from JSON to OS secure storage (one-time migration)
@@ -3151,6 +3221,7 @@ impl TenexCore {
                 agent_pubkey,
                 model,
                 tools,
+                tags: Vec::new(),
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send update agent config command: {}", e),
