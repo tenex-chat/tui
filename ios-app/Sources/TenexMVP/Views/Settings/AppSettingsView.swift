@@ -113,6 +113,7 @@ final class AppSettingsViewModel: ObservableObject {
     func approveBackend(coreManager: TenexCoreManager, pubkey: String) async {
         do {
             try await coreManager.safeCore.approveBackend(pubkey: pubkey)
+            await coreManager.fetchData()
             await reloadBackends(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to approve backend: \(error.localizedDescription)"
@@ -122,6 +123,7 @@ final class AppSettingsViewModel: ObservableObject {
     func blockBackend(coreManager: TenexCoreManager, pubkey: String) async {
         do {
             try await coreManager.safeCore.blockBackend(pubkey: pubkey)
+            await coreManager.fetchData()
             await reloadBackends(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to block backend: \(error.localizedDescription)"
@@ -135,6 +137,7 @@ final class AppSettingsViewModel: ObservableObject {
 
         do {
             try await coreManager.safeCore.setTrustedBackends(approved: approved, blocked: blocked)
+            await coreManager.fetchData()
             await reloadBackends(coreManager: coreManager)
         } catch {
             errorMessage = "Failed to update backend lists: \(error.localizedDescription)"
@@ -380,6 +383,9 @@ struct AppSettingsView: View {
                     Label(section.title, systemImage: section.icon)
                 }
             }
+            #if os(macOS)
+            .listStyle(.sidebar)
+            #endif
             .navigationTitle("Settings")
         } detail: {
             Group {
@@ -389,6 +395,7 @@ struct AppSettingsView: View {
                     ContentUnavailableView("Select a Section", systemImage: "gearshape")
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .navigationTitle(selectedSection?.title ?? "Settings")
             .toolbar {
                 if !isEmbedded {
@@ -513,6 +520,9 @@ private struct RelaysSettingsSectionView: View {
                 }
             }
         }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
     }
 
     private func lastSyncText(_ seconds: UInt64?) -> String {
@@ -614,6 +624,9 @@ private struct BackendsSettingsSectionView: View {
                 }
             }
         }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
         .task {
             await viewModel.reloadBackends(coreManager: coreManager)
         }
@@ -717,6 +730,9 @@ private struct AISettingsSectionView: View {
                 .disabled(!viewModel.hasOpenRouterKey)
             }
         }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
         .sheet(isPresented: $showModelSelector) {
             ModelSelectorSheet(viewModel: viewModel)
                 .environmentObject(coreManager)
@@ -878,6 +894,9 @@ private struct AudioSettingsSectionView: View {
                 }
             }
         }
+        #if os(macOS)
+        .formStyle(.grouped)
+        #endif
         .sheet(isPresented: $showVoiceBrowser) {
             VoiceBrowserSheet(viewModel: viewModel)
                 .environmentObject(coreManager)
