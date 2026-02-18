@@ -1049,6 +1049,57 @@ fn render_agent_config_modal(
         );
     }
 
+    // When Shift is held, show a panel listing the projects that contain this agent.
+    if state.shift_held && !state.agent_projects.is_empty() {
+        let project_list_height = (state.agent_projects.len() as u16 + 2).min(6);
+        let panel_y = popup_area
+            .y
+            .saturating_add(popup_area.height)
+            .saturating_sub(project_list_height + 2);
+        let panel_area = Rect::new(
+            popup_area.x + 1,
+            panel_y,
+            popup_area.width.saturating_sub(2),
+            project_list_height,
+        );
+
+        let header =
+            Line::from(vec![Span::styled(
+                "Projects with this agent:",
+                Style::default().fg(theme::ACCENT_PRIMARY),
+            )]);
+        let project_lines: Vec<Line> = std::iter::once(header)
+            .chain(state.agent_projects.iter().map(|(name, _a_tag)| {
+                Line::from(vec![Span::styled(
+                    format!("  · {}", name),
+                    Style::default().fg(theme::TEXT_MUTED),
+                )])
+            }))
+            .collect();
+
+        f.render_widget(
+            Paragraph::new(project_lines)
+                .style(Style::default().bg(theme::BG_SECONDARY)),
+            panel_area,
+        );
+    } else if state.shift_held {
+        // Agent has no known projects
+        let panel_area = Rect::new(
+            popup_area.x + 1,
+            popup_area
+                .y
+                .saturating_add(popup_area.height)
+                .saturating_sub(3),
+            popup_area.width.saturating_sub(2),
+            1,
+        );
+        f.render_widget(
+            Paragraph::new("No known projects for this agent")
+                .style(Style::default().fg(theme::TEXT_MUTED)),
+            panel_area,
+        );
+    }
+
     let hints_area = Rect::new(
         popup_area.x + 1,
         popup_area.y + popup_area.height.saturating_sub(2),
@@ -1056,9 +1107,9 @@ fn render_agent_config_modal(
         1,
     );
     let hints_text = if popup_area.width < 90 {
-        "←→/tab shift+tab · ↑↓ · space/a · enter save · esc"
+        "←→/tab shift+tab · ↑↓ · space/a · shift+enter save global · enter select · esc"
     } else {
-        "←→/tab/shift+tab switch · ↑↓ navigate · space toggle · a toggle all · enter save · esc cancel"
+        "←→/tab/shift+tab switch · ↑↓ navigate · space toggle · a toggle all · shift+enter save global · enter select · esc cancel"
     };
     let hints = Paragraph::new(hints_text).style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);

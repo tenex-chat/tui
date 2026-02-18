@@ -1266,6 +1266,7 @@ fn handle_request(
                         agent_pubkey: result.agent_pubkey.clone(),
                         model: Some(params.model.clone()),
                         tools: params.tools.clone(),
+                        tags: Vec::new(),
                     }) {
                         Ok(_) => {
                             if params.wait {
