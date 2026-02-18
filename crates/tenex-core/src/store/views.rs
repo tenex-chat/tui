@@ -31,7 +31,10 @@ pub fn get_projects(ndb: &Ndb) -> Result<Vec<Project>> {
         }
     }
 
-    let mut projects: Vec<Project> = projects_by_atag.into_values().collect();
+    let mut projects: Vec<Project> = projects_by_atag
+        .into_values()
+        .filter(|p| !p.is_deleted)
+        .collect();
 
     // Sort by created_at descending (newest first)
     projects.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -536,6 +539,99 @@ mod tests {
     }
 
     #[test]
+    fn test_get_projects_hides_latest_tombstone() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["tombstone-test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Tombstone Test".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_100))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["tombstone-test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Tombstone Test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_200))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[live_event, tombstone_event], None).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let projects = get_projects(&db.ndb).unwrap();
+        assert!(
+            projects.is_empty(),
+            "Expected tombstoned project to be hidden"
+        );
+    }
+
+    #[test]
+    fn test_get_projects_keeps_newer_live_over_older_tombstone() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let keys = Keys::generate();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["revive-test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Revive Test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_100))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live again")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["revive-test".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Revive Test".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_200))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[tombstone_event, live_event], None).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        wait_for_event_processing(&db.ndb, filter, 5000);
+
+        let projects = get_projects(&db.ndb).unwrap();
+        assert_eq!(projects.len(), 1);
+        assert_eq!(projects[0].id, "revive-test");
+        assert!(!projects[0].is_deleted);
+    }
+
+    #[test]
     fn test_get_threads_for_project() {
         let dir = tempdir().unwrap();
         let db = Database::new(dir.path()).unwrap();
@@ -617,7 +713,10 @@ mod tests {
         // First check: verify events were ingested using a simple query
         {
             let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
-            let all_messages = db.ndb.query(&txn, std::slice::from_ref(&filter), 100).unwrap();
+            let all_messages = db
+                .ndb
+                .query(&txn, std::slice::from_ref(&filter), 100)
+                .unwrap();
             assert!(!all_messages.is_empty(), "No messages were ingested");
         }
 

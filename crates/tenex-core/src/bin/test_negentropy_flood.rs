@@ -106,10 +106,12 @@ async fn main() -> Result<()> {
     let sync_start = Instant::now();
 
     // Run negentropy sync (same filters as main app)
-    let sync_filters = [Filter::new().kind(Kind::Custom(31933)).author(pubkey),
+    let sync_filters = [
+        Filter::new().kind(Kind::Custom(31933)).author(pubkey),
         Filter::new().kind(Kind::Custom(4199)),
         Filter::new().kind(Kind::Custom(4200)),
-        Filter::new().kind(Kind::Custom(4201))];
+        Filter::new().kind(Kind::Custom(4201)),
+    ];
 
     for (i, filter) in sync_filters.iter().enumerate() {
         let opts = SyncOptions::default();

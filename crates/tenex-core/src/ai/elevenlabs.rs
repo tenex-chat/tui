@@ -11,6 +11,7 @@ pub struct Voice {
     pub name: String,
     pub category: Option<String>,
     pub description: Option<String>,
+    pub preview_url: Option<String>,
     pub labels: Option<HashMap<String, String>>,
 }
 

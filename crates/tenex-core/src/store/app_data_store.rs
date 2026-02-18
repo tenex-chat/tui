@@ -463,9 +463,10 @@ impl AppDataStore {
                 // Update delegation relationship (this conversation's parent)
                 if let Some(ref parent_id) = message.delegation_tag {
                     if parent_id != thread_id
-                        && self.runtime_hierarchy.set_parent(thread_id, parent_id) {
-                            relationships_changed = true;
-                        }
+                        && self.runtime_hierarchy.set_parent(thread_id, parent_id)
+                    {
+                        relationships_changed = true;
+                    }
                 }
             }
 
@@ -876,11 +877,13 @@ impl AppDataStore {
         // (Don't re-query - nostrdb indexes asynchronously, so query might miss it)
         if let Some(project) = Project::from_note(note) {
             let a_tag = project.a_tag();
-
-            // Check if project already exists and update it, or add new one
-            if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
+            if project.is_deleted {
+                self.projects.retain(|p| p.a_tag() != a_tag);
+            } else if let Some(existing) = self.projects.iter_mut().find(|p| p.a_tag() == a_tag) {
+                // Check if project already exists and update it
                 *existing = project;
             } else {
+                // Add new non-deleted project
                 self.projects.push(project);
             }
         }
@@ -1231,7 +1234,9 @@ impl AppDataStore {
                     // Try string first, then id bytes (same pattern as e-tag handling)
                     let pk = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
+                    } else {
+                        tag.get(1).and_then(|t| t.variant().id()).map(hex::encode)
+                    };
                     if pk.as_deref() == Some(user_pubkey) {
                         return true;
                     }
@@ -1346,7 +1351,9 @@ impl AppDataStore {
                     // Try string first, then id bytes
                     let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
+                    } else {
+                        tag.get(1).and_then(|t| t.variant().id()).map(hex::encode)
+                    };
                     if let Some(id) = event_id {
                         ids.push(id);
                     }
@@ -2249,6 +2256,70 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_handle_project_event_removes_tombstoned_project() {
+        use crate::store::events::ingest_events;
+        use nostr_sdk::prelude::*;
+        use nostrdb::Transaction;
+
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+        let keys = Keys::generate();
+
+        let live_event = EventBuilder::new(Kind::Custom(31933), "Live project")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["delete-me".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Delete Me".to_string()],
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_100))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let tombstone_event = EventBuilder::new(Kind::Custom(31933), "")
+            .tag(Tag::custom(
+                TagKind::SingleLetter(SingleLetterTag::lowercase(Alphabet::D)),
+                vec!["delete-me".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Delete Me".to_string()],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ))
+            .custom_created_at(Timestamp::from(1_700_000_200))
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        ingest_events(&db.ndb, &[live_event, tombstone_event], None).unwrap();
+
+        let txn = Transaction::new(&db.ndb).unwrap();
+        let filter = nostrdb::Filter::new().kinds([31933]).build();
+        let mut notes: Vec<_> = db
+            .ndb
+            .query(&txn, &[filter], 100)
+            .unwrap()
+            .into_iter()
+            .filter_map(|r| db.ndb.get_note_by_key(&txn, r.note_key).ok())
+            .collect();
+        notes.sort_by_key(|n| n.created_at());
+
+        for note in notes {
+            store.handle_project_event(&note);
+        }
+
+        assert!(store
+            .projects
+            .iter()
+            .all(|p| p.id != "delete-me" && !p.is_deleted));
+    }
+
     /// Regression test: Verify that when NostrDB text_search returns empty results,
     /// the in-memory fallback is used and correctly finds messages.
     ///
@@ -2799,6 +2870,10 @@ mod tests {
             Project {
                 id: id.to_string(),
                 name: name.to_string(),
+                description: None,
+                repo_url: None,
+                picture_url: None,
+                is_deleted: false,
                 pubkey: pubkey.to_string(),
                 participants: vec![],
                 agent_ids: vec![],
@@ -5366,6 +5441,10 @@ mod tests {
         store.projects.push(Project {
             id: "p1".to_string(),
             name: "Project One".to_string(),
+            description: None,
+            repo_url: None,
+            picture_url: None,
+            is_deleted: false,
             pubkey: "pk".to_string(),
             participants: vec![],
             agent_ids: vec![],
@@ -5416,6 +5495,10 @@ mod tests {
         store.projects.push(Project {
             id: "p1".to_string(),
             name: "Proj".to_string(),
+            description: None,
+            repo_url: None,
+            picture_url: None,
+            is_deleted: false,
             pubkey: "pk".to_string(),
             participants: vec![],
             agent_ids: vec![],
