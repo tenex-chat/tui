@@ -81,6 +81,8 @@ struct AgentSelectorSheet: View {
             .navigationTitle("Select Agent")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

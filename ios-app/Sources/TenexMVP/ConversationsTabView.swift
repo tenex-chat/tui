@@ -172,6 +172,7 @@ struct ConversationsTabView: View {
     @EnvironmentObject var coreManager: TenexCoreManager
     let layoutMode: ConversationsLayoutMode
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
+    private let newConversationProjectIdBindingOverride: Binding<String?>?
 
     @State private var selectedProjectIds: Set<String> = []  // Empty means show all
     @State private var showFilterSheet = false
@@ -184,9 +185,10 @@ struct ConversationsTabView: View {
     /// Hide scheduled conversations (those with scheduled-task-id tag)
     @AppStorage("hideScheduled") private var hideScheduled = true
     @State private var selectedConversationState: ConversationFullInfo?
+    @State private var newConversationProjectIdState: String?
     @State private var runtimeText: String = "0m"
-    @State private var projectForNewConversation: ProjectInfo?
-    @State private var showNewConversation = false
+    @State private var projectForNewConversation: SelectedProjectForComposer?
+    @State private var pendingCreatedConversationId: String?
     @State private var cachedHierarchy = ConversationFullHierarchy(conversations: [])
     // Conversation reference feature state - uses .sheet(item:) pattern for safe state management
     @State private var conversationToReference: ConversationFullInfo?
@@ -196,14 +198,20 @@ struct ConversationsTabView: View {
 
     init(
         layoutMode: ConversationsLayoutMode = .adaptive,
-        selectedConversation: Binding<ConversationFullInfo?>? = nil
+        selectedConversation: Binding<ConversationFullInfo?>? = nil,
+        newConversationProjectId: Binding<String?>? = nil
     ) {
         self.layoutMode = layoutMode
         self.selectedConversationBindingOverride = selectedConversation
+        self.newConversationProjectIdBindingOverride = newConversationProjectId
     }
 
     private var selectedConversationBinding: Binding<ConversationFullInfo?> {
         selectedConversationBindingOverride ?? $selectedConversationState
+    }
+
+    private var newConversationProjectIdBinding: Binding<String?> {
+        newConversationProjectIdBindingOverride ?? $newConversationProjectIdState
     }
 
     private var useSplitView: Bool {
@@ -306,6 +314,10 @@ struct ConversationsTabView: View {
             }
         }
         .onChange(of: coreManager.conversations) { _, _ in
+            if let pendingId = pendingCreatedConversationId,
+               let conversation = coreManager.conversations.first(where: { $0.id == pendingId }) {
+                selectCreatedConversation(conversation)
+            }
             rebuildHierarchy()
             Task {
                 await updateRuntime()
@@ -323,6 +335,11 @@ struct ConversationsTabView: View {
             Task {
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
             }
+        }
+        .onChange(of: selectedConversationBinding.wrappedValue?.id) { _, newId in
+            guard newId != nil else { return }
+            newConversationProjectIdBinding.wrappedValue = nil
+            pendingCreatedConversationId = nil
         }
         .sheet(isPresented: $showFilterSheet) {
             ProjectsSheet(selectedProjectIds: $selectedProjectIds)
@@ -344,7 +361,7 @@ struct ConversationsTabView: View {
                 .environmentObject(coreManager)
         }
         .sheet(isPresented: $showAISettings) {
-            AISettingsView()
+            AppSettingsView(defaultSection: .audio)
                 .tenexModalPresentation(detents: [.large])
                 #if os(macOS)
                 .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
@@ -361,8 +378,10 @@ struct ConversationsTabView: View {
             }
             .tenexModalPresentation(detents: [.large])
         }
-        .sheet(isPresented: $showNewConversation) {
-            newConversationComposerSheet()
+        .sheet(item: $projectForNewConversation) { selectedProject in
+            MessageComposerView(project: selectedProject.project)
+                .environmentObject(coreManager)
+                .tenexModalPresentation(detents: [.large])
         }
         .sheet(item: $conversationToReference) { conversation in
             let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
@@ -396,22 +415,11 @@ struct ConversationsTabView: View {
     private var splitSidebarContent: some View {
         VStack(spacing: 0) {
             List(selection: selectedConversationBinding) {
-                Section {
-                    conversationRows(isSplitInteraction: true)
-                } header: {
-                    HStack(spacing: 8) {
-                        Text("Chats")
-
-                        if !selectedProjectIds.isEmpty {
-                            Text("\(selectedProjectIds.count)")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        newConversationMenuButton
-                    }
+                conversationRows(isSplitInteraction: true)
+            }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    newConversationMenuButton
                 }
             }
             .modifier(ShellConversationListStyle(isShellColumn: layoutMode == .shellList))
@@ -424,9 +432,17 @@ struct ConversationsTabView: View {
     @ViewBuilder
     private var conversationDetailContent: some View {
         if let conversation = selectedConversationBinding.wrappedValue {
-            ConversationDetailView(conversation: conversation)
+            ConversationAdaptiveDetailView(conversation: conversation)
                 .environmentObject(coreManager)
             .id(conversation.id)
+        } else if let newProjectId = newConversationProjectIdBinding.wrappedValue,
+                  let project = coreManager.projects.first(where: { $0.id == newProjectId }) {
+            ConversationWorkspaceView(
+                source: .newThread(project: project),
+                onThreadCreated: handleThreadCreated
+            )
+            .environmentObject(coreManager)
+            .id("new-thread-\(project.id)")
         } else {
             ContentUnavailableView(
                 "Select a Conversation",
@@ -438,15 +454,19 @@ struct ConversationsTabView: View {
     }
 
     private var shellListLayout: some View {
-        splitSidebarContent
-            .navigationTitle("Chats")
-            .accessibilityIdentifier("section_list_column")
+        NavigationStack {
+            splitSidebarContent
+                .navigationTitle("Chats")
+        }
+        .accessibilityIdentifier("section_list_column")
     }
 
     private var shellDetailLayout: some View {
-        conversationDetailContent
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .accessibilityIdentifier("detail_column")
+        NavigationStack {
+            conversationDetailContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        }
+        .accessibilityIdentifier("detail_column")
     }
 
     // MARK: - Stack Layout (iPhone)
@@ -470,7 +490,7 @@ struct ConversationsTabView: View {
                 }
                 .sheet(item: selectedConversationBinding) { conversation in
                     NavigationStack {
-                        ConversationDetailView(conversation: conversation)
+                        ConversationAdaptiveDetailView(conversation: conversation)
                             .environmentObject(coreManager)
                             .toolbar {
                                 ToolbarItem(placement: .topBarTrailing) {
@@ -633,7 +653,7 @@ struct ConversationsTabView: View {
             }
 
             Button(action: { showAISettings = true }) {
-                Label("AI Settings", systemImage: "waveform")
+                Label("Settings", systemImage: "gearshape")
             }
 
             Button(action: { showDiagnostics = true }) {
@@ -654,30 +674,51 @@ struct ConversationsTabView: View {
     }
 
     private func startNewConversation(in project: ProjectInfo) {
-        projectForNewConversation = project
-        // Defer presentation one turn so the sheet content always sees the selected project.
+        // Defer presentation one turn so the menu can fully dismiss first.
         DispatchQueue.main.async {
-            showNewConversation = true
+            #if os(macOS)
+            selectedConversationBinding.wrappedValue = nil
+            newConversationProjectIdBinding.wrappedValue = project.id
+            #else
+            projectForNewConversation = SelectedProjectForComposer(project: project)
+            #endif
         }
     }
 
-    private func newConversationComposerSheet() -> some View {
-        Group {
-            if let project = projectForNewConversation {
-                MessageComposerView(project: project)
-                    .environmentObject(coreManager)
-                    .tenexModalPresentation(detents: [.large])
-            } else {
-                ProgressView("Loading project...")
-                    .padding(24)
+    private func handleThreadCreated(_ eventId: String) {
+        pendingCreatedConversationId = eventId
+
+        if let conversation = coreManager.conversations.first(where: { $0.id == eventId }) {
+            selectCreatedConversation(conversation)
+            return
+        }
+
+        Task {
+            let fetched = await coreManager.safeCore.getConversationsByIds(conversationIds: [eventId])
+            await MainActor.run {
+                if let conversation = fetched.first {
+                    selectCreatedConversation(conversation)
+                }
             }
         }
+    }
+
+    private func selectCreatedConversation(_ conversation: ConversationFullInfo) {
+        let canonical = coreManager.conversations.first(where: { $0.id == conversation.id }) ?? conversation
+        selectedConversationBinding.wrappedValue = canonical
+        newConversationProjectIdBinding.wrappedValue = nil
+        pendingCreatedConversationId = nil
     }
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {
         let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
         return coreManager.projects.first { $0.id == projectId }?.title
     }
+}
+
+private struct SelectedProjectForComposer: Identifiable {
+    let project: ProjectInfo
+    var id: String { project.id }
 }
 
 private struct ShellConversationListStyle: ViewModifier {

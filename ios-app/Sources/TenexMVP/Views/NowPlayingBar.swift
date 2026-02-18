@@ -44,8 +44,16 @@ struct NowPlayingBar: View {
     /// Resolve agent display name from pubkey
     private var agentName: String? {
         guard let pubkey = player.currentAgentPubkey else { return nil }
-        let name = coreManager.safeCore.getProfileName(pubkey: pubkey)
-        return name.isEmpty ? nil : AgentNameFormatter.format(name)
+        return resolveCachedAgentName(pubkey: pubkey)
+    }
+
+    private func resolveCachedAgentName(pubkey: String) -> String? {
+        for agents in coreManager.onlineAgents.values {
+            if let agent = agents.first(where: { $0.pubkey == pubkey }) {
+                return AgentNameFormatter.format(agent.name)
+            }
+        }
+        return nil
     }
 
     var body: some View {
@@ -252,8 +260,12 @@ struct AudioQueueSheet: View {
 
     private func resolveAgentName(pubkey: String?) -> String? {
         guard let pubkey else { return nil }
-        let name = coreManager.safeCore.getProfileName(pubkey: pubkey)
-        return name.isEmpty ? nil : AgentNameFormatter.format(name)
+        for agents in coreManager.onlineAgents.values {
+            if let agent = agents.first(where: { $0.pubkey == pubkey }) {
+                return AgentNameFormatter.format(agent.name)
+            }
+        }
+        return nil
     }
 
     private func resolveConversationTitle(conversationId: String?, fallback: String?) -> String {

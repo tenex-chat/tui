@@ -151,6 +151,8 @@ struct NudgeSkillSelectorSheet: View {
             .navigationTitle("Nudges & Skills")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

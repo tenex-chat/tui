@@ -32,7 +32,7 @@ struct DiagnosticsView: View {
 
             // Tab Content
             if viewModel.selectedTab == .settings {
-                AISettingsView(isEmbedded: true)
+                AppSettingsView(defaultSection: .audio, isEmbedded: true)
                     .environmentObject(coreManager)
             } else {
                 ScrollView {

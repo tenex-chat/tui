@@ -16,7 +16,7 @@ struct ConversationSummaryWindow: View {
         NavigationStack {
             Group {
                 if let conversation {
-                    ConversationDetailView(conversation: conversation)
+                    ConversationAdaptiveDetailView(conversation: conversation)
                         .environmentObject(coreManager)
                 } else if isLoading {
                     ProgressView("Loading conversation...")

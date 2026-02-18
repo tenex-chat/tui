@@ -65,6 +65,17 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Force reconnect all relays and restart subscriptions.
+    func forceReconnect() throws {
+        try profiler.measureFFI("forceReconnect") {
+            do {
+                try core.forceReconnect()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
 
     // MARK: - Projects
 
@@ -254,6 +265,17 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Get all MCP tool definitions (kind:4200 events).
+    func getAllMcpTools() throws -> [McpToolInfo] {
+        try profiler.measureFFI("getAllMcpTools") {
+            do {
+                return try core.getAllMcpTools()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Get online agents from project status (kind:24010).
     /// These are actual agent instances with their own Nostr keypairs.
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo] {
@@ -309,6 +331,44 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("updateAgentConfig") {
             do {
                 try core.updateAgentConfig(projectId: projectId, agentPubkey: agentPubkey, model: model, tools: tools)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Update an existing project by republishing kind:31933 with the same d-tag.
+    func updateProject(
+        projectId: String,
+        title: String,
+        description: String,
+        repoUrl: String?,
+        pictureUrl: String?,
+        agentIds: [String],
+        mcpToolIds: [String]
+    ) throws {
+        try profiler.measureFFI("updateProject") {
+            do {
+                try core.updateProject(
+                    projectId: projectId,
+                    title: title,
+                    description: description,
+                    repoUrl: repoUrl,
+                    pictureUrl: pictureUrl,
+                    agentIds: agentIds,
+                    mcpToolIds: mcpToolIds
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Tombstone-delete a project by publishing kind:31933 with ["deleted"].
+    func deleteProject(projectId: String) throws {
+        try profiler.measureFFI("deleteProject") {
+            do {
+                try core.deleteProject(projectId: projectId)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
@@ -383,6 +443,25 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
+        }
+    }
+
+    /// Get full backend trust snapshot for settings UI.
+    func getBackendTrustSnapshot() throws -> BackendTrustSnapshot {
+        try profiler.measureFFI("getBackendTrustSnapshot") {
+            do {
+                return try core.getBackendTrustSnapshot()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Get configured relay URLs.
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func getConfiguredRelays() -> [String] {
+        profiler.measureFFI("getConfiguredRelays") {
+            core.getConfiguredRelays()
         }
     }
 
@@ -554,7 +633,8 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
                     selectedVoiceIds: settings.selectedVoiceIds,
                     openrouterModel: settings.openrouterModel,
                     audioPrompt: settings.audioPrompt,
-                    enabled: settings.enabled
+                    enabled: settings.enabled,
+                    ttsInactivityThresholdSecs: settings.ttsInactivityThresholdSecs
                 )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
@@ -567,6 +647,17 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("setAudioNotificationsEnabled") {
             do {
                 try core.setAudioNotificationsEnabled(enabled: enabled)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Set inactivity threshold before TTS playback.
+    func setTtsInactivityThreshold(secs: UInt64) throws {
+        try profiler.measureFFI("setTtsInactivityThreshold") {
+            do {
+                try core.setTtsInactivityThreshold(secs: secs)
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }

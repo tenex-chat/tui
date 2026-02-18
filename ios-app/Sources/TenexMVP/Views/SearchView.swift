@@ -107,7 +107,7 @@ struct SearchView: View {
                 .navigationTitle("Search")
                 .navigationBarTitleDisplayMode(.inline)
                 .navigationDestination(item: selectedConversationBinding) { conversation in
-                    ConversationDetailView(conversation: conversation)
+                    ConversationAdaptiveDetailView(conversation: conversation)
                         .environmentObject(coreManager)
                 }
         }
@@ -156,7 +156,7 @@ struct SearchView: View {
     @ViewBuilder
     private var splitDetailContent: some View {
         if let conversation = selectedConversationBinding.wrappedValue {
-            ConversationDetailView(conversation: conversation)
+            ConversationAdaptiveDetailView(conversation: conversation)
                 .environmentObject(coreManager)
         } else {
             ContentUnavailableView(

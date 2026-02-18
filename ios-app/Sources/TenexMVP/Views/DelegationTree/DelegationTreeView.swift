@@ -343,7 +343,7 @@ private struct DelegationDetailPanel: View {
             Divider()
 
             NavigationStack {
-                ConversationDetailView(conversation: node.conversation)
+                ConversationAdaptiveDetailView(conversation: node.conversation)
                     .environmentObject(coreManager)
             }
         }
