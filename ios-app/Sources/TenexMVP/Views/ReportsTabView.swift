@@ -17,7 +17,7 @@ struct ReportsTabView: View {
     private let selectedReportBindingOverride: Binding<ReportInfo?>?
     @StateObject private var viewModel = ReportsViewModel()
     @State private var selectedReportState: ReportInfo?
-    @State private var showProjectFilter = false
+    @State private var showGlobalFilterSheet = false
     @State private var hasConfiguredViewModel = false
 
     #if os(iOS)
@@ -71,6 +71,13 @@ struct ReportsTabView: View {
             }
             if viewModel.filteredReports.isEmpty {
                 await viewModel.loadReports()
+            }
+        }
+        .onChange(of: viewModel.filteredReports.map(reportIdentity)) { _, visibleReportIds in
+            guard let selectedReport = selectedReportBinding.wrappedValue else { return }
+            let selectedIdentity = reportIdentity(selectedReport)
+            if !visibleReportIds.contains(selectedIdentity) {
+                selectedReportBinding.wrappedValue = nil
             }
         }
         // Reports now update reactively via TenexEventHandler -> coreManager.reports -> viewModel
@@ -175,7 +182,9 @@ struct ReportsTabView: View {
         .searchable(text: $viewModel.searchText, prompt: "Search reports...")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                filterButton
+                AppGlobalFilterToolbarButton {
+                    showGlobalFilterSheet = true
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if viewModel.isLoading {
@@ -184,39 +193,13 @@ struct ReportsTabView: View {
                 }
             }
         }
-        .sheet(isPresented: $showProjectFilter) {
-            ReportsProjectFilterSheet(
-                projects: coreManager.projects,
-                projectOnlineStatus: coreManager.projectOnlineStatus,
-                selectedProjectIds: $viewModel.selectedProjectIds
+        .sheet(isPresented: $showGlobalFilterSheet) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
             )
+            .environmentObject(coreManager)
         }
-    }
-
-    // MARK: - Filter Button
-
-    private var filterButton: some View {
-        Button {
-            showProjectFilter = true
-        } label: {
-            Label(filterButtonLabel, systemImage: filterButtonIcon)
-        }
-    }
-
-    private var filterButtonLabel: String {
-        if viewModel.selectedProjectIds.isEmpty {
-            return "All Projects"
-        } else if viewModel.selectedProjectIds.count == 1 {
-            return coreManager.projects.first { $0.id == viewModel.selectedProjectIds.first }?.title ?? "1 Project"
-        } else {
-            return "\(viewModel.selectedProjectIds.count) Projects"
-        }
-    }
-
-    private var filterButtonIcon: String {
-        viewModel.selectedProjectIds.isEmpty
-            ? "line.3.horizontal.decrease.circle"
-            : "line.3.horizontal.decrease.circle.fill"
     }
 
     private func projectFor(report: ReportInfo) -> ProjectInfo? {
@@ -224,6 +207,10 @@ struct ReportsTabView: View {
             return configured
         }
         return coreManager.projects.first { $0.id == report.projectId }
+    }
+
+    private func reportIdentity(_ report: ReportInfo) -> String {
+        "\(report.projectId)::\(report.id)"
     }
 
     // MARK: - Empty State
@@ -248,10 +235,10 @@ struct ReportsTabView: View {
                     .padding(.top, 8)
             }
 
-            if !viewModel.selectedProjectIds.isEmpty || !viewModel.searchText.isEmpty {
+            if !coreManager.isAppFilterDefault || !viewModel.searchText.isEmpty {
                 Button {
-                    viewModel.selectedProjectIds.removeAll()
                     viewModel.searchText = ""
+                    coreManager.resetAppFilterToDefaults()
                 } label: {
                     Label("Clear Filters", systemImage: "xmark.circle")
                 }
@@ -265,7 +252,7 @@ struct ReportsTabView: View {
     private var emptyStateIcon: String {
         if !viewModel.searchText.isEmpty {
             return "magnifyingglass"
-        } else if !viewModel.selectedProjectIds.isEmpty {
+        } else if !coreManager.isAppFilterDefault {
             return "line.3.horizontal.decrease.circle"
         } else {
             return "doc.richtext"
@@ -275,8 +262,8 @@ struct ReportsTabView: View {
     private var emptyStateTitle: String {
         if !viewModel.searchText.isEmpty {
             return "No Matching Reports"
-        } else if !viewModel.selectedProjectIds.isEmpty {
-            return "No Reports in Selected Projects"
+        } else if !coreManager.isAppFilterDefault {
+            return "No Reports in Current Filter"
         } else {
             return "No Reports"
         }
@@ -285,8 +272,8 @@ struct ReportsTabView: View {
     private var emptyStateMessage: String {
         if !viewModel.searchText.isEmpty {
             return "Try adjusting your search terms"
-        } else if !viewModel.selectedProjectIds.isEmpty {
-            return "Try selecting different projects"
+        } else if !coreManager.isAppFilterDefault {
+            return "Try adjusting your project/time filter"
         } else {
             return "Reports from your projects will appear here"
         }
@@ -517,101 +504,6 @@ struct ReportsTabDetailView: View {
     private func formatDate(_ timestamp: UInt64) -> String {
         let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
         return Self.dateFormatter.string(from: date)
-    }
-}
-
-// MARK: - Reports Project Filter Sheet
-
-/// Sheet for filtering reports by project
-private struct ReportsProjectFilterSheet: View {
-    let projects: [ProjectInfo]
-    let projectOnlineStatus: [String: Bool]
-    @Binding var selectedProjectIds: Set<String>
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                // "All Projects" option
-                Button {
-                    selectedProjectIds.removeAll()
-                } label: {
-                    HStack {
-                        Image(systemName: "square.grid.2x2")
-                            .foregroundStyle(Color.agentBrand)
-                            .frame(width: 24)
-                        Text("All Projects")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        if selectedProjectIds.isEmpty {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(Color.agentBrand)
-                        }
-                    }
-                }
-
-                Divider()
-
-                // Individual projects
-                ForEach(projects, id: \.id) { project in
-                    Button {
-                        toggleProject(project.id)
-                    } label: {
-                        HStack {
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(deterministicColor(for: project.id).gradient)
-                                .frame(width: 24, height: 24)
-                                .overlay {
-                                    Image(systemName: "folder.fill")
-                                        .foregroundStyle(.white)
-                                        .font(.caption)
-                                }
-
-                            Text(project.title)
-                                .foregroundStyle(.primary)
-                                .lineLimit(1)
-
-                            if projectOnlineStatus[project.id] == true {
-                                Circle()
-                                    .fill(Color.presenceOnline)
-                                    .frame(width: 8, height: 8)
-                            }
-
-                            Spacer()
-
-                            if selectedProjectIds.contains(project.id) {
-                                Image(systemName: "checkmark")
-                                    .foregroundStyle(Color.agentBrand)
-                            }
-                        }
-                    }
-                }
-            }
-            #if os(iOS)
-            .listStyle(.insetGrouped)
-            #else
-            .listStyle(.inset)
-            #endif
-            .navigationTitle("Filter by Project")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                }
-            }
-        }
-        .tenexModalPresentation(detents: [.medium, .large])
-    }
-
-    private func toggleProject(_ id: String) {
-        if selectedProjectIds.contains(id) {
-            selectedProjectIds.remove(id)
-        } else {
-            selectedProjectIds.insert(id)
-        }
     }
 }
 

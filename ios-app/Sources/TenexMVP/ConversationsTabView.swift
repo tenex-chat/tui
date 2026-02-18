@@ -174,8 +174,7 @@ struct ConversationsTabView: View {
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
 
-    @State private var selectedProjectIds: Set<String> = []  // Empty means show all
-    @State private var showFilterSheet = false
+    @State private var showGlobalFilterSheet = false
     @State private var showDiagnostics = false
     @State private var showAISettings = false
     @State private var showAudioQueue = false
@@ -268,7 +267,8 @@ struct ConversationsTabView: View {
         sortedProjects.filter { !(coreManager.projectOnlineStatus[$0.id] ?? false) }
     }
 
-    /// Filtered conversations based on selected projects, archived status, and scheduled status
+    /// Filtered conversations based on archived status and scheduled status.
+    /// Global project/time filtering is already applied centrally in TenexCoreManager.
     private var filteredConversations: [ConversationFullInfo] {
         var conversations = coreManager.conversations
 
@@ -278,13 +278,6 @@ struct ConversationsTabView: View {
 
         if hideScheduled {
             conversations = conversations.filter { !$0.isScheduled }
-        }
-
-        if !selectedProjectIds.isEmpty {
-            conversations = conversations.filter { conv in
-                let projectId = conv.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
-                return selectedProjectIds.contains(projectId)
-            }
         }
 
         return conversations
@@ -327,13 +320,18 @@ struct ConversationsTabView: View {
         .onChange(of: showArchived) { _, _ in
             rebuildHierarchy()
         }
-        .onChange(of: selectedProjectIds) { _, _ in
-            rebuildHierarchy()
-        }
         .onChange(of: hideScheduled) { _, _ in
             rebuildHierarchy()
             Task {
                 await coreManager.hierarchyCache.preloadForConversations(cachedHierarchy.sortedRootConversations)
+            }
+        }
+        .onChange(of: filteredConversations.map(\.id)) { _, visibleIds in
+            if let selectedId = selectedConversationBinding.wrappedValue?.id,
+               !visibleIds.contains(selectedId) {
+                selectedConversationBinding.wrappedValue = nil
+                newConversationProjectIdBinding.wrappedValue = nil
+                pendingCreatedConversationId = nil
             }
         }
         .onChange(of: selectedConversationBinding.wrappedValue?.id) { _, newId in
@@ -341,8 +339,11 @@ struct ConversationsTabView: View {
             newConversationProjectIdBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
         }
-        .sheet(isPresented: $showFilterSheet) {
-            ProjectsSheet(selectedProjectIds: $selectedProjectIds)
+        .sheet(isPresented: $showGlobalFilterSheet) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
                 .environmentObject(coreManager)
         }
         .sheet(isPresented: $showDiagnostics) {
@@ -384,7 +385,7 @@ struct ConversationsTabView: View {
                 .tenexModalPresentation(detents: [.large])
         }
         .sheet(item: $conversationToReference) { conversation in
-            let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+            let projectId = TenexCoreManager.projectId(fromATag: conversation.projectATag)
             if let project = coreManager.projects.first(where: { $0.id == projectId }) {
                 MessageComposerView(
                     project: project,
@@ -418,6 +419,11 @@ struct ConversationsTabView: View {
                 conversationRows(isSplitInteraction: true)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    AppGlobalFilterToolbarButton {
+                        showGlobalFilterSheet = true
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     newConversationMenuButton
                 }
@@ -479,6 +485,9 @@ struct ConversationsTabView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         ControlGroup {
+                            AppGlobalFilterToolbarButton {
+                                showGlobalFilterSheet = true
+                            }
                             settingsMenu(compact: true)
                             runtimeButton
                         }
@@ -519,8 +528,8 @@ struct ConversationsTabView: View {
     private func conversationRows(isSplitInteraction: Bool) -> some View {
         if cachedHierarchy.sortedRootConversations.isEmpty {
             ConversationsEmptyState(
-                hasFilter: !selectedProjectIds.isEmpty,
-                onClearFilter: { selectedProjectIds.removeAll() }
+                hasFilter: !coreManager.isAppFilterDefault,
+                onClearFilter: { coreManager.resetAppFilterToDefaults() }
             )
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
@@ -711,7 +720,7 @@ struct ConversationsTabView: View {
     }
 
     private func projectTitle(for conversation: ConversationFullInfo) -> String? {
-        let projectId = conversation.projectATag.split(separator: ":").dropFirst(2).joined(separator: ":")
+        let projectId = TenexCoreManager.projectId(fromATag: conversation.projectATag)
         return coreManager.projects.first { $0.id == projectId }?.title
     }
 }
@@ -1009,7 +1018,7 @@ private struct ConversationsEmptyState: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text(hasFilter ? "Try adjusting your project filter" : "Conversations will appear automatically")
+            Text(hasFilter ? "Try adjusting your project/time filter" : "Conversations from the last 24h will appear automatically")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 

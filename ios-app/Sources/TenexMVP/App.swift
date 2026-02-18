@@ -1,6 +1,9 @@
 import SwiftUI
 import CryptoKit
 import UserNotifications
+#if os(macOS)
+import AppKit
+#endif
 
 // MARK: - Auto-Login Result
 
@@ -111,21 +114,24 @@ class TenexCoreManager: ObservableObject {
     /// Used by view selection state to clear deleted-project detail panes immediately.
     @Published private(set) var lastDeletedProjectId: String?
 
+    // MARK: - Global App Filter
+
+    @Published var appFilterProjectIds: Set<String>
+    @Published var appFilterTimeWindow: AppTimeWindow
+
+    private static let appFilterProjectsDefaultsKey = "app.global.filter.projectIds"
+    private static let appFilterTimeWindowDefaultsKey = "app.global.filter.timeWindow"
+
     // MARK: - Ask Badge Support
 
-    /// Hard cap for inbox items: 48 hours in seconds.
-    /// Synchronized with InboxView.inbox48HourCapSeconds and Rust constant.
-    private static let inbox48HourCapSeconds: UInt64 = 48 * 60 * 60
-
-    /// Count of unanswered ask events within the 48-hour window.
-    /// Computed property that filters inboxItems for badge display.
+    /// Count of unanswered ask events within the selected global filter scope.
     var unansweredAskCount: Int {
         let now = UInt64(Date().timeIntervalSince1970)
-        let cutoff = now > Self.inbox48HourCapSeconds ? now - Self.inbox48HourCapSeconds : 0
+        let snapshot = appFilterSnapshot
         return inboxItems.filter { item in
             item.eventType == "ask" &&
             item.status == "waiting" &&
-            item.createdAt >= cutoff
+            snapshot.includes(projectId: item.projectId, timestamp: item.createdAt, now: now)
         }.count
     }
 
@@ -135,6 +141,8 @@ class TenexCoreManager: ObservableObject {
 
     /// Task reference for project status updates - enables cancellation of stale refreshes
     private var projectStatusUpdateTask: Task<Void, Never>?
+    /// Task reference for app-filtered conversation refreshes
+    private var conversationRefreshTask: Task<Void, Never>?
 
     /// Cache for profile picture URLs to prevent repeated FFI calls
     nonisolated let profilePictureCache = ProfilePictureCache.shared
@@ -145,6 +153,10 @@ class TenexCoreManager: ObservableObject {
     let hierarchyCache = ConversationHierarchyCache()
 
     init() {
+        let persistedFilter = Self.loadPersistedAppFilter()
+        _appFilterProjectIds = Published(initialValue: persistedFilter.projectIds)
+        _appFilterTimeWindow = Published(initialValue: persistedFilter.timeWindow)
+
         // Create core immediately (lightweight)
         let tenexCore = TenexCore()
         core = tenexCore
@@ -172,6 +184,92 @@ class TenexCoreManager: ObservableObject {
     /// Trigger a manual sync with relays (optional, user-initiated).
     func syncNow() async {
         _ = await safeCore.refresh()
+    }
+
+    var appFilterSnapshot: AppGlobalFilterSnapshot {
+        AppGlobalFilterSnapshot(projectIds: appFilterProjectIds, timeWindow: appFilterTimeWindow)
+    }
+
+    var isAppFilterDefault: Bool {
+        appFilterSnapshot.isDefault
+    }
+
+    var appFilterProjectSummaryLabel: String {
+        if appFilterProjectIds.isEmpty {
+            return "All Projects"
+        }
+        if appFilterProjectIds.count == 1,
+           let id = appFilterProjectIds.first,
+           let title = projects.first(where: { $0.id == id })?.title {
+            return title
+        }
+        return "\(appFilterProjectIds.count) Projects"
+    }
+
+    var appFilterSummaryLabel: String {
+        "\(appFilterTimeWindow.label) · \(appFilterProjectSummaryLabel)"
+    }
+
+    @MainActor
+    func updateAppFilter(projectIds: Set<String>, timeWindow: AppTimeWindow) {
+        guard projectIds != appFilterProjectIds || timeWindow != appFilterTimeWindow else { return }
+
+        appFilterProjectIds = projectIds
+        appFilterTimeWindow = timeWindow
+        persistAppFilter()
+
+        // Apply immediately to current in-memory list so selection/UI react instantly.
+        let now = UInt64(Date().timeIntervalSince1970)
+        conversations = sortedConversations(
+            conversations.filter { conversationMatchesAppFilter($0, now: now) }
+        )
+        updateActiveAgentsState()
+        updateAppBadge()
+
+        refreshConversationsForActiveFilter()
+    }
+
+    @MainActor
+    func resetAppFilterToDefaults() {
+        updateAppFilter(projectIds: [], timeWindow: .defaultValue)
+    }
+
+    func matchesAppFilter(projectId: String?, timestamp: UInt64, now: UInt64? = nil) -> Bool {
+        let resolvedNow = now ?? UInt64(Date().timeIntervalSince1970)
+        return appFilterSnapshot.includes(projectId: projectId, timestamp: timestamp, now: resolvedNow)
+    }
+
+    func conversationMatchesAppFilter(_ conversation: ConversationFullInfo, now: UInt64? = nil) -> Bool {
+        let projectId = Self.projectId(fromATag: conversation.projectATag)
+        return matchesAppFilter(projectId: projectId, timestamp: conversation.effectiveLastActivity, now: now)
+    }
+
+    func reportMatchesAppFilter(_ report: ReportInfo, now: UInt64? = nil) -> Bool {
+        matchesAppFilter(projectId: report.projectId, timestamp: report.updatedAt, now: now)
+    }
+
+    func inboxItemMatchesAppFilter(_ item: InboxItem, now: UInt64? = nil) -> Bool {
+        matchesAppFilter(projectId: item.projectId, timestamp: item.createdAt, now: now)
+    }
+
+    func searchResultMatchesAppFilter(_ result: SearchResult, now: UInt64? = nil) -> Bool {
+        let projectId = result.projectATag.map(Self.projectId(fromATag:))
+        return matchesAppFilter(projectId: projectId, timestamp: result.createdAt, now: now)
+    }
+
+    private static func loadPersistedAppFilter() -> (projectIds: Set<String>, timeWindow: AppTimeWindow) {
+        let defaults = UserDefaults.standard
+        let persistedProjectIds = Set(defaults.stringArray(forKey: Self.appFilterProjectsDefaultsKey) ?? [])
+        let persistedTimeWindow = defaults.string(forKey: Self.appFilterTimeWindowDefaultsKey)
+            .flatMap(AppTimeWindow.init(rawValue:))
+            ?? .defaultValue
+        return (persistedProjectIds, persistedTimeWindow)
+    }
+
+    private func persistAppFilter() {
+        let defaults = UserDefaults.standard
+        defaults.set(Array(appFilterProjectIds).sorted(), forKey: Self.appFilterProjectsDefaultsKey)
+        defaults.set(appFilterTimeWindow.rawValue, forKey: Self.appFilterTimeWindowDefaultsKey)
     }
 
     // MARK: - Event Callback Registration
@@ -203,6 +301,8 @@ class TenexCoreManager: ObservableObject {
     func unregisterEventCallback() {
         core.clearEventCallback()
         eventHandler = nil
+        projectStatusUpdateTask?.cancel()
+        conversationRefreshTask?.cancel()
     }
 
     /// Manual refresh for pull-to-refresh gesture.
@@ -235,6 +335,12 @@ class TenexCoreManager: ObservableObject {
     @MainActor
     func applyConversationUpsert(_ conversation: ConversationFullInfo) {
         var updated = conversations
+        guard conversationMatchesAppFilter(conversation) else {
+            updated.removeAll { $0.id == conversation.id }
+            conversations = sortedConversations(updated)
+            updateActiveAgentsState()
+            return
+        }
         if let index = updated.firstIndex(where: { $0.id == conversation.id }) {
             updated[index] = conversation
         } else {
@@ -250,6 +356,12 @@ class TenexCoreManager: ObservableObject {
             projects.removeAll { $0.id == project.id }
             projectOnlineStatus.removeValue(forKey: project.id)
             onlineAgents.removeValue(forKey: project.id)
+            if appFilterProjectIds.contains(project.id) {
+                appFilterProjectIds.remove(project.id)
+                persistAppFilter()
+                refreshConversationsForActiveFilter()
+                updateAppBadge()
+            }
             lastDeletedProjectId = project.id
             return
         }
@@ -394,19 +506,8 @@ class TenexCoreManager: ObservableObject {
             await MainActor.run {
                 self.setMessagesCache(messages, for: conversationId)
             }
-            // Also refresh the conversation list
-            // Use showArchived: true to match fetchData() - client-side filtering is applied in views
-            let filter = ConversationFilter(
-                projectIds: [],
-                showArchived: true,
-                hideScheduled: false,
-                timeFilter: .all
-            )
-            if let conversations = try? await safeCore.getAllConversations(filter: filter) {
-                await MainActor.run {
-                    self.conversations = self.sortedConversations(conversations)
-                    self.updateActiveAgentsState()
-                }
+            await MainActor.run {
+                self.refreshConversationsForActiveFilter()
             }
         }
     }
@@ -640,6 +741,41 @@ class TenexCoreManager: ObservableObject {
         diagnosticsVersion &+= 1
     }
 
+    @MainActor
+    private func refreshConversationsForActiveFilter() {
+        let snapshot = appFilterSnapshot
+
+        conversationRefreshTask?.cancel()
+        conversationRefreshTask = Task { [weak self] in
+            guard let self else { return }
+
+            guard let refreshed = try? await self.fetchConversations(for: snapshot) else { return }
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                guard self.appFilterSnapshot == snapshot else { return }
+                self.conversations = self.sortedConversations(refreshed)
+                self.updateActiveAgentsState()
+            }
+        }
+    }
+
+    private func fetchConversations(for snapshot: AppGlobalFilterSnapshot) async throws -> [ConversationFullInfo] {
+        let filter = ConversationFilter(
+            projectIds: Array(snapshot.projectIds),
+            showArchived: true,
+            hideScheduled: false,
+            timeFilter: snapshot.timeWindow.coreTimeFilter
+        )
+        let fetched = try await safeCore.getAllConversations(filter: filter)
+        guard !Task.isCancelled else { return [] }
+        let now = UInt64(Date().timeIntervalSince1970)
+        return fetched.filter { conversation in
+            let projectId = Self.projectId(fromATag: conversation.projectATag)
+            return snapshot.includes(projectId: projectId, timestamp: conversation.effectiveLastActivity, now: now)
+        }
+    }
+
     static func projectId(fromATag aTag: String) -> String {
         let parts = aTag.split(separator: ":")
         guard parts.count >= 3 else { return "" }
@@ -660,18 +796,11 @@ class TenexCoreManager: ObservableObject {
         #endif
 
         do {
-            // Always fetch all conversations (including scheduled)
-            // Client-side filtering is applied in ConversationsTabView based on user preferences
-            let filter = ConversationFilter(
-                projectIds: [],
-                showArchived: true,
-                hideScheduled: false,
-                timeFilter: .all
-            )
+            let filterSnapshot = appFilterSnapshot
 
             // Fetch all data concurrently
             async let fetchedProjects = safeCore.getProjects()
-            async let fetchedConversations = try safeCore.getAllConversations(filter: filter)
+            async let fetchedConversations = try fetchConversations(for: filterSnapshot)
             async let fetchedInbox = safeCore.getInbox()
 
             let (p, c, i) = try await (fetchedProjects, fetchedConversations, fetchedInbox)
@@ -680,6 +809,14 @@ class TenexCoreManager: ObservableObject {
             conversations = sortedConversations(c)
             inboxItems = i
 
+            let validProjectIds = Set(p.map(\.id))
+            let prunedProjectIds = appFilterProjectIds.intersection(validProjectIds)
+            if prunedProjectIds != appFilterProjectIds {
+                appFilterProjectIds = prunedProjectIds
+                persistAppFilter()
+                refreshConversationsForActiveFilter()
+            }
+
             // Initialize project online status and online agents in parallel, OFF main actor
             // This uses the shared helper to avoid code duplication and ensure consistent behavior
             await refreshProjectStatusParallel(for: p)
@@ -687,6 +824,7 @@ class TenexCoreManager: ObservableObject {
             updateActiveAgentsState()
             signalStatsUpdate()
             signalDiagnosticsUpdate()
+            updateAppBadge()
         } catch {
             // Don't crash - just log and continue with stale data
         }
@@ -863,6 +1001,37 @@ struct TenexMVPApp: App {
         return nil
     }
 
+    #if os(macOS)
+    private let loginWindowSize = NSSize(width: 360, height: 460)
+    private let mainWindowSize = NSSize(width: 1200, height: 800)
+
+    private func updateMainWindowForAuthState() {
+        DispatchQueue.main.async {
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first else {
+                return
+            }
+
+            if isLoggedIn {
+                window.maxSize = NSSize(
+                    width: CGFloat.greatestFiniteMagnitude,
+                    height: CGFloat.greatestFiniteMagnitude
+                )
+                window.minSize = NSSize(width: 900, height: 620)
+
+                if window.frame.size.width < 900 || window.frame.size.height < 620 {
+                    window.setContentSize(mainWindowSize)
+                    window.center()
+                }
+            } else {
+                window.minSize = NSSize(width: 340, height: 430)
+                window.maxSize = NSSize(width: 520, height: 680)
+                window.setContentSize(loginWindowSize)
+                window.center()
+            }
+        }
+    }
+    #endif
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -900,12 +1069,20 @@ struct TenexMVPApp: App {
                     .environmentObject(coreManager)
                 }
             }
+            .onAppear {
+                #if os(macOS)
+                updateMainWindowForAuthState()
+                #endif
+            }
             .onChange(of: coreManager.isInitialized) { _, isInitialized in
                 if isInitialized {
                     attemptAutoLogin()
                 }
             }
             .onChange(of: isLoggedIn) { _, loggedIn in
+                #if os(macOS)
+                updateMainWindowForAuthState()
+                #endif
                 // Register/unregister event callback based on login state
                 if loggedIn {
                     coreManager.registerEventCallback()
@@ -945,7 +1122,7 @@ struct TenexMVPApp: App {
                     Task {
                         // Refresh authorization status (user may have changed permissions in Settings)
                         await NotificationService.shared.checkAuthorizationStatus()
-                        // Recalculate badge (may be stale after 48-hour window changes)
+                        // Recalculate badge in case global filter scope changed while inactive
                         await MainActor.run {
                             coreManager.updateAppBadge()
                         }

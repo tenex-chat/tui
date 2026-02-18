@@ -11,47 +11,43 @@ struct LoginView: View {
     @State private var nsecInput = ""
     @State private var isLoading = false
     @State private var errorMessage: String?
-    private let maxLoginContentWidth: CGFloat = 560
+    private let loginCardWidth: CGFloat = 320
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                Spacer(minLength: 32)
+            ZStack {
+                VStack(spacing: 14) {
+                    // Header
+                    VStack(spacing: 6) {
+                        Image(systemName: "key.fill")
+                            .font(.system(size: 42))
+                            .foregroundStyle(Color.agentBrand)
 
-                // Header
-                VStack(spacing: 8) {
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(Color.agentBrand)
+                        Text("Login to TENEX")
+                            .font(.title3)
+                            .fontWeight(.semibold)
 
-                    Text("Login to TENEX")
-                        .font(.largeTitle)
-                        .fontWeight(.bold)
-
-                    Text("Enter your Nostr secret key")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Auto-login error (from previous session)
-                if let autoError = autoLoginError {
-                    HStack {
-                        Image(systemName: "info.circle.fill")
-                            .foregroundStyle(Color.healthWarning)
-                        Text(autoError)
-                            .foregroundStyle(Color.healthWarning)
-                            .font(.footnote)
+                        Text("Enter your Nostr secret key")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(Color.healthWarning.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .padding(.horizontal)
-                }
 
-                VStack(spacing: 20) {
-                    // Input Section
-                    VStack(alignment: .leading, spacing: 8) {
+                    // Auto-login error (from previous session)
+                    if let autoError = autoLoginError {
+                        HStack(spacing: 6) {
+                            Image(systemName: "info.circle.fill")
+                                .foregroundStyle(Color.healthWarning)
+                            Text(autoError)
+                                .foregroundStyle(Color.healthWarning)
+                                .font(.footnote)
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 8)
+                        .background(Color.healthWarning.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    VStack(alignment: .leading, spacing: 7) {
                         Text("NSEC Key")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -67,14 +63,14 @@ struct LoginView: View {
 
                     // Error Message
                     if let error = errorMessage {
-                        HStack {
+                        HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundStyle(Color.healthError)
                             Text(error)
                                 .foregroundStyle(Color.healthError)
                                 .font(.footnote)
                         }
-                        .padding(.horizontal)
+                        .padding(.horizontal, 10)
                         .padding(.vertical, 8)
                         .background(Color.healthError.opacity(0.1))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -93,27 +89,33 @@ struct LoginView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(nsecInput.isEmpty || isLoading)
+
+                    // Footer Info
+                    VStack(spacing: 2) {
+                        Text("Your key is stored securely in Keychain when available")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+
+                        Text("If saved, you'll be auto-logged in on next launch")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 2)
                 }
-                .padding(.horizontal)
-                .frame(maxWidth: maxLoginContentWidth)
-
-                Spacer()
-
-                // Footer Info
-                VStack(spacing: 4) {
-                    Text("Your key is stored securely in Keychain when available")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-
-                    Text("If saved, you'll be auto-logged in on next launch")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: maxLoginContentWidth)
-                .padding(.horizontal)
-                .padding(.bottom, 20)
+                .padding(18)
+                .frame(maxWidth: loginCardWidth)
+                #if os(macOS)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                #endif
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(24)
             .navigationBarTitleDisplayMode(.inline)
         }
     }
