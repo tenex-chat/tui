@@ -1234,6 +1234,7 @@ enum AppSection: String, CaseIterable, Identifiable {
     case reports
     case inbox
     case search
+    case agentDefinitions
 
     var id: String { rawValue }
 
@@ -1244,6 +1245,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .reports: return "Reports"
         case .inbox: return "Inbox"
         case .search: return "Search"
+        case .agentDefinitions: return "Agent Definitions"
         }
     }
 
@@ -1254,6 +1256,7 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .reports: return "doc.richtext"
         case .inbox: return "tray"
         case .search: return "magnifyingglass"
+        case .agentDefinitions: return "person.3.sequence"
         }
     }
 
@@ -1414,6 +1417,7 @@ struct MainShellView: View {
     @State private var selectedInboxItemId: String?
     @State private var activeInboxConversationId: String?
     @State private var selectedSearchConversation: ConversationFullInfo?
+    @State private var selectedAgentDefinition: AgentInfo?
     @State private var newConversationProjectId: String?
 
     private var currentSection: AppSection {
@@ -1568,6 +1572,11 @@ struct MainShellView: View {
             )
         case .search:
             SearchView(layoutMode: .shellList, selectedConversation: $selectedSearchConversation)
+        case .agentDefinitions:
+            AgentDefinitionsTabView(
+                layoutMode: .shellList,
+                selectedAgent: $selectedAgentDefinition
+            )
         }
     }
 
@@ -1593,6 +1602,11 @@ struct MainShellView: View {
             )
         case .search:
             SearchView(layoutMode: .shellDetail, selectedConversation: $selectedSearchConversation)
+        case .agentDefinitions:
+            AgentDefinitionsTabView(
+                layoutMode: .shellDetail,
+                selectedAgent: $selectedAgentDefinition
+            )
         }
     }
 }

@@ -241,8 +241,15 @@ fn agent_to_info(agent: &AgentDefinition) -> AgentInfo {
         name: agent.name.clone(),
         description: agent.description.clone(),
         role: agent.role.clone(),
+        instructions: agent.instructions.clone(),
         picture: agent.picture.clone(),
+        version: agent.version.clone(),
         model: agent.model.clone(),
+        tools: agent.tools.clone(),
+        mcp_servers: agent.mcp_servers.clone(),
+        use_criteria: agent.use_criteria.clone(),
+        file_ids: agent.file_ids.clone(),
+        created_at: agent.created_at,
     }
 }
 
@@ -1106,10 +1113,24 @@ pub struct AgentInfo {
     pub description: String,
     /// Role of the agent (e.g., "Developer", "PM")
     pub role: String,
+    /// Full instruction prompt for the agent definition
+    pub instructions: String,
     /// Profile picture URL, if any
     pub picture: Option<String>,
+    /// Version string (supports both `ver` and legacy `version` tags)
+    pub version: Option<String>,
     /// Model used by the agent (e.g., "claude-3-opus")
     pub model: Option<String>,
+    /// Tool names declared on the definition
+    pub tools: Vec<String>,
+    /// Referenced MCP server event IDs
+    pub mcp_servers: Vec<String>,
+    /// Usage criteria tags
+    pub use_criteria: Vec<String>,
+    /// Referenced file metadata event IDs (NIP-94 kind:1063) from `e` tags
+    pub file_ids: Vec<String>,
+    /// Creation timestamp (unix seconds)
+    pub created_at: u64,
 }
 
 /// An online agent from project status (kind:24010 events).

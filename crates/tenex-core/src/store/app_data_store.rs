@@ -4498,6 +4498,7 @@ mod tests {
             tools: vec![],
             mcp_servers: vec![],
             use_criteria: vec![],
+            file_ids: vec![],
             created_at,
         }
     }

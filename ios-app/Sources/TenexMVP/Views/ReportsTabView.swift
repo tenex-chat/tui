@@ -193,6 +193,15 @@ struct ReportsTabView: View {
                 }
             }
         }
+        #if os(macOS)
+        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
+        }
+        #else
         .sheet(isPresented: $showGlobalFilterSheet) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
@@ -200,6 +209,7 @@ struct ReportsTabView: View {
             )
             .environmentObject(coreManager)
         }
+        #endif
     }
 
     private func projectFor(report: ReportInfo) -> ProjectInfo? {

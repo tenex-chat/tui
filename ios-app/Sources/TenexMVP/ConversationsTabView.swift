@@ -339,13 +339,23 @@ struct ConversationsTabView: View {
             newConversationProjectIdBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
         }
+        #if os(macOS)
+        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
+        }
+        #else
         .sheet(isPresented: $showGlobalFilterSheet) {
             AppGlobalFilterSheet(
                 selectedProjectIds: coreManager.appFilterProjectIds,
                 selectedTimeWindow: coreManager.appFilterTimeWindow
             )
-                .environmentObject(coreManager)
+            .environmentObject(coreManager)
         }
+        #endif
         .sheet(isPresented: $showDiagnostics) {
             NavigationStack {
                 DiagnosticsView(coreManager: coreManager)
