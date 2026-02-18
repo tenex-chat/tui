@@ -451,7 +451,10 @@ fn sync_tab_working_state(app: &mut App) {
         .iter()
         .filter(|tab| tab.is_conversation() && !tab.thread_id.is_empty())
         .map(|tab| {
-            let is_working = !store.operations.get_working_agents(&tab.thread_id).is_empty();
+            let is_working = !store
+                .operations
+                .get_working_agents(&tab.thread_id)
+                .is_empty();
             (tab.thread_id.clone(), is_working)
         })
         .collect();
