@@ -1324,6 +1324,8 @@ pub struct AgentSettingsState {
     pub agent_name: String,
     pub agent_pubkey: String,
     pub project_a_tag: String,
+    /// Whether this agent is currently the PM for the project
+    pub is_pm: bool,
     /// Available models to choose from (from project status)
     pub available_models: Vec<String>,
     /// Index of selected model in available_models
@@ -1345,6 +1347,7 @@ impl AgentSettingsState {
         project_a_tag: String,
         current_model: Option<String>,
         current_tools: Vec<String>,
+        is_pm: bool,
         available_models: Vec<String>,
         all_available_tools: Vec<String>,
     ) -> Self {
@@ -1364,6 +1367,7 @@ impl AgentSettingsState {
             agent_name,
             agent_pubkey,
             project_a_tag,
+            is_pm,
             available_models,
             model_index,
             tool_groups,
@@ -1458,7 +1462,13 @@ impl AgentSettingsState {
                 count += group.tools.len();
             }
         }
-        count
+        // PM toggle row at the bottom of tools column
+        count + 1
+    }
+
+    /// Cursor index of the PM toggle row.
+    pub fn pm_toggle_cursor_index(&self) -> usize {
+        self.visible_item_count().saturating_sub(1)
     }
 
     /// Get the item at a given cursor position
@@ -1485,6 +1495,11 @@ impl AgentSettingsState {
 
     /// Toggle expansion of group at cursor, or toggle tool selection
     pub fn toggle_at_cursor(&mut self) {
+        if self.tools_cursor == self.pm_toggle_cursor_index() {
+            self.is_pm = !self.is_pm;
+            return;
+        }
+
         if let Some((group_idx, tool_idx)) = self.item_at_cursor(self.tools_cursor) {
             match tool_idx {
                 None => {
@@ -1520,6 +1535,10 @@ impl AgentSettingsState {
 
     /// Toggle all tools in the group at cursor (bulk toggle)
     pub fn toggle_group_all(&mut self) {
+        if self.tools_cursor == self.pm_toggle_cursor_index() {
+            return;
+        }
+
         if let Some((group_idx, _)) = self.item_at_cursor(self.tools_cursor) {
             let group = &self.tool_groups[group_idx];
             let is_fully_selected = group.is_fully_selected(&self.selected_tools);
@@ -1588,6 +1607,8 @@ pub struct AgentConfigState {
     pub original_model: Option<String>,
     /// Original tools for change detection
     pub original_tools: std::collections::HashSet<String>,
+    /// Original PM marker for change detection
+    pub original_is_pm: bool,
 }
 
 impl AgentConfigState {
@@ -1599,6 +1620,7 @@ impl AgentConfigState {
             settings: None,
             original_model: None,
             original_tools: std::collections::HashSet::new(),
+            original_is_pm: false,
         }
     }
 
@@ -1609,11 +1631,13 @@ impl AgentConfigState {
         settings: Option<AgentSettingsState>,
         original_model: Option<String>,
         original_tools: std::collections::HashSet<String>,
+        original_is_pm: bool,
     ) {
         self.active_agent_pubkey = active_agent_pubkey;
         self.settings = settings;
         self.original_model = original_model;
         self.original_tools = original_tools;
+        self.original_is_pm = original_is_pm;
     }
 
     /// Returns true when the current settings differ from the original snapshot.
@@ -1622,7 +1646,9 @@ impl AgentConfigState {
             return false;
         };
         let current_model = settings.selected_model().map(str::to_string);
-        current_model != self.original_model || settings.selected_tools != self.original_tools
+        current_model != self.original_model
+            || settings.selected_tools != self.original_tools
+            || settings.is_pm != self.original_is_pm
     }
 }
 
@@ -2316,6 +2342,7 @@ mod tests {
             "31933:pubkey:project".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
+            false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
         );
@@ -2325,6 +2352,7 @@ mod tests {
             Some(settings),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            false,
         );
         assert!(!state.has_config_changes());
 
@@ -2340,6 +2368,13 @@ mod tests {
             s.selected_tools.insert("tool_write".to_string());
         }
         assert!(state.has_config_changes());
+
+        // PM change
+        if let Some(s) = state.settings.as_mut() {
+            s.selected_tools.remove("tool_write");
+            s.is_pm = true;
+        }
+        assert!(state.has_config_changes());
     }
 
     #[test]
@@ -2351,6 +2386,7 @@ mod tests {
             "31933:pubkey:project".to_string(),
             Some("model-a".to_string()),
             vec!["tool_read".to_string()],
+            false,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
         );
@@ -2360,10 +2396,12 @@ mod tests {
             Some(first),
             Some("model-a".to_string()),
             HashSet::from(["tool_read".to_string()]),
+            false,
         );
         if let Some(s) = state.settings.as_mut() {
             s.model_index = 1;
             s.selected_tools.insert("tool_write".to_string());
+            s.is_pm = true;
         }
         assert!(state.has_config_changes());
 
@@ -2373,6 +2411,7 @@ mod tests {
             "31933:pubkey:project".to_string(),
             Some("model-b".to_string()),
             vec!["tool_write".to_string()],
+            true,
             vec!["model-a".to_string(), "model-b".to_string()],
             vec!["tool_read".to_string(), "tool_write".to_string()],
         );
@@ -2381,6 +2420,7 @@ mod tests {
             Some(second),
             Some("model-b".to_string()),
             HashSet::from(["tool_write".to_string()]),
+            true,
         );
 
         assert_eq!(state.active_agent_pubkey.as_deref(), Some("pubkey-b"));

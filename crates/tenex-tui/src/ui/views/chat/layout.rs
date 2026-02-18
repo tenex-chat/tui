@@ -812,8 +812,6 @@ fn render_agent_config_modal(
                 continue;
             }
 
-            let name_text = truncate_with_ellipsis(&agent.name, content_width.max(1));
-
             let name_style = if is_selected {
                 Style::default()
                     .fg(Color::Black)
@@ -822,7 +820,24 @@ fn render_agent_config_modal(
             } else {
                 Style::default().fg(theme::TEXT_PRIMARY)
             };
-            let line = Line::from(Span::styled(name_text, name_style));
+            let pm_prefix = if agent.is_pm { "[PM] " } else { "" };
+            let available_name_width = content_width.saturating_sub(pm_prefix.chars().count());
+            let name_text = truncate_with_ellipsis(&agent.name, available_name_width.max(1));
+            let pm_style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD)
+            };
+
+            let line = Line::from(vec![
+                Span::styled(pm_prefix.to_string(), pm_style),
+                Span::styled(name_text, name_style),
+            ]);
             f.render_widget(Paragraph::new(line), row_area);
         }
     }
@@ -882,71 +897,106 @@ fn render_agent_config_modal(
         let visible_height = tools_list_area.height as usize;
         settings.adjust_tools_scroll(visible_height.max(1));
 
-        if settings.tool_groups.is_empty() {
-            f.render_widget(
-                Paragraph::new("No tools available").style(Style::default().fg(theme::TEXT_MUTED)),
-                tools_list_area,
-            );
-        } else {
-            let mut y_offset: u16 = 0;
-            let mut cursor_pos: usize = 0;
-            let scroll_offset = settings.tools_scroll;
+        let mut y_offset: u16 = 0;
+        let mut cursor_pos: usize = 0;
+        let scroll_offset = settings.tools_scroll;
 
-            for group in &settings.tool_groups {
-                if y_offset as usize >= visible_height {
-                    break;
+        for group in &settings.tool_groups {
+            if y_offset as usize >= visible_height {
+                break;
+            }
+
+            let is_cursor_on_group = cursor_pos == settings.tools_cursor;
+            let is_single_tool = group.tools.len() == 1;
+
+            if cursor_pos >= scroll_offset {
+                if is_single_tool {
+                    let tool = &group.tools[0];
+                    let is_checked = settings.selected_tools.contains(tool);
+                    let prefix = if is_checked { "[x] " } else { "[ ] " };
+                    let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools {
+                        Style::default().fg(theme::ACCENT_PRIMARY)
+                    } else if is_checked {
+                        Style::default().fg(theme::TEXT_PRIMARY)
+                    } else {
+                        Style::default().fg(theme::TEXT_MUTED)
+                    };
+                    let row = Rect::new(
+                        tools_list_area.x,
+                        tools_list_area.y + y_offset,
+                        tools_list_area.width,
+                        1,
+                    );
+                    f.render_widget(
+                        Paragraph::new(format!("{}{}", prefix, tool)).style(style),
+                        row,
+                    );
+                } else {
+                    let is_fully = group.is_fully_selected(&settings.selected_tools);
+                    let is_partial = group.is_partially_selected(&settings.selected_tools);
+                    let expand_icon = if group.expanded { "▼ " } else { "▶ " };
+                    let check_icon = if is_fully {
+                        "[x] "
+                    } else if is_partial {
+                        "[-] "
+                    } else {
+                        "[ ] "
+                    };
+                    let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools {
+                        Style::default()
+                            .fg(theme::ACCENT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
+                    } else if is_fully {
+                        Style::default()
+                            .fg(theme::TEXT_PRIMARY)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                            .fg(theme::TEXT_MUTED)
+                            .add_modifier(Modifier::BOLD)
+                    };
+                    let row = Rect::new(
+                        tools_list_area.x,
+                        tools_list_area.y + y_offset,
+                        tools_list_area.width,
+                        1,
+                    );
+                    f.render_widget(
+                        Paragraph::new(format!(
+                            "{}{}{} ({})",
+                            expand_icon,
+                            check_icon,
+                            group.name,
+                            group.tools.len()
+                        ))
+                        .style(style),
+                        row,
+                    );
                 }
+                y_offset += 1;
+            }
+            cursor_pos += 1;
 
-                let is_cursor_on_group = cursor_pos == settings.tools_cursor;
-                let is_single_tool = group.tools.len() == 1;
-
-                if cursor_pos >= scroll_offset {
-                    if is_single_tool {
-                        let tool = &group.tools[0];
+            if group.expanded && !is_single_tool {
+                for tool in &group.tools {
+                    if y_offset as usize >= visible_height {
+                        break;
+                    }
+                    if cursor_pos >= scroll_offset {
+                        let is_cursor_on_tool = cursor_pos == settings.tools_cursor;
                         let is_checked = settings.selected_tools.contains(tool);
-                        let prefix = if is_checked { "[x] " } else { "[ ] " };
-                        let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools
-                        {
+                        let prefix = if is_checked { "  [x] " } else { "  [ ] " };
+                        let style = if is_cursor_on_tool && state.focus == AgentConfigFocus::Tools {
                             Style::default().fg(theme::ACCENT_PRIMARY)
                         } else if is_checked {
                             Style::default().fg(theme::TEXT_PRIMARY)
                         } else {
                             Style::default().fg(theme::TEXT_MUTED)
                         };
-                        let row = Rect::new(
-                            tools_list_area.x,
-                            tools_list_area.y + y_offset,
-                            tools_list_area.width,
-                            1,
-                        );
-                        f.render_widget(
-                            Paragraph::new(format!("{}{}", prefix, tool)).style(style),
-                            row,
-                        );
-                    } else {
-                        let is_fully = group.is_fully_selected(&settings.selected_tools);
-                        let is_partial = group.is_partially_selected(&settings.selected_tools);
-                        let expand_icon = if group.expanded { "▼ " } else { "▶ " };
-                        let check_icon = if is_fully {
-                            "[x] "
-                        } else if is_partial {
-                            "[-] "
+                        let display_name = if tool.starts_with("mcp__") {
+                            tool.split("__").last().unwrap_or(tool)
                         } else {
-                            "[ ] "
-                        };
-                        let style = if is_cursor_on_group && state.focus == AgentConfigFocus::Tools
-                        {
-                            Style::default()
-                                .fg(theme::ACCENT_PRIMARY)
-                                .add_modifier(Modifier::BOLD)
-                        } else if is_fully {
-                            Style::default()
-                                .fg(theme::TEXT_PRIMARY)
-                                .add_modifier(Modifier::BOLD)
-                        } else {
-                            Style::default()
-                                .fg(theme::TEXT_MUTED)
-                                .add_modifier(Modifier::BOLD)
+                            tool.as_str()
                         };
                         let row = Rect::new(
                             tools_list_area.x,
@@ -955,59 +1005,42 @@ fn render_agent_config_modal(
                             1,
                         );
                         f.render_widget(
-                            Paragraph::new(format!(
-                                "{}{}{} ({})",
-                                expand_icon,
-                                check_icon,
-                                group.name,
-                                group.tools.len()
-                            ))
-                            .style(style),
+                            Paragraph::new(format!("{}{}", prefix, display_name)).style(style),
                             row,
                         );
+                        y_offset += 1;
                     }
-                    y_offset += 1;
-                }
-                cursor_pos += 1;
-
-                if group.expanded && !is_single_tool {
-                    for tool in &group.tools {
-                        if y_offset as usize >= visible_height {
-                            break;
-                        }
-                        if cursor_pos >= scroll_offset {
-                            let is_cursor_on_tool = cursor_pos == settings.tools_cursor;
-                            let is_checked = settings.selected_tools.contains(tool);
-                            let prefix = if is_checked { "  [x] " } else { "  [ ] " };
-                            let style =
-                                if is_cursor_on_tool && state.focus == AgentConfigFocus::Tools {
-                                    Style::default().fg(theme::ACCENT_PRIMARY)
-                                } else if is_checked {
-                                    Style::default().fg(theme::TEXT_PRIMARY)
-                                } else {
-                                    Style::default().fg(theme::TEXT_MUTED)
-                                };
-                            let display_name = if tool.starts_with("mcp__") {
-                                tool.split("__").last().unwrap_or(tool)
-                            } else {
-                                tool.as_str()
-                            };
-                            let row = Rect::new(
-                                tools_list_area.x,
-                                tools_list_area.y + y_offset,
-                                tools_list_area.width,
-                                1,
-                            );
-                            f.render_widget(
-                                Paragraph::new(format!("{}{}", prefix, display_name)).style(style),
-                                row,
-                            );
-                            y_offset += 1;
-                        }
-                        cursor_pos += 1;
-                    }
+                    cursor_pos += 1;
                 }
             }
+        }
+
+        // Bottom-row PM toggle
+        if cursor_pos >= scroll_offset && (y_offset as usize) < visible_height {
+            let is_cursor_on_pm = cursor_pos == settings.tools_cursor;
+            let is_checked = settings.is_pm;
+            let prefix = if is_checked { "[x] " } else { "[ ] " };
+            let style = if is_cursor_on_pm && state.focus == AgentConfigFocus::Tools {
+                Style::default()
+                    .fg(theme::ACCENT_PRIMARY)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_checked {
+                Style::default()
+                    .fg(theme::ACCENT_WARNING)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::TEXT_MUTED)
+            };
+            let row = Rect::new(
+                tools_list_area.x,
+                tools_list_area.y + y_offset,
+                tools_list_area.width,
+                1,
+            );
+            f.render_widget(
+                Paragraph::new(format!("{}Set as PM", prefix)).style(style),
+                row,
+            );
         }
     } else {
         f.render_widget(
