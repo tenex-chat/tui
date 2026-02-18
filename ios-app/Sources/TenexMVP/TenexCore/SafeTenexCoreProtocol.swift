@@ -5,6 +5,7 @@ import Foundation
 protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Core Lifecycle
     func refresh() -> Bool
+    func forceReconnect() throws
 
     // MARK: - Projects
     func getProjects() -> [ProjectInfo]
@@ -36,9 +37,20 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - Agents
     func getAgents(projectId: String) throws -> [AgentInfo]
     func getAllAgents() throws -> [AgentInfo]
+    func getAllMcpTools() throws -> [McpToolInfo]
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws
+    func updateProject(
+        projectId: String,
+        title: String,
+        description: String,
+        repoUrl: String?,
+        pictureUrl: String?,
+        agentIds: [String],
+        mcpToolIds: [String]
+    ) throws
+    func deleteProject(projectId: String) throws
 
     // MARK: - Project Status
     func isProjectOnline(projectId: String) -> Bool
@@ -54,6 +66,8 @@ protocol SafeTenexCoreProtocol: Actor {
     func approveBackend(pubkey: String) throws
     func blockBackend(pubkey: String) throws
     func approveAllPendingBackends() throws -> UInt32
+    func getBackendTrustSnapshot() throws -> BackendTrustSnapshot
+    func getConfiguredRelays() -> [String]
 
     // MARK: - Stats & Diagnostics
     func getStatsSnapshot() throws -> StatsSnapshot
@@ -86,6 +100,7 @@ protocol SafeTenexCoreProtocol: Actor {
     // MARK: - AI Audio Settings
     func getAiAudioSettings() throws -> AiAudioSettings
     func setAudioNotificationsEnabled(enabled: Bool) throws
+    func setTtsInactivityThreshold(secs: UInt64) throws
     func setAudioPrompt(prompt: String) throws
     func setOpenRouterModel(model: String?) throws
     func setSelectedVoiceIds(voiceIds: [String]) throws

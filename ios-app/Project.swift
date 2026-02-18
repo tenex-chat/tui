@@ -37,7 +37,8 @@ let project = Project(
                 )
             ],
             dependencies: [
-                .package(product: "Kingfisher", type: .runtime)
+                .package(product: "Kingfisher", type: .runtime),
+                .sdk(name: "AppIntents", type: .framework)
             ],
             settings: .settings(
                 base: [

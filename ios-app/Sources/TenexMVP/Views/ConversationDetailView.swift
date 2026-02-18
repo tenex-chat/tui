@@ -843,7 +843,7 @@ struct FullConversationSheet: View {
                         proxy.scrollTo(lastMessage.id, anchor: .bottom)
                     }
                 }
-                .onChange(of: messages.last?.id) { _ in
+                .onChange(of: messages.last?.id) { _, _ in
                     guard let lastMessage = messages.last else { return }
                     if isAtBottom {
                         DispatchQueue.main.async {
@@ -853,7 +853,7 @@ struct FullConversationSheet: View {
                         }
                     }
                 }
-                .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _ in
+                .onChange(of: coreManager.streamingBuffers[conversation.id]?.text.count) { _, _ in
                     if isAtBottom {
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.2)) {

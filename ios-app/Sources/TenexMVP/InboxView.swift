@@ -302,7 +302,7 @@ struct InboxView: View {
     @ViewBuilder
     private func splitDetailContent(now: UInt64) -> some View {
         if let conversationId = activeConversationIdBinding.wrappedValue {
-            InboxConversationView(conversationId: conversationId)
+            ConversationByIdAdaptiveDetailView(conversationId: conversationId)
                 .environmentObject(coreManager)
         } else if let item = selectedItem(now: now) {
             InboxDetailView(
@@ -373,7 +373,7 @@ struct InboxView: View {
                 .environmentObject(coreManager)
             }
             .navigationDestination(item: $navigateToConversation) { navData in
-                InboxConversationView(conversationId: navData.conversationId)
+                ConversationByIdAdaptiveDetailView(conversationId: navData.conversationId)
                     .environmentObject(coreManager)
             }
         }

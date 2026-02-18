@@ -3,6 +3,34 @@ import Combine
 
 // MARK: - Conversation Detail ViewModel
 
+/// A report reference extracted from message a-tags in a conversation.
+struct ReferencedReportItem: Identifiable, Hashable {
+    /// Full report coordinate: 30023:pubkey:slug
+    let aTag: String
+    /// Human-readable title (resolved from ReportInfo when available, else slug fallback)
+    let title: String
+    /// Report slug parsed from a-tag coordinate
+    let slug: String
+    /// Matching report object from the local report cache when available
+    let report: ReportInfo?
+
+    var id: String { aTag }
+}
+
+private struct ReportATagCoordinate {
+    let kind: Int
+    let pubkey: String
+    let slug: String
+
+    static func parse(_ aTag: String) -> ReportATagCoordinate? {
+        let parts = aTag.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 3, let kind = Int(parts[0]) else { return nil }
+        let pubkey = String(parts[1])
+        let slug = parts.dropFirst(2).joined(separator: ":")
+        return ReportATagCoordinate(kind: kind, pubkey: pubkey, slug: slug)
+    }
+}
+
 /// ViewModel for ConversationDetailView that handles data loading, caching derived state,
 /// and managing live runtime updates efficiently.
 @MainActor
@@ -31,6 +59,9 @@ final class ConversationDetailViewModel: ObservableObject {
 
     /// Cached latest reply (most recent non-tool-call message)
     @Published private(set) var latestReply: MessageInfo?
+
+    /// Reports referenced in this conversation via message a-tags (deduped by a-tag)
+    @Published private(set) var referencedReports: [ReferencedReportItem] = []
 
     /// Cached participating agent infos with pubkeys for avatar lookups
     @Published private(set) var participatingAgentInfos: [AgentAvatarInfo] = []
@@ -130,6 +161,14 @@ final class ConversationDetailViewModel: ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] conversations in
                 self?.applyConversationUpdates(conversations)
+            }
+            .store(in: &subscriptions)
+
+        coreManager.$reports
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                Task { await self.recomputeDerivedState() }
             }
             .store(in: &subscriptions)
 
@@ -399,6 +438,9 @@ final class ConversationDetailViewModel: ObservableObject {
 
         // Compute delegations with their subtree todo stats
         delegations = await extractDelegations()
+
+        // Compute reports referenced by this conversation's a-tags
+        referencedReports = extractReferencedReports()
     }
 
     /// Computes todo stats for a conversation and all its descendants using cached data
@@ -488,6 +530,57 @@ final class ConversationDetailViewModel: ObservableObject {
         }
 
         return result.sorted { $0.timestamp > $1.timestamp }
+    }
+
+    /// Extracts report references from message a-tags, deduplicated by full a-tag coordinate.
+    /// Matches TUI behavior: consume only explicit a-tags, never infer from message content.
+    private func extractReferencedReports() -> [ReferencedReportItem] {
+        guard let coreManager = coreManager else { return [] }
+
+        // Build lookup from canonical report a-tag to ReportInfo for fast resolution.
+        var reportsByATag: [String: ReportInfo] = [:]
+        for report in coreManager.reports {
+            guard let authorHex = Bech32.npubToHex(report.authorNpub) else { continue }
+            let aTag = "30023:\(authorHex):\(report.id)"
+            if reportsByATag[aTag] == nil {
+                reportsByATag[aTag] = report
+            }
+        }
+
+        var seen = Set<String>()
+        var referenced: [ReferencedReportItem] = []
+
+        for message in messages {
+            for aTag in message.aTags {
+                // Only keep report references (kind 30023) and dedupe.
+                guard let coordinate = ReportATagCoordinate.parse(aTag), coordinate.kind == 30023 else {
+                    continue
+                }
+                guard seen.insert(aTag).inserted else { continue }
+
+                if let report = reportsByATag[aTag] {
+                    referenced.append(
+                        ReferencedReportItem(
+                            aTag: aTag,
+                            title: report.title,
+                            slug: report.id,
+                            report: report
+                        )
+                    )
+                } else {
+                    referenced.append(
+                        ReferencedReportItem(
+                            aTag: aTag,
+                            title: coordinate.slug,
+                            slug: coordinate.slug,
+                            report: nil
+                        )
+                    )
+                }
+            }
+        }
+
+        return referenced
     }
 
     // MARK: - Runtime Calculation

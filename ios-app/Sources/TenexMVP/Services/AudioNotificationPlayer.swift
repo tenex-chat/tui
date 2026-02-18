@@ -281,8 +281,7 @@ extension AudioNotificationPlayer: AVAudioPlayerDelegate {
             self.stopProgressTimer()
             self.playbackProgress = 0
             self.clearMetadata()
-            if let error = error {
-            }
+            _ = error
             self.playNext()
         }
     }

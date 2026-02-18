@@ -73,6 +73,8 @@ struct ProjectSelectorSheet: View {
             .navigationTitle("Select Project")
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
+            #else
+            .toolbarTitleDisplayMode(.inline)
             #endif
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -293,24 +295,48 @@ struct ProjectRowSelectView: View {
             ProjectInfo(
                 id: "tenex-tui",
                 title: "TENEX TUI Client",
-                description: "Terminal UI client for TENEX"
+                description: "Terminal UI client for TENEX",
+                repoUrl: nil,
+                pictureUrl: nil,
+                createdAt: 0,
+                agentIds: [],
+                mcpToolIds: [],
+                isDeleted: false
             ),
             ProjectInfo(
                 id: "nostr-sdk",
                 title: "Nostr SDK",
-                description: "Swift SDK for Nostr protocol"
+                description: "Swift SDK for Nostr protocol",
+                repoUrl: nil,
+                pictureUrl: nil,
+                createdAt: 0,
+                agentIds: [],
+                mcpToolIds: [],
+                isDeleted: false
             ),
             ProjectInfo(
                 id: "mobile-app",
                 title: "Mobile App",
-                description: nil
+                description: nil,
+                repoUrl: nil,
+                pictureUrl: nil,
+                createdAt: 0,
+                agentIds: [],
+                mcpToolIds: [],
+                isDeleted: false
             )
         ],
         selectedProject: .constant(
             ProjectInfo(
                 id: "tenex-tui",
                 title: "TENEX TUI Client",
-                description: "Terminal UI client for TENEX"
+                description: "Terminal UI client for TENEX",
+                repoUrl: nil,
+                pictureUrl: nil,
+                createdAt: 0,
+                agentIds: [],
+                mcpToolIds: [],
+                isDeleted: false
             )
         )
     )

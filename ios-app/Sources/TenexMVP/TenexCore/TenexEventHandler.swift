@@ -8,15 +8,15 @@ import Foundation
 /// Thread Safety: Callbacks are invoked from a background thread in Rust.
 /// This handler dispatches all notifications to the main thread for safe UI updates.
 final class TenexEventHandler: EventCallback {
-    weak var coreManager: TenexCoreManager?
+    private unowned let coreManager: TenexCoreManager
 
     init(coreManager: TenexCoreManager) {
         self.coreManager = coreManager
     }
 
     func onDataChanged(changeType: DataChangeType) {
-        Task { @MainActor [weak self] in
-            guard let coreManager = self?.coreManager else { return }
+        Task { @MainActor in
+            let coreManager = self.coreManager
 
             switch changeType {
             case .messageAppended(let conversationId, let message):

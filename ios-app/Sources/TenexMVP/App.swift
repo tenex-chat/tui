@@ -27,7 +27,7 @@ struct StreamingBuffer {
 
 /// Thread-safe cache for profile picture URLs to prevent repeated synchronous FFI calls during scroll.
 /// Each pubkey's picture URL is fetched once and cached for the session lifetime.
-final class ProfilePictureCache {
+final class ProfilePictureCache: @unchecked Sendable {
     static let shared = ProfilePictureCache()
 
     private var cache: [String: String?] = [:]
@@ -107,6 +107,10 @@ class TenexCoreManager: ObservableObject {
     /// Used to highlight the runtime indicator when work is happening
     @Published var hasActiveAgents: Bool = false
 
+    /// Last project ID tombstoned via a push upsert.
+    /// Used by view selection state to clear deleted-project detail panes immediately.
+    @Published private(set) var lastDeletedProjectId: String?
+
     // MARK: - Ask Badge Support
 
     /// Hard cap for inbox items: 48 hours in seconds.
@@ -133,7 +137,7 @@ class TenexCoreManager: ObservableObject {
     private var projectStatusUpdateTask: Task<Void, Never>?
 
     /// Cache for profile picture URLs to prevent repeated FFI calls
-    let profilePictureCache = ProfilePictureCache.shared
+    nonisolated let profilePictureCache = ProfilePictureCache.shared
 
     // MARK: - Performance Caches
 
@@ -242,6 +246,14 @@ class TenexCoreManager: ObservableObject {
 
     @MainActor
     func applyProjectUpsert(_ project: ProjectInfo) {
+        if project.isDeleted {
+            projects.removeAll { $0.id == project.id }
+            projectOnlineStatus.removeValue(forKey: project.id)
+            onlineAgents.removeValue(forKey: project.id)
+            lastDeletedProjectId = project.id
+            return
+        }
+
         var updated = projects
         if let index = updated.firstIndex(where: { $0.id == project.id }) {
             updated[index] = project
@@ -320,6 +332,11 @@ class TenexCoreManager: ObservableObject {
 
     @MainActor
     func handlePendingBackendApproval(backendPubkey: String, projectATag: String) {
+        #if os(macOS)
+        // Manual approval on macOS: keep backend pending and surface it in Settings > Backends.
+        signalDiagnosticsUpdate()
+        return
+        #else
         Task {
             do {
                 try await safeCore.approveBackend(pubkey: backendPubkey)
@@ -336,6 +353,7 @@ class TenexCoreManager: ObservableObject {
                 self.applyProjectStatusChanged(projectId: projectId, projectATag: projectATag, isOnline: isOnline, onlineAgents: agents)
             }
         }
+        #endif
     }
 
     @MainActor
@@ -395,13 +413,8 @@ class TenexCoreManager: ObservableObject {
         projectStatusUpdateTask = Task { [weak self] in
             guard let self else { return }
 
-            // Fetch projects with proper error handling
-            let projects: [ProjectInfo]
-            do {
-                projects = try await safeCore.getProjects()
-            } catch {
-                return
-            }
+            // Fetch projects
+            let projects = await safeCore.getProjects()
 
             // Check for cancellation before continuing
             if Task.isCancelled { return }
@@ -628,15 +641,14 @@ class TenexCoreManager: ObservableObject {
     /// Real-time updates come via push-based event callbacks, not polling.
     @MainActor
     func fetchData() async {
-        // Auto-approve any pending backends (iOS doesn't have approval UI yet)
-        // This allows kind:24010 status events to be processed, enabling online agents
+        #if !os(macOS)
+        // Keep current iOS/iPadOS behavior: auto-approve pending backends.
+        // macOS uses manual approval from Settings > Backends.
         do {
-            let approved = try await safeCore.approveAllPendingBackends()
-            if approved > 0 {
-            } else {
-            }
+            _ = try await safeCore.approveAllPendingBackends()
         } catch {
         }
+        #endif
 
         do {
             // Always fetch all conversations (including scheduled)
@@ -677,7 +689,7 @@ class TenexCoreManager: ObservableObject {
     /// This is the primary API for avatar views - always use this instead of core.getProfilePicture directly.
     /// - Parameter pubkey: The hex-encoded public key
     /// - Returns: Profile picture URL if available, nil otherwise
-    func getProfilePicture(pubkey: String) -> String? {
+    nonisolated func getProfilePicture(pubkey: String) -> String? {
         // Check cache first (O(1) lookup)
         if let cached = profilePictureCache.getCached(pubkey) {
             return cached
@@ -700,17 +712,19 @@ class TenexCoreManager: ObservableObject {
     /// Prefetch profile pictures for multiple pubkeys in background.
     /// Call this when loading a list of agents/conversations to warm the cache.
     /// - Parameter pubkeys: Array of hex-encoded public keys to prefetch
-    func prefetchProfilePictures(_ pubkeys: [String]) {
-        DispatchQueue.global(qos: .utility).async { [weak self] in
+    nonisolated func prefetchProfilePictures(_ pubkeys: [String]) {
+        let cache = profilePictureCache
+        let core = core
+        DispatchQueue.global(qos: .utility).async {
             for pubkey in pubkeys {
                 // Only fetch if not already cached
-                if self?.profilePictureCache.getCached(pubkey) == nil {
+                if cache.getCached(pubkey) == nil {
                     do {
-                        let pictureUrl = try self?.core.getProfilePicture(pubkey: pubkey)
-                        self?.profilePictureCache.store(pubkey, pictureUrl: pictureUrl)
+                        let pictureUrl = try core.getProfilePicture(pubkey: pubkey)
+                        cache.store(pubkey, pictureUrl: pictureUrl)
                     } catch {
                         // Log but don't crash - cache nil to prevent repeated attempts
-                        self?.profilePictureCache.store(pubkey, pictureUrl: nil)
+                        cache.store(pubkey, pictureUrl: nil)
                     }
                 }
             }
@@ -722,7 +736,7 @@ class TenexCoreManager: ObservableObject {
     /// Attempts auto-login using stored credentials
     /// - Returns: AutoLoginResult indicating outcome
     /// - Note: Call from background thread
-    func attemptAutoLogin() -> AutoLoginResult {
+    nonisolated func attemptAutoLogin() -> AutoLoginResult {
         // Load credential from keychain
         let loadResult = KeychainService.shared.loadNsec()
 
@@ -1010,7 +1024,7 @@ struct TenexMVPApp: App {
                     userNpub = npub
                     isLoggedIn = true
 
-                case .invalidCredential(let error):
+                case .invalidCredential:
                     // Credential was provably invalid - delete it and show login
                     Task {
                         _ = await coreManager.clearCredentials()
@@ -1124,7 +1138,7 @@ struct MainTabView: View {
             Task { await updateRuntime() }
         }
         .sheet(isPresented: $showAISettings) {
-            AISettingsView()
+            AppSettingsView(defaultSection: .audio)
                 .tenexModalPresentation(detents: [.large])
                 #if os(macOS)
                 .frame(minWidth: 500, idealWidth: 520, minHeight: 500, idealHeight: 600)
@@ -1214,6 +1228,7 @@ struct MainShellView: View {
     @State private var selectedInboxItemId: String?
     @State private var activeInboxConversationId: String?
     @State private var selectedSearchConversation: ConversationFullInfo?
+    @State private var newConversationProjectId: String?
 
     private var currentSection: AppSection {
         selectedSection ?? .chats
@@ -1225,6 +1240,11 @@ struct MainShellView: View {
                 List(selection: $selectedSection) {
                     ForEach(AppSection.allCases) { section in
                         shellSidebarRow(for: section)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedSection = section
+                            }
                             .tag(Optional(section))
                             .accessibilityIdentifier(section.accessibilityRowID)
                     }
@@ -1252,6 +1272,12 @@ struct MainShellView: View {
         .onChange(of: coreManager.projects.map(\.id)) { _, ids in
             if let selectedProjectId, !ids.contains(selectedProjectId) {
                 self.selectedProjectId = nil
+            }
+        }
+        .onChange(of: coreManager.lastDeletedProjectId) { _, deletedProjectId in
+            guard let deletedProjectId else { return }
+            if selectedProjectId == deletedProjectId {
+                selectedProjectId = nil
             }
         }
     }
@@ -1338,7 +1364,11 @@ struct MainShellView: View {
     private var sectionListColumn: some View {
         switch currentSection {
         case .chats:
-            ConversationsTabView(layoutMode: .shellList, selectedConversation: $selectedConversation)
+            ConversationsTabView(
+                layoutMode: .shellList,
+                selectedConversation: $selectedConversation,
+                newConversationProjectId: $newConversationProjectId
+            )
         case .projects:
             ProjectsSectionListColumn(selectedProjectId: $selectedProjectId)
         case .reports:
@@ -1359,7 +1389,11 @@ struct MainShellView: View {
     private var sectionDetailColumn: some View {
         switch currentSection {
         case .chats:
-            ConversationsTabView(layoutMode: .shellDetail, selectedConversation: $selectedConversation)
+            ConversationsTabView(
+                layoutMode: .shellDetail,
+                selectedConversation: $selectedConversation,
+                newConversationProjectId: $newConversationProjectId
+            )
         case .projects:
             ProjectsSectionDetailColumn(selectedProjectId: $selectedProjectId)
         case .reports:
@@ -1431,72 +1465,14 @@ private struct ProjectsSectionDetailColumn: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
     @Binding var selectedProjectId: String?
 
-    @State private var isBooting = false
-    @State private var showBootError = false
-    @State private var bootErrorMessage: String?
-
-    private var selectedProject: ProjectInfo? {
-        guard let selectedProjectId else { return nil }
-        return coreManager.projects.first { $0.id == selectedProjectId }
-    }
-
     var body: some View {
         Group {
-            if let project = selectedProject {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        HStack(spacing: 12) {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(deterministicColor(for: project.id).gradient)
-                                .frame(width: 44, height: 44)
-                                .overlay {
-                                    Image(systemName: "folder.fill")
-                                        .foregroundStyle(.white)
-                                }
-
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(project.title)
-                                    .font(.title2.weight(.semibold))
-                                Text(project.id)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        let isOnline = coreManager.projectOnlineStatus[project.id] ?? false
-                        let onlineAgents = coreManager.onlineAgents[project.id]?.count ?? 0
-
-                        HStack(spacing: 8) {
-                            Circle()
-                                .fill(isOnline ? Color.presenceOnline : Color.secondary)
-                                .frame(width: 10, height: 10)
-                            Text(isOnline ? "Online" : "Offline")
-                                .font(.headline)
-                            if isOnline {
-                                Text("• \(onlineAgents) agent\(onlineAgents == 1 ? "" : "s")")
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-
-                        if !isOnline {
-                            Button {
-                                bootProject(project.id)
-                            } label: {
-                                if isBooting {
-                                    ProgressView()
-                                } else {
-                                    Label("Boot Project", systemImage: "power")
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isBooting)
-                        }
-
-                        Spacer(minLength: 0)
-                    }
-                    .padding(24)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
+            if let selectedProjectId {
+                ProjectSettingsView(
+                    projectId: selectedProjectId,
+                    selectedProjectId: $selectedProjectId
+                )
+                .environmentObject(coreManager)
             } else {
                 ContentUnavailableView(
                     "Select a Project",
@@ -1506,32 +1482,6 @@ private struct ProjectsSectionDetailColumn: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .alert("Boot Failed", isPresented: $showBootError) {
-            Button("OK") { bootErrorMessage = nil }
-        } message: {
-            if let bootErrorMessage {
-                Text(bootErrorMessage)
-            }
-        }
-    }
-
-    private func bootProject(_ projectId: String) {
-        isBooting = true
-        bootErrorMessage = nil
-
-        Task {
-            do {
-                try await coreManager.safeCore.bootProject(projectId: projectId)
-            } catch {
-                await MainActor.run {
-                    bootErrorMessage = error.localizedDescription
-                    showBootError = true
-                }
-            }
-            await MainActor.run {
-                isBooting = false
-            }
-        }
     }
 }
 

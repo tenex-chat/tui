@@ -3,6 +3,7 @@ import SwiftUI
 import UIKit
 #endif
 import CryptoKit
+import UniformTypeIdentifiers
 
 /// A premium message composition view for both new conversations and replies.
 /// Supports project selection (for new conversations), agent selection, draft persistence, and markdown input.
@@ -10,6 +11,11 @@ struct MessageComposerView: View {
     enum DisplayStyle {
         case modal
         case inline
+    }
+
+    enum InlineLayoutStyle {
+        case standard
+        case workspace
     }
 
     // MARK: - Properties
@@ -45,6 +51,9 @@ struct MessageComposerView: View {
 
     /// Rendering style for the composer container
     let displayStyle: DisplayStyle
+
+    /// Inline layout variant (used to keep iPhone behavior unchanged while improving workspace)
+    let inlineLayoutStyle: InlineLayoutStyle
 
     // MARK: - Environment
 
@@ -83,6 +92,7 @@ struct MessageComposerView: View {
     @State private var isUploadingImage = false
     @State private var imageUploadError: String?
     @State private var showImageUploadError = false
+    @State private var isDropTargeted = false
     /// Local image attachments synced with draft for UI display
     @State private var localImageAttachments: [ImageAttachment] = []
 
@@ -94,6 +104,13 @@ struct MessageComposerView: View {
     // Flag to suppress onChange sync during programmatic localText updates (load/switch/dictation)
     @State private var isProgrammaticUpdate: Bool = false
     @State private var triggerDetectionTask: Task<Void, Never>?
+
+    // Workspace inline layout metrics
+    @ScaledMetric(relativeTo: .body) private var workspaceContextRowHeight: CGFloat = 44
+    @ScaledMetric(relativeTo: .body) private var workspaceBottomRowHeight: CGFloat = 46
+    @ScaledMetric(relativeTo: .body) private var workspaceIconBoxSize: CGFloat = 18
+    @ScaledMetric(relativeTo: .body) private var workspaceIconSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .body) private var workspaceSendButtonSize: CGFloat = 28
 
     // MARK: - Computed
 
@@ -146,6 +163,10 @@ struct MessageComposerView: View {
         displayStyle == .inline
     }
 
+    private var usesWorkspaceInlineLayout: Bool {
+        isInlineComposer && inlineLayoutStyle == .workspace
+    }
+
     /// Hide scheduled conversations preference (synced with ConversationsTabView)
     @AppStorage("hideScheduled") private var hideScheduled = true
 
@@ -182,6 +203,7 @@ struct MessageComposerView: View {
         referenceConversationId: String? = nil,
         referenceReportATag: String? = nil,
         displayStyle: DisplayStyle = .modal,
+        inlineLayoutStyle: InlineLayoutStyle = .standard,
         onSend: ((SendMessageResult) -> Void)? = nil,
         onDismiss: (() -> Void)? = nil
     ) {
@@ -193,6 +215,7 @@ struct MessageComposerView: View {
         self.referenceConversationId = referenceConversationId
         self.referenceReportATag = referenceReportATag
         self.displayStyle = displayStyle
+        self.inlineLayoutStyle = inlineLayoutStyle
         self.onSend = onSend
         self.onDismiss = onDismiss
 
@@ -445,57 +468,59 @@ struct MessageComposerView: View {
     @ViewBuilder
     private var composerContent: some View {
         VStack(spacing: 0) {
-            // Project and Agent row (for new conversations)
-            if isNewConversation {
-                HStack(spacing: 12) {
-                    if let project = selectedProject {
-                        ProjectChipView(project: project) {
-                            showProjectSelector = true
-                        }
-                    } else {
-                        projectPromptButton
-                    }
-
-                    if selectedProject != nil {
-                        if let agent = selectedAgent {
-                            OnlineAgentChipView(agent: agent) {
-                                openAgentSelector()
+            if !usesWorkspaceInlineLayout {
+                // Project and Agent row (for new conversations)
+                if isNewConversation {
+                    HStack(spacing: 12) {
+                        if let project = selectedProject {
+                            ProjectChipView(project: project) {
+                                showProjectSelector = true
                             }
-                            .environmentObject(coreManager)
                         } else {
-                            agentPromptButton
+                            projectPromptButton
                         }
+
+                        if selectedProject != nil {
+                            if let agent = selectedAgent {
+                                OnlineAgentChipView(agent: agent) {
+                                    openAgentSelector()
+                                }
+                                .environmentObject(coreManager)
+                            } else {
+                                agentPromptButton
+                            }
+                        }
+
+                        Spacer()
                     }
-
-                    Spacer()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(.bar)
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .background(.bar)
-            }
 
-            // Agent chip for replies (not new conversations)
-            if !isNewConversation {
-                if let agent = selectedAgent {
-                    agentChipView(agent)
-                } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
-                    // Show the reply target even if they're not in online agents list
-                    replyTargetChipView(name: targetName, pubkey: targetPubkey) {
-                        openAgentSelector()
+                // Agent chip for replies (not new conversations)
+                if !isNewConversation {
+                    if let agent = selectedAgent {
+                        agentChipView(agent)
+                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
+                        // Show the reply target even if they're not in online agents list
+                        replyTargetChipView(name: targetName, pubkey: targetPubkey) {
+                            openAgentSelector()
+                        }
+                    } else if selectedProject != nil {
+                        agentPromptView
                     }
-                } else if selectedProject != nil {
-                    agentPromptView
                 }
-            }
 
-            // Nudge chips (for all conversations)
-            if selectedProject != nil {
-                nudgeChipsView
-            }
+                // Nudge chips (for all conversations)
+                if selectedProject != nil {
+                    nudgeChipsView
+                }
 
-            // Skill chips (for all conversations)
-            if selectedProject != nil {
-                skillChipsView
+                // Skill chips (for all conversations)
+                if selectedProject != nil {
+                    skillChipsView
+                }
             }
 
             // Image attachment chips (for all conversations)
@@ -503,15 +528,21 @@ struct MessageComposerView: View {
                 imageAttachmentChipsView
             }
 
-            Divider()
+            if usesWorkspaceInlineLayout {
+                // Workspace mode uses explicit rows and avoids stacked divider artifacts.
+                contentEditorView
+                workspaceInlineControlRow
+            } else {
+                Divider()
 
-            // Content editor
-            contentEditorView
+                // Content editor
+                contentEditorView
 
-            Divider()
+                Divider()
 
-            // Toolbar
-            toolbarView
+                // Toolbar
+                toolbarView
+            }
         }
         #if os(iOS)
         .overlay {
@@ -539,6 +570,11 @@ struct MessageComposerView: View {
                     }
                 )
             }
+        }
+        #endif
+        #if os(macOS)
+        .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleFileDrop(providers: providers)
         }
         #endif
     }
@@ -755,6 +791,112 @@ struct MessageComposerView: View {
         .background(.bar)
     }
 
+    private var workspaceInlineControlRow: some View {
+        HStack(spacing: 12) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    if let project = selectedProject {
+                        inlineContextToken(icon: "folder.fill", text: project.title) {
+                            if isNewConversation {
+                                showProjectSelector = true
+                            }
+                        }
+                    } else if isNewConversation {
+                        inlineContextToken(icon: "folder.badge.questionmark", text: "Select project") {
+                            showProjectSelector = true
+                        }
+                    }
+
+                    if let agent = selectedAgent {
+                        inlineContextToken(icon: "person.crop.circle", text: agentContextSummary(agent: agent)) {
+                            openAgentSelector()
+                        }
+                    } else if let targetPubkey = initialAgentPubkey, let targetName = replyTargetAgentName {
+                        inlineContextToken(icon: "person.crop.circle", text: targetName) {
+                            // Keep this reply path explicit even when target is offline.
+                            draft.setAgent(targetPubkey)
+                            openAgentSelector()
+                        }
+                    } else if selectedProject != nil {
+                        inlineContextToken(icon: "person.crop.circle.badge.questionmark", text: "Agent") {
+                            openAgentSelector()
+                        }
+                    }
+
+                    inlineContextToken(text: nudgeSkillContextSummary) {
+                        openNudgeSkillSelector(mode: .all)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: sendMessage) {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: workspaceIconSize, weight: .semibold))
+                    .foregroundStyle(canSend ? Color.primary : Color.secondary.opacity(0.9))
+                    .frame(width: workspaceSendButtonSize, height: workspaceSendButtonSize)
+                    .background(
+                        Circle()
+                            .fill(canSend ? Color.secondary.opacity(0.28) : Color.secondary.opacity(0.16))
+                    )
+            }
+            .buttonStyle(.borderless)
+            .disabled(!canSend)
+            #if os(macOS)
+            .keyboardShortcut(.return, modifiers: [.command])
+            #endif
+            .help("Send")
+        }
+        .frame(height: max(workspaceContextRowHeight, workspaceBottomRowHeight))
+        .padding(.horizontal, 16)
+        .background(Color.systemBackground)
+    }
+
+    private func inlineContextToken(icon: String? = nil, text: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                if let icon {
+                    Image(systemName: icon)
+                        .font(.system(size: workspaceIconSize, weight: .medium))
+                        .frame(width: workspaceIconBoxSize, height: workspaceIconBoxSize)
+                        .foregroundStyle(.secondary)
+                }
+                Text(text)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal, 2)
+            .padding(.vertical, 2)
+            .frame(height: workspaceContextRowHeight - 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private func agentContextSummary(agent: OnlineAgentInfo) -> String {
+        if let model = agent.model, !model.isEmpty {
+            return "\(agent.name) (\(model))"
+        }
+        return agent.name
+    }
+
+    private var nudgeSkillContextSummary: String {
+        let selectedCount = selectedNudges.count + selectedSkills.count
+        guard selectedCount > 0 else { return "Shortcuts" }
+        return selectedCount == 1 ? "1 selected" : "\(selectedCount) selected"
+    }
+
+    private var composerPlaceholderText: String {
+        if isNewConversation && selectedProject == nil {
+            return "Select a project to start composing"
+        }
+        if isSwitchingProject {
+            return "Switching project..."
+        }
+        return isNewConversation ? "What would you like to discuss?" : "Type your reply..."
+    }
+
     private var imageAttachmentChipsView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
@@ -772,32 +914,56 @@ struct MessageComposerView: View {
 
     private var contentEditorView: some View {
         ZStack(alignment: .topLeading) {
-            // PERFORMANCE FIX: Bind directly to localText for instant response
-            // Draft sync is debounced to prevent per-keystroke lag
-            TextEditor(text: $localText)
-            .font(.body)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .scrollContentBackground(.hidden)
-            .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
-            .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
-            .onChange(of: localText) { oldValue, newValue in
-                scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
-                // PERFORMANCE FIX: Debounce draft sync to avoid per-keystroke mutations
-                scheduleContentSync(newValue)
-            }
+            if usesWorkspaceInlineLayout {
+                // Native multiline TextField keeps caret and prompt baseline aligned.
+                TextField(
+                    "",
+                    text: $localText,
+                    prompt: Text(composerPlaceholderText).foregroundStyle(.tertiary),
+                    axis: .vertical
+                )
+                .textFieldStyle(.plain)
+                .font(.body)
+                .lineLimit(1...6)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
+                .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
+                .onChange(of: localText) { oldValue, newValue in
+                    scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+                    scheduleContentSync(newValue)
+                }
+            } else {
+                // PERFORMANCE FIX: Bind directly to localText for instant response
+                // Draft sync is debounced to prevent per-keystroke lag
+                TextEditor(text: $localText)
+                .font(.body)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .scrollContentBackground(.hidden)
+                .disabled((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject)
+                .opacity((isNewConversation && selectedProject == nil) || draftManager.loadFailed || isSwitchingProject ? 0.5 : 1.0)
+                .onChange(of: localText) { oldValue, newValue in
+                    scheduleTriggerDetection(previousValue: oldValue, newValue: newValue)
+                    // PERFORMANCE FIX: Debounce draft sync to avoid per-keystroke mutations
+                    scheduleContentSync(newValue)
+                }
 
-            if localText.isEmpty {
-                Text(isNewConversation && selectedProject == nil
-                     ? "Select a project to start composing"
-                     : (isSwitchingProject ? "Switching project..." : (isNewConversation ? "What would you like to discuss?" : "Type your reply...")))
-                    .foregroundStyle(.tertiary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 16)
-                    .allowsHitTesting(false)
+                if localText.isEmpty {
+                    Text(composerPlaceholderText)
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 16)
+                        .allowsHitTesting(false)
+                }
             }
         }
-        .frame(minHeight: 200)
+        .frame(
+            minHeight: usesWorkspaceInlineLayout ? 40 : 200,
+            idealHeight: usesWorkspaceInlineLayout ? 56 : nil,
+            maxHeight: usesWorkspaceInlineLayout ? 120 : nil,
+            alignment: usesWorkspaceInlineLayout ? .topLeading : .center
+        )
     }
 
     // MARK: - Content Sync (Debounced)
@@ -947,8 +1113,11 @@ struct MessageComposerView: View {
     }
 
     private var toolbarView: some View {
+        standardToolbarView
+    }
+
+    private var standardToolbarView: some View {
         HStack(spacing: 16) {
-            // Show error indicator if agents failed to load
             if agentsLoadError != nil {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(Color.composerWarning)
@@ -956,7 +1125,6 @@ struct MessageComposerView: View {
             }
 
             #if os(iOS)
-            // Image attachment button
             Button {
                 showImagePicker = true
             } label: {
@@ -971,7 +1139,6 @@ struct MessageComposerView: View {
             .buttonStyle(.borderless)
             .disabled(selectedProject == nil || isUploadingImage)
 
-            // Voice dictation button
             Button {
                 Task {
                     showDictationOverlay = true
@@ -987,7 +1154,6 @@ struct MessageComposerView: View {
 
             Spacer()
 
-            // Image attachment count
             if !localImageAttachments.isEmpty {
                 HStack(spacing: 4) {
                     Image(systemName: "photo.fill")
@@ -998,14 +1164,12 @@ struct MessageComposerView: View {
                 .foregroundStyle(Color.composerAction)
             }
 
-            // Character count (use localText for instant feedback)
             if localText.count > 0 {
                 Text("\(localText.count)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
-            // Clear button (if has content or images) - use localText for instant feedback
             if !localText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !localImageAttachments.isEmpty {
                 Button(action: clearDraft) {
                     Image(systemName: "trash")
@@ -1018,14 +1182,21 @@ struct MessageComposerView: View {
                 Button(action: sendMessage) {
                     Image(systemName: "arrow.up")
                         .font(.headline.weight(.semibold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(canSend ? Color.primary : Color.secondary.opacity(0.9))
                         .frame(width: 30, height: 30)
-                        .background(canSend ? Color.agentBrand : Color.secondary.opacity(0.5))
-                        .clipShape(Circle())
+                        .background(
+                            Circle()
+                                .fill(canSend ? Color.secondary.opacity(0.28) : Color.secondary.opacity(0.16))
+                        )
                 }
                 .buttonStyle(.borderless)
                 .disabled(!canSend)
+                #if os(macOS)
+                .keyboardShortcut(.return, modifiers: [.command])
                 .help("Send")
+                #else
+                .help("Send")
+                #endif
             }
         }
         .padding(.horizontal, 16)
@@ -1148,7 +1319,7 @@ struct MessageComposerView: View {
                 await draftManager.updateAgent(initialPubkey, conversationId: conversationId, projectId: projectId)
 
                 // Resolve the agent name for display (even if not online)
-                let name = coreManager.safeCore.getProfileName(pubkey: initialPubkey)
+                let name = await coreManager.safeCore.getProfileName(pubkey: initialPubkey)
                 replyTargetAgentName = name.isEmpty ? "Agent" : name
             } else if draft.agentPubkey == nil {
                 // No initial agent specified: auto-select PM agent if available (for new conversations)
@@ -1396,30 +1567,33 @@ struct MessageComposerView: View {
 
         Task {
             do {
-                let url = try await coreManager.safeCore.uploadImage(data: data, mimeType: mimeType)
-
-                // Add to draft and local state
-                let imageId = draft.addImageAttachment(url: url)
-                let attachment = ImageAttachment(id: imageId, url: url)
-                localImageAttachments.append(attachment)
-
-                // Insert marker at cursor position (matching TUI behavior)
-                let marker = "[Image #\(imageId)] "
-                localText.append(marker)
-
-                // Mark dirty and save
-                isDirty = true
-                if let projectId = selectedProject?.id {
-                    await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
-                    await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
-                }
-
+                try await uploadImageAttachment(data: data, mimeType: mimeType)
                 isUploadingImage = false
             } catch {
                 isUploadingImage = false
                 imageUploadError = error.localizedDescription
                 showImageUploadError = true
             }
+        }
+    }
+
+    private func uploadImageAttachment(data: Data, mimeType: String) async throws {
+        let url = try await coreManager.safeCore.uploadImage(data: data, mimeType: mimeType)
+
+        // Add to draft and local state
+        let imageId = draft.addImageAttachment(url: url)
+        let attachment = ImageAttachment(id: imageId, url: url)
+        localImageAttachments.append(attachment)
+
+        // Insert marker at cursor position (matching TUI behavior)
+        let marker = "[Image #\(imageId)] "
+        localText.append(marker)
+
+        // Mark dirty and save
+        isDirty = true
+        if let projectId = selectedProject?.id {
+            await draftManager.updateContent(localText, conversationId: conversationId, projectId: projectId)
+            await draftManager.updateImageAttachments(localImageAttachments, conversationId: conversationId, projectId: projectId)
         }
     }
 
@@ -1445,6 +1619,134 @@ struct MessageComposerView: View {
             }
         }
     }
+
+    #if os(macOS)
+    private enum FileDropError: LocalizedError {
+        case noReadableFileURL
+        case unsupportedFileType(String)
+        case readFailed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noReadableFileURL:
+                return "Could not read dropped file URL."
+            case .unsupportedFileType(let name):
+                return "Unsupported file '\(name)'. Supported: png, jpg, jpeg, gif, webp, bmp."
+            case .readFailed(let name):
+                return "Failed to read '\(name)'."
+            }
+        }
+    }
+
+    private func handleFileDrop(providers: [NSItemProvider]) -> Bool {
+        guard selectedProject != nil else {
+            imageUploadError = "Select a project before dropping files."
+            showImageUploadError = true
+            return false
+        }
+
+        let fileProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
+        guard !fileProviders.isEmpty else { return false }
+
+        Task {
+            await uploadDroppedFiles(from: fileProviders)
+        }
+        return true
+    }
+
+    private func uploadDroppedFiles(from providers: [NSItemProvider]) async {
+        isUploadingImage = true
+        imageUploadError = nil
+
+        var uploadedCount = 0
+        var failures: [String] = []
+
+        for provider in providers {
+            do {
+                let fileURL = try await loadDroppedFileURL(from: provider)
+                try await uploadDroppedFile(at: fileURL)
+                uploadedCount += 1
+            } catch {
+                failures.append(error.localizedDescription)
+            }
+        }
+
+        isUploadingImage = false
+
+        if !failures.isEmpty {
+            let prefix = uploadedCount > 0 ? "Some files were skipped:\n" : ""
+            imageUploadError = prefix + failures.joined(separator: "\n")
+            showImageUploadError = true
+        }
+    }
+
+    private func loadDroppedFileURL(from provider: NSItemProvider) async throws -> URL {
+        try await withCheckedThrowingContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let url = item as? URL {
+                    continuation.resume(returning: url)
+                    return
+                }
+                if let data = item as? Data,
+                   let url = URL(dataRepresentation: data, relativeTo: nil) {
+                    continuation.resume(returning: url)
+                    return
+                }
+                if let text = item as? String,
+                   let url = URL(string: text) {
+                    continuation.resume(returning: url)
+                    return
+                }
+                continuation.resume(throwing: FileDropError.noReadableFileURL)
+            }
+        }
+    }
+
+    private func uploadDroppedFile(at fileURL: URL) async throws {
+        guard let mimeType = mimeTypeForDroppedImage(url: fileURL) else {
+            throw FileDropError.unsupportedFileType(fileURL.lastPathComponent)
+        }
+
+        let hasSecurityScope = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if hasSecurityScope {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch {
+            throw FileDropError.readFailed(fileURL.lastPathComponent)
+        }
+
+        try await uploadImageAttachment(data: data, mimeType: mimeType)
+    }
+
+    private func mimeTypeForDroppedImage(url: URL) -> String? {
+        switch url.pathExtension.lowercased() {
+        case "png":
+            return "image/png"
+        case "jpg", "jpeg":
+            return "image/jpeg"
+        case "gif":
+            return "image/gif"
+        case "webp":
+            return "image/webp"
+        case "bmp":
+            return "image/bmp"
+        default:
+            return nil
+        }
+    }
+    #endif
 }
 
 // MARK: - Project Chip View
@@ -1636,14 +1938,34 @@ struct ImagePicker: UIViewControllerRepresentable {
 
 #Preview("New Conversation") {
     MessageComposerView(
-        project: ProjectInfo(id: "test-project", title: "Test Project", description: "A test project")
+        project: ProjectInfo(
+            id: "test-project",
+            title: "Test Project",
+            description: "A test project",
+            repoUrl: nil,
+            pictureUrl: nil,
+            createdAt: 0,
+            agentIds: [],
+            mcpToolIds: [],
+            isDeleted: false
+        )
     )
     .environmentObject(TenexCoreManager())
 }
 
 #Preview("Reply") {
     MessageComposerView(
-        project: ProjectInfo(id: "test-project", title: "Test Project", description: "A test project"),
+        project: ProjectInfo(
+            id: "test-project",
+            title: "Test Project",
+            description: "A test project",
+            repoUrl: nil,
+            pictureUrl: nil,
+            createdAt: 0,
+            agentIds: [],
+            mcpToolIds: [],
+            isDeleted: false
+        ),
         conversationId: "conv-123",
         conversationTitle: "Test Conversation"
     )
