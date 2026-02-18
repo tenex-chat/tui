@@ -1576,8 +1576,7 @@ impl FfiPreferencesStorage {
         storage
     }
 
-    fn read_legacy_tui_trusted_backends(
-    ) -> Option<(
+    fn read_legacy_tui_trusted_backends() -> Option<(
         std::collections::HashSet<String>,
         std::collections::HashSet<String>,
     )> {
@@ -3246,6 +3245,80 @@ impl TenexCore {
             })
             .map_err(|e| TenexError::Internal {
                 message: format!("Failed to send update agent config command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Create a new agent definition (kind:4199).
+    ///
+    /// The created definition is published through the Nostr worker and ingested locally.
+    pub fn create_agent_definition(
+        &self,
+        name: String,
+        description: String,
+        role: String,
+        instructions: String,
+        version: String,
+        source_id: Option<String>,
+        is_fork: bool,
+    ) -> Result<(), TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::CreateAgentDefinition {
+                name,
+                description,
+                role,
+                instructions,
+                version,
+                source_id,
+                is_fork,
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send create agent definition command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Delete an agent definition (kind:4199) via NIP-09 kind:5 deletion.
+    pub fn delete_agent_definition(&self, agent_id: String) -> Result<(), TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let agent = store
+            .content
+            .get_agent_definition(&agent_id)
+            .ok_or_else(|| TenexError::Internal {
+                message: format!("Agent definition not found: {}", agent_id),
+            })?;
+
+        let current_user = self
+            .get_current_user()
+            .ok_or_else(|| TenexError::Internal {
+                message: "No logged-in user".to_string(),
+            })?;
+
+        if !agent.pubkey.eq_ignore_ascii_case(&current_user.pubkey) {
+            return Err(TenexError::Internal {
+                message: "Only the author can delete this agent definition".to_string(),
+            });
+        }
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::DeleteAgentDefinition {
+                agent_id,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send delete agent definition command: {}", e),
             })?;
 
         Ok(())

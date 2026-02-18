@@ -90,6 +90,41 @@ final class AgentDefinitionsViewModel: ObservableObject {
         )
     }
 
+    func canDelete(_ item: AgentDefinitionListItem) -> Bool {
+        guard let currentUserPubkey else { return false }
+        return item.agent.pubkey.caseInsensitiveCompare(currentUserPubkey) == .orderedSame
+    }
+
+    @discardableResult
+    func deleteAgentDefinition(id: String) async -> Bool {
+        guard let coreManager else {
+            errorMessage = "Core manager unavailable."
+            return false
+        }
+
+        let allItems = mine + community
+        guard let item = allItems.first(where: { $0.agent.id == id }) else {
+            errorMessage = "Agent definition not found."
+            return false
+        }
+
+        guard canDelete(item) else {
+            errorMessage = "You can only delete agent definitions you authored."
+            return false
+        }
+
+        do {
+            try await coreManager.safeCore.deleteAgentDefinition(agentId: id)
+
+            mine.removeAll { $0.id == id }
+            community.removeAll { $0.id == id }
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     private func filterRows(_ rows: [AgentDefinitionListItem]) -> [AgentDefinitionListItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !query.isEmpty else { return rows }

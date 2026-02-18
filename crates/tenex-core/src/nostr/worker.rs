@@ -332,6 +332,12 @@ pub enum NostrCommand {
         source_id: Option<String>,
         is_fork: bool,
     },
+    /// Delete an agent definition (kind:5 deletion event referencing kind:4199)
+    DeleteAgentDefinition {
+        agent_id: String,
+        /// Client identifier for the client tag
+        client: Option<String>,
+    },
     /// Stop operations on specified events (kind:24134)
     StopOperations {
         project_a_tag: String,
@@ -702,6 +708,15 @@ impl NostrWorker {
                             is_fork,
                         )) {
                             tlog!("ERROR", "Failed to create agent definition: {}", e);
+                        }
+                    }
+                    NostrCommand::DeleteAgentDefinition { agent_id, client } => {
+                        let short_id: String = agent_id.chars().take(8).collect();
+                        debug_log(&format!("Worker: Deleting agent definition {}", short_id));
+                        if let Err(e) =
+                            rt.block_on(self.handle_delete_agent_definition(agent_id, client))
+                        {
+                            tlog!("ERROR", "Failed to delete agent definition: {}", e);
                         }
                     }
                     NostrCommand::StopOperations {
@@ -1965,6 +1980,62 @@ impl NostrWorker {
             Err(_) => tlog!(
                 "ERROR",
                 "Timeout sending agent definition to relay (saved locally)"
+            ),
+        }
+
+        Ok(())
+    }
+
+    /// Delete an agent definition (kind:5 deletion event)
+    async fn handle_delete_agent_definition(
+        &self,
+        agent_id: String,
+        client_tag: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let event_id =
+            EventId::parse(&agent_id).map_err(|e| anyhow::anyhow!("Invalid event ID: {}", e))?;
+
+        let client_name = client_tag.unwrap_or_else(|| "tenex-ios".to_string());
+
+        let deletion_request = EventDeletionRequest::new().id(event_id);
+        let event = EventBuilder::delete(deletion_request).tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+            vec![client_name],
+        ));
+
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Ingest locally into nostrdb
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                let short_id: String = agent_id.chars().take(8).collect();
+                debug_log(&format!(
+                    "Deleted agent definition {}: deletion event {}",
+                    short_id,
+                    output.id()
+                ))
+            }
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send deletion event to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending deletion event to relay (saved locally)"
             ),
         }
 

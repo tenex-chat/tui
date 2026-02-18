@@ -337,6 +337,44 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Create a new agent definition (kind:4199 event).
+    func createAgentDefinition(
+        name: String,
+        description: String,
+        role: String,
+        instructions: String,
+        version: String,
+        sourceId: String?,
+        isFork: Bool
+    ) throws {
+        try profiler.measureFFI("createAgentDefinition") {
+            do {
+                try core.createAgentDefinition(
+                    name: name,
+                    description: description,
+                    role: role,
+                    instructions: instructions,
+                    version: version,
+                    sourceId: sourceId,
+                    isFork: isFork
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Delete an existing agent definition by publishing a NIP-09 kind:5 deletion.
+    func deleteAgentDefinition(agentId: String) throws {
+        try profiler.measureFFI("deleteAgentDefinition") {
+            do {
+                try core.deleteAgentDefinition(agentId: agentId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
     /// Update an existing project by republishing kind:31933 with the same d-tag.
     func updateProject(
         projectId: String,

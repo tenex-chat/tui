@@ -41,6 +41,16 @@ protocol SafeTenexCoreProtocol: Actor {
     func getOnlineAgents(projectId: String) throws -> [OnlineAgentInfo]
     func getProjectConfigOptions(projectId: String) throws -> ProjectConfigOptions
     func updateAgentConfig(projectId: String, agentPubkey: String, model: String?, tools: [String]) throws
+    func createAgentDefinition(
+        name: String,
+        description: String,
+        role: String,
+        instructions: String,
+        version: String,
+        sourceId: String?,
+        isFork: Bool
+    ) throws
+    func deleteAgentDefinition(agentId: String) throws
     func updateProject(
         projectId: String,
         title: String,
