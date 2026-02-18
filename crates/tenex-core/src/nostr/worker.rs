@@ -344,6 +344,8 @@ pub enum NostrCommand {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        /// Additional marker tags (e.g. ["pm"])
+        tags: Vec<String>,
     },
     /// Subscribe to messages for a new project
     SubscribeToProjectMessages {
@@ -716,6 +718,7 @@ impl NostrWorker {
                         agent_pubkey,
                         model,
                         tools,
+                        tags,
                     } => {
                         debug_log(&format!(
                             "Worker: Updating agent config for {}",
@@ -726,6 +729,7 @@ impl NostrWorker {
                             agent_pubkey,
                             model,
                             tools,
+                            tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
                         }
@@ -2006,6 +2010,7 @@ impl NostrWorker {
         agent_pubkey: String,
         model: Option<String>,
         tools: Vec<String>,
+        tags: Vec<String>,
     ) -> Result<()> {
         let client = self
             .client
@@ -2047,6 +2052,14 @@ impl NostrWorker {
             event = event.tag(Tag::custom(
                 TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
                 vec![tool.clone()],
+            ));
+        }
+
+        // Add marker tags (e.g. ["pm"])
+        for tag in &tags {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
+                Vec::<String>::new(),
             ));
         }
 
