@@ -1955,9 +1955,12 @@ impl App {
             .into_iter()
             .filter_map(|a| fuzzy_score(&a.name, filter).map(|score| (a, score)))
             .collect();
-        // Sort by score (lower = better match), then alphabetically for ties
+        // Sort by PM first, then score (lower = better match), then alphabetically for ties.
         agents_with_scores.sort_by(|(a, score_a), (b, score_b)| {
-            score_a.cmp(score_b).then_with(|| a.name.cmp(&b.name))
+            b.is_pm
+                .cmp(&a.is_pm)
+                .then_with(|| score_a.cmp(score_b))
+                .then_with(|| a.name.cmp(&b.name))
         });
         agents_with_scores.into_iter().map(|(a, _)| a).collect()
     }
@@ -1994,6 +1997,7 @@ impl App {
             project.a_tag(),
             agent.model.clone(),
             agent.tools.clone(),
+            agent.is_pm,
             all_models,
             all_tools,
         ))
@@ -2005,7 +2009,7 @@ impl App {
         state.selector.clamp_index(filtered.len());
 
         let Some(agent) = filtered.get(state.selector.index) else {
-            state.load_agent_settings(None, None, None, HashSet::new());
+            state.load_agent_settings(None, None, None, HashSet::new(), false);
             return;
         };
 
@@ -2019,6 +2023,7 @@ impl App {
             settings,
             agent.model.clone(),
             agent.tools.iter().cloned().collect(),
+            agent.is_pm,
         );
     }
 

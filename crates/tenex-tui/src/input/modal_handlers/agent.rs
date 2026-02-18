@@ -298,6 +298,11 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                     let agent_pubkey = settings.agent_pubkey.clone();
                     let model = settings.selected_model().map(str::to_string);
                     let tools = settings.selected_tools_vec();
+                    let tags = if settings.is_pm {
+                        vec!["pm".to_string()]
+                    } else {
+                        Vec::new()
+                    };
 
                     if let Some(ref core_handle) = app.core_handle {
                         if let Err(e) = core_handle.send(NostrCommand::UpdateAgentConfig {
@@ -305,6 +310,7 @@ pub(super) fn handle_agent_config_modal_key(app: &mut App, key: KeyEvent) {
                             agent_pubkey,
                             model,
                             tools,
+                            tags,
                         }) {
                             app.set_warning_status(&format!(
                                 "Failed to update agent config: {}",
