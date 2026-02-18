@@ -203,19 +203,25 @@ struct ProjectSettingsView: View {
     private func generalSection(project: ProjectInfo) -> some View {
         Section("General") {
             TextField("Title", text: $generalDraft.title)
+#if os(iOS)
                 .textInputAutocapitalization(.words)
+#endif
 
             TextField("Description", text: $generalDraft.description, axis: .vertical)
                 .lineLimit(3...8)
 
             TextField("Repository URL", text: $generalDraft.repoUrl)
+#if os(iOS)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
+#endif
                 .autocorrectionDisabled()
 
             TextField("Image URL", text: $generalDraft.pictureUrl)
+#if os(iOS)
                 .keyboardType(.URL)
                 .textInputAutocapitalization(.never)
+#endif
                 .autocorrectionDisabled()
 
             if let imageUrl = URL(string: generalDraft.pictureUrl.trimmingCharacters(in: .whitespacesAndNewlines)),
