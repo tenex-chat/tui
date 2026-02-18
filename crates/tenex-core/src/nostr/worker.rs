@@ -347,6 +347,14 @@ pub enum NostrCommand {
         /// Additional marker tags (e.g. ["pm"])
         tags: Vec<String>,
     },
+    /// Update global agent configuration (kind:24020) without a project a-tag
+    UpdateGlobalAgentConfig {
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+        /// Additional marker tags (e.g. ["pm"])
+        tags: Vec<String>,
+    },
     /// Subscribe to messages for a new project
     SubscribeToProjectMessages {
         project_a_tag: String,
@@ -732,6 +740,25 @@ impl NostrWorker {
                             tags,
                         )) {
                             tlog!("ERROR", "Failed to update agent config: {}", e);
+                        }
+                    }
+                    NostrCommand::UpdateGlobalAgentConfig {
+                        agent_pubkey,
+                        model,
+                        tools,
+                        tags,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Updating global agent config for {}",
+                            &agent_pubkey[..8]
+                        ));
+                        if let Err(e) = rt.block_on(self.handle_update_global_agent_config(
+                            agent_pubkey,
+                            model,
+                            tools,
+                            tags,
+                        )) {
+                            tlog!("ERROR", "Failed to update global agent config: {}", e);
                         }
                     }
                     NostrCommand::SubscribeToProjectMessages { project_a_tag } => {
@@ -2025,44 +2052,10 @@ impl NostrWorker {
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
-        // Build kind:24020 agent config update event
-        let mut event = EventBuilder::new(Kind::Custom(24020), "")
-            .tag(Tag::coordinate(coordinate, None))
-            // NIP-89 client tag
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec!["tenex-tui".to_string()],
-            ));
-
-        // Add p-tag for the agent being configured
-        if let Ok(pk) = PublicKey::parse(&agent_pubkey) {
-            event = event.tag(Tag::public_key(pk));
-        }
-
-        // Add model tag if specified
-        if let Some(m) = model {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("model")),
-                vec![m],
-            ));
-        }
-
-        // Add tool tags (exhaustive list - empty means no tools)
-        for tool in &tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-                vec![tool.clone()],
-            ));
-        }
-
-        // Add marker tags (e.g. ["pm"])
-        for tag in &tags {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
-                Vec::<String>::new(),
-            ));
-        }
-
+        // Build kind:24020 agent config update event with project a-tag
+        let base = EventBuilder::new(Kind::Custom(24020), "")
+            .tag(Tag::coordinate(coordinate, None));
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -2079,6 +2072,49 @@ impl NostrWorker {
                 e
             ),
             Err(_) => tlog!("ERROR", "Timeout sending agent config update to relay"),
+        }
+
+        Ok(())
+    }
+
+    /// Send a global kind:24020 agent config event (no a-tag, agent-scoped only).
+    async fn handle_update_global_agent_config(
+        &self,
+        agent_pubkey: String,
+        model: Option<String>,
+        tools: Vec<String>,
+        tags: Vec<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        // Build kind:24020 global agent config event (no a-tag)
+        let base = EventBuilder::new(Kind::Custom(24020), "");
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
+        let signed_event = event.sign_with_keys(keys)?;
+
+        // Send to relay with timeout
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => {
+                debug_log(&format!("Sent global agent config update: {}", output.id()))
+            }
+            Ok(Err(e)) => tlog!(
+                "ERROR",
+                "Failed to send global agent config update to relay: {}",
+                e
+            ),
+            Err(_) => tlog!("ERROR", "Timeout sending global agent config update to relay"),
         }
 
         Ok(())
@@ -2451,6 +2487,59 @@ impl NostrWorker {
 
         Ok(())
     }
+}
+
+/// Attach the common tags to a kind:24020 agent config `EventBuilder`.
+///
+/// Adds (in order):
+/// - NIP-89 `client` tag
+/// - `p` tag for `agent_pubkey` (skipped if the pubkey cannot be parsed)
+/// - `model` tag when `model` is `Some`
+/// - one `tool` tag per entry in `tools`
+/// - one bare marker tag per entry in `tags` (e.g. `"pm"`)
+fn build_agent_config_event(
+    mut event: EventBuilder,
+    agent_pubkey: &str,
+    model: Option<String>,
+    tools: &[String],
+    tags: &[String],
+) -> EventBuilder {
+    // NIP-89 client tag
+    event = event.tag(Tag::custom(
+        TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+        vec!["tenex-tui".to_string()],
+    ));
+
+    // p-tag for the agent being configured
+    if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+        event = event.tag(Tag::public_key(pk));
+    }
+
+    // Model tag (optional)
+    if let Some(m) = model {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("model")),
+            vec![m],
+        ));
+    }
+
+    // Tool tags (exhaustive list — empty means no tools)
+    for tool in tools {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
+            vec![tool.clone()],
+        ));
+    }
+
+    // Marker tags (e.g. ["pm"])
+    for tag in tags {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
+            Vec::<String>::new(),
+        ));
+    }
+
+    event
 }
 
 /// Run negentropy sync loop with adaptive timing

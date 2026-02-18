@@ -1592,6 +1592,15 @@ impl AgentSettingsState {
     }
 }
 
+/// A reference to a project that contains a particular agent.
+#[derive(Debug, Clone)]
+pub struct AgentProjectRef {
+    /// Human-readable project name.
+    pub name: String,
+    /// Nostr coordinate a-tag for the project (e.g. `"30078:<pubkey>:<d-tag>"`).
+    pub a_tag: String,
+}
+
 /// State for the unified agent selection + configuration modal.
 #[derive(Debug, Clone)]
 pub struct AgentConfigState {
@@ -1609,6 +1618,12 @@ pub struct AgentConfigState {
     pub original_tools: std::collections::HashSet<String>,
     /// Original PM marker for change detection
     pub original_is_pm: bool,
+    /// Whether Shift is currently held — shows global-save hint and project list
+    pub shift_held: bool,
+    /// Projects that contain this agent.
+    /// Populated when `shift_held` transitions from `false` to `true`; cleared when Shift is
+    /// released (i.e. when `shift_held` transitions back to `false`).
+    pub agent_projects: Vec<AgentProjectRef>,
 }
 
 impl AgentConfigState {
@@ -1621,6 +1636,8 @@ impl AgentConfigState {
             original_model: None,
             original_tools: std::collections::HashSet::new(),
             original_is_pm: false,
+            shift_held: false,
+            agent_projects: Vec::new(),
         }
     }
 
