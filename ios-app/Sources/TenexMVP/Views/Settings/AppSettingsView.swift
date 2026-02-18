@@ -34,7 +34,7 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var hasOpenRouterKey = false
     @Published var audioEnabled = false
     @Published var audioPrompt = ""
-    @Published var selectedModel: String?
+    @Published var selectedModelIds: Set<String> = []
     @Published var selectedVoiceIds: Set<String> = []
     @Published var ttsInactivityThresholdSecs: UInt64 = 120
 
@@ -49,6 +49,9 @@ final class AppSettingsViewModel: ObservableObject {
     @Published var isLoadingModels = false
     @Published var isSavingApiKey = false
     @Published var errorMessage: String?
+
+    // Backward-compatible multi-model encoding stored in the existing single-model field.
+    private static let multiModelPrefix = "tenex:openrouter_models:v1:"
 
     private static let defaultAudioPrompt = """
         You are a text preprocessor for a text-to-speech system. Your task is to convert technical \
@@ -70,7 +73,7 @@ final class AppSettingsViewModel: ObservableObject {
             let settings = try await coreManager.safeCore.getAiAudioSettings()
             audioEnabled = settings.enabled
             audioPrompt = settings.audioPrompt
-            selectedModel = settings.openrouterModel
+            selectedModelIds = Self.decodeSelectedModelIds(from: settings.openrouterModel)
             selectedVoiceIds = Set(settings.selectedVoiceIds)
             ttsInactivityThresholdSecs = settings.ttsInactivityThresholdSecs
         } catch {
@@ -222,15 +225,36 @@ final class AppSettingsViewModel: ObservableObject {
         }
     }
 
-    func setSelectedModel(coreManager: TenexCoreManager, model: String?) async {
-        let previous = selectedModel
-        selectedModel = model
-        do {
-            try await coreManager.safeCore.setOpenRouterModel(model: model)
-        } catch {
-            selectedModel = previous
-            errorMessage = "Failed to save model: \(error.localizedDescription)"
+    func toggleSelectedModel(coreManager: TenexCoreManager, modelId: String) async {
+        let previous = selectedModelIds
+        if selectedModelIds.contains(modelId) {
+            selectedModelIds.remove(modelId)
+        } else {
+            selectedModelIds.insert(modelId)
         }
+
+        await persistSelectedModels(coreManager: coreManager, rollbackTo: previous)
+    }
+
+    func clearSelectedModels(coreManager: TenexCoreManager) async {
+        let previous = selectedModelIds
+        selectedModelIds = []
+        await persistSelectedModels(coreManager: coreManager, rollbackTo: previous)
+    }
+
+    var selectedModelsSummary: String {
+        guard !selectedModelIds.isEmpty else { return "Not selected" }
+        if selectedModelIds.count == 1, let modelId = selectedModelIds.first {
+            if let model = availableModels.first(where: { $0.id == modelId }) {
+                return model.name ?? modelId
+            }
+            return modelId
+        }
+        return "\(selectedModelIds.count) selected"
+    }
+
+    func isModelSelected(_ modelId: String) -> Bool {
+        selectedModelIds.contains(modelId)
     }
 
     func setAudioEnabled(coreManager: TenexCoreManager, enabled: Bool) async {
@@ -290,6 +314,46 @@ final class AppSettingsViewModel: ObservableObject {
             }
             errorMessage = "Failed to save voice selection: \(error.localizedDescription)"
         }
+    }
+
+    private func persistSelectedModels(coreManager: TenexCoreManager, rollbackTo previous: Set<String>) async {
+        do {
+            let encoded = Self.encodeSelectedModelIds(selectedModelIds)
+            try await coreManager.safeCore.setOpenRouterModel(model: encoded)
+        } catch {
+            selectedModelIds = previous
+            errorMessage = "Failed to save model selection: \(error.localizedDescription)"
+        }
+    }
+
+    private static func decodeSelectedModelIds(from storedValue: String?) -> Set<String> {
+        guard let storedValue, !storedValue.isEmpty else { return [] }
+
+        if storedValue.hasPrefix(multiModelPrefix) {
+            let payload = String(storedValue.dropFirst(multiModelPrefix.count))
+            if let data = payload.data(using: .utf8),
+               let decoded = try? JSONSerialization.jsonObject(with: data) as? [String] {
+                return Set(decoded.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+            }
+        }
+
+        return [storedValue]
+    }
+
+    private static func encodeSelectedModelIds(_ modelIds: Set<String>) -> String? {
+        let normalized = modelIds
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+
+        guard !normalized.isEmpty else { return nil }
+        if normalized.count == 1 { return normalized[0] }
+
+        guard let data = try? JSONSerialization.data(withJSONObject: normalized),
+              let payload = String(data: data, encoding: .utf8) else {
+            return normalized[0]
+        }
+        return multiModelPrefix + payload
     }
 }
 
@@ -717,9 +781,9 @@ private struct AISettingsSectionView: View {
                     }
                 } label: {
                     HStack {
-                        Text("OpenRouter Model")
+                        Text("OpenRouter Models")
                         Spacer()
-                        Text(viewModel.selectedModel ?? "Not selected")
+                        Text(viewModel.selectedModelsSummary)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                         Image(systemName: "chevron.right")
@@ -936,7 +1000,10 @@ private struct ModelSelectorSheet: View {
                     List(filteredModels, id: \.id) { model in
                         Button {
                             Task {
-                                await viewModel.setSelectedModel(coreManager: coreManager, model: model.id)
+                                await viewModel.toggleSelectedModel(
+                                    coreManager: coreManager,
+                                    modelId: model.id
+                                )
                             }
                         } label: {
                             HStack {
@@ -951,21 +1018,33 @@ private struct ModelSelectorSheet: View {
                                     }
                                 }
                                 Spacer()
-                                if viewModel.selectedModel == model.id {
-                                    Image(systemName: "checkmark")
+                                if viewModel.isModelSelected(model.id) {
+                                    Image(systemName: "checkmark.circle.fill")
                                         .foregroundStyle(Color.agentBrand)
+                                } else {
+                                    Image(systemName: "circle")
+                                        .foregroundStyle(.tertiary)
                                 }
                             }
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .searchable(text: $searchText)
+            .searchable(text: $searchText, prompt: "Search models")
             .navigationTitle("OpenRouter Models")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Refresh") {
                         Task { await viewModel.fetchModels(coreManager: coreManager) }
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if !viewModel.selectedModelIds.isEmpty {
+                        Button("Clear") {
+                            Task { await viewModel.clearSelectedModels(coreManager: coreManager) }
+                        }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -1055,6 +1134,7 @@ private struct VoiceBrowserSheet: View {
             }
             .searchable(text: $searchText, prompt: "Search voices")
             .navigationTitle("ElevenLabs Voices")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Refresh") {
@@ -1067,6 +1147,19 @@ private struct VoiceBrowserSheet: View {
                         dismiss()
                     }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                HStack {
+                    Spacer()
+                    Button("Done") {
+                        previewPlayer.stop()
+                        dismiss()
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .background(.ultraThinMaterial)
             }
         }
     }
