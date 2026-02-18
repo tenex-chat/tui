@@ -47,6 +47,9 @@ pub const TEXT_MUTED: Color = Color::Rgb(128, 128, 128);
 /// Dimmed text for hints, placeholders
 pub const TEXT_DIM: Color = Color::Rgb(90, 90, 90);
 
+/// White text - pure white for high-contrast indicators
+pub const TEXT_WHITE: Color = Color::Rgb(255, 255, 255);
+
 // -----------------------------------------------------------------------------
 // Accent Colors - Muted, not harsh
 // -----------------------------------------------------------------------------
@@ -292,8 +295,13 @@ pub fn tab_unread() -> Style {
 }
 
 pub fn tab_waiting_for_user() -> Style {
-    // Same style as unread - both use warning color with bold
-    tab_unread()
+    // User is mentioned - red/orange (error color) with bold
+    Style::default().fg(ACCENT_ERROR).add_modifier(Modifier::BOLD)
+}
+
+pub fn tab_agent_working() -> Style {
+    // Agent is working - blue (primary accent) with bold
+    Style::default().fg(ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
 }
 
 // -----------------------------------------------------------------------------

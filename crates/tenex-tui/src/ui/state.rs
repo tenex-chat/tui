@@ -483,6 +483,9 @@ pub struct OpenTab {
     /// Whether the last message in this tab p-tags the current user (waiting for response)
     /// This takes priority over `has_unread` for visual indicators
     pub waiting_for_user: bool,
+    /// Whether an agent is currently working in this conversation (kind 24133 events)
+    /// Used to show a blue indicator in the tab bar
+    pub is_agent_working: bool,
     /// Draft ID for new conversations not yet sent (None for real threads)
     pub draft_id: Option<String>,
     /// Navigation stack for drilling into delegations.
@@ -534,6 +537,7 @@ impl OpenTab {
     }
 
     /// Clear attention flags (unread and waiting_for_user) when user views this tab
+    /// Note: is_agent_working is NOT cleared here as it reflects actual agent state
     pub fn clear_attention_flags(&mut self) {
         self.has_unread = false;
         self.waiting_for_user = false;
@@ -548,6 +552,7 @@ impl OpenTab {
             project_a_tag,
             has_unread: false,
             waiting_for_user: false,
+            is_agent_working: false,
             draft_id: None,
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -578,6 +583,7 @@ impl OpenTab {
             project_a_tag,
             has_unread: false,
             waiting_for_user: false,
+            is_agent_working: false,
             draft_id: Some(draft_id),
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -601,6 +607,7 @@ impl OpenTab {
             project_a_tag: String::new(),
             has_unread: false,
             waiting_for_user: false,
+            is_agent_working: false,
             draft_id: None,
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -627,6 +634,7 @@ impl OpenTab {
             project_a_tag: String::new(),
             has_unread: false,
             waiting_for_user: false,
+            is_agent_working: false,
             draft_id: None,
             navigation_stack: Vec::new(),
             message_history: TabMessageHistory::default(),
@@ -1082,6 +1090,16 @@ impl TabManager {
         for tab in self.tabs.iter_mut() {
             if tab.thread_id == thread_id {
                 tab.waiting_for_user = false;
+            }
+        }
+    }
+
+    /// Update the is_agent_working state for a thread
+    /// Called when kind:24133 operation events change
+    pub fn set_agent_working(&mut self, thread_id: &str, is_working: bool) {
+        for tab in self.tabs.iter_mut() {
+            if tab.thread_id == thread_id {
+                tab.is_agent_working = is_working;
             }
         }
     }
