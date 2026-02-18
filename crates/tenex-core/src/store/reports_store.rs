@@ -121,8 +121,7 @@ impl ReportsStore {
         known_project_a_tags: &[String],
     ) -> Option<Report> {
         if let Some(report) = Report::from_note(note) {
-            if known_project_a_tags.contains(&report.project_a_tag)
-            {
+            if known_project_a_tags.contains(&report.project_a_tag) {
                 self.add_report(report.clone());
                 return Some(report);
             }

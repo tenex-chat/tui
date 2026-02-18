@@ -304,6 +304,24 @@ pub enum NostrCommand {
         #[allow(dead_code)]
         client: Option<String>,
     },
+    /// Update an existing project (kind:31933 replaceable)
+    UpdateProject {
+        project_a_tag: String,
+        title: String,
+        description: String,
+        repo_url: Option<String>,
+        picture_url: Option<String>,
+        agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+        /// Client identifier for the client tag
+        client: Option<String>,
+    },
+    /// Tombstone-delete an existing project by republishing with ["deleted"] tag
+    DeleteProject {
+        project_a_tag: String,
+        /// Client identifier for the client tag
+        client: Option<String>,
+    },
     /// Create a new agent definition (kind:4199)
     CreateAgentDefinition {
         name: String,
@@ -614,6 +632,44 @@ impl NostrWorker {
                             client,
                         )) {
                             tlog!("ERROR", "Failed to save project: {}", e);
+                        }
+                    }
+                    NostrCommand::UpdateProject {
+                        project_a_tag,
+                        title,
+                        description,
+                        repo_url,
+                        picture_url,
+                        agent_ids,
+                        mcp_tool_ids,
+                        client,
+                    } => {
+                        debug_log(&format!("Worker: Updating project {}", project_a_tag));
+                        if let Err(e) = rt.block_on(self.handle_update_project(
+                            project_a_tag,
+                            title,
+                            description,
+                            repo_url,
+                            picture_url,
+                            agent_ids,
+                            mcp_tool_ids,
+                            client,
+                        )) {
+                            tlog!("ERROR", "Failed to update project: {}", e);
+                        }
+                    }
+                    NostrCommand::DeleteProject {
+                        project_a_tag,
+                        client,
+                    } => {
+                        debug_log(&format!(
+                            "Worker: Tombstone deleting project {}",
+                            project_a_tag
+                        ));
+                        if let Err(e) =
+                            rt.block_on(self.handle_delete_project(project_a_tag, client))
+                        {
+                            tlog!("ERROR", "Failed to delete project: {}", e);
                         }
                     }
                     NostrCommand::CreateAgentDefinition {
@@ -1533,6 +1589,104 @@ impl NostrWorker {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn build_project_event_builder(
+        d_tag: String,
+        title: String,
+        description: String,
+        repo_url: Option<String>,
+        picture_url: Option<String>,
+        participants: &[String],
+        agent_ids: &[String],
+        mcp_tool_ids: &[String],
+        client_name: String,
+        is_deleted: bool,
+    ) -> EventBuilder {
+        let mut event = EventBuilder::new(Kind::Custom(31933), &description)
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
+                vec![d_tag],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec![title],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+                vec![client_name],
+            ));
+
+        if let Some(repo) = repo_url.filter(|s| !s.trim().is_empty()) {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("repo")),
+                vec![repo],
+            ));
+        }
+
+        if let Some(picture) = picture_url.filter(|s| !s.trim().is_empty()) {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("picture")),
+                vec![picture],
+            ));
+        }
+
+        if is_deleted {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("deleted")),
+                Vec::<String>::new(),
+            ));
+        }
+
+        for participant in participants {
+            if let Ok(pk) = PublicKey::parse(participant) {
+                event = event.tag(Tag::public_key(pk));
+            }
+        }
+
+        for agent_id in agent_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
+                vec![agent_id.clone()],
+            ));
+        }
+
+        for tool_id in mcp_tool_ids {
+            event = event.tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
+                vec![tool_id.clone()],
+            ));
+        }
+
+        event
+    }
+
+    async fn publish_project_event(
+        &self,
+        client: &Client,
+        keys: &Keys,
+        event: EventBuilder,
+        action_label: &str,
+    ) -> Result<()> {
+        let signed_event = event.sign_with_keys(keys)?;
+        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            client.send_event(&signed_event),
+        )
+        .await
+        {
+            Ok(Ok(output)) => debug_log(&format!("{}: {}", action_label, output.id())),
+            Ok(Err(e)) => tlog!("ERROR", "Failed to send project event to relay: {}", e),
+            Err(_) => tlog!(
+                "ERROR",
+                "Timeout sending project event to relay (saved locally)"
+            ),
+        }
+
+        Ok(())
+    }
+
     async fn handle_update_project_agents(
         &self,
         project_a_tag: String,
@@ -1555,66 +1709,21 @@ impl NostrWorker {
             .find(|p| p.a_tag() == project_a_tag)
             .ok_or_else(|| anyhow::anyhow!("Project not found: {}", project_a_tag))?;
 
-        // Build the updated project event (kind 31933, NIP-33 replaceable)
-        let mut event = EventBuilder::new(Kind::Custom(31933), "")
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
-                vec![project.id.clone()],
-            ))
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
-                vec![project.name.clone()],
-            ))
-            // NIP-89 client tag
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec!["tenex-tui".to_string()],
-            ));
+        let event = Self::build_project_event_builder(
+            project.id.clone(),
+            project.name.clone(),
+            project.description.clone().unwrap_or_default(),
+            project.repo_url.clone(),
+            project.picture_url.clone(),
+            &project.participants,
+            &agent_ids,
+            &mcp_tool_ids,
+            "tenex-tui".to_string(),
+            false,
+        );
 
-        // Add participant p-tags
-        for participant in &project.participants {
-            if let Ok(pk) = PublicKey::parse(participant) {
-                event = event.tag(Tag::public_key(pk));
-            }
-        }
-
-        // Add agent tags (first agent is PM)
-        for agent_id in &agent_ids {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id.clone()],
-            ));
-        }
-
-        // Add MCP tool tags
-        for tool_id in &mcp_tool_ids {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
-                vec![tool_id.clone()],
-            ));
-        }
-
-        let signed_event = event.sign_with_keys(keys)?;
-
-        // Ingest locally into nostrdb
-        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
-
-        // Send to relay with timeout
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&signed_event),
-        )
-        .await
-        {
-            Ok(Ok(output)) => debug_log(&format!("Updated project agents: {}", output.id())),
-            Ok(Err(e)) => tlog!("ERROR", "Failed to send project update to relay: {}", e),
-            Err(_) => tlog!(
-                "ERROR",
-                "Timeout sending project update to relay (saved locally)"
-            ),
-        }
-
-        Ok(())
+        self.publish_project_event(client, keys, event, "Updated project agents")
+            .await
     }
 
     async fn handle_save_project(
@@ -1643,57 +1752,104 @@ impl NostrWorker {
         // Determine client identifier
         let client_name = client_tag.unwrap_or_else(|| "tenex".to_string());
 
-        // Build the project event (kind 31933, NIP-33 replaceable)
-        // Publishing with the same d-tag replaces/updates the existing project
-        let mut event = EventBuilder::new(Kind::Custom(31933), &description)
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("d")),
-                vec![d_tag],
-            ))
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
-                vec![name],
-            ))
-            // NIP-89 client tag
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec![client_name],
-            ));
+        let event = Self::build_project_event_builder(
+            d_tag,
+            name,
+            description,
+            None,
+            None,
+            &[],
+            &agent_ids,
+            &mcp_tool_ids,
+            client_name,
+            false,
+        );
 
-        // Add agent tags
-        for agent_id in &agent_ids {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("agent")),
-                vec![agent_id.clone()],
-            ));
-        }
+        self.publish_project_event(client, keys, event, "Saved project")
+            .await
+    }
 
-        // Add MCP tool tags
-        for tool_id in &mcp_tool_ids {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("mcp")),
-                vec![tool_id.clone()],
-            ));
-        }
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_update_project(
+        &self,
+        project_a_tag: String,
+        title: String,
+        description: String,
+        repo_url: Option<String>,
+        picture_url: Option<String>,
+        agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+        client_tag: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
-        let signed_event = event.sign_with_keys(keys)?;
+        let projects = crate::store::get_projects(&self.ndb)?;
+        let project = projects
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .ok_or_else(|| anyhow::anyhow!("Project not found: {}", project_a_tag))?;
 
-        // Ingest locally into nostrdb
-        ingest_events(&self.ndb, std::slice::from_ref(&signed_event), None)?;
+        let client_name = client_tag.unwrap_or_else(|| "tenex-ios".to_string());
+        let event = Self::build_project_event_builder(
+            project.id.clone(),
+            title,
+            description,
+            repo_url,
+            picture_url,
+            &project.participants,
+            &agent_ids,
+            &mcp_tool_ids,
+            client_name,
+            false,
+        );
 
-        // Send to relay with timeout
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            client.send_event(&signed_event),
-        )
-        .await
-        {
-            Ok(Ok(output)) => debug_log(&format!("Saved project: {}", output.id())),
-            Ok(Err(e)) => tlog!("ERROR", "Failed to send project to relay: {}", e),
-            Err(_) => tlog!("ERROR", "Timeout sending project to relay (saved locally)"),
-        }
+        self.publish_project_event(client, keys, event, "Updated project")
+            .await
+    }
 
-        Ok(())
+    async fn handle_delete_project(
+        &self,
+        project_a_tag: String,
+        client_tag: Option<String>,
+    ) -> Result<()> {
+        let client = self
+            .client
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No client"))?;
+        let keys = self
+            .keys
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No keys"))?;
+
+        let projects = crate::store::get_projects(&self.ndb)?;
+        let project = projects
+            .iter()
+            .find(|p| p.a_tag() == project_a_tag)
+            .ok_or_else(|| anyhow::anyhow!("Project not found: {}", project_a_tag))?;
+
+        let client_name = client_tag.unwrap_or_else(|| "tenex-ios".to_string());
+        let event = Self::build_project_event_builder(
+            project.id.clone(),
+            project.name.clone(),
+            project.description.clone().unwrap_or_default(),
+            project.repo_url.clone(),
+            project.picture_url.clone(),
+            &project.participants,
+            &project.agent_ids,
+            &project.mcp_tool_ids,
+            client_name,
+            true,
+        );
+
+        self.publish_project_event(client, keys, event, "Deleted project")
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2538,6 +2694,56 @@ mod tests {
         let result = Coordinate::parse(a_tag);
         println!("Parse result: {:?}", result);
         assert!(result.is_ok(), "Failed to parse: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_delete_project_publishes_kind_31933_with_d_and_deleted_tag() {
+        let keys = Keys::generate();
+        let d_tag = "project-delete-check".to_string();
+        let event = NostrWorker::build_project_event_builder(
+            d_tag.clone(),
+            "Project Delete Check".to_string(),
+            "description".to_string(),
+            Some("https://example.com/repo".to_string()),
+            Some("https://example.com/pic.png".to_string()),
+            &[],
+            &[],
+            &[],
+            "tenex-ios".to_string(),
+            true,
+        )
+        .sign_with_keys(&keys)
+        .unwrap();
+
+        let event_json = serde_json::to_value(event).unwrap();
+        assert_eq!(
+            event_json.get("kind").and_then(|v| v.as_u64()),
+            Some(31933),
+            "Delete must publish kind:31933"
+        );
+
+        let tags = event_json
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        let has_d_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.first().and_then(|v| v.as_str()) == Some("d")
+                && arr.get(1).and_then(|v| v.as_str()) == Some(d_tag.as_str())
+        });
+        assert!(has_d_tag, "Delete event must preserve original d-tag");
+
+        let has_deleted_tag = tags.iter().any(|tag| {
+            let Some(arr) = tag.as_array() else {
+                return false;
+            };
+            arr.first().and_then(|v| v.as_str()) == Some("deleted")
+        });
+        assert!(has_deleted_tag, "Delete event must include deleted tag");
     }
 
     /// Helper to build nudge event tags based on tool permission mode

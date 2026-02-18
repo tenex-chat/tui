@@ -251,7 +251,22 @@ fn project_to_info(project: &Project) -> ProjectInfo {
     ProjectInfo {
         id: project.id.clone(),
         title: project.name.clone(),
-        description: None, // Project model doesn't include description
+        description: project.description.clone(),
+        repo_url: project.repo_url.clone(),
+        picture_url: project.picture_url.clone(),
+        created_at: project.created_at,
+        agent_ids: project.agent_ids.clone(),
+        mcp_tool_ids: project.mcp_tool_ids.clone(),
+        is_deleted: project.is_deleted,
+    }
+}
+
+fn mcp_tool_to_info(tool: &crate::models::MCPTool) -> McpToolInfo {
+    McpToolInfo {
+        id: tool.id.clone(),
+        name: tool.name.clone(),
+        description: tool.description.clone(),
+        command: tool.command.clone(),
     }
 }
 
@@ -323,6 +338,7 @@ fn message_to_info(store: &AppDataStore, message: &crate::models::Message) -> Me
         is_tool_call: message.tool_name.is_some(),
         role,
         q_tags: message.q_tags.clone(),
+        a_tags: message.a_tags.clone(),
         p_tags: message.p_tags.clone(),
         ask_event,
         tool_name: message.tool_name.clone(),
@@ -770,6 +786,31 @@ pub struct ProjectInfo {
     pub title: String,
     /// Project description (from content field), if any
     pub description: Option<String>,
+    /// Repository URL from ["repo", ...], if present
+    pub repo_url: Option<String>,
+    /// Picture URL from ["picture", ...] or ["image", ...], if present
+    pub picture_url: Option<String>,
+    /// Created timestamp of the latest replaceable event
+    pub created_at: u64,
+    /// Agent definition event IDs from "agent" tags
+    pub agent_ids: Vec<String>,
+    /// MCP tool event IDs from "mcp" tags
+    pub mcp_tool_ids: Vec<String>,
+    /// Whether the project is tombstoned via ["deleted"] tag
+    pub is_deleted: bool,
+}
+
+/// MCP tool info for project tool selection UI.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct McpToolInfo {
+    /// Event ID of the MCP tool definition (kind:4200)
+    pub id: String,
+    /// Display name
+    pub name: String,
+    /// Description/content
+    pub description: String,
+    /// Command tag value
+    pub command: String,
 }
 
 /// A conversation/thread in a project.
@@ -945,6 +986,8 @@ pub struct MessageInfo {
     pub role: String,
     /// Q-tags pointing to referenced events (delegation targets, ask events, etc.)
     pub q_tags: Vec<String>,
+    /// A-tags (addressable references) - NIP-33 coordinates for kind:30023 reports
+    pub a_tags: Vec<String>,
     /// P-tags (mentions) - pubkeys this message mentions/delegates to
     pub p_tags: Vec<String>,
     /// Ask event data if this message contains an ask (inline ask)
@@ -1369,6 +1412,24 @@ pub struct VoiceInfo {
     pub name: String,
     pub category: Option<String>,
     pub description: Option<String>,
+    pub preview_url: Option<String>,
+}
+
+/// Pending backend awaiting user trust decision.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PendingBackendInfo {
+    pub backend_pubkey: String,
+    pub project_a_tag: String,
+    pub first_seen: u64,
+    pub status_created_at: u64,
+}
+
+/// Snapshot of backend trust state and pending approvals.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BackendTrustSnapshot {
+    pub approved: Vec<String>,
+    pub blocked: Vec<String>,
+    pub pending: Vec<PendingBackendInfo>,
 }
 
 /// Model from OpenRouter
@@ -1422,6 +1483,12 @@ pub struct FfiPreferences {
     /// IDs of collapsed threads (for UI state)
     #[serde(default)]
     pub collapsed_thread_ids: std::collections::HashSet<String>,
+    /// Backend pubkeys explicitly approved by the user
+    #[serde(default)]
+    pub approved_backend_pubkeys: std::collections::HashSet<String>,
+    /// Backend pubkeys explicitly blocked by the user
+    #[serde(default)]
+    pub blocked_backend_pubkeys: std::collections::HashSet<String>,
     /// AI Audio Notifications settings
     #[serde(default)]
     pub ai_audio_settings: crate::models::project_draft::AiAudioSettings,
@@ -1516,6 +1583,29 @@ impl FfiPreferencesStorage {
 
     fn set_tts_inactivity_threshold(&mut self, secs: u64) -> Result<(), String> {
         self.prefs.ai_audio_settings.tts_inactivity_threshold_secs = secs;
+        self.save()
+            .map_err(|e| format!("Failed to save preferences: {}", e))
+    }
+
+    fn trusted_backends(
+        &self,
+    ) -> (
+        std::collections::HashSet<String>,
+        std::collections::HashSet<String>,
+    ) {
+        (
+            self.prefs.approved_backend_pubkeys.clone(),
+            self.prefs.blocked_backend_pubkeys.clone(),
+        )
+    }
+
+    fn set_trusted_backends(
+        &mut self,
+        approved: std::collections::HashSet<String>,
+        blocked: std::collections::HashSet<String>,
+    ) -> Result<(), String> {
+        self.prefs.approved_backend_pubkeys = approved;
+        self.prefs.blocked_backend_pubkeys = blocked;
         self.save()
             .map_err(|e| format!("Failed to save preferences: {}", e))
     }
@@ -1789,6 +1879,11 @@ impl TenexCore {
             *prefs_guard = Some(prefs);
         }
 
+        // Apply persisted backend trust state to the runtime store.
+        if self.sync_trusted_backends_from_preferences().is_err() {
+            return false;
+        }
+
         // Store stats references for diagnostics
         {
             let mut stats_guard = match self.subscription_stats.write() {
@@ -1868,6 +1963,9 @@ impl TenexCore {
                 store.rebuild_from_ndb();
             }
         }
+
+        // Re-apply persisted backend trust after store rebuild/logout cycles.
+        self.sync_trusted_backends_from_preferences()?;
 
         // Trigger async relay connection (non-blocking, fire-and-forget)
         let core_handle = {
@@ -3061,6 +3159,77 @@ impl TenexCore {
         Ok(())
     }
 
+    /// Get all MCP tool definitions (kind:4200 events).
+    ///
+    /// Returns tools sorted by created_at descending (newest first).
+    pub fn get_all_mcp_tools(&self) -> Result<Vec<McpToolInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        Ok(store
+            .content
+            .get_mcp_tools()
+            .into_iter()
+            .map(mcp_tool_to_info)
+            .collect())
+    }
+
+    /// Update an existing project (kind:31933 replaceable event).
+    ///
+    /// Republish the same d-tag with updated metadata, agents, and MCP tool assignments.
+    pub fn update_project(
+        &self,
+        project_id: String,
+        title: String,
+        description: String,
+        repo_url: Option<String>,
+        picture_url: Option<String>,
+        agent_ids: Vec<String>,
+        mcp_tool_ids: Vec<String>,
+    ) -> Result<(), TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::UpdateProject {
+                project_a_tag,
+                title,
+                description,
+                repo_url,
+                picture_url,
+                agent_ids,
+                mcp_tool_ids,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send update project command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
+    /// Tombstone-delete a project by republishing it with ["deleted"] tag.
+    pub fn delete_project(&self, project_id: String) -> Result<(), TenexError> {
+        let project_a_tag = get_project_a_tag(&self.store, &project_id)?;
+        let core_handle = get_core_handle(&self.core_handle)?;
+
+        core_handle
+            .send(NostrCommand::DeleteProject {
+                project_a_tag,
+                client: Some("tenex-ios".to_string()),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send delete project command: {}", e),
+            })?;
+
+        Ok(())
+    }
+
     /// Check if a project is online (has a recent kind:24010 status event).
     ///
     /// A project is considered online if:
@@ -3159,7 +3328,12 @@ impl TenexCore {
 
         let approved_set: std::collections::HashSet<String> = approved.into_iter().collect();
         let blocked_set: std::collections::HashSet<String> = blocked.into_iter().collect();
-        store.trust.set_trusted_backends(approved_set, blocked_set);
+        store
+            .trust
+            .set_trusted_backends(approved_set.clone(), blocked_set.clone());
+
+        drop(store_guard);
+        self.persist_trusted_backends_to_preferences(approved_set, blocked_set)?;
 
         Ok(())
     }
@@ -3178,6 +3352,8 @@ impl TenexCore {
         })?;
 
         store.add_approved_backend(&pubkey);
+        drop(store_guard);
+        self.persist_current_trusted_backends()?;
         Ok(())
     }
 
@@ -3194,6 +3370,8 @@ impl TenexCore {
         })?;
 
         store.add_blocked_backend(&pubkey);
+        drop(store_guard);
+        self.persist_current_trusted_backends()?;
         Ok(())
     }
 
@@ -3243,8 +3421,50 @@ impl TenexCore {
             "[DEBUG] project_statuses HashMap now has {} entries",
             store.project_statuses.len()
         );
+        drop(store_guard);
+        self.persist_current_trusted_backends()?;
 
         Ok(count)
+    }
+
+    /// Get approved/blocked/pending backend trust state for settings UI.
+    pub fn get_backend_trust_snapshot(&self) -> Result<BackendTrustSnapshot, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let mut approved: Vec<String> = store.trust.approved_backends.iter().cloned().collect();
+        let mut blocked: Vec<String> = store.trust.blocked_backends.iter().cloned().collect();
+        approved.sort();
+        blocked.sort();
+
+        let mut pending: Vec<PendingBackendInfo> = store
+            .trust
+            .pending_backend_approvals
+            .iter()
+            .map(|p| PendingBackendInfo {
+                backend_pubkey: p.backend_pubkey.clone(),
+                project_a_tag: p.project_a_tag.clone(),
+                first_seen: p.first_seen,
+                status_created_at: p.status.created_at,
+            })
+            .collect();
+        pending.sort_by(|a, b| b.first_seen.cmp(&a.first_seen));
+
+        Ok(BackendTrustSnapshot {
+            approved,
+            blocked,
+            pending,
+        })
+    }
+
+    /// Return currently configured relay URLs (read-only in this phase).
+    pub fn get_configured_relays(&self) -> Vec<String> {
+        vec![crate::constants::RELAY_URL.to_string()]
     }
 
     /// Get diagnostics about backend approvals and project statuses.
@@ -4285,6 +4505,7 @@ pub fn fetch_elevenlabs_voices(api_key: String) -> Result<Vec<VoiceInfo>, TenexE
             name: v.name,
             category: v.category,
             description: v.description,
+            preview_url: v.preview_url,
         })
         .collect())
 }
@@ -4313,6 +4534,61 @@ pub fn fetch_openrouter_models(api_key: String) -> Result<Vec<ModelInfo>, TenexE
 
 // Private implementation methods for TenexCore (not exposed via UniFFI)
 impl TenexCore {
+    fn sync_trusted_backends_from_preferences(&self) -> Result<(), TenexError> {
+        let (approved, blocked) = {
+            let prefs_guard = self.preferences.read().map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
+            let prefs = prefs_guard.as_ref().ok_or(TenexError::CoreNotInitialized)?;
+            prefs.trusted_backends()
+        };
+
+        let mut store_guard = self.store.write().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_mut().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        store.trust.set_trusted_backends(approved, blocked);
+        Ok(())
+    }
+
+    fn persist_trusted_backends_to_preferences(
+        &self,
+        approved: std::collections::HashSet<String>,
+        blocked: std::collections::HashSet<String>,
+    ) -> Result<(), TenexError> {
+        let mut prefs_guard = self
+            .preferences
+            .write()
+            .map_err(|_| TenexError::LockError {
+                resource: "preferences".to_string(),
+            })?;
+        let prefs = prefs_guard.as_mut().ok_or(TenexError::CoreNotInitialized)?;
+        prefs
+            .set_trusted_backends(approved, blocked)
+            .map_err(|e| TenexError::Internal { message: e })?;
+        Ok(())
+    }
+
+    fn persist_current_trusted_backends(&self) -> Result<(), TenexError> {
+        let (approved, blocked) = {
+            let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire store lock: {}", e),
+            })?;
+            let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+                message: "Store not initialized - call init() first".to_string(),
+            })?;
+            (
+                store.trust.approved_backends.clone(),
+                store.trust.blocked_backends.clone(),
+            )
+        };
+
+        self.persist_trusted_backends_to_preferences(approved, blocked)
+    }
+
     /// Collect system diagnostics (version, status)
     fn collect_system_diagnostics(
         &self,
@@ -4853,5 +5129,42 @@ mod tests {
                 pubkey
             );
         }
+    }
+
+    #[test]
+    fn test_message_to_info_includes_a_tags() {
+        use crate::models::Message;
+        use crate::store::{AppDataStore, Database};
+        use tempfile::tempdir;
+
+        let dir = tempdir().expect("temp dir");
+        let db = Database::new(dir.path()).expect("database");
+        let store = AppDataStore::new(db.ndb.clone());
+
+        let message = Message {
+            id: "msg-1".to_string(),
+            content: "content".to_string(),
+            pubkey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
+            thread_id: "thread-1".to_string(),
+            created_at: 1_700_000_000,
+            reply_to: None,
+            is_reasoning: false,
+            ask_event: None,
+            q_tags: vec!["child-conv-id".to_string()],
+            a_tags: vec![
+                "30023:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb:weekly-report"
+                    .to_string(),
+            ],
+            p_tags: vec!["cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc".to_string()],
+            tool_name: Some("mcp__tenex__report_read".to_string()),
+            tool_args: Some("{\"slug\":\"weekly-report\"}".to_string()),
+            llm_metadata: vec![],
+            delegation_tag: None,
+            branch: None,
+        };
+
+        let info = message_to_info(&store, &message);
+        assert_eq!(info.a_tags, message.a_tags);
     }
 }

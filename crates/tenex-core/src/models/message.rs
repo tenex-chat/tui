@@ -154,7 +154,9 @@ impl Message {
                     // Extract event ID
                     let event_id = if let Some(s) = tag.get(1).and_then(|t| t.variant().str()) {
                         Some(s.to_string())
-                    } else { tag.get(1).and_then(|t| t.variant().id()).map(hex::encode) };
+                    } else {
+                        tag.get(1).and_then(|t| t.variant().id()).map(hex::encode)
+                    };
 
                     if let Some(eid) = event_id {
                         // Check marker for NIP-10 format: ["e", id, relay, marker]
@@ -364,43 +366,42 @@ impl Message {
         let mut chars = self.content.chars().peekable();
 
         while let Some(c) = chars.next() {
-            if c == '!'
-                && chars.peek() == Some(&'[') {
-                    chars.next();
+            if c == '!' && chars.peek() == Some(&'[') {
+                chars.next();
 
-                    // Skip alt text
-                    let mut depth = 1;
-                    for ch in chars.by_ref() {
-                        if ch == '[' {
-                            depth += 1;
-                        } else if ch == ']' {
-                            depth -= 1;
-                            if depth == 0 {
-                                break;
-                            }
-                        }
-                    }
-
-                    // Expect opening paren
-                    if chars.peek() == Some(&'(') {
-                        chars.next();
-
-                        // Extract URL
-                        let mut url = String::new();
-                        while let Some(ch) = chars.peek() {
-                            if *ch == ')' {
-                                chars.next();
-                                break;
-                            }
-                            url.push(*ch);
-                            chars.next();
-                        }
-
-                        if !url.is_empty() {
-                            urls.push(url.trim().to_string());
+                // Skip alt text
+                let mut depth = 1;
+                for ch in chars.by_ref() {
+                    if ch == '[' {
+                        depth += 1;
+                    } else if ch == ']' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
                         }
                     }
                 }
+
+                // Expect opening paren
+                if chars.peek() == Some(&'(') {
+                    chars.next();
+
+                    // Extract URL
+                    let mut url = String::new();
+                    while let Some(ch) = chars.peek() {
+                        if *ch == ')' {
+                            chars.next();
+                            break;
+                        }
+                        url.push(*ch);
+                        chars.next();
+                    }
+
+                    if !url.is_empty() {
+                        urls.push(url.trim().to_string());
+                    }
+                }
+            }
         }
 
         urls
