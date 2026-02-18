@@ -37,7 +37,6 @@ struct SearchView: View {
     @State private var isLoadingConversation = false
     @State private var loadingConversationId: String?  // Track which conversation we're loading for "latest wins"
     @State private var loadErrorMessage: String?  // Error feedback for failed loads
-    @State private var showGlobalFilterSheet = false
 
     init(
         layoutMode: SearchLayoutMode = .adaptive,
@@ -110,23 +109,6 @@ struct SearchView: View {
                 Text(message)
             }
         }
-        #if os(macOS)
-        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #else
-        .sheet(isPresented: $showGlobalFilterSheet) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #endif
     }
 
     // MARK: - Layouts
@@ -250,9 +232,7 @@ struct SearchView: View {
         #endif
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                AppGlobalFilterToolbarButton {
-                    showGlobalFilterSheet = true
-                }
+                AppGlobalFilterToolbarButton()
             }
         }
     }

@@ -236,7 +236,7 @@ struct ConversationWorkspaceView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                inspectorToggleToolbarButton
+                inspectorToggleButton
             }
         }
         .navigationDestination(item: $selectedDelegationConversation) { delegatedConversation in
@@ -301,7 +301,7 @@ struct ConversationWorkspaceView: View {
         #endif
     }
 
-    private var inspectorToggleToolbarButton: some View {
+    private var inspectorToggleButton: some View {
         Button {
             withAnimation(.easeInOut(duration: 0.2)) {
                 inspectorVisible.toggle()
