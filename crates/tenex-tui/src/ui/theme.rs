@@ -296,12 +296,16 @@ pub fn tab_unread() -> Style {
 
 pub fn tab_waiting_for_user() -> Style {
     // User is mentioned - red/orange (error color) with bold
-    Style::default().fg(ACCENT_ERROR).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(ACCENT_ERROR)
+        .add_modifier(Modifier::BOLD)
 }
 
 pub fn tab_agent_working() -> Style {
     // Agent is working - blue (primary accent) with bold
-    Style::default().fg(ACCENT_PRIMARY).add_modifier(Modifier::BOLD)
+    Style::default()
+        .fg(ACCENT_PRIMARY)
+        .add_modifier(Modifier::BOLD)
 }
 
 // -----------------------------------------------------------------------------
