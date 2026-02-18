@@ -2052,44 +2052,10 @@ impl NostrWorker {
         let coordinate = Coordinate::parse(&project_a_tag)
             .map_err(|e| anyhow::anyhow!("Invalid project coordinate: {}", e))?;
 
-        // Build kind:24020 agent config update event
-        let mut event = EventBuilder::new(Kind::Custom(24020), "")
-            .tag(Tag::coordinate(coordinate, None))
-            // NIP-89 client tag
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec!["tenex-tui".to_string()],
-            ));
-
-        // Add p-tag for the agent being configured
-        if let Ok(pk) = PublicKey::parse(&agent_pubkey) {
-            event = event.tag(Tag::public_key(pk));
-        }
-
-        // Add model tag if specified
-        if let Some(m) = model {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("model")),
-                vec![m],
-            ));
-        }
-
-        // Add tool tags (exhaustive list - empty means no tools)
-        for tool in &tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-                vec![tool.clone()],
-            ));
-        }
-
-        // Add marker tags (e.g. ["pm"])
-        for tag in &tags {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
-                Vec::<String>::new(),
-            ));
-        }
-
+        // Build kind:24020 agent config update event with project a-tag
+        let base = EventBuilder::new(Kind::Custom(24020), "")
+            .tag(Tag::coordinate(coordinate, None));
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -2129,42 +2095,8 @@ impl NostrWorker {
             .ok_or_else(|| anyhow::anyhow!("No keys"))?;
 
         // Build kind:24020 global agent config event (no a-tag)
-        let mut event = EventBuilder::new(Kind::Custom(24020), "")
-            // NIP-89 client tag
-            .tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("client")),
-                vec!["tenex-tui".to_string()],
-            ));
-
-        // Add p-tag for the agent being configured
-        if let Ok(pk) = PublicKey::parse(&agent_pubkey) {
-            event = event.tag(Tag::public_key(pk));
-        }
-
-        // Add model tag if specified
-        if let Some(m) = model {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("model")),
-                vec![m],
-            ));
-        }
-
-        // Add tool tags (exhaustive list - empty means no tools)
-        for tool in &tools {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
-                vec![tool.clone()],
-            ));
-        }
-
-        // Add marker tags (e.g. ["pm"])
-        for tag in &tags {
-            event = event.tag(Tag::custom(
-                TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
-                Vec::<String>::new(),
-            ));
-        }
-
+        let base = EventBuilder::new(Kind::Custom(24020), "");
+        let event = build_agent_config_event(base, &agent_pubkey, model, &tools, &tags);
         let signed_event = event.sign_with_keys(keys)?;
 
         // Send to relay with timeout
@@ -2555,6 +2487,59 @@ impl NostrWorker {
 
         Ok(())
     }
+}
+
+/// Attach the common tags to a kind:24020 agent config `EventBuilder`.
+///
+/// Adds (in order):
+/// - NIP-89 `client` tag
+/// - `p` tag for `agent_pubkey` (skipped if the pubkey cannot be parsed)
+/// - `model` tag when `model` is `Some`
+/// - one `tool` tag per entry in `tools`
+/// - one bare marker tag per entry in `tags` (e.g. `"pm"`)
+fn build_agent_config_event(
+    mut event: EventBuilder,
+    agent_pubkey: &str,
+    model: Option<String>,
+    tools: &[String],
+    tags: &[String],
+) -> EventBuilder {
+    // NIP-89 client tag
+    event = event.tag(Tag::custom(
+        TagKind::Custom(std::borrow::Cow::Borrowed("client")),
+        vec!["tenex-tui".to_string()],
+    ));
+
+    // p-tag for the agent being configured
+    if let Ok(pk) = PublicKey::parse(agent_pubkey) {
+        event = event.tag(Tag::public_key(pk));
+    }
+
+    // Model tag (optional)
+    if let Some(m) = model {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("model")),
+            vec![m],
+        ));
+    }
+
+    // Tool tags (exhaustive list — empty means no tools)
+    for tool in tools {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Borrowed("tool")),
+            vec![tool.clone()],
+        ));
+    }
+
+    // Marker tags (e.g. ["pm"])
+    for tag in tags {
+        event = event.tag(Tag::custom(
+            TagKind::Custom(std::borrow::Cow::Owned(tag.clone())),
+            Vec::<String>::new(),
+        ));
+    }
+
+    event
 }
 
 /// Run negentropy sync loop with adaptive timing

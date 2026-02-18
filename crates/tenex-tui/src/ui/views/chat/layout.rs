@@ -22,6 +22,14 @@ use std::rc::Rc;
 
 use super::{actions, input, messages};
 
+/// Extra lines added to `agent_projects.len()` when computing the project-list panel height:
+/// one for the "Projects with this agent:" header, one for bottom padding.
+const PROJECT_LIST_HEIGHT_OVERHEAD: u16 = 2;
+
+/// Maximum height (in terminal rows) of the project-list panel shown while Shift is held.
+/// Caps the visible list at this value regardless of how many projects the agent belongs to.
+const PROJECT_LIST_MAX_HEIGHT: u16 = 6;
+
 pub fn render_chat(f: &mut Frame, app: &mut App, area: Rect) {
     // Fill entire area with app background (pure black)
     let bg_block = Block::default().style(Style::default().bg(theme::BG_APP));
@@ -1051,11 +1059,12 @@ fn render_agent_config_modal(
 
     // When Shift is held, show a panel listing the projects that contain this agent.
     if state.shift_held && !state.agent_projects.is_empty() {
-        let project_list_height = (state.agent_projects.len() as u16 + 2).min(6);
+        let project_list_height = (state.agent_projects.len() as u16 + PROJECT_LIST_HEIGHT_OVERHEAD)
+            .min(PROJECT_LIST_MAX_HEIGHT);
         let panel_y = popup_area
             .y
             .saturating_add(popup_area.height)
-            .saturating_sub(project_list_height + 2);
+            .saturating_sub(project_list_height + PROJECT_LIST_HEIGHT_OVERHEAD);
         let panel_area = Rect::new(
             popup_area.x + 1,
             panel_y,
@@ -1069,9 +1078,9 @@ fn render_agent_config_modal(
                 Style::default().fg(theme::ACCENT_PRIMARY),
             )]);
         let project_lines: Vec<Line> = std::iter::once(header)
-            .chain(state.agent_projects.iter().map(|(name, _a_tag)| {
+            .chain(state.agent_projects.iter().map(|proj| {
                 Line::from(vec![Span::styled(
-                    format!("  · {}", name),
+                    format!("  · {}", proj.name),
                     Style::default().fg(theme::TEXT_MUTED),
                 )])
             }))
