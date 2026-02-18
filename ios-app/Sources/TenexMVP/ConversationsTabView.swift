@@ -174,7 +174,6 @@ struct ConversationsTabView: View {
     private let selectedConversationBindingOverride: Binding<ConversationFullInfo?>?
     private let newConversationProjectIdBindingOverride: Binding<String?>?
 
-    @State private var showGlobalFilterSheet = false
     @State private var showDiagnostics = false
     @State private var showAISettings = false
     @State private var showAudioQueue = false
@@ -339,23 +338,6 @@ struct ConversationsTabView: View {
             newConversationProjectIdBinding.wrappedValue = nil
             pendingCreatedConversationId = nil
         }
-        #if os(macOS)
-        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #else
-        .sheet(isPresented: $showGlobalFilterSheet) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #endif
         .sheet(isPresented: $showDiagnostics) {
             NavigationStack {
                 DiagnosticsView(coreManager: coreManager)
@@ -424,24 +406,20 @@ struct ConversationsTabView: View {
     }
 
     private var splitSidebarContent: some View {
-        VStack(spacing: 0) {
-            List(selection: selectedConversationBinding) {
-                conversationRows(isSplitInteraction: true)
+        List(selection: selectedConversationBinding) {
+            conversationRows(isSplitInteraction: true)
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                AppGlobalFilterToolbarButton()
             }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    AppGlobalFilterToolbarButton {
-                        showGlobalFilterSheet = true
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    newConversationMenuButton
-                }
+            ToolbarItem(placement: .topBarTrailing) {
+                newConversationMenuButton
             }
-            .modifier(ShellConversationListStyle(isShellColumn: layoutMode == .shellList))
-            .refreshable {
-                await coreManager.manualRefresh()
-            }
+        }
+        .modifier(ShellConversationListStyle(isShellColumn: layoutMode == .shellList))
+        .refreshable {
+            await coreManager.manualRefresh()
         }
     }
 
@@ -470,19 +448,15 @@ struct ConversationsTabView: View {
     }
 
     private var shellListLayout: some View {
-        NavigationStack {
-            splitSidebarContent
-                .navigationTitle("Chats")
-        }
-        .accessibilityIdentifier("section_list_column")
+        splitSidebarContent
+            .navigationTitle("Chats")
+            .accessibilityIdentifier("section_list_column")
     }
 
     private var shellDetailLayout: some View {
-        NavigationStack {
-            conversationDetailContent
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .accessibilityIdentifier("detail_column")
+        conversationDetailContent
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .accessibilityIdentifier("detail_column")
     }
 
     // MARK: - Stack Layout (iPhone)
@@ -495,9 +469,7 @@ struct ConversationsTabView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         ControlGroup {
-                            AppGlobalFilterToolbarButton {
-                                showGlobalFilterSheet = true
-                            }
+                            AppGlobalFilterToolbarButton()
                             settingsMenu(compact: true)
                             runtimeButton
                         }

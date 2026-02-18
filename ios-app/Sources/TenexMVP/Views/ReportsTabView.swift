@@ -17,7 +17,6 @@ struct ReportsTabView: View {
     private let selectedReportBindingOverride: Binding<ReportInfo?>?
     @StateObject private var viewModel = ReportsViewModel()
     @State private var selectedReportState: ReportInfo?
-    @State private var showGlobalFilterSheet = false
     @State private var hasConfiguredViewModel = false
 
     #if os(iOS)
@@ -182,9 +181,7 @@ struct ReportsTabView: View {
         .searchable(text: $viewModel.searchText, prompt: "Search reports...")
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                AppGlobalFilterToolbarButton {
-                    showGlobalFilterSheet = true
-                }
+                AppGlobalFilterToolbarButton()
             }
             ToolbarItem(placement: .topBarTrailing) {
                 if viewModel.isLoading {
@@ -193,23 +190,6 @@ struct ReportsTabView: View {
                 }
             }
         }
-        #if os(macOS)
-        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #else
-        .sheet(isPresented: $showGlobalFilterSheet) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #endif
     }
 
     private func projectFor(report: ReportInfo) -> ProjectInfo? {

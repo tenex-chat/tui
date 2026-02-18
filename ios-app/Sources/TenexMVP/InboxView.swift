@@ -139,7 +139,6 @@ struct InboxView: View {
     @State private var pendingNavigation: ConversationNavigationData?
     @State private var navigateToConversation: ConversationNavigationData?
     @State private var activeConversationIdState: String?
-    @State private var showGlobalFilterSheet = false
 
     init(
         layoutMode: InboxLayoutMode = .adaptive,
@@ -240,23 +239,6 @@ struct InboxView: View {
                 }
             }
         }
-        #if os(macOS)
-        .popover(isPresented: $showGlobalFilterSheet, arrowEdge: .top) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #else
-        .sheet(isPresented: $showGlobalFilterSheet) {
-            AppGlobalFilterSheet(
-                selectedProjectIds: coreManager.appFilterProjectIds,
-                selectedTimeWindow: coreManager.appFilterTimeWindow
-            )
-            .environmentObject(coreManager)
-        }
-        #endif
     }
 
     // MARK: - Split Layout (macOS / iPad)
@@ -311,9 +293,7 @@ struct InboxView: View {
         }
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
-                AppGlobalFilterToolbarButton {
-                    showGlobalFilterSheet = true
-                }
+                AppGlobalFilterToolbarButton()
             }
         }
     }
@@ -380,9 +360,7 @@ struct InboxView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    AppGlobalFilterToolbarButton {
-                        showGlobalFilterSheet = true
-                    }
+                    AppGlobalFilterToolbarButton()
                 }
             }
             .sheet(item: $presentedItem, onDismiss: {

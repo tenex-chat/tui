@@ -2,16 +2,35 @@ import SwiftUI
 
 struct AppGlobalFilterToolbarButton: View {
     @EnvironmentObject private var coreManager: TenexCoreManager
-    let action: () -> Void
+    @State private var isPresented = false
 
     var body: some View {
-        Button(action: action) {
+        Button {
+            isPresented = true
+        } label: {
             Label(coreManager.appFilterSummaryLabel, systemImage: filterIcon)
                 .lineLimit(1)
         }
         .accessibilityIdentifier("global_filter_button")
         .accessibilityValue(coreManager.appFilterSummaryLabel)
         .help("Filter by time and project")
+        #if os(macOS)
+        .popover(isPresented: $isPresented, arrowEdge: .top) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
+        }
+        #else
+        .sheet(isPresented: $isPresented) {
+            AppGlobalFilterSheet(
+                selectedProjectIds: coreManager.appFilterProjectIds,
+                selectedTimeWindow: coreManager.appFilterTimeWindow
+            )
+            .environmentObject(coreManager)
+        }
+        #endif
     }
 
     private var filterIcon: String {
@@ -144,7 +163,7 @@ struct AppGlobalFilterSheet: View {
         #if os(iOS)
         .tenexModalPresentation(detents: [.medium, .large])
         #else
-        .frame(minWidth: 560, idealWidth: 640, minHeight: 560, idealHeight: 720)
+        .frame(minWidth: 360, idealWidth: 420, maxWidth: 480, minHeight: 500, idealHeight: 620)
         #endif
     }
 
