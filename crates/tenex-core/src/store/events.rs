@@ -9,6 +9,11 @@ pub fn ingest_events(ndb: &Ndb, events: &[Event], relay_url: Option<&str>) -> Re
     let mut ingested = 0;
 
     for event in events {
+        // Ephemeral events (kinds 20000-29999) must not be persisted.
+        if event.kind.is_ephemeral() {
+            continue;
+        }
+
         let json = event.as_json();
         // nostrdb expects relay format: ["EVENT", "subid", {...}]
         let relay_json = format!(r#"["EVENT","tenex",{}]"#, json);
@@ -200,5 +205,28 @@ mod tests {
         let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
         let results = db.ndb.query(&txn, &[filter], 10).unwrap();
         assert_eq!(results.len(), 1);
+    }
+
+    #[test]
+    fn test_ingest_events_skips_ephemeral_kinds() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+
+        let keys = Keys::generate();
+        let ephemeral_event = EventBuilder::new(Kind::Custom(24010), "status")
+            .sign_with_keys(&keys)
+            .unwrap();
+
+        let ingested =
+            ingest_events(&db.ndb, std::slice::from_ref(&ephemeral_event), None).unwrap();
+        assert_eq!(ingested, 0, "ephemeral events should be skipped");
+
+        let filter = nostrdb::Filter::new().kinds([24010]).build();
+        let txn = nostrdb::Transaction::new(&db.ndb).unwrap();
+        let results = db.ndb.query(&txn, &[filter], 10).unwrap();
+        assert!(
+            results.is_empty(),
+            "ephemeral events must not be present in nostrdb"
+        );
     }
 }

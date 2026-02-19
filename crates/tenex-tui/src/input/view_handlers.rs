@@ -1572,7 +1572,7 @@ pub(super) fn handle_editing_mode(
                                 app.keys = Some(keys.clone());
                                 app.data_store
                                     .borrow_mut()
-                                    .set_user_pubkey(user_pubkey.clone());
+                                    .apply_authenticated_user(user_pubkey.clone());
 
                                 if let Some(ref core_handle) = app.core_handle {
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {
@@ -1610,7 +1610,7 @@ pub(super) fn handle_editing_mode(
                                 app.keys = Some(keys.clone());
                                 app.data_store
                                     .borrow_mut()
-                                    .set_user_pubkey(user_pubkey.clone());
+                                    .apply_authenticated_user(user_pubkey.clone());
 
                                 if let Some(ref core_handle) = app.core_handle {
                                     if let Err(e) = core_handle.send(NostrCommand::Connect {

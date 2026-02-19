@@ -136,6 +136,14 @@ pub async fn run_daemon(
         eprintln!("No stored credentials or password required - daemon running without login");
     }
 
+    if let Some(ref keys) = keys {
+        let user_pubkey = nostr::get_current_pubkey(keys);
+        shared_data_store
+            .lock()
+            .unwrap()
+            .apply_authenticated_user(user_pubkey);
+    }
+
     // Track state
     let start_time = Instant::now();
     let ndb = core_runtime.ndb();
