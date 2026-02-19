@@ -15,6 +15,7 @@ use crate::store::{RuntimeHierarchy, RUNTIME_CUTOFF_TIMESTAMP};
 use nostrdb::{Ndb, Note, Transaction};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Instant;
 use tracing::{trace, warn};
 
 /// Reactive data store - single source of truth for app-level concepts.
@@ -53,6 +54,9 @@ pub struct AppDataStore {
 
     // Runtime hierarchy - tracks individual conversation runtimes and parent-child relationships
     pub runtime_hierarchy: RuntimeHierarchy,
+
+    // Set on logout clear(); consumed by login() to avoid duplicate rebuild work.
+    needs_rebuild: bool,
 }
 
 impl AppDataStore {
@@ -75,12 +79,37 @@ impl AppDataStore {
             pending_project_subscriptions: Vec::new(),
             thread_root_index: HashMap::new(),
             runtime_hierarchy: RuntimeHierarchy::new(),
+            needs_rebuild: false,
         };
         store.rebuild_from_ndb();
         store
     }
 
+    pub fn needs_rebuild_for_login(&self) -> bool {
+        self.needs_rebuild
+    }
+
+    /// Apply authenticated user context during login.
+    ///
+    /// If the store was cleared during logout, this performs a full rebuild before
+    /// attaching user-specific state (inbox + user statistics).
+    pub fn apply_authenticated_user(&mut self, pubkey: String) {
+        let started_at = Instant::now();
+        let did_rebuild = self.needs_rebuild;
+        if self.needs_rebuild {
+            self.rebuild_from_ndb();
+        }
+        self.set_user_pubkey(pubkey);
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::apply_authenticated_user rebuild={} elapsedMs={}",
+            did_rebuild,
+            started_at.elapsed().as_millis()
+        );
+    }
+
     pub fn set_user_pubkey(&mut self, pubkey: String) {
+        let started_at = Instant::now();
         let pubkey_changed = self.user_pubkey.as_ref() != Some(&pubkey);
         self.user_pubkey = Some(pubkey.clone());
         // Populate inbox from existing messages
@@ -100,6 +129,13 @@ impl AppDataStore {
         // Rebuild runtime-by-day aggregates (always, not user-dependent)
         self.statistics
             .rebuild_runtime_by_day_counts(&self.messages_by_thread);
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::set_user_pubkey pubkeyChanged={} inboxItems={} elapsedMs={}",
+            pubkey_changed,
+            self.inbox.get_items().len(),
+            started_at.elapsed().as_millis()
+        );
     }
 
     /// Clear all in-memory data (used on logout to prevent stale data leaks).
@@ -123,13 +159,13 @@ impl AppDataStore {
         self.pending_project_subscriptions.clear();
         self.thread_root_index.clear();
         self.runtime_hierarchy = RuntimeHierarchy::new();
+        self.needs_rebuild = true;
     }
 
     /// Scan existing messages and populate inbox with those that p-tag the user
     fn populate_inbox_from_existing(&mut self, user_pubkey: &str) {
-        let Ok(txn) = Transaction::new(&self.ndb) else {
-            return;
-        };
+        let started_at = Instant::now();
+        let txn = Transaction::new(&self.ndb).ok();
 
         // First, build a set of ask event IDs that the user has already replied to
         // by checking e-tags on user's messages (not just reply_to field, but all e-tags)
@@ -138,31 +174,49 @@ impl AppDataStore {
         for messages in self.messages_by_thread.values() {
             for message in messages {
                 if message.pubkey == user_pubkey {
-                    // Query nostrdb to get the full note and extract all e-tags
-                    let note_id_bytes = match hex::decode(&message.id) {
-                        Ok(bytes) if bytes.len() == 32 => bytes,
-                        _ => continue,
-                    };
-                    let note_id: [u8; 32] = match note_id_bytes.try_into() {
-                        Ok(arr) => arr,
-                        Err(_) => continue,
-                    };
-                    if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
-                        // Extract all e-tag IDs (includes replies with or without reply markers)
-                        let reply_to_ids = Self::extract_e_tag_ids(&note);
-                        for reply_to_id in reply_to_ids {
-                            answered_ask_ids.insert(reply_to_id);
+                    // Fast path: direct parent reply is already parsed on Message.
+                    if let Some(reply_to_id) = &message.reply_to {
+                        answered_ask_ids.insert(reply_to_id.clone());
+                        continue;
+                    }
+
+                    // Fallback for legacy/non-marked replies: inspect all e-tags from note.
+                    // This preserves previous behavior without requiring note fetches for
+                    // every candidate inbox message.
+                    if let Some(txn) = txn.as_ref() {
+                        let note_id_bytes = match hex::decode(&message.id) {
+                            Ok(bytes) if bytes.len() == 32 => bytes,
+                            _ => continue,
+                        };
+                        let note_id: [u8; 32] = match note_id_bytes.try_into() {
+                            Ok(arr) => arr,
+                            Err(_) => continue,
+                        };
+                        if let Ok(note) = self.ndb.get_note_by_id(txn, &note_id) {
+                            let reply_to_ids = Self::extract_e_tag_ids(&note);
+                            for reply_to_id in reply_to_ids {
+                                answered_ask_ids.insert(reply_to_id);
+                            }
                         }
                     }
                 }
             }
         }
 
-        // Collect all messages that need checking
-        let mut inbox_candidates: Vec<(String, Message)> = Vec::new();
+        // Build thread->project lookup once to avoid repeated linear scans.
+        let mut thread_to_project: HashMap<String, String> = HashMap::new();
+        for (project_a_tag, threads) in &self.threads_by_project {
+            for thread in threads {
+                thread_to_project.insert(thread.id.clone(), project_a_tag.clone());
+            }
+        }
 
+        // Collect all messages that need checking.
+        let mut inbox_candidates: Vec<InboxItem> = Vec::new();
+        let mut messages_scanned = 0usize;
         for (thread_id, messages) in &self.messages_by_thread {
             for message in messages {
+                messages_scanned += 1;
                 // Skip our own messages
                 if message.pubkey == user_pubkey {
                     continue;
@@ -171,68 +225,73 @@ impl AppDataStore {
                 if self.inbox.is_read(&message.id) {
                     continue;
                 }
-                inbox_candidates.push((thread_id.clone(), message.clone()));
+
+                // Fast path: p-tags are already parsed and normalized in Message.
+                if !message.p_tags.iter().any(|p| p == user_pubkey) {
+                    continue;
+                }
+
+                // Ask events are parsed from message tags when available.
+                let is_ask = message.ask_event.is_some();
+
+                // Skip ask events that user has already answered
+                if is_ask && answered_ask_ids.contains(&message.id) {
+                    continue;
+                }
+
+                let event_type = if is_ask {
+                    InboxEventType::Ask
+                } else {
+                    InboxEventType::Mention
+                };
+
+                let project_a_tag = thread_to_project
+                    .get(thread_id)
+                    .cloned()
+                    .unwrap_or_default();
+
+                inbox_candidates.push(InboxItem {
+                    id: message.id.clone(),
+                    event_type,
+                    title: message.content.chars().take(50).collect(),
+                    content: message.content.clone(),
+                    project_a_tag,
+                    author_pubkey: message.pubkey.clone(),
+                    created_at: message.created_at,
+                    is_read: false,
+                    thread_id: Some(thread_id.clone()),
+                    ask_event: message.ask_event.clone(),
+                });
             }
         }
 
-        // Check each message for p-tags (inbox)
-        for (thread_id, message) in inbox_candidates {
-            // Query nostrdb for the note to check its tags
-            let note_id_bytes = match hex::decode(&message.id) {
-                Ok(bytes) if bytes.len() == 32 => bytes,
-                _ => continue,
-            };
-
-            let note_id: [u8; 32] = match note_id_bytes.try_into() {
-                Ok(arr) => arr,
-                Err(_) => continue,
-            };
-
-            if let Ok(note) = self.ndb.get_note_by_id(&txn, &note_id) {
-                if self.note_ptags_user(&note, user_pubkey) {
-                    let is_ask = self.note_is_ask_event(&note);
-
-                    // Skip ask events that user has already answered
-                    if is_ask && answered_ask_ids.contains(&message.id) {
-                        continue;
-                    }
-
-                    let event_type = if is_ask {
-                        InboxEventType::Ask
-                    } else {
-                        InboxEventType::Mention
-                    };
-
-                    let project_a_tag = Self::extract_project_a_tag(&note)
-                        .or_else(|| self.find_project_for_thread(&thread_id))
-                        .unwrap_or_default();
-
-                    let inbox_item = InboxItem {
-                        id: message.id.clone(),
-                        event_type,
-                        title: message.content.chars().take(50).collect(),
-                        content: message.content.clone(),
-                        project_a_tag,
-                        author_pubkey: message.pubkey.clone(),
-                        created_at: message.created_at,
-                        is_read: false,
-                        thread_id: Some(thread_id.clone()),
-                        ask_event: message.ask_event.clone(),
-                    };
-                    self.inbox.push_raw(inbox_item);
-                }
+        for candidate in inbox_candidates {
+            if !self.inbox.contains(&candidate.id) {
+                self.inbox.push_raw(candidate);
             }
         }
 
         // Sort inbox by created_at descending (most recent first)
         self.inbox.sort();
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::populate_inbox_from_existing scannedMessages={} inboxSize={} elapsedMs={}",
+            messages_scanned,
+            self.inbox.get_items().len(),
+            started_at.elapsed().as_millis()
+        );
     }
 
     /// Rebuild all data from nostrdb (called on startup)
     pub fn rebuild_from_ndb(&mut self) {
+        let rebuild_started_at = Instant::now();
+        crate::tlog!("PERF", "AppDataStore::rebuild_from_ndb start");
+        let load_projects_started_at = Instant::now();
         if let Ok(projects) = crate::store::get_projects(&self.ndb) {
             self.projects = projects;
         }
+        let load_projects_elapsed_ms = load_projects_started_at.elapsed().as_millis();
+        let project_count = self.projects.len();
 
         // NOTE: Project statuses are loaded in set_trusted_backends() after login
         // This ensures trust validation is applied
@@ -241,27 +300,37 @@ impl AppDataStore {
 
         // Step 1: Build thread root index for all projects
         // This scans kind:1 events once and identifies thread roots (no e-tags)
+        let build_thread_index_started_at = Instant::now();
         if let Ok(index) = crate::store::build_thread_root_index(&self.ndb, &a_tags) {
             self.thread_root_index = index;
         }
+        let build_thread_index_elapsed_ms = build_thread_index_started_at.elapsed().as_millis();
 
         // Step 2: Load full thread data using the index (query by known IDs)
+        let load_threads_started_at = Instant::now();
+        let mut loaded_thread_count = 0usize;
         for a_tag in &a_tags {
             if let Some(root_ids) = self.thread_root_index.get(a_tag) {
                 if let Ok(threads) = crate::store::get_threads_by_ids(&self.ndb, root_ids) {
+                    loaded_thread_count += threads.len();
                     self.threads_by_project.insert(a_tag.clone(), threads);
                 }
             }
         }
+        let load_threads_elapsed_ms = load_threads_started_at.elapsed().as_millis();
 
         // Pre-load messages for all threads
+        let load_messages_started_at = Instant::now();
+        let mut loaded_message_count = 0usize;
         for threads in self.threads_by_project.values() {
             for thread in threads {
                 if let Ok(messages) = crate::store::get_messages_for_thread(&self.ndb, &thread.id) {
+                    loaded_message_count += messages.len();
                     self.messages_by_thread.insert(thread.id.clone(), messages);
                 }
             }
         }
+        let load_messages_elapsed_ms = load_messages_started_at.elapsed().as_millis();
 
         // Update thread last_activity based on most recent message
         // (effective_last_activity will be updated after metadata is applied and hierarchy is built)
@@ -280,6 +349,7 @@ impl AppDataStore {
         }
 
         // Rebuild pre-aggregated statistics
+        let rebuild_stats_started_at = Instant::now();
         let project_a_tags_for_stats: Vec<String> =
             self.projects.iter().map(|p| p.a_tag()).collect();
         self.statistics.rebuild_messages_by_day_counts(
@@ -291,32 +361,60 @@ impl AppDataStore {
             .rebuild_llm_activity_by_hour(&self.messages_by_thread);
         self.statistics
             .rebuild_runtime_by_day_counts(&self.messages_by_thread);
+        let rebuild_stats_elapsed_ms = rebuild_stats_started_at.elapsed().as_millis();
 
         // Apply metadata (kind:513) to threads - may further update last_activity
+        let apply_metadata_started_at = Instant::now();
         self.apply_existing_metadata();
+        let apply_metadata_elapsed_ms = apply_metadata_started_at.elapsed().as_millis();
 
         // Build runtime hierarchy from loaded data
         // This sets up parent-child relationships and calculates effective_last_activity
+        let rebuild_hierarchy_started_at = Instant::now();
         self.rebuild_runtime_hierarchy();
+        let rebuild_hierarchy_elapsed_ms = rebuild_hierarchy_started_at.elapsed().as_millis();
 
         // Final sort by effective_last_activity after hierarchy is fully built
         for threads in self.threads_by_project.values_mut() {
             threads.sort_by(|a, b| b.effective_last_activity.cmp(&a.effective_last_activity));
         }
 
-        // Load content definitions (kind:4199, 4200, 4201, 4202)
+        // Load content definitions (kind:34199, 4199, 4200, 4201, 4202)
+        let load_content_started_at = Instant::now();
+        self.content.load_team_packs(&self.ndb);
         self.content.load_agent_definitions(&self.ndb);
         self.content.load_mcp_tools(&self.ndb);
         self.content.load_nudges(&self.ndb);
         self.content.load_skills(&self.ndb);
+        let load_content_elapsed_ms = load_content_started_at.elapsed().as_millis();
 
         // NOTE: Ephemeral events (kind:24010, 24133) are intentionally NOT loaded from nostrdb.
         // They are only received via live subscriptions and stored in memory.
         // Operations status (kind:24133) will be populated when events arrive.
 
         // Load reports (kind:30023)
+        let load_reports_started_at = Instant::now();
         let project_a_tags: Vec<String> = self.projects.iter().map(|p| p.a_tag()).collect();
         self.reports.load_reports(&self.ndb, &project_a_tags);
+        let load_reports_elapsed_ms = load_reports_started_at.elapsed().as_millis();
+        self.needs_rebuild = false;
+        crate::tlog!(
+            "PERF",
+            "AppDataStore::rebuild_from_ndb complete projects={} threads={} messages={} loadProjectsMs={} buildIndexMs={} loadThreadsMs={} loadMessagesMs={} statsMs={} metadataMs={} hierarchyMs={} contentMs={} reportsMs={} totalMs={}",
+            project_count,
+            loaded_thread_count,
+            loaded_message_count,
+            load_projects_elapsed_ms,
+            build_thread_index_elapsed_ms,
+            load_threads_elapsed_ms,
+            load_messages_elapsed_ms,
+            rebuild_stats_elapsed_ms,
+            apply_metadata_elapsed_ms,
+            rebuild_hierarchy_elapsed_ms,
+            load_content_elapsed_ms,
+            load_reports_elapsed_ms,
+            rebuild_started_at.elapsed().as_millis()
+        );
     }
 
     // NOTE: load_operations_status() was removed because ephemeral events (kind:24133)
@@ -798,6 +896,10 @@ impl AppDataStore {
             }
             4199 => {
                 self.content.handle_agent_definition_event(note);
+                None
+            }
+            34199 => {
+                self.content.handle_team_pack_event(note);
                 None
             }
             4200 => {
@@ -1470,13 +1572,31 @@ impl AppDataStore {
             return name.clone();
         }
 
+        let lookup_started_at = Instant::now();
         let fallback = format!("{}...", &pubkey[..8.min(pubkey.len())]);
         let name = crate::store::get_profile_name(&self.ndb, pubkey);
 
         if name == fallback {
             if let Some(slug) = self.get_agent_slug_from_status(pubkey) {
+                crate::tlog!(
+                    "PERF",
+                    "AppDataStore::get_profile_name cacheMiss pubkey={} source=agentStatus elapsedMs={}",
+                    &pubkey[..12.min(pubkey.len())],
+                    lookup_started_at.elapsed().as_millis()
+                );
                 return slug;
             }
+        }
+
+        let elapsed_ms = lookup_started_at.elapsed().as_millis();
+        if elapsed_ms >= 2 {
+            crate::tlog!(
+                "PERF",
+                "AppDataStore::get_profile_name cacheMiss pubkey={} fallback={} elapsedMs={}",
+                &pubkey[..12.min(pubkey.len())],
+                name == fallback,
+                elapsed_ms
+            );
         }
 
         name
@@ -1783,7 +1903,7 @@ impl AppDataStore {
 
     // ===== Operations Status Methods (kind:24133) =====
 
-    pub fn get_statusbar_runtime_ms(&mut self) -> (u64, bool, usize) {
+    pub fn get_statusbar_runtime_ms(&self) -> (u64, bool, usize) {
         let today_runtime_ms = self.statistics.get_today_unique_runtime();
         let unconfirmed_runtime_ms = self.operations.unconfirmed_runtime_secs() * 1000;
         let cumulative_runtime_ms = today_runtime_ms.saturating_add(unconfirmed_runtime_ms);
@@ -5544,6 +5664,78 @@ mod tests {
         assert!(store.reports.get_reports().is_empty());
         assert!(store.trust.approved_backends.is_empty());
         assert!(store.user_pubkey.is_none());
+    }
+
+    #[test]
+    fn test_login_rebuild_flag_transitions_after_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        assert!(!store.needs_rebuild_for_login());
+
+        store.clear();
+        assert!(store.needs_rebuild_for_login());
+
+        store.rebuild_from_ndb();
+        assert!(!store.needs_rebuild_for_login());
+    }
+
+    #[test]
+    fn test_apply_authenticated_user_rebuilds_after_clear() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store.clear();
+        assert!(store.needs_rebuild_for_login());
+
+        store.apply_authenticated_user("user1".to_string());
+
+        assert_eq!(store.user_pubkey.as_deref(), Some("user1"));
+        assert!(!store.needs_rebuild_for_login());
+    }
+
+    #[test]
+    fn test_set_user_pubkey_skips_answered_ask_without_ndb_candidate_fetches() {
+        let dir = tempdir().unwrap();
+        let db = Database::new(dir.path()).unwrap();
+        let mut store = AppDataStore::new(db.ndb.clone());
+
+        store
+            .threads_by_project
+            .entry("proj1".to_string())
+            .or_default()
+            .push(make_test_thread("t1", "agent1", 102));
+
+        let mut ask = make_test_message("ask1", "agent1", "t1", "Need input", 100);
+        ask.p_tags = vec!["user1".to_string()];
+        ask.ask_event = Some(AskEvent {
+            title: Some("Question".to_string()),
+            context: "Need input".to_string(),
+            questions: vec![crate::models::AskQuestion::SingleSelect {
+                title: "q1".to_string(),
+                question: "What now?".to_string(),
+                suggestions: vec!["A".to_string()],
+            }],
+        });
+
+        let mut reply = make_test_message("reply1", "user1", "t1", "Answer", 101);
+        reply.reply_to = Some("ask1".to_string());
+
+        let mut mention = make_test_message("mention1", "agent2", "t1", "FYI", 102);
+        mention.p_tags = vec!["user1".to_string()];
+
+        store
+            .messages_by_thread
+            .insert("t1".to_string(), vec![ask, reply, mention]);
+
+        store.set_user_pubkey("user1".to_string());
+
+        let inbox = store.inbox.get_items();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].id, "mention1");
+        assert_eq!(inbox[0].event_type, InboxEventType::Mention);
     }
 
     #[test]
