@@ -188,6 +188,14 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         }
     }
 
+    /// Resolve ask-event details for an event ID (used by q-tag inline rendering).
+    /// Note: Internal `try!` in FFI - can crash on error.
+    func getAskEventById(eventId: String) -> AskEventLookupInfo? {
+        profiler.measureFFI("getAskEventById") {
+            core.getAskEventById(eventId: eventId)
+        }
+    }
+
     /// Send a message to an existing conversation.
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult {
         try profiler.measureFFI("sendMessage") {
@@ -417,6 +425,74 @@ actor SafeTenexCore: SafeTenexCoreProtocol {
         try profiler.measureFFI("deleteProject") {
             do {
                 try core.deleteProject(projectId: projectId)
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    // MARK: - Teams
+
+    /// Get all teams (kind:34199) with social counters.
+    func getAllTeams() throws -> [TeamInfo] {
+        try profiler.measureFFI("getAllTeams") {
+            do {
+                return try core.getAllTeams()
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Get comments for one team (kind:1111) with two-level threading metadata.
+    func getTeamComments(teamCoordinate: String, teamEventId: String) throws -> [TeamCommentInfo] {
+        try profiler.measureFFI("getTeamComments") {
+            do {
+                return try core.getTeamComments(
+                    teamCoordinate: teamCoordinate,
+                    teamEventId: teamEventId
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Toggle a like/unlike reaction (kind:7) for a team.
+    func reactToTeam(teamCoordinate: String, teamEventId: String, teamPubkey: String, isLike: Bool) throws -> String {
+        try profiler.measureFFI("reactToTeam") {
+            do {
+                return try core.reactToTeam(
+                    teamCoordinate: teamCoordinate,
+                    teamEventId: teamEventId,
+                    teamPubkey: teamPubkey,
+                    isLike: isLike
+                )
+            } catch let error as TenexError {
+                throw CoreError.tenex(error)
+            }
+        }
+    }
+
+    /// Post a comment/reply (kind:1111) to a team thread.
+    func postTeamComment(
+        teamCoordinate: String,
+        teamEventId: String,
+        teamPubkey: String,
+        content: String,
+        parentCommentId: String?,
+        parentCommentPubkey: String?
+    ) throws -> String {
+        try profiler.measureFFI("postTeamComment") {
+            do {
+                return try core.postTeamComment(
+                    teamCoordinate: teamCoordinate,
+                    teamEventId: teamEventId,
+                    teamPubkey: teamPubkey,
+                    content: content,
+                    parentCommentId: parentCommentId,
+                    parentCommentPubkey: parentCommentPubkey
+                )
             } catch let error as TenexError {
                 throw CoreError.tenex(error)
             }
