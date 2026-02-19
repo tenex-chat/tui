@@ -45,6 +45,8 @@ pub const CHART_WINDOW_DAYS: usize = 14;
 pub mod kinds {
     /// Text note (thread or message)
     pub const TEXT_NOTE: u16 = 1;
+    /// Reaction (NIP-25)
+    pub const REACTION: u16 = 7;
     /// Metadata (profiles)
     pub const METADATA: u16 = 0;
     /// Conversation metadata (title, summary, status)
@@ -57,6 +59,8 @@ pub mod kinds {
     pub const NUDGE: u16 = 4201;
     /// Skill (agent skill instruction set)
     pub const SKILL: u16 = 4202;
+    /// Comment (NIP-22)
+    pub const COMMENT: u16 = 1111;
     /// Boot request
     pub const BOOT_REQUEST: u16 = 24000;
     /// Project status
@@ -71,6 +75,8 @@ pub mod kinds {
     pub const REPORT: u16 = 30023;
     /// Project definition (NIP-33 replaceable)
     pub const PROJECT: u16 = 31933;
+    /// Team pack definition (NIP-33 replaceable)
+    pub const TEAM_PACK: u16 = 34199;
     /// Blossom upload authorization
     pub const BLOSSOM_AUTH: u16 = 24242;
 }

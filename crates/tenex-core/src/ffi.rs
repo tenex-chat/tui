@@ -51,7 +51,8 @@ use nostrdb::{FilterBuilder, Ndb, Note, NoteKey, SubscriptionStream, Transaction
 
 use crate::models::agent_definition::AgentDefinition;
 use crate::models::{
-    ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, Thread,
+    ConversationMetadata, Message, OperationsStatus, Project, ProjectStatus, Report, TeamPack,
+    Thread,
 };
 use crate::nostr::{set_log_path, DataChange, NostrCommand, NostrWorker};
 use crate::runtime::CoreHandle;
@@ -59,6 +60,7 @@ use crate::stats::{
     query_ndb_stats, SharedEventStats, SharedNegentropySyncStats, SharedSubscriptionStats,
 };
 use crate::store::AppDataStore;
+use std::collections::HashMap;
 
 /// Shared Tokio runtime for async operations in FFI
 /// Using OnceLock ensures thread-safe lazy initialization
@@ -466,6 +468,87 @@ fn extract_e_tag_ids(note: &Note) -> Vec<String> {
     ids
 }
 
+fn tag_value_to_string(tag: &nostrdb::Tag, index: u16) -> Option<String> {
+    tag.get(index).map(|t| match t.variant() {
+        nostrdb::NdbStrVariant::Str(s) => s.to_string(),
+        nostrdb::NdbStrVariant::Id(bytes) => hex::encode(bytes),
+    })
+}
+
+fn note_matches_team_context(note: &Note, team_coordinate: &str, team_event_id: &str) -> bool {
+    for tag in note.tags() {
+        if tag.count() < 2 {
+            continue;
+        }
+
+        let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) else {
+            continue;
+        };
+
+        match tag_name {
+            "a" | "A" => {
+                if let Some(value) = tag.get(1).and_then(|t| t.variant().str()) {
+                    if value == team_coordinate {
+                        return true;
+                    }
+                }
+            }
+            "e" | "E" => {
+                if let Some(value) = tag_value_to_string(&tag, 1) {
+                    if value == team_event_id {
+                        return true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+fn parse_parent_comment_id(note: &Note, team_event_id: &str) -> Option<String> {
+    let mut fallback: Option<String> = None;
+
+    for tag in note.tags() {
+        if tag.count() < 2 {
+            continue;
+        }
+
+        let Some(tag_name) = tag.get(0).and_then(|t| t.variant().str()) else {
+            continue;
+        };
+
+        if tag_name != "e" && tag_name != "E" {
+            continue;
+        }
+
+        let Some(event_id) = tag_value_to_string(&tag, 1) else {
+            continue;
+        };
+
+        if event_id == team_event_id {
+            continue;
+        }
+
+        // NIP-22/NIP-10 marker: ["e", <id>, <relay>, "reply"]
+        let marker = tag.get(3).and_then(|t| t.variant().str());
+        if marker == Some("reply") {
+            return Some(event_id);
+        }
+
+        if fallback.is_none() {
+            fallback = Some(event_id);
+        }
+    }
+
+    fallback
+}
+
+fn reaction_is_positive(content: &str) -> bool {
+    let trimmed = content.trim();
+    !(trimmed == "-")
+}
+
 fn short_id(value: &str, max_chars: usize) -> String {
     value.chars().take(max_chars).collect()
 }
@@ -483,6 +566,7 @@ struct DeltaSummary {
     active_conversations_changed: usize,
     stream_chunk: usize,
     mcp_tools_changed: usize,
+    teams_changed: usize,
     stats_updated: usize,
     diagnostics_updated: usize,
     general: usize,
@@ -504,6 +588,7 @@ impl DeltaSummary {
             }
             DataChangeType::StreamChunk { .. } => self.stream_chunk += 1,
             DataChangeType::McpToolsChanged => self.mcp_tools_changed += 1,
+            DataChangeType::TeamsChanged => self.teams_changed += 1,
             DataChangeType::StatsUpdated => self.stats_updated += 1,
             DataChangeType::DiagnosticsUpdated => self.diagnostics_updated += 1,
             DataChangeType::General => self.general += 1,
@@ -512,7 +597,7 @@ impl DeltaSummary {
 
     fn compact(&self) -> String {
         format!(
-            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} stats={} diag={} general={}",
+            "total={} msg={} conv={} proj={} inbox={} report={} status={} pending={} active={} stream={} mcp={} teams={} stats={} diag={} general={}",
             self.total,
             self.message_appended,
             self.conversation_upsert,
@@ -524,6 +609,7 @@ impl DeltaSummary {
             self.active_conversations_changed,
             self.stream_chunk,
             self.mcp_tools_changed,
+            self.teams_changed,
             self.stats_updated,
             self.diagnostics_updated,
             self.general
@@ -560,10 +646,14 @@ fn process_note_keys_with_deltas(
         std::collections::HashSet::new();
     let mut notes_found = 0usize;
     let mut kind_1 = 0usize;
+    let mut kind_7 = 0usize;
     let mut kind_513 = 0usize;
+    let mut kind_1111 = 0usize;
     let mut kind_31933 = 0usize;
+    let mut kind_34199 = 0usize;
     let mut kind_30023 = 0usize;
     let mut other_kinds = 0usize;
+    let mut teams_changed = false;
 
     for &note_key in note_keys.iter() {
         if let Ok(note) = ndb.get_note_by_key(&txn, note_key) {
@@ -571,8 +661,20 @@ fn process_note_keys_with_deltas(
             let kind = note.kind();
             match kind {
                 1 => kind_1 += 1,
+                7 => {
+                    kind_7 += 1;
+                    teams_changed = true;
+                }
                 513 => kind_513 += 1,
+                1111 => {
+                    kind_1111 += 1;
+                    teams_changed = true;
+                }
                 31933 => kind_31933 += 1,
+                34199 => {
+                    kind_34199 += 1;
+                    teams_changed = true;
+                }
                 30023 => kind_30023 += 1,
                 _ => other_kinds += 1,
             }
@@ -703,6 +805,10 @@ fn process_note_keys_with_deltas(
         }
     }
 
+    if teams_changed {
+        deltas.push(DataChangeType::TeamsChanged);
+    }
+
     let conversation_upsert_count = conversations_to_upsert.len();
     for conversation_id in conversations_to_upsert {
         if let Some(thread) = store.get_thread_by_id(&conversation_id) {
@@ -731,12 +837,15 @@ fn process_note_keys_with_deltas(
     let delta_summary = summarize_deltas(&deltas);
     tlog!(
         "PERF",
-        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 513:{} 31933:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
+        "process_note_keys_with_deltas noteKeys={} notesFound={} kinds={{1:{} 7:{} 513:{} 1111:{} 31933:{} 34199:{} 30023:{} other:{}}} convUpserts={} inboxUpserts={} pendingProjectSubs={} deltas=[{}] elapsedMs={}",
         note_keys.len(),
         notes_found,
         kind_1,
+        kind_7,
         kind_513,
+        kind_1111,
         kind_31933,
+        kind_34199,
         kind_30023,
         other_kinds,
         conversation_upsert_count,
@@ -893,7 +1002,8 @@ fn append_snapshot_update_deltas(deltas: &mut Vec<DataChangeType>) {
             DataChangeType::ProjectStatusChanged { .. }
             | DataChangeType::PendingBackendApproval { .. }
             | DataChangeType::ActiveConversationsChanged { .. }
-            | DataChangeType::McpToolsChanged => {
+            | DataChangeType::McpToolsChanged
+            | DataChangeType::TeamsChanged => {
                 diagnostics_changed = true;
             }
             DataChangeType::General => {
@@ -1084,6 +1194,15 @@ pub struct AskEventInfo {
     pub questions: Vec<AskQuestionInfo>,
 }
 
+/// Ask-event lookup result for q-tag resolution.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct AskEventLookupInfo {
+    /// Ask payload resolved from the referenced event.
+    pub ask_event: AskEventInfo,
+    /// Author pubkey (hex) of the ask event.
+    pub author_pubkey: String,
+}
+
 /// An answer to a single question in an ask event.
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AskAnswer {
@@ -1224,6 +1343,56 @@ pub struct SendMessageResult {
     pub event_id: String,
     /// Whether the message was successfully sent
     pub success: bool,
+}
+
+/// Team pack info (kind:34199) for browse/list/detail UIs.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct TeamInfo {
+    /// Event ID of this team pack event.
+    pub id: String,
+    /// Author pubkey (hex) of the team pack event.
+    pub pubkey: String,
+    /// Team d-tag (replaceable identifier).
+    pub d_tag: String,
+    /// Full team coordinate `34199:<pubkey>:<d_tag>`.
+    pub coordinate: String,
+    /// Display title from `title` tag.
+    pub title: String,
+    /// Markdown/plain description from content.
+    pub description: String,
+    /// Optional image URL from `image`/`picture` tags.
+    pub image: Option<String>,
+    /// Agent definition event IDs from repeated `e` tags.
+    pub agent_ids: Vec<String>,
+    /// Categories from repeated `c` tags.
+    pub categories: Vec<String>,
+    /// Hashtags from repeated `t` tags.
+    pub tags: Vec<String>,
+    /// Creation timestamp (unix seconds).
+    pub created_at: u64,
+    /// Aggregated positive reaction count (NIP-25 kind:7).
+    pub like_count: u64,
+    /// Aggregated comment count (NIP-22 kind:1111).
+    pub comment_count: u64,
+    /// Whether current user has a positive latest reaction on this team.
+    pub liked_by_me: bool,
+}
+
+/// Team comment row (kind:1111 NIP-22) for threaded display.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct TeamCommentInfo {
+    /// Comment event ID.
+    pub id: String,
+    /// Comment author pubkey (hex).
+    pub pubkey: String,
+    /// Display author name resolved from profile cache.
+    pub author: String,
+    /// Raw comment content.
+    pub content: String,
+    /// Creation timestamp (unix seconds).
+    pub created_at: u64,
+    /// Parent comment event ID for replies (None for roots).
+    pub parent_comment_id: Option<String>,
 }
 
 /// An agent definition for FFI export (from kind:4199 events).
@@ -1882,6 +2051,8 @@ pub enum DataChangeType {
     },
     /// MCP tools changed (kind:4200)
     McpToolsChanged,
+    /// Teams content changed (kind:34199, 1111, or 7)
+    TeamsChanged,
     /// Stats snapshot should be refreshed
     StatsUpdated,
     /// Diagnostics snapshot should be refreshed
@@ -2054,7 +2225,9 @@ impl TenexCore {
         // Subscribe to relevant kinds in nostrdb (mirrors CoreRuntime)
         let subscribe_started_at = Instant::now();
         let ndb_filter = FilterBuilder::new()
-            .kinds([31933, 1, 0, 4199, 513, 4129, 4201, 30023])
+            .kinds([
+                31933, 1, 0, 513, 4129, 30023, 34199, 4199, 4200, 4201, 4202, 1111, 7,
+            ])
             .build();
         let ndb_subscription = match ndb.subscribe(&[ndb_filter]) {
             Ok(sub) => sub,
@@ -2572,12 +2745,12 @@ impl TenexCore {
     /// This matches exactly what the TUI statusbar shows.
     /// Returns 0 if store is not initialized.
     pub fn get_today_runtime_ms(&self) -> u64 {
-        let mut store_guard = match self.store.write() {
+        let store_guard = match self.store.read() {
             Ok(g) => g,
             Err(_) => return 0,
         };
 
-        let store = match store_guard.as_mut() {
+        let store = match store_guard.as_ref() {
             Some(s) => s,
             None => return 0,
         };
@@ -2692,6 +2865,23 @@ impl TenexCore {
         );
 
         converted
+    }
+
+    /// Resolve an ask event by event ID.
+    /// Used for q-tag references that may point to ask events instead of child threads.
+    pub fn get_ask_event_by_id(&self, event_id: String) -> Option<AskEventLookupInfo> {
+        let store_guard = match self.store.read() {
+            Ok(g) => g,
+            Err(_) => return None,
+        };
+
+        let store = store_guard.as_ref()?;
+
+        let (ask_event, author_pubkey) = store.get_ask_event_by_id(&event_id)?;
+        Some(AskEventLookupInfo {
+            ask_event: ask_event_to_info(&ask_event),
+            author_pubkey,
+        })
     }
 
     /// Get reports for a project.
@@ -3299,6 +3489,289 @@ impl TenexCore {
             .into_iter()
             .map(agent_to_info)
             .collect())
+    }
+
+    /// Get all available team packs (kind:34199), deduped to latest by `pubkey + d_tag`.
+    ///
+    /// Includes computed social metrics from comments (kind:1111) and reactions (kind:7)
+    /// matched with dual anchors (`a`/`A` coordinate + `e`/`E` event id).
+    pub fn get_all_teams(&self) -> Result<Vec<TeamInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let mut latest_by_key: HashMap<String, TeamPack> = HashMap::new();
+        for team in store.content.get_team_packs() {
+            let identifier = if team.d_tag.is_empty() {
+                team.id.clone()
+            } else {
+                team.d_tag.clone()
+            };
+            let key = format!(
+                "{}:{}",
+                team.pubkey.to_lowercase(),
+                identifier.to_lowercase()
+            );
+            match latest_by_key.get(&key) {
+                Some(existing)
+                    if existing.created_at > team.created_at
+                        || (existing.created_at == team.created_at && existing.id >= team.id) => {}
+                _ => {
+                    latest_by_key.insert(key, team.clone());
+                }
+            }
+        }
+
+        let mut teams: Vec<TeamPack> = latest_by_key.into_values().collect();
+        teams.sort_by(|a, b| {
+            b.created_at
+                .cmp(&a.created_at)
+                .then_with(|| b.id.cmp(&a.id))
+        });
+
+        let ndb = {
+            let ndb_guard = self.ndb.read().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire ndb lock: {}", e),
+            })?;
+            ndb_guard
+                .as_ref()
+                .cloned()
+                .ok_or(TenexError::CoreNotInitialized)?
+        };
+
+        let txn = Transaction::new(ndb.as_ref()).map_err(|e| TenexError::Internal {
+            message: format!("Failed to create transaction: {}", e),
+        })?;
+        let social_filter = nostrdb::Filter::new().kinds([7, 1111]).build();
+        let social_notes =
+            ndb.query(&txn, &[social_filter], 50_000)
+                .map_err(|e| TenexError::Internal {
+                    message: format!("Failed querying social events: {}", e),
+                })?;
+
+        let current_user_pubkey = self.get_current_user().map(|u| u.pubkey);
+
+        #[derive(Default)]
+        struct TeamSocial {
+            comment_count: u64,
+            reactions_by_pubkey: HashMap<String, (u64, bool)>,
+        }
+
+        let mut social_by_team: HashMap<String, TeamSocial> = HashMap::new();
+        for team in &teams {
+            social_by_team.insert(team.id.clone(), TeamSocial::default());
+        }
+
+        for result in social_notes {
+            let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) else {
+                continue;
+            };
+
+            for team in &teams {
+                let identifier = if team.d_tag.is_empty() {
+                    team.id.clone()
+                } else {
+                    team.d_tag.clone()
+                };
+                let coordinate = format!("34199:{}:{}", team.pubkey, identifier);
+                if !note_matches_team_context(&note, &coordinate, &team.id) {
+                    continue;
+                }
+
+                if let Some(social) = social_by_team.get_mut(&team.id) {
+                    if note.kind() == 1111 {
+                        social.comment_count += 1;
+                    } else if note.kind() == 7 {
+                        let reactor = hex::encode(note.pubkey());
+                        let is_positive = reaction_is_positive(note.content());
+                        let created_at = note.created_at();
+                        match social.reactions_by_pubkey.get(&reactor) {
+                            Some((existing_ts, _)) if *existing_ts > created_at => {}
+                            _ => {
+                                social
+                                    .reactions_by_pubkey
+                                    .insert(reactor, (created_at, is_positive));
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+        }
+
+        Ok(teams
+            .into_iter()
+            .map(|team| {
+                let identifier = if team.d_tag.is_empty() {
+                    team.id.clone()
+                } else {
+                    team.d_tag.clone()
+                };
+                let coordinate = format!("34199:{}:{}", team.pubkey, identifier);
+                let social = social_by_team.remove(&team.id).unwrap_or_default();
+                let like_count = social
+                    .reactions_by_pubkey
+                    .values()
+                    .filter(|(_, is_positive)| *is_positive)
+                    .count() as u64;
+                let liked_by_me = current_user_pubkey
+                    .as_ref()
+                    .and_then(|pk| social.reactions_by_pubkey.get(pk))
+                    .map(|(_, is_positive)| *is_positive)
+                    .unwrap_or(false);
+
+                TeamInfo {
+                    id: team.id,
+                    pubkey: team.pubkey,
+                    d_tag: team.d_tag,
+                    coordinate,
+                    title: team.title,
+                    description: team.description,
+                    image: team.image,
+                    agent_ids: team.agent_ids,
+                    categories: team.categories,
+                    tags: team.tags,
+                    created_at: team.created_at,
+                    like_count,
+                    comment_count: social.comment_count,
+                    liked_by_me,
+                }
+            })
+            .collect())
+    }
+
+    /// Get team comments (kind:1111) for one team using dual-anchor matching.
+    pub fn get_team_comments(
+        &self,
+        team_coordinate: String,
+        team_event_id: String,
+    ) -> Result<Vec<TeamCommentInfo>, TenexError> {
+        let store_guard = self.store.read().map_err(|e| TenexError::Internal {
+            message: format!("Failed to acquire store lock: {}", e),
+        })?;
+        let store = store_guard.as_ref().ok_or_else(|| TenexError::Internal {
+            message: "Store not initialized - call init() first".to_string(),
+        })?;
+
+        let ndb = {
+            let ndb_guard = self.ndb.read().map_err(|e| TenexError::Internal {
+                message: format!("Failed to acquire ndb lock: {}", e),
+            })?;
+            ndb_guard
+                .as_ref()
+                .cloned()
+                .ok_or(TenexError::CoreNotInitialized)?
+        };
+
+        let txn = Transaction::new(ndb.as_ref()).map_err(|e| TenexError::Internal {
+            message: format!("Failed to create transaction: {}", e),
+        })?;
+        let filter = nostrdb::Filter::new().kinds([1111]).build();
+        let notes = ndb
+            .query(&txn, &[filter], 20_000)
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed querying comments: {}", e),
+            })?;
+
+        let mut comments: Vec<TeamCommentInfo> = Vec::new();
+        for result in notes {
+            let Ok(note) = ndb.get_note_by_key(&txn, result.note_key) else {
+                continue;
+            };
+            if !note_matches_team_context(&note, &team_coordinate, &team_event_id) {
+                continue;
+            }
+
+            let pubkey = hex::encode(note.pubkey());
+            comments.push(TeamCommentInfo {
+                id: hex::encode(note.id()),
+                pubkey: pubkey.clone(),
+                author: store.get_profile_name(&pubkey),
+                content: note.content().to_string(),
+                created_at: note.created_at(),
+                parent_comment_id: parse_parent_comment_id(&note, &team_event_id),
+            });
+        }
+
+        comments.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(comments)
+    }
+
+    /// Publish a team reaction (kind:7 NIP-25) and return reaction event ID.
+    pub fn react_to_team(
+        &self,
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        is_like: bool,
+    ) -> Result<String, TenexError> {
+        let core_handle = get_core_handle(&self.core_handle)?;
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+        core_handle
+            .send(NostrCommand::ReactToTeam {
+                team_coordinate,
+                team_event_id,
+                team_pubkey,
+                is_like,
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send react_to_team command: {}", e),
+            })?;
+
+        response_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| TenexError::Internal {
+                message: "Timed out waiting for team reaction publish confirmation".to_string(),
+            })
+    }
+
+    /// Publish a team comment (kind:1111 NIP-22) and return comment event ID.
+    pub fn post_team_comment(
+        &self,
+        team_coordinate: String,
+        team_event_id: String,
+        team_pubkey: String,
+        content: String,
+        parent_comment_id: Option<String>,
+        parent_comment_pubkey: Option<String>,
+    ) -> Result<String, TenexError> {
+        if content.trim().is_empty() {
+            return Err(TenexError::Internal {
+                message: "Comment content cannot be empty".to_string(),
+            });
+        }
+
+        let core_handle = get_core_handle(&self.core_handle)?;
+        let (response_tx, response_rx) = std::sync::mpsc::sync_channel::<String>(1);
+
+        core_handle
+            .send(NostrCommand::PostTeamComment {
+                team_coordinate,
+                team_event_id,
+                team_pubkey,
+                content,
+                parent_comment_id,
+                parent_comment_pubkey,
+                response_tx: Some(response_tx),
+            })
+            .map_err(|e| TenexError::Internal {
+                message: format!("Failed to send post_team_comment command: {}", e),
+            })?;
+
+        response_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|_| TenexError::Internal {
+                message: "Timed out waiting for team comment publish confirmation".to_string(),
+            })
     }
 
     /// Get all nudges (kind:4201 events).
@@ -5453,14 +5926,19 @@ fn get_kind_name(kind: u16) -> String {
         1 => "Text Notes".to_string(),
         3 => "Contact List".to_string(),
         4 => "DMs".to_string(),
+        7 => "Reactions".to_string(),
         513 => "Conversations".to_string(),
+        1111 => "Comments".to_string(),
         4129 => "Lessons".to_string(),
         4199 => "Agent Definitions".to_string(),
+        4200 => "MCP Tools".to_string(),
         4201 => "Nudges".to_string(),
+        4202 => "Skills".to_string(),
         24010 => "Project Status".to_string(),
         24133 => "Operations Status".to_string(),
         30023 => "Articles".to_string(),
         31933 => "Projects".to_string(),
+        34199 => "Teams".to_string(),
         _ => format!("Kind {}", kind),
     }
 }
@@ -5506,6 +5984,9 @@ impl Default for TenexCore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::store::{events::ingest_events, AppDataStore, Database};
+    use nostr_sdk::{EventBuilder, Keys, Kind, Tag, TagKind};
+    use tempfile::tempdir;
 
     #[test]
     fn test_tenex_core_new() {
@@ -5730,5 +6211,64 @@ mod tests {
 
         let info = message_to_info(&store, &message);
         assert_eq!(info.a_tags, message.a_tags);
+    }
+
+    #[test]
+    fn test_get_ask_event_by_id_returns_none_for_missing_or_invalid_id() {
+        let dir = tempdir().expect("temp dir");
+        let db = Database::new(dir.path()).expect("database");
+        let core = TenexCore::new();
+
+        {
+            let mut store_guard = core.store.write().expect("store lock");
+            *store_guard = Some(AppDataStore::new(db.ndb.clone()));
+        }
+
+        // Invalid hex/event id format.
+        assert!(core
+            .get_ask_event_by_id("not-a-valid-event-id".to_string())
+            .is_none());
+
+        // Valid event-id shape but missing event in DB.
+        let missing = "a".repeat(64);
+        assert!(core.get_ask_event_by_id(missing).is_none());
+    }
+
+    #[test]
+    fn test_get_ask_event_by_id_returns_ask_event_and_author_pubkey() {
+        let dir = tempdir().expect("temp dir");
+        let db = Database::new(dir.path()).expect("database");
+        let keys = Keys::generate();
+
+        let ask_event = EventBuilder::new(Kind::from(1), "Please confirm scope")
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("title")),
+                vec!["Scope Question"],
+            ))
+            .tag(Tag::custom(
+                TagKind::Custom(std::borrow::Cow::Borrowed("question")),
+                vec!["Scope", "What should be prioritized?", "UI", "FFI"],
+            ))
+            .sign_with_keys(&keys)
+            .expect("ask event");
+
+        ingest_events(&db.ndb, std::slice::from_ref(&ask_event), None).expect("ingest ask event");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+
+        let core = TenexCore::new();
+        {
+            let mut store_guard = core.store.write().expect("store lock");
+            *store_guard = Some(AppDataStore::new(db.ndb.clone()));
+        }
+
+        let event_id = ask_event.id.to_hex();
+        let lookup = core
+            .get_ask_event_by_id(event_id)
+            .expect("ask lookup should resolve");
+
+        assert_eq!(lookup.author_pubkey, keys.public_key().to_hex());
+        assert_eq!(lookup.ask_event.title.as_deref(), Some("Scope Question"));
+        assert_eq!(lookup.ask_event.context, "Please confirm scope");
+        assert_eq!(lookup.ask_event.questions.len(), 1);
     }
 }
