@@ -7,14 +7,41 @@ import Foundation
 ///
 /// Thread Safety: Callbacks are invoked from a background thread in Rust.
 /// This handler dispatches all notifications to the main thread for safe UI updates.
-final class TenexEventHandler: EventCallback {
+final class TenexEventHandler: EventCallback, @unchecked Sendable {
     private unowned let coreManager: TenexCoreManager
+    private let lock = NSLock()
+    private var pendingDiagnosticsUpdate = false
+    private var pendingTeamsUpdate = false
+    private var pendingStatsUpdate = false
+    private var pendingGeneralUpdate = false
+    private var isFlushScheduled = false
 
     init(coreManager: TenexCoreManager) {
         self.coreManager = coreManager
     }
 
     func onDataChanged(changeType: DataChangeType) {
+        // Coalesce high-frequency no-payload update signals to avoid main-thread task storms.
+        switch changeType {
+        case .mcpToolsChanged:
+            queueCoalescedUpdate(diagnostics: true)
+            return
+        case .teamsChanged:
+            queueCoalescedUpdate(teams: true)
+            return
+        case .statsUpdated:
+            queueCoalescedUpdate(stats: true)
+            return
+        case .diagnosticsUpdated:
+            queueCoalescedUpdate(diagnostics: true)
+            return
+        case .general:
+            queueCoalescedUpdate(general: true)
+            return
+        default:
+            break
+        }
+
         Task { @MainActor in
             let coreManager = self.coreManager
 
@@ -23,7 +50,7 @@ final class TenexEventHandler: EventCallback {
                 coreManager.applyMessageAppended(conversationId: conversationId, message: message)
 
             case .conversationUpsert(let conversation):
-                coreManager.signalConversationUpdate(conversationId: conversation.id)
+                coreManager.applyConversationUpsertDelta(conversation)
 
             case .projectUpsert(let project):
                 coreManager.applyProjectUpsert(project)
@@ -91,18 +118,73 @@ final class TenexEventHandler: EventCallback {
                     textDelta: textDelta
                 )
 
-            case .mcpToolsChanged:
-                coreManager.signalGeneralUpdate()
-
-            case .statsUpdated:
-                coreManager.signalGeneralUpdate()
-
-            case .diagnosticsUpdated:
-                coreManager.signalGeneralUpdate()
-
-            case .general:
-                coreManager.signalGeneralUpdate()
+            case .mcpToolsChanged, .teamsChanged, .statsUpdated, .diagnosticsUpdated, .general:
+                break
             }
+        }
+    }
+
+    private func queueCoalescedUpdate(
+        diagnostics: Bool = false,
+        teams: Bool = false,
+        stats: Bool = false,
+        general: Bool = false
+    ) {
+        var shouldScheduleFlush = false
+
+        lock.lock()
+        pendingDiagnosticsUpdate = pendingDiagnosticsUpdate || diagnostics
+        pendingTeamsUpdate = pendingTeamsUpdate || teams
+        pendingStatsUpdate = pendingStatsUpdate || stats
+        pendingGeneralUpdate = pendingGeneralUpdate || general
+        if !isFlushScheduled {
+            isFlushScheduled = true
+            shouldScheduleFlush = true
+        }
+        lock.unlock()
+
+        guard shouldScheduleFlush else { return }
+
+        Task { @MainActor [weak self] in
+            // Batch bursts arriving in the same scheduling window.
+            try? await Task.sleep(nanoseconds: 40_000_000)
+            self?.flushCoalescedUpdates()
+        }
+    }
+
+    @MainActor
+    private func flushCoalescedUpdates() {
+        let shouldSignalDiagnostics: Bool
+        let shouldSignalTeams: Bool
+        let shouldSignalStats: Bool
+        let shouldSignalGeneral: Bool
+
+        lock.lock()
+        shouldSignalDiagnostics = pendingDiagnosticsUpdate
+        shouldSignalTeams = pendingTeamsUpdate
+        shouldSignalStats = pendingStatsUpdate
+        shouldSignalGeneral = pendingGeneralUpdate
+
+        pendingDiagnosticsUpdate = false
+        pendingTeamsUpdate = false
+        pendingStatsUpdate = false
+        pendingGeneralUpdate = false
+        isFlushScheduled = false
+        lock.unlock()
+
+        let coreManager = self.coreManager
+
+        if shouldSignalTeams {
+            coreManager.signalTeamsUpdate()
+        }
+        if shouldSignalStats {
+            coreManager.signalStatsUpdate()
+        }
+        if shouldSignalDiagnostics {
+            coreManager.signalDiagnosticsUpdate()
+        }
+        if shouldSignalGeneral {
+            coreManager.signalGeneralUpdate()
         }
     }
 }

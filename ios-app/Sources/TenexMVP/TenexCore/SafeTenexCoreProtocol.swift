@@ -24,6 +24,7 @@ protocol SafeTenexCoreProtocol: Actor {
 
     // MARK: - Messages
     func getMessages(conversationId: String) -> [MessageInfo]
+    func getAskEventById(eventId: String) -> AskEventLookupInfo?
     func sendMessage(conversationId: String, projectId: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
     func sendThread(projectId: String, title: String, content: String, agentPubkey: String?, nudgeIds: [String], skillIds: [String]) throws -> SendMessageResult
     func answerAsk(askEventId: String, askAuthorPubkey: String, conversationId: String, projectId: String, answers: [AskAnswer]) throws -> SendMessageResult
@@ -62,6 +63,19 @@ protocol SafeTenexCoreProtocol: Actor {
         mcpToolIds: [String]
     ) throws
     func deleteProject(projectId: String) throws
+
+    // MARK: - Teams
+    func getAllTeams() throws -> [TeamInfo]
+    func getTeamComments(teamCoordinate: String, teamEventId: String) throws -> [TeamCommentInfo]
+    func reactToTeam(teamCoordinate: String, teamEventId: String, teamPubkey: String, isLike: Bool) throws -> String
+    func postTeamComment(
+        teamCoordinate: String,
+        teamEventId: String,
+        teamPubkey: String,
+        content: String,
+        parentCommentId: String?,
+        parentCommentPubkey: String?
+    ) throws -> String
 
     // MARK: - Project Status
     func isProjectOnline(projectId: String) -> Bool
