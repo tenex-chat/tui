@@ -451,57 +451,58 @@ struct ConversationWorkspaceView: View {
     }
 
     private var inspectorPrimaryMetadata: some View {
-        WorkspaceInspectorCard(title: nil, tone: .primary) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(conversationTitle)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(conversationTitle)
+                .font(.headline)
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let summary = currentConversation.summary, !summary.isEmpty {
+                Text(summary)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.secondary.opacity(0.86))
+                    .padding(.top, 4)
                     .fixedSize(horizontal: false, vertical: true)
+            }
 
-                if let summary = currentConversation.summary, !summary.isEmpty {
-                    Text(summary)
-                        .font(.subheadline)
-                        .foregroundStyle(Color.secondary.opacity(0.86))
-                        .padding(.top, 4)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+            HStack(alignment: .center, spacing: 10) {
+                HStack(spacing: 8) {
+                    StatusBadge(status: statusText, isActive: isActiveState)
 
-                HStack(alignment: .center, spacing: 10) {
-                    HStack(spacing: 8) {
-                        StatusBadge(status: statusText, isActive: isActiveState)
-
-                        if let project {
-                            ProjectBadge(projectTitle: project.title)
-                        }
+                    if let project {
+                        ProjectBadge(projectTitle: project.title)
                     }
-
-                    Text(runtimeText)
-                        .font(.callout.weight(.medium))
-                        .monospacedDigit()
-                        .foregroundStyle(Color.secondary.opacity(0.9))
-                        .frame(maxWidth: .infinity, alignment: .trailing)
                 }
 
-                if let currentActivity = currentActivityText, !currentActivity.isEmpty {
-                    Text(currentActivity)
-                        .font(.caption)
-                        .foregroundStyle(Color.statusWaiting.opacity(0.72))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text(runtimeText)
+                    .font(.callout.weight(.medium))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.secondary.opacity(0.9))
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+
+            if let currentActivity = currentActivityText, !currentActivity.isEmpty {
+                Text(currentActivity)
+                    .font(.caption)
+                    .foregroundStyle(Color.statusWaiting.opacity(0.72))
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
     private var inspectorTodoSection: some View {
-        WorkspaceInspectorCard(title: "Todos", tone: .secondary) {
-            VStack(alignment: .leading, spacing: 12) {
-                TodoProgressView(stats: viewModel.aggregatedTodoStats)
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Todos")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.primary.opacity(0.66))
+                .textCase(.uppercase)
 
-                if !viewModel.todoState.items.isEmpty {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(viewModel.todoState.items) { todo in
-                            TodoRowView(todo: todo)
-                        }
+            TodoProgressView(stats: viewModel.aggregatedTodoStats)
+
+            if !viewModel.todoState.items.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(viewModel.todoState.items) { todo in
+                        TodoRowView(todo: todo)
                     }
                 }
             }
@@ -534,7 +535,12 @@ struct ConversationWorkspaceView: View {
     }
 
     private var inspectorReportsSection: some View {
-        WorkspaceInspectorCard(title: "Reports (\(viewModel.referencedReports.count))", tone: .secondary) {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Reports (\(viewModel.referencedReports.count))")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.primary.opacity(0.66))
+                .textCase(.uppercase)
+
             if viewModel.referencedReports.isEmpty {
                 Text("No report references found.")
                     .font(.caption)
