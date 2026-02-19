@@ -260,6 +260,18 @@ pub static COMMANDS: &[Command] = &[
         },
     },
     Command {
+        key: 'T',
+        label: "TTS Queue",
+        section: "Audio",
+        available: |_| true,
+        execute: |app| {
+            let idx = app.tabs.open_tts_control();
+            app.switch_to_tab(idx);
+            app.view = View::Chat;
+            app.input_mode = InputMode::Normal;
+        },
+    },
+    Command {
         key: 'B',
         label: "Agent Browser",
         section: "Other",
