@@ -1424,6 +1424,14 @@ struct MainShellView: View {
         selectedSection ?? .chats
     }
 
+    private var onlineProjectsCount: Int {
+        coreManager.projects.reduce(into: 0) { count, project in
+            if coreManager.projectOnlineStatus[project.id] ?? false {
+                count += 1
+            }
+        }
+    }
+
     var body: some View {
         Group {
             if currentSection == .agentDefinitions {
@@ -1450,15 +1458,28 @@ struct MainShellView: View {
     private var appSidebar: some View {
         VStack(spacing: 0) {
             List(selection: $selectedSection) {
-                ForEach(AppSection.allCases) { section in
-                    shellSidebarRow(for: section)
+                Section {
+                    ForEach(AppSection.allCases.filter { $0 != .agentDefinitions }) { section in
+                        shellSidebarRow(for: section)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                selectedSection = section
+                            }
+                            .tag(Optional(section))
+                            .accessibilityIdentifier(section.accessibilityRowID)
+                    }
+                }
+
+                Section("Browse") {
+                    shellSidebarRow(for: .agentDefinitions)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            selectedSection = section
+                            selectedSection = .agentDefinitions
                         }
-                        .tag(Optional(section))
-                        .accessibilityIdentifier(section.accessibilityRowID)
+                        .tag(Optional(AppSection.agentDefinitions))
+                        .accessibilityIdentifier(AppSection.agentDefinitions.accessibilityRowID)
                 }
             }
             .listStyle(.sidebar)
@@ -1520,12 +1541,20 @@ struct MainShellView: View {
                     .background(Color.askBrandBackground)
                     .foregroundStyle(Color.askBrand)
                     .clipShape(Capsule())
+            } else if section == .projects {
+                Text("\(onlineProjectsCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background((onlineProjectsCount > 0 ? Color.presenceOnline : .secondary).opacity(0.16))
+                    .foregroundStyle(onlineProjectsCount > 0 ? Color.presenceOnline : .secondary)
+                    .clipShape(Capsule())
             }
         }
     }
 
     private var shellSidebarBottomBar: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 8) {
             Button(action: onShowSettings) {
                 Label("Settings", systemImage: "gearshape")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1565,7 +1594,12 @@ struct MainShellView: View {
                     }
                 } label: {
                     Label("You", systemImage: "person.crop.circle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
+                #if os(macOS)
+                .menuStyle(.borderlessButton)
+                #endif
 
                 Spacer(minLength: 0)
 
@@ -1578,9 +1612,9 @@ struct MainShellView: View {
                 .buttonStyle(.plain)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(.bar)
+        .padding(.horizontal, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 14)
     }
 
     @ViewBuilder
