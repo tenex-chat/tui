@@ -1,0 +1,298 @@
+import SwiftUI
+
+struct MainShellView: View {
+    @Binding var userNpub: String
+    @Binding var isLoggedIn: Bool
+    let runtimeText: String
+    let onShowSettings: () -> Void
+    let onShowDiagnostics: () -> Void
+    let onShowStats: () -> Void
+
+    @EnvironmentObject private var coreManager: TenexCoreManager
+
+    @State private var selectedSection: AppSection? = .chats
+    @State private var selectedConversation: ConversationFullInfo?
+    @State private var selectedProjectId: String?
+    @State private var selectedReport: ReportInfo?
+    @State private var selectedInboxFilter: InboxFilter = .all
+    @State private var selectedInboxItemId: String?
+    @State private var activeInboxConversationId: String?
+    @State private var selectedSearchConversation: ConversationFullInfo?
+    @State private var selectedTeam: TeamInfo?
+    @State private var selectedAgentDefinition: AgentInfo?
+    @State private var newConversationProjectId: String?
+    @State private var currentUserPubkey: String?
+    @State private var currentUserDisplayName: String = "You"
+
+    private var currentSection: AppSection {
+        selectedSection ?? .chats
+    }
+
+    private var onlineProjectsCount: Int {
+        coreManager.projects.reduce(into: 0) { count, project in
+            if coreManager.projectOnlineStatus[project.id] ?? false {
+                count += 1
+            }
+        }
+    }
+
+    private var activeConversationsCount: Int {
+        ConversationActivityMetrics.activeConversationCount(conversations: coreManager.conversations)
+    }
+
+    var body: some View {
+        stableShell
+        .onChange(of: coreManager.projects.map(\.id)) { _, ids in
+            if let selectedProjectId, !ids.contains(selectedProjectId) {
+                self.selectedProjectId = nil
+            }
+        }
+        .onChange(of: coreManager.lastDeletedProjectId) { _, deletedProjectId in
+            guard let deletedProjectId else { return }
+            if selectedProjectId == deletedProjectId {
+                selectedProjectId = nil
+            }
+        }
+        .task(id: userNpub) {
+            await refreshCurrentUserIdentity()
+        }
+    }
+
+    private var appSidebar: some View {
+        List {
+            Section {
+                ForEach(AppSection.allCases.filter { $0 != .teams && $0 != .agentDefinitions }) { section in
+                    shellSidebarRowButton(for: section)
+                }
+            }
+
+            Section("Browse") {
+                shellSidebarRowButton(for: .teams)
+                shellSidebarRowButton(for: .agentDefinitions)
+            }
+
+            Section {
+                Button(action: onShowSettings) {
+                    Label("Settings", systemImage: "gearshape")
+                }
+                .buttonStyle(.plain)
+
+                Menu {
+                    if !userNpub.isEmpty {
+                        Text(userNpub)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Divider()
+
+                    Button(action: onShowDiagnostics) {
+                        Label("Diagnostics", systemImage: "gauge.with.needle")
+                    }
+
+                    Button(action: onShowStats) {
+                        Label("LLM Runtime", systemImage: "clock")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        Task {
+                            _ = await coreManager.clearCredentials()
+                            userNpub = ""
+                            isLoggedIn = false
+                        }
+                    } label: {
+                        Label("Log Out", systemImage: "rectangle.portrait.and.arrow.right")
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        AgentAvatarView(
+                            agentName: currentUserDisplayName,
+                            pubkey: currentUserPubkey,
+                            size: 18,
+                            showBorder: false
+                        )
+                        Text(currentUserDisplayName)
+                    }
+                }
+                #if os(macOS)
+                .menuStyle(.borderlessButton)
+                #endif
+
+                Button(action: onShowStats) {
+                    HStack(spacing: 8) {
+                        Label("LLM Runtime", systemImage: "clock")
+                        Spacer(minLength: 8)
+                        Text(runtimeText)
+                            .font(.subheadline)
+                            .fontWeight(.medium)
+                            .foregroundStyle(coreManager.hasActiveAgents ? Color.presenceOnline : .secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .listStyle(.sidebar)
+        .accessibilityIdentifier("app_sidebar")
+        #if os(macOS)
+        .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 300)
+        #endif
+    }
+
+    @ViewBuilder
+    private func shellSidebarRowButton(for section: AppSection) -> some View {
+        Button {
+            selectedSection = section
+        } label: {
+            shellSidebarRow(for: section)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(section.accessibilityRowID)
+    }
+
+    private var stableShell: some View {
+        NavigationSplitView {
+            appSidebar
+        } detail: {
+            sectionContentHost
+                .accessibilityIdentifier("section_content_host")
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder
+    private func shellSidebarRow(for section: AppSection) -> some View {
+        let unansweredAskCount = coreManager.unansweredAskCount
+        let projectsOnlineCount = section == .projects ? onlineProjectsCount : 0
+        let chatsActiveCount = section == .chats ? activeConversationsCount : 0
+        let isSelected = currentSection == section
+        let rowTint: Color = isSelected ? .accentColor : .primary
+
+        HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: section.systemImage)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(rowTint)
+                Text(section.title)
+                    .foregroundStyle(rowTint)
+                    .fontWeight(isSelected ? .semibold : .regular)
+            }
+
+            Spacer(minLength: 8)
+
+            if section == .chats, chatsActiveCount > 0 {
+                Text("\(chatsActiveCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.presenceOnline.opacity(0.16))
+                    .foregroundStyle(Color.presenceOnline)
+                    .clipShape(Capsule())
+            } else if section == .inbox, unansweredAskCount > 0 {
+                Text("\(unansweredAskCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.askBrandBackground)
+                    .foregroundStyle(Color.askBrand)
+                    .clipShape(Capsule())
+            } else if section == .projects {
+                Text("\(projectsOnlineCount)")
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background((projectsOnlineCount > 0 ? Color.presenceOnline : .secondary).opacity(0.16))
+                    .foregroundStyle(projectsOnlineCount > 0 ? Color.presenceOnline : .secondary)
+                    .clipShape(Capsule())
+            }
+        }
+    }
+
+    private func refreshCurrentUserIdentity() async {
+        let currentUser = await coreManager.safeCore.getCurrentUser()
+        let resolvedPubkey = currentUser?.pubkey
+            ?? Bech32.npubToHex(userNpub)
+
+        let fallbackName: String
+        if let displayName = currentUser?.displayName.trimmingCharacters(in: .whitespacesAndNewlines),
+           !displayName.isEmpty {
+            fallbackName = displayName
+        } else if !userNpub.isEmpty {
+            fallbackName = shortUserDisplay(userNpub)
+        } else {
+            fallbackName = "You"
+        }
+
+        var resolvedName = fallbackName
+        if let pubkey = resolvedPubkey {
+            let profileName = await coreManager.safeCore
+                .getProfileName(pubkey: pubkey)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !profileName.isEmpty, profileName != pubkey {
+                resolvedName = profileName
+            }
+        }
+
+        currentUserPubkey = resolvedPubkey
+        currentUserDisplayName = resolvedName
+    }
+
+    private func shortUserDisplay(_ npub: String) -> String {
+        guard npub.count > 20 else { return npub }
+        return "\(npub.prefix(8))...\(npub.suffix(8))"
+    }
+
+    @ViewBuilder
+    private var sectionContentHost: some View {
+        switch currentSection {
+        case .chats:
+            #if os(macOS)
+            ConversationsTabView(
+                layoutMode: .shellComposite,
+                selectedConversation: $selectedConversation,
+                newConversationProjectId: $newConversationProjectId
+            )
+            .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
+            #else
+            ConversationsTabView(
+                layoutMode: .adaptive,
+                selectedConversation: $selectedConversation,
+                newConversationProjectId: $newConversationProjectId
+            )
+            .accessibilityIdentifier(AppSection.chats.accessibilityContentID)
+            #endif
+        case .projects:
+            ProjectsSectionContainer(selectedProjectId: $selectedProjectId)
+                .accessibilityIdentifier(AppSection.projects.accessibilityContentID)
+        case .reports:
+            ReportsTabView(layoutMode: .adaptive, selectedReport: $selectedReport)
+                .accessibilityIdentifier(AppSection.reports.accessibilityContentID)
+        case .inbox:
+            InboxView(
+                layoutMode: .adaptive,
+                selectedFilter: $selectedInboxFilter,
+                selectedItemId: $selectedInboxItemId,
+                activeConversationId: $activeInboxConversationId
+            )
+            .accessibilityIdentifier(AppSection.inbox.accessibilityContentID)
+        case .search:
+            SearchView(layoutMode: .adaptive, selectedConversation: $selectedSearchConversation)
+                .accessibilityIdentifier(AppSection.search.accessibilityContentID)
+        case .teams:
+            TeamsTabView(
+                layoutMode: .adaptive,
+                selectedTeam: $selectedTeam
+            )
+            .accessibilityIdentifier(AppSection.teams.accessibilityContentID)
+        case .agentDefinitions:
+            AgentDefinitionsTabView(
+                layoutMode: .adaptive,
+                selectedAgent: $selectedAgentDefinition
+            )
+            .accessibilityIdentifier(AppSection.agentDefinitions.accessibilityContentID)
+        }
+    }
+}
