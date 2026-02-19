@@ -1014,7 +1014,6 @@ fn render_agent_config_modal(
                 }
             }
         }
-
     } else {
         f.render_widget(
             Paragraph::new("Select an agent").style(Style::default().fg(theme::TEXT_MUTED)),
@@ -1029,11 +1028,7 @@ fn render_agent_config_modal(
         popup_area.width.saturating_sub(2),
         1,
     );
-    let pm_checked = state
-        .settings
-        .as_ref()
-        .map(|s| s.is_pm)
-        .unwrap_or(false);
+    let pm_checked = state.settings.as_ref().map(|s| s.is_pm).unwrap_or(false);
     let pm_prefix = if pm_checked { "[x] " } else { "[ ] " };
     let pm_style = if pm_checked {
         Style::default().fg(theme::ACCENT_WARNING)
@@ -1064,8 +1059,9 @@ fn render_agent_config_modal(
         popup_area.width.saturating_sub(2),
         1,
     );
-    let hints = Paragraph::new("space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc")
-        .style(Style::default().fg(theme::TEXT_MUTED));
+    let hints =
+        Paragraph::new("space toggle · a toggle all · ctrl+m pm · ctrl+g scope · enter save · esc")
+            .style(Style::default().fg(theme::TEXT_MUTED));
     f.render_widget(hints, hints_area);
 }
 
