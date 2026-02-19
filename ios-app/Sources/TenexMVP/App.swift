@@ -1432,6 +1432,8 @@ struct MainShellView: View {
                 threeColumnShell
             }
         }
+        // Force split-view state reset when swapping shell topology (3-col <-> 2-col).
+        .id(currentSection == .agentDefinitions ? "agent_definitions_shell" : "default_shell")
         .onChange(of: coreManager.projects.map(\.id)) { _, ids in
             if let selectedProjectId, !ids.contains(selectedProjectId) {
                 self.selectedProjectId = nil
@@ -1487,7 +1489,7 @@ struct MainShellView: View {
     }
 
     private var agentDefinitionsTwoColumnShell: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             appSidebar
         } detail: {
             agentDefinitionsContent
